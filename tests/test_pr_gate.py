@@ -1,7 +1,12 @@
 """A contributor's pull request gets only the cheap checks; ours, main and dispatches get the heavy ones."""
 
 import importlib.util
+import itertools
+import json
+import os
 import re
+import subprocess
+import time
 import unittest
 from pathlib import Path
 
@@ -78,6 +83,42 @@ class WorkflowTests(unittest.TestCase):
             body = self.job(name)
             if "head.repo.full_name" in body:
                 self.fail(f"{name} decides trust itself instead of needs.changes.outputs.trusted")
+
+    def runs_on(self, name, outputs, self_hosted_ci):
+        """Evaluates a job's runs-on expression with these changes outputs, the way Actions would."""
+        expression = re.search(r"^    runs-on: \$\{\{ (.*) \}\}$", self.job(name), re.M)[1]
+        names = {"needs.changes.outputs." + key: value for key, value in outputs.items()}
+        names |= {"vars.SELF_HOSTED_CI": self_hosted_ci, "inputs.github-fallback": False}
+        python = re.sub(r"fromJSON\('([^']*)'\)", lambda m: repr(json.loads(m[1])), expression)
+        python = re.sub(r"[a-z]+(?:\.[A-Za-z_-]+)+", lambda m: repr(names[m[0]]), python)
+        python = python.replace("&&", " and ").replace("||", " or ").replace("!=", " != ")
+        python = re.sub(r"!(?!=)", " not ", python)
+        return eval(python, {})
+
+    def test_an_untrusted_head_never_gets_our_runners(self):
+        # A fork's dispatched pr: trusted is false and the runner script answers self_hosted=false.
+        for name in ("lint", "verify", "verify-static", "launcher"):
+            for rust, forced, label, pool in itertools.product(("true", "false"), ("true", "false"),
+                                                               ("", "boat"), ("all", "")):
+                outputs = {"rust_required": rust, "forced_github": forced, "hosted_label": label,
+                           "self_hosted": "false", "trusted": "false"}
+                with self.subTest(job=name, outputs=outputs, pool=pool):
+                    runner = self.runs_on(name, outputs, pool)
+                    self.assertIn(runner, ("ubuntu-latest", "boat"))
+        # The control: the same expressions do reach our runners for a trusted head.
+        trusted = {"rust_required": "true", "forced_github": "false", "hosted_label": "",
+                   "self_hosted": "true", "trusted": "true"}
+        self.assertEqual(self.runs_on("verify", trusted, "all"), "dyna-large")
+
+    def test_the_runner_script_hears_the_gates_trust(self):
+        self.assertIn("SAME_REPO: ${{ steps.gate.outputs.trusted || (", self.job("changes"))
+        lease = str(int(time.time()) + 3600)
+        for same_repo, expected in (("false", "self_hosted=false"), ("true", "self_hosted=true")):
+            env = {"PATH": os.environ["PATH"], "ENABLED": "true", "SAME_REPO": same_repo,
+                   "EVENT": "workflow_dispatch", "LEASE": lease}
+            result = subprocess.run(["bash", ROOT / "tools/ci/dyna_ci_runner.sh"], env=env, capture_output=True,
+                                    text=True, check=True)
+            self.assertEqual(result.stdout.strip(), expected, same_repo)
 
     def test_other_pull_request_workflows_skip_what_compiles_for_forks(self):
         for workflow, jobs in (("launcher-windows-check.yml", ("test", "runtime-leases")),
