@@ -2369,8 +2369,8 @@ impl Game<'_> {
                 MobEvent::ArmorHurt { mob, amount, kind } => self.hurt_mob_armor(mob, amount, kind),
                 MobEvent::GliderWear { mob, slot } => self.wear_mob_glider(mob, slot),
                 MobEvent::EntityEvent { mob, event, at } => {
-                    // Ravager.roar (event 69 ends it): with mob_griefing on,
-                    // ROAR_TARGET_WITH_GRIEFING also takes the armor stands.
+                    // Ravager.roar (event 69 ends it): with the raw mob_griefing rule (not
+                    // canEntityGrief), ROAR_TARGET_WITH_GRIEFING also takes the armor stands.
                     if event == 69
                         && self
                             .ui

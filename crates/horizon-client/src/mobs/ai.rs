@@ -1542,9 +1542,9 @@ impl crate::block_contact::InsideWalk for MobInside<'_, '_, '_> {
             crate::block_contact::inside_written(state, at, writes);
         }
         // PowderSnowBlock.entityInside: a burning mob destroys the
-        // block (with `mob_griefing`), then EXTINGUISH puts it out.
+        // block (`canEntityGrief` for the mob), then EXTINGUISH puts it out.
         if self.w.block_name(x, y, z) == "minecraft:powder_snow" {
-            if self.m.is_on_fire() && self.w.mob_griefing {
+            if self.m.is_on_fire() && self.w.can_grief(self.m.id) {
                 self.events.push(MobEvent::BreakBlock {
                     pos: p,
                     drop: false,

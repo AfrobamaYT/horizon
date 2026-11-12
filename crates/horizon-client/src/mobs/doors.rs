@@ -153,8 +153,8 @@ impl BreakDoor {
     /// `BreakDoorGoal.canUse` after `DoorInteractGoal.canUse`.
     fn can_break(&mut self, m: &Mob, w: &MobWorld) -> bool {
         self.interact.can_use(m, w)
-            // Only the game rule is checked here.
-            && w.mob_griefing
+            // NeoForge: `EventHooks.canEntityGrief` for the zombie.
+            && w.can_grief(m.id)
             && self.valid_difficulty(w)
             && !self.interact.is_open(w)
     }

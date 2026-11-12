@@ -159,7 +159,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
                         | "minecraft:potatoes"
                         | "minecraft:beetroots"
                         | "minecraft:torchflower_crop" => w.can_grief(m.id),
-                        "minecraft:pitcher_crop" => w.mob_griefing,
+                        "minecraft:pitcher_crop" => w.can_grief(m.id),
                         _ => false,
                     };
                     if breaks {
