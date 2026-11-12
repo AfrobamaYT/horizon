@@ -2405,7 +2405,7 @@ mod tests {
             .write(&saves.join("Moor"))
             .unwrap();
             let world = list_worlds(&saves).remove(0);
-            let mut title = Title::new(saves, scratch.path());
+            let mut title = Title::new(saves, scratch.path(), "");
             title.mode = Mode::Edit {
                 world: world.clone(),
                 name: "Typed name".into(),
