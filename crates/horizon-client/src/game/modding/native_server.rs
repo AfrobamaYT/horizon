@@ -1797,9 +1797,10 @@ impl Game<'_> {
     /// (`broadcastToAdmins`); another entity's source is silent
     /// (`CommandSource.NULL`). Whether the command ran: false for a line that
     /// fails to parse or to run, and, with nothing run, for a stale or removed
-    /// entity, an entity not in the level in place (a player in another level
-    /// included), and on a client. During a guest's turn, displaced outer
-    /// players are excluded, as in `native_run_command`.
+    /// entity, an entity outside the level in place (a player in another level
+    /// included: that level is parked while the hook runs), and on a client.
+    /// During a guest's turn, displaced outer players are excluded, as in
+    /// `native_run_command`.
     pub(super) fn entity_run_command(
         &mut self,
         entity: mod_api::EntityRef,
