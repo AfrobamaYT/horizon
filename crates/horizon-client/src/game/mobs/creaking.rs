@@ -1,7 +1,7 @@
 //! The creaking heart block entity in the game: `mobs::creaking_heart`
 //! ticks each heart (spawning, letting go of and bleeding for its creaking)
 //! and this applies what it reports to the world, the mobs and the speakers.
-use super::{Game, creatures::seen};
+use super::{Game, creatures::seen, persist::EntityUuids};
 use horizon_client::{
     Result,
     chunk_map::{ChunkMap, ChunkMembershipDelta},
@@ -18,7 +18,7 @@ use horizon_core::{
     random::{LegacyRandom, RandomSource},
 };
 use horizon_world::registry::BlockStateId;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 type Pos = (i32, i32, i32);
 
@@ -34,7 +34,7 @@ pub(super) fn heart_signal(world: &horizon_client::world::World, pos: BlockPos) 
 struct Host<'a> {
     mobs: &'a mut horizon_client::join_seq::JoinList<Mob>,
     added: Vec<Mob>,
-    uuids: &'a mut HashMap<u32, [i32; 4]>,
+    uuids: &'a mut EntityUuids,
     creaking: Option<Arc<MobType>>,
     next_entity: &'a mut u32,
     spawning: bool,
@@ -72,10 +72,8 @@ impl HeartHost for Host<'_> {
             .map(|(id, _)| *id)
     }
     fn uuid_for(&mut self, id: u32) -> [i32; 4] {
-        *self
-            .uuids
-            .entry(id)
-            .or_insert_with(horizon_client::save::random_uuid)
+        self.uuids
+            .get_or_insert_with(id, horizon_client::save::random_uuid)
     }
     fn creaking_type(&self) -> Option<Arc<MobType>> {
         self.creaking.clone()

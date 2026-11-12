@@ -24,8 +24,11 @@ pub trait EntitiesHost {
 pub trait EntitiesServerHost {
     /// Side: server.
     /// Finds a loaded entity by UUID in the server level in place for this
-    /// hook. Returns None when the entity is unloaded, in another level, or
-    /// temporarily unavailable. The lookup leaves entity and level state alone.
+    /// hook. Returns `None` for unloaded entities, entities in another level,
+    /// and dragon parts. It also returns `None` for entities held out of
+    /// lookup, taken from their resident storage, unavailable under a scoped
+    /// item loan, queued for removal, or vehicles undergoing destruction.
+    /// The lookup leaves entity and level state alone.
     #[access(WorldOnly)]
     fn entity_by_uuid(&self, uuid: EntityUuid) -> Option<EntityRef>;
     /// Side: server.

@@ -100,7 +100,7 @@ pub struct ServerPlayer {
 
 /// A persistent entity UUID in the same bit order as the value from `EntityRef::uuid`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, horizon_mod_api_macros::Wire)]
-// exhaustive: an entity UUID is one fixed 128-bit value, matching EntityRef::uuid.
+// exhaustive: a UUID is exactly one public 128-bit value
 pub struct EntityUuid(pub u128);
 
 /// An entity of the open world, for the `Host` methods that read or change one

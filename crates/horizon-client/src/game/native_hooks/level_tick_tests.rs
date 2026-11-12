@@ -57,26 +57,32 @@ mod tests {
 
                 let uuids_before = game.persist.uuids.clone();
                 game.native_level_tick_pre(home);
-                assert_eq!(game.persist.uuids, uuids_before);
+                assert_eq!(*game.persist.uuids, uuids_before);
 
                 game.enter_level(Dim::Nether).unwrap();
                 let nether = game.level("minecraft:the_nether").unwrap();
                 let uuids_before = game.persist.uuids.clone();
                 game.native_level_tick_pre(nether);
                 assert_eq!(game.dim, Dim::Nether);
-                assert_eq!(game.persist.uuids, uuids_before);
+                assert_eq!(*game.persist.uuids, uuids_before);
 
                 game.enter_level(Dim::Overworld).unwrap();
+                use horizon_client::join_seq::Joined;
+                let join = game.mobs[0].join_seq();
+                let taken = game.mobs.extract(join).unwrap();
+                game.native_level_tick_pre(home);
+                game.mobs.put_back(0, taken);
                 game.native_level_tick_pre(home);
                 game.mobs.retain(|mob| mob.id != 91);
                 let uuids_before = game.persist.uuids.clone();
                 game.native_level_tick_pre(home);
-                assert_eq!(game.persist.uuids, uuids_before);
+                assert_eq!(*game.persist.uuids, uuids_before);
 
                 assert_eq!(
                     *heard.lock().unwrap(),
                     [
                         Some((91, [3.5, 70.0, 5.5])),
+                        None,
                         None,
                         Some((91, [3.5, 70.0, 5.5])),
                         None,

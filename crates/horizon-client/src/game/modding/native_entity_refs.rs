@@ -145,23 +145,23 @@ impl Game<'_> {
         let epoch = self.native_lifecycle.epoch()?;
         let dimension = self.dim.key();
         let uuid = horizon_client::lan::playerdata::uuid_ints(uuid.0);
-        // Match recorded UUIDs without assigning new ones. Release the table
-        // borrow before checking each candidate through ordinary handle resolution.
-        let candidates: Vec<_> = self
-            .resident_entities
-            .table
-            .borrow_mut()
-            .admitted_metadata()
-            .filter_map(|(id, location, details)| {
-                (location.owner.dimension == dimension
-                    && details.known_uuid.or_else(|| self.persist.uuid_of(id)) == Some(uuid))
-                .then_some(EntityRef::new(epoch, id))
-            })
-            .collect();
-        candidates.into_iter().find(|&entity| {
-            self.native_entity_target(entity)
+        let mut after = None;
+        loop {
+            let id = self
+                .resident_entities
+                .table
+                .borrow_mut()
+                .level_uuid_candidate(dimension, uuid, after)?;
+            let entity = EntityRef::new(epoch, id.get());
+            if self
+                .native_entity_target(entity)
                 .is_some_and(|target| self.resident_source_target_visible(dimension, target))
-        })
+            {
+                return Some(entity);
+            }
+            // A queued departure can overlap a replacement with the same UUID.
+            after = Some(id);
+        }
     }
     /// Whether the entity is made of parts that are entities of their own
     /// (`Entity.isMultipartEntity`): the dragon, not one of its parts.
