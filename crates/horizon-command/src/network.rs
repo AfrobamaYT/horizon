@@ -124,7 +124,7 @@ const MAX_NAMES: usize = 1024;
 /// tree, so a server sending trees of new 32 KiB names packet after packet leaked memory until
 /// the client ran out: a name too long, not a resource location, or past [`MAX_NAMES`] is kept
 /// as "" instead (no suggestions for that argument), where vanilla's tree frees its keys anyway.
-fn intern(name: &str) -> &'static str {
+pub fn intern(name: &str) -> &'static str {
     static NAMES: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
     let mut names = NAMES
         .get_or_init(Default::default)

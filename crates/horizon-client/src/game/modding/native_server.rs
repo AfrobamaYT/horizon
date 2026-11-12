@@ -7,6 +7,8 @@
 //! player's plain items: count, take, give. They act on the server's own
 //! players (the hub's: a dedicated server's, a LAN host's, single player's
 //! server thread's), never on a client's.
+#[path = "native_server/argument_kinds.rs"]
+mod argument_kinds;
 #[cfg(test)]
 #[path = "native_server/selector_tests.rs"]
 mod selector_tests;
@@ -17,6 +19,8 @@ mod wasm_selector_tests;
 use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::{Dim, Game, commands::execute, lan::LanHost, respawn_anchor::RespawnConfig};
 use crate::game::level_control_hooks::LevelControl;
+pub(super) use argument_kinds::{CommandArguments, command_arguments};
+use argument_kinds::{MOD_ID, argument_type, parser};
 use mod_api::__private::game::*;
 // Their old home, for mixin code that names them here.
 use horizon_client::{
@@ -53,77 +57,6 @@ pub(crate) struct NativeSidebar {
 /// The objective a mod's sidebar is sent as: the player's client only; the
 /// server's scoreboard never holds it.
 const SIDEBAR_OBJECTIVE: &str = "horizon:native_sidebar";
-
-/// The argument kinds a native usage may name, each with a [`parser`].
-const KINDS: [&str; 11] = [
-    "word",
-    "text",
-    "integer",
-    "number",
-    "boolean",
-    "player",
-    "entity",
-    "entities",
-    "players",
-    "item",
-    "block_pos",
-];
-
-/// The custom argument types the mods registered, by namespaced id, for the command tree being
-/// built and its server dispatcher.
-pub(super) type CommandArguments = HashMap<String, Arc<dyn mod_api::CommandArgumentType>>;
-
-/// The argument types the installed mods registered at startup.
-pub(super) fn command_arguments() -> CommandArguments {
-    mod_api::__private::command_argument_types()
-        .into_iter()
-        .collect()
-}
-
-/// The brigadier parser of an argument kind, its properties and its dispatcher type.
-/// `EntityArgument.entity` / `entities` / `player` / `players` share the vanilla parser.
-fn parser(kind: &str) -> Option<(&'static str, Value, ArgType)> {
-    Some(match kind {
-        "word" => ("brigadier:string", json!({"type": "word"}), ArgType::Word),
-        "text" => (
-            "brigadier:string",
-            json!({"type": "greedy"}),
-            ArgType::Greedy,
-        ),
-        "integer" => (
-            "brigadier:integer",
-            Value::Null,
-            ArgType::Integer {
-                min: i32::MIN,
-                max: i32::MAX,
-            },
-        ),
-        "number" => (
-            "brigadier:double",
-            Value::Null,
-            ArgType::Double {
-                min: f64::MIN,
-                max: f64::MAX,
-            },
-        ),
-        "boolean" => ("brigadier:bool", Value::Null, ArgType::Bool),
-        "entity" | "entities" | "player" | "players" => {
-            let single = matches!(kind, "entity" | "player");
-            let players = matches!(kind, "player" | "players");
-            (
-                "minecraft:entity",
-                json!({
-                    "amount": if single { "single" } else { "multiple" },
-                    "type": if players { "players" } else { "entities" },
-                }),
-                ArgType::Entity { single, players },
-            )
-        }
-        "item" => ("minecraft:item_stack", Value::Null, ArgType::Item),
-        "block_pos" => ("minecraft:block_pos", Value::Null, ArgType::BlockPos),
-        _ => return None,
-    })
-}
 
 /// The report's name of an operator level (`commands.json`'s
 /// `permissions`).
@@ -373,84 +306,6 @@ pub(super) fn register_dispatcher(
     if let Some(children) = tree["children"].as_object() {
         add(dispatcher, 0, children, handler, arguments);
     }
-}
-
-/// The message a mod's argument parser refused with, as the engine's text. A text the
-/// boundary cannot carry is reported as its own diagnostic: the refusal still fails the
-/// argument, never silently passing it.
-fn refused_argument_text(error: mod_api::CommandArgumentError) -> Text {
-    let message: mod_api::Text = error.into();
-    match message.try_into_engine(&()) {
-        Ok(text) => text,
-        Err(error) => Text::literal(error.to_string()),
-    }
-}
-
-/// The dispatcher type of one validated tree node: a vanilla kind, or the mod's registered
-/// argument type with its parser and suggestions.
-fn argument_type(node: &Value, arguments: &CommandArguments) -> ArgType {
-    if let Some(id) = node["custom_argument"].as_str() {
-        let argument = arguments
-            .get(id)
-            .unwrap_or_else(|| panic!("native command tree names unregistered argument type {id}"));
-        let parse = argument.clone();
-        let suggest = argument.clone();
-        // Use the validated tree property rather than calling mod code again.
-        let kind = if node["properties"]["type"] == "greedy" {
-            horizon_client::command::CustomArgumentKind::Greedy
-        } else {
-            horizon_client::command::CustomArgumentKind::Word
-        };
-        return ArgType::Custom(horizon_client::command::CustomArgument::new(
-            id,
-            kind,
-            move |input| {
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| parse.parse(input)))
-                    .map_err(|_| Text::tr("commands.generic.failed", &[]))?
-                    .map_err(refused_argument_text)
-            },
-            move |prefix| {
-                let Ok(results) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    suggest.suggest(prefix)
-                })) else {
-                    eprintln!("mod command argument completer panicked");
-                    return Vec::new();
-                };
-                // Suggestions use STRING_UTF8 (Java UTF-16 length). Tooltips are
-                // literal NBT strings, whose modified UTF-8 byte length is unsigned u16.
-                if results.iter().any(|s| {
-                    s.text.encode_utf16().count() > 32767
-                        || s.tooltip.as_ref().is_some_and(|tip| {
-                            tip.encode_utf16()
-                                .map(|unit| match unit {
-                                    1..=0x7f => 1,
-                                    0..=0x7ff => 2,
-                                    _ => 3,
-                                })
-                                .sum::<usize>()
-                                > 65535
-                        })
-                }) {
-                    eprintln!("mod command argument completion exceeds the protocol string limit");
-                    return Vec::new();
-                }
-                results
-                    .into_iter()
-                    .map(|suggestion| horizon_client::command::CustomSuggestion {
-                        text: suggestion.text,
-                        tooltip: suggestion.tooltip,
-                    })
-                    .collect()
-            },
-        ));
-    }
-    KINDS
-        .into_iter()
-        .filter_map(parser)
-        .find_map(|(id, properties, ty)| {
-            (node["parser"] == id && node["properties"] == properties).then_some(ty)
-        })
-        .expect("native command tree contains registered parsers")
 }
 
 /// The live player body, or a guest record outside a player swap.
@@ -2267,6 +2122,10 @@ impl Game<'_> {
                         .try_into_api()
                         .expect("command item validation resolves registered items"),
                 ),
+                Arg::Resource(id) => Value::Id(
+                    mod_api::Identifier::parse(&id).map_err(|_| err("command.failed", &[]))?,
+                ),
+                Arg::Custom { kind, value } if &*kind == MOD_ID => Value::String(value),
                 Arg::Custom { kind, value } => Value::Custom {
                     kind: kind.to_string(),
                     value,
@@ -2942,7 +2801,11 @@ mod tests {
 
     #[test]
     fn every_supported_kind_has_a_parser() {
-        assert!(KINDS.into_iter().all(|kind| parser(kind).is_some()));
+        assert!(
+            argument_kinds::KINDS
+                .into_iter()
+                .all(|kind| parser(kind).is_some())
+        );
     }
 
     /// A test mod's argument type: named machines, one word, completed by prefix.
@@ -3122,6 +2985,48 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["press"]
         );
+    }
+
+    #[test]
+    fn resource_and_mod_id_kinds_accept_only_known_ids() {
+        let arguments = command_arguments();
+        let (tree, _, problems) = super::command_tree(
+            &[
+                mod_api::Command::new("spawnof <kind:resource:minecraft:entity_type>"),
+                mod_api::Command::new("about <id:mod_id>"),
+                mod_api::Command::new("bad <kind:resource:NotOk>"),
+            ],
+            |_| false,
+            &arguments,
+        );
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        let kind = &tree["children"]["spawnof"]["children"]["kind"];
+        assert_eq!(kind["parser"], "minecraft:resource_key");
+        assert_eq!(
+            kind["properties"],
+            json!({"registry": "minecraft:entity_type"})
+        );
+        assert_eq!(
+            tree["children"]["about"]["children"]["id"]["custom_argument"],
+            MOD_ID
+        );
+
+        let mut dispatcher = Dispatcher::new();
+        register_dispatcher(&mut dispatcher, &tree, "native_mod_command", &arguments);
+        let mut registries = horizon_client::command::Registries::default();
+        registries.entity_types = vec!["minecraft:zombie".into()];
+        let parsed = dispatcher.parse("spawnof minecraft:zombie", &registries);
+        let (context, _) = parsed.executable().unwrap();
+        assert_eq!(
+            context.get("kind"),
+            Some(&Arg::Resource("minecraft:zombie".into()))
+        );
+        for refused in ["spawnof minecraft:nope", "about no_such_mod"] {
+            assert!(
+                dispatcher.parse(refused, &registries).executable().is_err(),
+                "{refused}"
+            );
+        }
     }
 
     #[test]
