@@ -433,7 +433,12 @@ jobs:
       - name: Slowest compile units
         if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' }}
         continue-on-error: true
-        run: python3 tools/ci/cargo_timings.py target/cargo-timings/cargo-timing.html | tee -a "$GITHUB_STEP_SUMMARY"
+        run: |
+          python3 tools/ci/cargo_timings.py target/cargo-timings/cargo-timing.html | tee -a "$GITHUB_STEP_SUMMARY"
+          # The points build script's phases (seconds since it started), from the file it writes beside its output.
+          for timing in target/debug/build/horizon-mod-points-*/out/points-timing.txt; do
+            [ -f "$timing" ] && { echo "points build script phases:"; cat "$timing"; } | tee -a "$GITHUB_STEP_SUMMARY"
+          done
       # Measurement: the test step below recompiled horizon-mod-points and every crate after it, minutes after
       # the build above. Cargo's verbose output says which tracked file or variable made each unit dirty.
       - name: Why the core build is not fresh
