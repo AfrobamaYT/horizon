@@ -26,7 +26,7 @@ impl Game<'_> {
             return;
         };
         let pending = chunk.dynamic_pending;
-        let cells = self.pack.context.light.dynamic_cells(chunk);
+        let cells = self.pack.context.light.dynamic_cells(chunk, |_| true);
         if cells.is_empty() && !pending {
             return;
         }
@@ -55,6 +55,8 @@ impl Game<'_> {
     /// asked before the light engine relights them (`Streaming::relight_edits`).
     /// `Chunk::set` already dropped the answers of the states they replaced.
     pub(super) fn ask_edited_light_emission(&mut self) {
+        // The checks queued so far are asked now: a later one at the same cell queues again.
+        self.world.light_checks.clear();
         if self.world.light_edits.is_empty() || !self.pack.context.light.any_dynamic() {
             return;
         }
@@ -78,22 +80,26 @@ impl Game<'_> {
         }
     }
     /// A server's light update changed the light of `sections` of the column `key`: their
-    /// `dynamic_light` cells asked again, so this copy's own relights take what the server's
-    /// took (the server asked before it relit them).
+    /// `dynamic_light` cells asked again, each once, so this copy's own relights take what the
+    /// server's took (the server asked before it relit them). A Horizon addition: the contract
+    /// reads emission again on no light packet, but a part's answer may read data the client
+    /// receives later.
     pub(super) fn ask_updated_light_emission(&mut self, key: (i32, i32), sections: &[usize]) {
-        if sections.is_empty() {
+        if sections.is_empty() || !self.pack.context.light.any_dynamic() {
             return;
         }
         let Some(chunk) = self.world.chunks.get(&key) else {
             return;
         };
-        let cells = self.pack.context.light.dynamic_cells(chunk);
+        let cells = self
+            .pack
+            .context
+            .light
+            .dynamic_cells(chunk, |s| sections.contains(&s));
         let dimension = self.dim.level();
         for (cell, [x, y, z], state) in cells {
-            if sections.contains(&((cell >> 12) as usize)) {
-                let emission = self.ask_light_emission(dimension, x, y, z, state);
-                self.store_light_emission(key, cell, emission);
-            }
+            let emission = self.ask_light_emission(dimension, x, y, z, state);
+            self.store_light_emission(key, cell, emission);
         }
     }
     /// One cell's answer stored in its chunk (`None` drops the one it had); the chunk is

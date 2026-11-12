@@ -676,13 +676,21 @@ impl Game<'_> {
     /// `LevelLightEngine.checkBlock` at `pos`, queued with the level's light edits: the next
     /// update asks a `dynamic_light` block's parts again (`ask_edited_light_emission`) and
     /// relights the cell, which `LightTables::differs` lets through for such a state set to
-    /// itself. False off the level in place, for a stale handle, on a client and for a
+    /// itself. A check already queued there since the last ask queues nothing, as vanilla's
+    /// queue is a set. False off the level in place, for a stale handle, on a client and for a
     /// position that isn't loaded.
     pub(super) fn level_check_light(&mut self, level: LevelRef, pos: [i32; 3]) -> bool {
         if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
             return false;
         }
         let [x, y, z] = pos;
+        let edits = &self.world.light_edits;
+        if let Some(&i) = self.world.light_checks.get(&(x, y, z))
+            && edits.get(i).is_some_and(|edit| edit.0 == (x, y, z))
+        {
+            return true;
+        }
+        self.world.light_checks.insert((x, y, z), edits.len());
         let state = self.world.block(x, y, z).0;
         self.world.light_edits.push(((x, y, z), state, state));
         true
