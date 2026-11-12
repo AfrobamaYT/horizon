@@ -5547,3 +5547,25 @@ fn proxy_forwarding_of(config: &horizon_client::lan::NetConfig) -> &'static str 
         "none"
     }
 }
+
+#[cfg(test)]
+mod network_settings_tests {
+    use super::*;
+    #[test]
+    fn server_settings_follow_the_network_config() {
+        use horizon_client::lan::{NetConfig, OnlineMode};
+        let mut config = NetConfig::loopback(25565, String::new(), 20);
+        // online-mode=false, no proxy: no key, no forwarding secret.
+        assert!(!online_mode_of(&config));
+        assert_eq!(proxy_forwarding_of(&config), "none");
+        // online-mode=false behind Velocity: the secret is set.
+        config.forwarding_secret = Some(b"secret".to_vec());
+        assert!(!online_mode_of(&config));
+        assert_eq!(proxy_forwarding_of(&config), "velocity");
+        // online-mode=true: the server's key, and forwarding stays off.
+        config.forwarding_secret = None;
+        config.online = Some(std::sync::Arc::new(OnlineMode::generate(false).unwrap()));
+        assert!(online_mode_of(&config));
+        assert_eq!(proxy_forwarding_of(&config), "none");
+    }
+}
