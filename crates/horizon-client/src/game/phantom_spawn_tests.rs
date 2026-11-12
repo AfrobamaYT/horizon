@@ -24,16 +24,17 @@ fn resources() -> Option<std::path::PathBuf> {
 
 /// A server's game on `root`: hard difficulty, a long-inhabited chunk, the
 /// player at (2.5, 99, 2.5), midnight (sky darken 11) and a fixed level seed.
-fn game(root: &std::path::Path) -> Game<'static> {
+fn game<'a>(root: &std::path::Path, resources: &'a mut Option<Arc<Resources>>) -> Game<'a> {
     let settings = Settings::default();
     let loaded = load_resources(
-        root.to_path_buf(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        Vec::new(),
         None,
         root,
         &settings,
         std::time::Instant::now(),
         false,
-        true,
+        execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
@@ -41,14 +42,16 @@ fn game(root: &std::path::Path) -> Game<'static> {
     let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
     options.resources = root.to_path_buf();
     options.execution_role = execution_role::ExecutionRole::IntegratedServer;
-    let res: &'static _ = Box::leak(Box::new(loaded.resources));
+    let res = resources.insert(loaded.resources);
     let mut game = Game::new(
         res,
         loaded.pack,
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.to_path_buf(),
+        )),
         None,
     )
     .unwrap();
@@ -115,7 +118,8 @@ fn attempt(game: &mut Game<'_>, tables: &LightTables, roof: Option<&str>) -> (i3
 #[test]
 fn phantoms_spawn_under_a_glass_roof() {
     let Some(root) = resources() else { return };
-    let mut game = game(&root);
+    let mut resources = None;
+    let mut game = game(&root, &mut resources);
     let tables = LightTables::load(&root, game.pack.assets.registry, game.res.facts()).unwrap();
 
     // Open night sky.
@@ -141,7 +145,8 @@ fn phantoms_spawn_under_a_glass_roof() {
 #[test]
 fn no_phantoms_under_a_roof_the_sky_light_does_not_reach() {
     let Some(root) = resources() else { return };
-    let mut game = game(&root);
+    let mut resources = None;
+    let mut game = game(&root, &mut resources);
     let tables = LightTables::load(&root, game.pack.assets.registry, game.res.facts()).unwrap();
 
     // Stone stops the light; water and ice damp it by a level; a bottom slab

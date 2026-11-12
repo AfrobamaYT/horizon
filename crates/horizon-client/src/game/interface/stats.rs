@@ -11,6 +11,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(test)]
+#[path = "../phantom_spawn_tests.rs"]
+mod phantom_spawn_tests;
+
 /// One player `PhantomSpawner.tick` visits. `identity` is the server player's uuid and
 /// name, absent for a game's own player, which no server player stands for.
 struct PhantomTarget {
