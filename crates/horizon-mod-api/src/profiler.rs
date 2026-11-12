@@ -415,6 +415,9 @@ mod tests {
 
     #[test]
     fn overflow_tokens_do_not_alias_records_or_lose_crash_owners() {
+        if !isolated("overflow_tokens_do_not_alias_records_or_lose_crash_owners") {
+            return;
+        }
         let _serial = SERIAL.lock().unwrap();
         stop();
         TIME.with(|time| time.set(0));
@@ -447,6 +450,9 @@ mod tests {
 
     #[test]
     fn profiler_guards_and_threads() {
+        if !isolated("profiler_guards_and_threads") {
+            return;
+        }
         let _serial = SERIAL.lock().unwrap();
         stop();
         *REPORT.lock().unwrap() = None;
@@ -513,6 +519,9 @@ mod tests {
     }
     #[test]
     fn profiler_drains_in_flight_and_reports_overflow() {
+        if !isolated("profiler_drains_in_flight_and_reports_overflow") {
+            return;
+        }
         let _serial = SERIAL.lock().unwrap();
         assert!(start_with_clock(tick));
         let (entered, ready) = std::sync::mpsc::channel();
@@ -547,6 +556,9 @@ mod tests {
     }
     #[test]
     fn profiler_stale_epoch_is_rejected() {
+        if !isolated("profiler_stale_epoch_is_rejected") {
+            return;
+        }
         let _serial = SERIAL.lock().unwrap();
         assert!(start_with_clock(tick));
         let (entered, ready) = std::sync::mpsc::channel();
