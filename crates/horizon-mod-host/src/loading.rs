@@ -4,7 +4,7 @@ use mod_api::__private::game::Fields;
 /// and start the engine. Keep the validated startup lease alive for the whole run.
 pub fn main_with(
     mods: Vec<mod_api::ModEntry>,
-    slots: &[horizon_client::entry::NativeSlot],
+    slots: &[crate::SlotListener],
     built: &'static [horizon_mod_package::runtime::BuiltMod],
     startup: horizon_client::entry::Startup,
 ) {
@@ -82,6 +82,15 @@ pub fn main_with(
                 .collect();
             let ids: Vec<_> = mods.iter().map(|entry| entry.fields().id).collect();
             mod_api::__private::install(mods.into());
+            for id in ids {
+        for slot in slots.iter().filter(|slot| slot.id() == id) {
+            if let Err(error) = mod_points::register(slot) {
+                log::error!("Horizon: {id}: {error}");
+                logging::flush();
+                std::process::exit(game::exit_code::ERROR);
+            }
+        }
+    }
             (ids, wasm)
         },
         horizon_client::entry::CodeRuntime {
@@ -93,7 +102,6 @@ pub fn main_with(
                     .any(|(owner, _)| owner == id)
             },
         },
-        slots,
         startup,
     );
 }
