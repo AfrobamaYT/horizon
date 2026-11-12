@@ -4,6 +4,7 @@ no edit to SUMMARY.md, and check every page's links.
 
 - A page `X.md` with a folder `X/` beside it gets the folder's pages as its sub-chapters, in file
   name order, each titled by its first heading (and so on, one folder down).
+  `<!-- section-pages -->` in such a page becomes a list of links to those sub-chapters.
 - A page directly in one of FOLDERS that SUMMARY.md doesn't list joins the end of its part, by title.
 - Every relative link, reference destination and `{{#include}}` must reach a file (or a generated
   chapter) and, for a page, an existing heading anchor; root-relative links are refused.
@@ -27,6 +28,7 @@ INCLUDE = re.compile(r"(\{\{#(?:rustdoc_)?include )([^ }]+)(\s*\}\})")
 # Each page directly in one of these folders is a chapter of the part: the pages SUMMARY.md lists keep
 # their place, the rest follow in title order.
 FOLDERS = {"Concepts": "concepts", "How-to": "how-to"}
+SECTION_PAGES = "<!-- section-pages -->"
 # The book documents what the game does. A page titled as one of these is a design, a plan or a work list,
 # and lives in docs/design/ instead.
 NOT_A_MANUAL = re.compile(r"\b(design|designs|proposal|proposed|draft|roadmap|tracker|status|plan)\b", re.IGNORECASE)
@@ -92,6 +94,10 @@ def nest(chapter_, src):
     for item in chapter_["sub_items"]:
         if "Chapter" in item and item["Chapter"]["path"]:
             nest(item["Chapter"], src)
+    here = Path(chapter_["path"]).parent
+    links = "\n".join(f"- [{c['name']}]({Path(c['path']).relative_to(here).as_posix()})"
+                      for c in (i["Chapter"] for i in chapter_["sub_items"] if "Chapter" in i))
+    chapter_["content"] = chapter_["content"].replace(SECTION_PAGES, links)
 
 
 def chapters(items):

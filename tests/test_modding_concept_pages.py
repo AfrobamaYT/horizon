@@ -44,6 +44,13 @@ class ConceptPages(unittest.TestCase):
         self.assertEqual([c["Chapter"]["number"] for c in parts["sub_items"]], [[1, 1], [1, 2]])
         self.assertEqual(parts["sub_items"][0]["Chapter"]["parent_names"], ["Parts"])
 
+    def test_section_pages_marker_lists_the_sub_chapters(self):
+        (self.src / "concepts/parts.md").write_text("# Parts\n\n<!-- section-pages -->\n")
+        book = copy.deepcopy(self.book)
+        book["sections"][1]["Chapter"]["content"] = (self.src / "concepts/parts.md").read_text()
+        parts = self.expand(book)["sections"][1]["Chapter"]
+        self.assertIn("- [Item parts](parts/a-item.md)\n- [Block parts](parts/b-block.md)", parts["content"])
+
     def test_nested_folders_nest_again(self):
         (self.src / "concepts/parts/a-item").mkdir()
         (self.src / "concepts/parts/a-item/tags.md").write_text("# Tag parts\n")

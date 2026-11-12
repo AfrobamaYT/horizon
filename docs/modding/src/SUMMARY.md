@@ -5,7 +5,9 @@
 # Getting started
 
 - [Installing and using mods](start/installing.md)
+- [Your first content mod](start/first-content-mod.md)
 - [Your first native mod](start/first-mod.md)
+- [Your first WebAssembly mod](start/first-wasm-mod.md)
 - [Writing hooks](start/writing-hooks.md)
 
 # Concepts
