@@ -617,3 +617,171 @@ fn double_chest_hopper_push_keeps_other_half_pending() {
         assert_eq!(count(g, (9, 64, 8), "minecraft:emerald"), 2);
     });
 }
+
+fn pending_bytes(game: &Game<'_>, pos: (i32, i32, i32)) -> Vec<u8> {
+    pending(game, pos);
+    let pending = game.world.block_entity_extras(pos).pending_loot.unwrap();
+    let mut fields = horizon_core::nbt::Compound::new();
+    pending.write_tags(&mut fields);
+    horizon_core::nbt::write_named(
+        &horizon_core::nbt::NamedTag {
+            name: "".into(),
+            tag: Tag::Compound(fields),
+        },
+        horizon_core::nbt::Limits::default(),
+    )
+    .unwrap()
+}
+#[test]
+#[ignore = "requires prepared resources"]
+fn clone_copy_preserves_pending_loot_independently() {
+    if fresh("clone_copy_preserves_pending_loot_independently") {
+        return;
+    }
+    with_game(|g| {
+        place(g, POS, TABLE, 37);
+        let original = pending_bytes(g, POS);
+        // An overwritten destination's different table must not survive.
+        place(g, (12, 64, 8), "test:right", 91);
+        assert!(g.run_command("clone 8 64 8 8 64 8 12 64 8"));
+        assert_eq!(pending_bytes(g, POS), original);
+        assert_eq!(pending_bytes(g, (12, 64, 8)), original);
+        open(g, (12, 64, 8), 0.0);
+        consumed(g, (12, 64, 8));
+        assert_eq!(count(g, (12, 64, 8), "minecraft:diamond"), 1);
+        assert_eq!(count(g, (12, 64, 8), "minecraft:emerald"), 0);
+        assert_eq!(pending_bytes(g, POS), original);
+        open(g, (12, 64, 8), 0.0);
+        assert_eq!(count(g, (12, 64, 8), "minecraft:diamond"), 1);
+    });
+}
+#[test]
+#[ignore = "requires prepared resources"]
+fn clone_move_transfers_pending_loot() {
+    if fresh("clone_move_transfers_pending_loot") {
+        return;
+    }
+    with_game(|g| {
+        place(g, POS, TABLE, 37);
+        let original = pending_bytes(g, POS);
+        place(g, (12, 64, 8), "test:right", 91);
+        assert!(g.run_command("clone 8 64 8 8 64 8 12 64 8 replace move"));
+        consumed(g, POS);
+        assert!(g.world.block_entities.get(&POS).is_none());
+        assert_eq!(pending_bytes(g, (12, 64, 8)), original);
+        assert_eq!(dropped(g, "minecraft:diamond"), 0);
+        assert_eq!(dropped(g, "minecraft:emerald"), 0);
+        open(g, (12, 64, 8), 0.0);
+        consumed(g, (12, 64, 8));
+        assert_eq!(count(g, (12, 64, 8), "minecraft:diamond"), 1);
+    });
+}
+#[test]
+#[ignore = "requires prepared resources"]
+fn structure_capture_disk_round_trip_keeps_pending_loot() {
+    if fresh("structure_capture_disk_round_trip_keeps_pending_loot") {
+        return;
+    }
+    with_game(|g| {
+        crate::game::growth::install_live_features(
+            &g.res,
+            &g.pack,
+            &g.options,
+            &Default::default(),
+        );
+        place(g, POS, TABLE, 37);
+        let original = pending_bytes(g, POS);
+        // fresh() supplies a unique scratch working directory for this world.
+        g.world_root = std::env::current_dir().unwrap().join("world");
+        assert!(g.save_structure_area(
+            "test:pending",
+            [8, 64, 8],
+            [1, 1, 1],
+            true,
+            "fixture",
+            true,
+            false
+        ));
+        let captured = g.template_entry("test:pending").unwrap();
+        let Tag::List(blocks) = captured.tag.get("blocks").unwrap() else {
+            panic!("captured blocks")
+        };
+        let nbt = blocks[0].get("nbt").expect("captured block entity");
+        assert_eq!(nbt.get("LootTable"), Some(&Tag::String(TABLE.into())));
+        assert_eq!(nbt.get("LootTableSeed"), Some(&Tag::Long(37)));
+        g.structure_templates.clear();
+        let entry = g
+            .template_entry("test:pending")
+            .expect("read saved structure from disk");
+        assert_eq!(entry.tag, captured.tag);
+        g.world
+            .chunks
+            .insert((1, 0), Arc::new(horizon_client::chunk::Chunk::empty(1, 0)));
+        assert!(g.place_template_entry(
+            &entry,
+            BlockPos::new(20, 64, 8),
+            crate::game::structure_blocks::load_settings(
+                horizon_world::worldgen::structure::Mirror::None,
+                horizon_world::worldgen::structure::Rotation::None,
+                1.0,
+                37,
+                false
+            ),
+            horizon_world::worldgen::structure::Mirror::None,
+            horizon_world::worldgen::structure::Rotation::None
+        ));
+        let placed = g
+            .world
+            .block_entity_extras((20, 64, 8))
+            .pending_loot
+            .unwrap();
+        assert_eq!(placed.table, Tag::String(TABLE.into()));
+        assert!(matches!(placed.seed, Some(Tag::Long(_))));
+        assert!(
+            g.world
+                .block_entities
+                .get(&(20, 64, 8))
+                .unwrap()
+                .slots()
+                .iter()
+                .all(Option::is_none)
+        );
+        assert_eq!(pending_bytes(g, POS), original);
+        open(g, (20, 64, 8), 0.0);
+        consumed(g, (20, 64, 8));
+        assert_eq!(count(g, (20, 64, 8), "minecraft:diamond"), 1);
+        assert_eq!(pending_bytes(g, POS), original);
+        open(g, (20, 64, 8), 0.0);
+        assert_eq!(count(g, (20, 64, 8), "minecraft:diamond"), 1);
+    });
+}
+
+#[test]
+#[ignore = "requires prepared resources"]
+fn clone_selection_modes_match_pending_payloads() {
+    if fresh("clone_selection_modes_match_pending_payloads") {
+        return;
+    }
+    with_game(|g| {
+        place(g, POS, TABLE, 37);
+        let original = pending_bytes(g, POS);
+        place(g, (13, 64, 8), "test:right", 91);
+        let skipped = pending_bytes(g, (13, 64, 8));
+        for mode in ["masked", "filtered minecraft:chest", "replace"] {
+            place(g, (12, 64, 8), "test:right", 91);
+            assert!(g.run_command(&format!("clone 8 64 8 9 64 8 12 64 8 {mode}")));
+            assert_eq!(pending_bytes(g, (12, 64, 8)), original);
+            assert_eq!(pending_bytes(g, POS), original);
+            if mode == "replace" {
+                consumed(g, (13, 64, 8));
+                assert!(g.world.block_entities.get(&(13, 64, 8)).is_none());
+            } else {
+                assert_eq!(pending_bytes(g, (13, 64, 8)), skipped);
+            }
+            assert_eq!(dropped(g, "minecraft:emerald"), 0);
+        }
+        let before = pending_bytes(g, (12, 64, 8));
+        assert!(!g.run_command("clone 8 64 8 8 64 8 12 64 8 filtered minecraft:stone"));
+        assert_eq!(pending_bytes(g, (12, 64, 8)), before);
+    });
+}

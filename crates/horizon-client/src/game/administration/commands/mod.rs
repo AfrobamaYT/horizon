@@ -1,6 +1,7 @@
 //! Command execution (the `execute` side of each vanilla command class):
 //! entity selectors resolved against the game, vanilla feedback and errors.
 mod admin;
+mod clone_payload;
 pub(super) mod compute;
 mod data;
 mod difficulty;
@@ -3233,14 +3234,14 @@ impl Game<'_> {
                             dest[2] + z - min[2],
                         ],
                         s,
-                        self.world.block_entities.get(&(x, y, z)).cloned(),
-                        self.world.block_names.get(&(x, y, z)).cloned(),
+                        self.clone_block_payload((x, y, z)),
                     ));
                 }
             }
         }
         if moving {
             for (from, ..) in &copies {
+                self.discard_clone_loot(*from);
                 self.place_state(*from, air, true, false)?;
             }
         }
@@ -3250,20 +3251,13 @@ impl Game<'_> {
         // each copied state but a barrier counts as placed.
         let barrier = self.pack.assets.registry.default_state("minecraft:barrier");
         let mut count = 0;
-        for (_, to, s, entity, name) in copies {
+        for (_, to, s, payload) in copies {
+            self.discard_clone_loot(to);
             self.place_state(to, s, strict, false)?;
             if Some(s) != barrier {
                 count += 1;
             }
-            if let Some(e) = entity {
-                let key = (to[0], to[1], to[2]);
-                self.world.block_entities.insert(key, e);
-                // The copied tag carries the custom name.
-                match name {
-                    Some(name) => self.world.block_names.insert(key, name),
-                    None => self.world.block_names.remove(&key),
-                };
-            }
+            self.apply_clone_payload(to, payload);
         }
         // LevelTicks.copyAreaFrom: the block ticks pending anywhere in the
         // source box go to the same offset in the destination, before the
