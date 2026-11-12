@@ -144,11 +144,6 @@ jobs:
           if [ -n "${LINKAGE_SCRATCH:-}" ]; then
             rm -rf "$LINKAGE_SCRATCH"
           fi
-      # Last, whatever happened: keep this Dyna slot's /build under the size at which Dyna empties it whole.
-      - name: Keep the build folder under Dyna's cap
-        if: always() && hashFiles('tools/ci/trim_build_folder.sh') != ''
-        continue-on-error: true
-        run: bash tools/ci/trim_build_folder.sh
 
   main-break:
     needs: [select, linkage]
