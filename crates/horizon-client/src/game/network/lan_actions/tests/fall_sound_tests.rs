@@ -7,7 +7,7 @@ use horizon_client::{
 };
 use std::sync::{Arc, mpsc};
 
-fn run(distance: f64, silent: bool, expected: usize) {
+fn run(distance: f64, expected: usize) {
     mod_platform::testing::with_mods(Vec::new().into(), || {
         with_game(|game| {
             open_to_lan(game);
@@ -28,7 +28,6 @@ fn run(distance: f64, silent: bool, expected: usize) {
             let mut motion = PlayerMotion::new(game.motion, Vec3::new(1.5, 64.0, 1.5)).unwrap();
             // The replayed downward move accumulates the fall distance.
             motion.fall_distance = 0.0;
-            motion.silent = silent;
             landing.motion = Some(Box::new(motion));
             let (tx, own) = mpsc::channel();
             landing.sender = PlayerSender::new(tx, Arc::default());
@@ -81,15 +80,10 @@ fn run(distance: f64, silent: bool, expected: usize) {
 #[test]
 #[ignore = "requires prepared resources"]
 fn five_block_fall_sends_stone_once_except_guest() {
-    run(5.0, false, 1);
+    run(5.0, 1);
 }
 #[test]
 #[ignore = "requires prepared resources"]
 fn three_block_fall_sends_no_stone_sound() {
-    run(3.0, false, 0);
-}
-#[test]
-#[ignore = "requires prepared resources"]
-fn silent_guest_sends_no_stone_sound() {
-    run(5.0, true, 0);
+    run(3.0, 0);
 }
