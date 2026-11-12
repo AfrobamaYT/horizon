@@ -12,6 +12,11 @@ import os
 from pathlib import Path
 import re
 import time
+import sys
+from urllib.error import HTTPError
+
+DEADLINE = None
+REQUESTS = 0
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -31,9 +36,28 @@ def get(url, payload=None):
     headers = {"Accept": "application/vnd.github+json"}
     if os.environ.get("GH_TOKEN"):
         headers["Authorization"] = "Bearer " + os.environ["GH_TOKEN"]
+    global REQUESTS
+    REQUESTS += 1
+    if REQUESTS > 100 or (DEADLINE is not None and time.monotonic() >= DEADLINE):
+        raise RuntimeError("Collection budget exceeded (100 requests / 110 seconds)")
+    print(f"GitHub request {REQUESTS}: {url.split('?')[0]}", file=sys.stderr, flush=True)
     body = json.dumps(payload).encode() if payload is not None else None
-    with urlopen(Request(url, data=body, headers=headers), timeout=60) as response:
-        return json.load(response)
+    timeout = min(15, max(1, DEADLINE - time.monotonic())) if DEADLINE else 15
+    try:
+        with urlopen(Request(url, data=body, headers=headers), timeout=timeout) as response:
+            return json.load(response)
+    except HTTPError as error:
+        if error.code not in (403, 429):
+            raise
+        delay = max(1, int(error.headers.get('Retry-After', 0)),
+                    int(error.headers.get('X-RateLimit-Reset', 0)) - int(time.time()))
+        if delay > 10 or (DEADLINE and time.monotonic() + delay >= DEADLINE):
+            raise RuntimeError(f"GitHub rate limited; retry after {delay} seconds") from error
+        print(f"GitHub rate limited; backing off {delay} seconds", file=sys.stderr, flush=True)
+        time.sleep(delay)
+        # A single retry; another failure is reported to the caller.
+        with urlopen(Request(url, data=body, headers=headers), timeout=timeout) as response:
+            return json.load(response)
 
 
 def search(query):
@@ -77,7 +101,15 @@ def merged_prs(day):
             raise RuntimeError("GitHub GraphQL query failed")
         batch = response["data"]["search"]
         if batch["issueCount"] > 1000:
-            raise RuntimeError("GitHub search exceeds 1,000 results for one day")
+            if '..' not in day:
+                raise RuntimeError("GitHub search exceeds 1,000 results for one day")
+            start, end = (datetime.fromisoformat(value) for value in day.split('..'))
+            if start == end:
+                raise RuntimeError('GitHub search exceeds 1,000 results for one day')
+            middle = start + (end - start) // 2
+            left = start.date().isoformat() + '..' + middle.date().isoformat()
+            right = (middle + timedelta(days=1)).date().isoformat() + '..' + end.date().isoformat()
+            return merged_prs(left) + merged_prs(right)
         for pr in batch["nodes"]:
             author = pr["author"] or {"login": "deleted", "__typename": "User"}
             result.append({"number": pr["number"], "title": pr["title"], "body": pr["body"],
@@ -92,25 +124,38 @@ def merged_prs(day):
 
 def collect(now, days):
     prs, issues = {}, {}
-    for offset in range(days):
-        day = (now - timedelta(days=offset)).date().isoformat()
-        for item in merged_prs(day):
-            prs[item["number"]] = item
-        for query in (f"is:issue label:\"help wanted\" created:{day}",
-                      f"is:issue label:bug closed:{day}"):
-            for item in search(query):
-                issues[item["number"]] = item
-    for pr in list(prs.values()):
-        if pr["head"]["ref"].startswith("fork-review-rollup-"):
-            for number in members(pr):
-                if number not in prs:
-                    prs[number] = get(API + f"/pulls/{number}")
+    day = (now - timedelta(days=days - 1)).date().isoformat() + '..' + now.date().isoformat()
+    for item in merged_prs(day):
+        prs[item['number']] = item
+    for query in (f'is:issue label:"help wanted" created:{day}',
+                  f'is:issue label:bug closed:{day}'):
+        for item in search(query):
+            issues[item['number']] = item
+    # Batch out-of-window members, never make a serial request for each member.
+    missing = sorted({n for pr in prs.values()
+                      if pr['head']['ref'].startswith('fork-review-rollup-')
+                      for n in members(pr)} - prs.keys())
+    for offset in range(0, len(missing), 50):
+        fields = 'number title body mergedAt headRefName headRefOid author { login __typename } labels(first: 100) { nodes { name } }'
+        aliases = ' '.join(f'p{n}: pullRequest(number: {n}) {{ {fields} }}' for n in missing[offset:offset + 50])
+        response = get('https://api.github.com/graphql', {'query': '{ repository(owner: "arismoko", name: "horizon") { ' + aliases + ' } }'})
+        if response.get('errors'):
+            raise RuntimeError('GitHub member lookup failed')
+        for pr in response['data']['repository'].values():
+            if pr is None:
+                raise RuntimeError('Rollup member not found')
+            author = pr['author'] or {'login': 'deleted', '__typename': 'User'}
+            prs[pr['number']] = dict(number=pr['number'], title=pr['title'], body=pr['body'],
+                merged_at=pr['mergedAt'], head={'ref': pr['headRefName'], 'sha': pr['headRefOid']},
+                user={'login': author['login'], 'type': author['__typename']}, labels=pr['labels']['nodes'])
     releases = []
     page = 1
     while True:
+        if page > 5:
+            raise RuntimeError('Release pagination exceeded five pages')
         batch = get(API + f"/releases?per_page=100&page={page}")
         releases.extend(batch)
-        if len(batch) < 100:
+        if len(batch) < 100 or any(r.get('published_at') and r['published_at'][:10] < day.split('..')[0] for r in batch):
             break
         page += 1
     return {"prs": list(prs.values()), "issues": list(issues.values()), "releases": releases}
@@ -179,4 +224,10 @@ if __name__ == "__main__":
     parser.add_argument("--output", default="CHANGELOG.md")
     args = parser.parse_args()
     now = datetime.now(timezone.utc)
-    Path(args.output).write_text(render(collect(now, args.days), now, args.days), encoding="utf-8")
+    DEADLINE = time.monotonic() + 110
+    try:
+        output = render(collect(now, args.days), now, args.days)
+    except Exception as error:
+        parser.exit(1, f"Changelog generation failed: {error}\n")
+    Path(args.output).write_text(output, encoding="utf-8")
+    print(f"Wrote {args.output} after {REQUESTS} requests", file=sys.stderr)

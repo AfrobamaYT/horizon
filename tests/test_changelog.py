@@ -59,6 +59,22 @@ class ChangelogTests(unittest.TestCase):
         self.assertEqual(get.call_count, 1)  # Releases only; member already batched.
         self.assertIn('/releases?', get.call_args.args[0])
 
+    @patch('tools.changelog.search', return_value=[])
+    @patch('tools.changelog.merged_prs', return_value=[])
+    @patch('tools.changelog.get')
+    def test_release_paging_is_bounded(self, get, pulls, search):
+        get.return_value = [{'published_at': '2026-11-13T00:00:00Z'}] * 100
+        with self.assertRaisesRegex(RuntimeError, 'five pages'):
+            collect(self.now, 1)
+        self.assertEqual(get.call_count, 5)
+
+    @patch('tools.changelog.time.sleep')
+    @patch('tools.changelog.get')
+    def test_daily_search_limit_fails_clearly(self, get, sleep):
+        get.return_value = {'data': {'search': {'issueCount': 1001}}}
+        with self.assertRaisesRegex(RuntimeError, '1,000 results'):
+            merged_prs('2026-11-13')
+
     def test_bot_filter_and_label_override(self):
         self.data['prs'] = [self.data['prs'][0]]
         pr = self.data['prs'][0]
