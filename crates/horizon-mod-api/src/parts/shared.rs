@@ -559,6 +559,18 @@ pub mod tests {
             }
             let chem_tank = r.block_entity_type_key("test:chem_tank");
             r.block_entity_capability(&CHEMICALS, &chem_tank, |_, at| Some(Box::new(ChemTank(at))));
+            // `test:void_bin`, a block with no block entity, voids what it is given.
+            let void_bin = r.block_key("test:void_bin");
+            r.block_capability(&ITEMS, &void_bin, |_, _, _, entity| {
+                entity.is_none().then(|| Box::new(VoidBin) as _)
+            });
+            // The `test:ordered` block, beside its block entity type's providers: one ahead of
+            // the game answering at x = 6 and x = 11, and one after it answering anywhere.
+            let ordered = r.block_key("test:ordered");
+            r.block_capability_before_game(&ITEMS, &ordered, |_, at, _, _| {
+                matches!(at.pos[0], 6 | 11).then(|| Box::new(Marked(5)) as _)
+            });
+            r.block_capability(&ITEMS, &ordered, |_, _, _, _| Some(Box::new(Marked(6))));
         }
     }
 
@@ -601,7 +613,7 @@ pub mod tests {
         }
         fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
             event.blocks.extend(
-                ["gauge", "connector", "press", "hoard"]
+                ["gauge", "connector", "press", "hoard", "void_bin"]
                     .into_iter()
                     .chain(CAPABILITY_TYPES.iter().copied())
                     .map(|id| mod_api::Block::new(format!("test:{id}"), "minecraft:stone")),
@@ -638,6 +650,9 @@ pub mod tests {
                 "test:other",
                 "test:connector",
                 "test:press",
+                "test:void_bin",
+                "test:ordered",
+                "minecraft:stone",
             ],
             |_| {
                 horizon_mod_runtime::block_definitions::BlockDefinition::new(

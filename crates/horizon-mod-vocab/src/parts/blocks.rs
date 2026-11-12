@@ -38,6 +38,52 @@ impl dyn Registrar + '_ {
     pub fn block_part_tag<P: BlockPart>(&mut self, tag: &str, part: P) {
         self.attach_block_part_tag(tag, type_name::<P>(), Arc::new(part));
     }
+    /// Answer capability `key` for block `block` with `provider`, whether or not a block entity
+    /// stands there (NeoForge's `RegisterCapabilitiesEvent.registerBlock`): a trash can that voids
+    /// what it is given, a machine's port block passing a pipe on to its controller. `provider`
+    /// is given the position and side asked about, the block state there and the block entity,
+    /// if any: `r.block_capability(&ITEMS, &bin, |_, _, _, _| Some(Box::new(Voids)))`. Asked
+    /// beside the providers of the block entity type there, as [`LevelRef::capability`](crate::LevelRef::capability)
+    /// orders them.
+    pub fn block_capability<T: ?Sized + 'static>(
+        &mut self,
+        key: &CapabilityKey<T>,
+        block: &crate::BlockKey,
+        provider: impl Fn(&mut dyn ServerHost, BlockSide, crate::BlockState, Option<crate::BlockEntityRef>) -> Option<Box<T>>
+        + Send
+        + Sync
+        + 'static,
+    ) {
+        self.provide_block_capability(key.name, block, false, block_provider(provider));
+    }
+    /// `block_capability`, asked ahead of the game's own provider.
+    pub fn block_capability_before_game<T: ?Sized + 'static>(
+        &mut self,
+        key: &CapabilityKey<T>,
+        block: &crate::BlockKey,
+        provider: impl Fn(&mut dyn ServerHost, BlockSide, crate::BlockState, Option<crate::BlockEntityRef>) -> Option<Box<T>>
+        + Send
+        + Sync
+        + 'static,
+    ) {
+        self.provide_block_capability(key.name, block, true, block_provider(provider));
+    }
+}
+
+/// A block provider as the table keeps it: one asked by position and side, which reads the block
+/// state and block entity there for `provider`. A position whose block can't be read (a stale
+/// level, an unloaded chunk) has no answer.
+fn block_provider<T: ?Sized + 'static>(
+    provider: impl Fn(&mut dyn ServerHost, BlockSide, crate::BlockState, Option<crate::BlockEntityRef>) -> Option<Box<T>>
+    + Send
+    + Sync
+    + 'static,
+) -> BlockProviderOf {
+    BlockProviderOf::of(Arc::new(move |host: &mut dyn ServerHost, at: BlockSide| {
+        let state = at.level.block_state(host, at.pos)?;
+        let entity = host.block_entity(at.level, at.pos);
+        provider(host, at, state, entity)
+    }) as Arc<dyn BlockCapabilityProvider<T>>)
 }
 
 /// Registrar operations for blocks.
@@ -55,4 +101,41 @@ pub trait BlocksRegistrar {
 
     /// Attach `part`, of kind `kind`, to every block in tag `tag`.
     fn attach_block_part_tag(&mut self, tag: &str, kind: &'static str, part: Arc<dyn BlockPart>);
+
+    /// Answer block capability `name` for block `block` with `provider`, asked ahead of the
+    /// game's own when `before_game`; mods reach it through `block_capability`.
+    fn provide_block_capability(
+        &mut self,
+        name: &'static str,
+        block: &crate::BlockKey,
+        before_game: bool,
+        provider: BlockProviderOf,
+    );
+}
+
+/// CapabilityProviders operations for blocks.
+// hidden: per-kind lookup implementation, exposed for generated provider bindings
+#[doc(hidden)]
+pub trait BlocksCapabilityProviders {
+    /// The next enabled provider of block capability `name` for block `block`, with its mod and
+    /// whether it is asked ahead of the game. `index` starts at zero and advances past every
+    /// visited registration, including disabled ones.
+    fn block_provider(
+        &self,
+        name: &str,
+        block: crate::BlockKey,
+        index: &mut u32,
+    ) -> Option<(BlockProviderOf, &'static str, bool)>;
+}
+
+impl BlocksCapabilityProviders for InstalledProviders {
+    fn block_provider(
+        &self,
+        name: &str,
+        block: crate::BlockKey,
+        index: &mut u32,
+    ) -> Option<(BlockProviderOf, &'static str, bool)> {
+        let block = crate::content::registry_keys::block_id(block)?;
+        next(&installed()?.keys.block_capabilities, name, block, index)
+    }
 }

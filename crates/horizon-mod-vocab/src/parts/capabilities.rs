@@ -82,15 +82,15 @@ pub(crate) fn answered<T: ?Sized>(
 /// providers and the game's); the first to answer wins. `get` takes a provider of this
 /// capability's handler type out of its case: a provider of a mod's own type the asker isn't
 /// linked with is passed over.
-pub(crate) fn ask_providers<O, P: ?Sized + 'static, T: ?Sized>(
+pub(crate) fn ask_providers<O, P: ?Sized + 'static, T: ?Sized, C: Default>(
     host: &mut dyn ServerHost,
-    next: impl Fn(&mut u32) -> Option<(O, &'static str, bool)>,
+    next: impl Fn(&mut C) -> Option<(O, &'static str, bool)>,
     get: impl Fn(&O) -> Option<&Arc<P>>,
     call: impl Fn(&P, &mut dyn ServerHost) -> Option<Box<T>>,
     game: impl FnOnce(&mut dyn ServerHost) -> bool,
 ) -> Answer<T> {
     let mut game = Some(game);
-    let mut index = 0;
+    let mut index = C::default();
     while let Some((provider, owner, before_game)) = next(&mut index) {
         if !before_game
             && let Some(game) = game.take()
@@ -111,6 +111,46 @@ pub(crate) fn ask_providers<O, P: ?Sized + 'static, T: ?Sized>(
     }
 }
 
+/// Where a lookup is in a position's two lists of providers: those of the block entity type
+/// standing there, and those of the block.
+#[derive(Default)]
+pub(crate) struct PositionCursor {
+    entity: u32,
+    block: u32,
+    /// Past the providers asked ahead of the game.
+    rest: bool,
+}
+
+/// The next of a position's providers (`entity`'s, the block entity type's, and `block`'s, the
+/// block's, each a registration cursor as `ask_providers` takes): those asked ahead of the game,
+/// the block entity type's then the block's, then the others in the same order.
+pub(crate) fn next_at_position<O>(
+    cursor: &mut PositionCursor,
+    entity: impl Fn(&mut u32) -> Option<(O, &'static str, bool)>,
+    block: impl Fn(&mut u32) -> Option<(O, &'static str, bool)>,
+) -> Option<(O, &'static str, bool)> {
+    /// `next`'s provider if it is asked ahead of the game, leaving `index` where it was if not.
+    fn ahead<O>(
+        next: &impl Fn(&mut u32) -> Option<(O, &'static str, bool)>,
+        index: &mut u32,
+    ) -> Option<(O, &'static str, bool)> {
+        let mut peek = *index;
+        let found = next(&mut peek).filter(|(_, _, before_game)| *before_game)?;
+        *index = peek;
+        Some(found)
+    }
+    if !cursor.rest {
+        if let Some(found) = ahead(&entity, &mut cursor.entity) {
+            return Some(found);
+        }
+        if let Some(found) = ahead(&block, &mut cursor.block) {
+            return Some(found);
+        }
+        cursor.rest = true;
+    }
+    entity(&mut cursor.entity).or_else(|| block(&mut cursor.block))
+}
+
 /// CapabilityProviders operations for capabilities.
 // hidden: per-kind lookup implementation, exposed for generated provider bindings
 #[doc(hidden)]
@@ -124,6 +164,7 @@ impl CapabilitiesCapabilityProviders for InstalledProviders {
     fn provided(&self, by: ProvidedBy, name: &str) -> bool {
         installed().is_some_and(|installed| match by {
             ProvidedBy::BlockEntity => installed.keys.capabilities.contains_key(name),
+            ProvidedBy::Block => installed.keys.block_capabilities.contains_key(name),
             ProvidedBy::Item => installed.keys.item_capabilities.contains_key(name),
             ProvidedBy::Entity => installed.keys.entity_capabilities.contains_key(name),
         })

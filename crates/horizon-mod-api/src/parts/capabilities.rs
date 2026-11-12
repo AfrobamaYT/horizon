@@ -272,7 +272,7 @@ pub mod tests {
         let host: &mut dyn ServerHost = &mut world;
         // No mod registered an items provider for the chest's type: the game's hoppers have no
         // mod's handler to look for there, yet a mod reading it gets the game's own slots.
-        assert!(block_entity_providers(&ITEMS, host, on(CHEST, None)).is_none());
+        assert!(block_providers(&ITEMS, host, on(CHEST, None)).is_none());
         let chest = here().capability(host, &ITEMS, CHEST, None).unwrap();
         assert_eq!(chest.owner(), "the game");
         assert_eq!(chest.size(host), 1);
@@ -424,6 +424,109 @@ pub mod tests {
         }
     }
 
+    /// A trash can's one slot, which takes any amount of anything and keeps none of it.
+    pub(crate) struct VoidBin;
+    impl ResourceHandler<ItemResource> for VoidBin {
+        fn size(&self, _: &mut dyn ServerHost) -> usize {
+            1
+        }
+        fn resource(&self, _: &mut dyn ServerHost, _: usize) -> Option<ItemResource> {
+            None
+        }
+        fn amount(&self, _: &mut dyn ServerHost, _: usize) -> u32 {
+            0
+        }
+        fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
+            u32::MAX
+        }
+        fn insert(
+            &self,
+            _: &mut dyn ServerHost,
+            _: &Transaction,
+            _: usize,
+            _: &ItemResource,
+            amount: u32,
+        ) -> u32 {
+            amount
+        }
+        fn extract(
+            &self,
+            _: &mut dyn ServerHost,
+            _: &Transaction,
+            _: usize,
+            _: &ItemResource,
+            _: u32,
+        ) -> u32 {
+            0
+        }
+    }
+
+    #[test]
+    pub(crate) fn a_block_with_no_block_entity_answers_through_its_block_provider() {
+        game_thread();
+        let bin = [0, 64, 0];
+        let mut world = FakeHost::new();
+        world.level.set_block(bin, "test:void_bin");
+        world.level.set_block([1, 64, 0], "minecraft:stone");
+        let host: &mut dyn ServerHost = &mut world;
+        let voids = here()
+            .capability(host, &ITEMS, bin, Some(Direction::Up))
+            .expect("the bin's provider");
+        assert_eq!(voids.owner(), "doubler");
+        let stick_ = ItemResource::of(&stick());
+        let went: Result<u32, ()> = host.transaction(|host, tx| Ok(voids.insert(host, tx, 0, &stick_, 64)));
+        assert_eq!(went, Ok(64));
+        assert_eq!(voids.amount(host, 0), 0);
+        // A block no provider is registered for has none, as before.
+        assert!(here().capability(host, &ITEMS, [1, 64, 0], None).is_none());
+        // A hopper's lookup finds the bin where the game has no slots of its own.
+        let hopper = block_providers(&ITEMS, host, on(bin, Some(Direction::Up)))
+            .expect("the bin's providers")
+            .ask(host, false)
+            .expect("the bin's handler");
+        assert_eq!(hopper.size(host), 1);
+        // The provider is given the block entity standing there, and this one declines then.
+        world.level.block_entity(bin);
+        let host: &mut dyn ServerHost = &mut world;
+        assert!(here().capability(host, &ITEMS, bin, None).is_none());
+    }
+
+    #[test]
+    pub(crate) fn a_blocks_providers_follow_its_block_entity_types_on_each_side_of_the_game() {
+        game_thread();
+        let mut world = FakeHost::new();
+        for x in [3, 4, 5, 6, 11] {
+            world.level.set_block([x, 64, 0], "test:ordered");
+        }
+        for x in [4, 5, 6, 11] {
+            world.level.block_entity([x, 64, 0]).of_type("test:ordered");
+        }
+        world.level.block_entity([4, 64, 0]).with_items(27);
+        let host: &mut dyn ServerHost = &mut world;
+        let size = |host: &mut dyn ServerHost, x| {
+            let found = here().capability(host, &ITEMS, [x, 64, 0], None).unwrap();
+            found.size(host)
+        };
+        // Ahead of the game, the block entity type's (4, from x = 9 on) before the block's (5).
+        assert_eq!(size(host, 11), 4);
+        // The block's ahead of the game before the block entity type's after it (1).
+        assert_eq!(size(host, 6), 5);
+        // After the game, the block entity type's (1) before the block's (6).
+        assert_eq!(size(host, 5), 1);
+        // The game's 27 slots before every provider after it.
+        assert_eq!(size(host, 4), 27);
+        // No block entity: the block's alone.
+        assert_eq!(size(host, 3), 6);
+        // A hopper's lookup asks them in the same order.
+        let ask = |host: &mut dyn ServerHost, x, game| {
+            let found = block_providers(&ITEMS, host, on([x, 64, 0], None))?.ask(host, game)?;
+            Some(found.size(host))
+        };
+        assert_eq!(ask(host, 5, false), Some(1));
+        assert_eq!(ask(host, 6, true), Some(5));
+        assert_eq!(ask(host, 4, true), None);
+    }
+
     #[test]
     pub(crate) fn disabled_capability_providers_are_skipped_and_resume() {
         struct Later;
@@ -455,7 +558,7 @@ pub mod tests {
             pos: [7, 64, 0],
             side: None,
         };
-        let direct_block = || block_entity_providers(&ITEMS, &ordered_world(), at).unwrap();
+        let direct_block = || block_providers(&ITEMS, &ordered_world(), at).unwrap();
         let robot = EntityRef::new(WorldEpoch::new(1), 3);
         let mut player = player_world(None);
         let direct_entity =
@@ -608,7 +711,7 @@ pub mod tests {
             let game_slots = backend_of(&*host)
                 .and_then(|backend| backend.container_size(at))
                 .is_some();
-            let providers = block_entity_providers(&ITEMS, host, at)?;
+            let providers = block_providers(&ITEMS, host, at)?;
             providers
                 .ask(host, game_slots)
                 .map(|found| found.size(host))
@@ -626,13 +729,13 @@ pub mod tests {
         };
         let mut vanilla = FakeHost::new();
         vanilla.level.block_entity(at.pos);
-        assert!(block_entity_providers(&ITEMS, &vanilla, at).is_none());
+        assert!(block_providers(&ITEMS, &vanilla, at).is_none());
         let mut unregistered = FakeHost::new();
         unregistered
             .level
             .block_entity(at.pos)
             .of_type("test:unregistered");
-        assert!(block_entity_providers(&ITEMS, &unregistered, at).is_none());
+        assert!(block_providers(&ITEMS, &unregistered, at).is_none());
 
         // Item providers in the same order, for the item in a player's hand: with no game slots
         // (damage 0), the first mod's that answers; with them (damage 1), the game's; for two

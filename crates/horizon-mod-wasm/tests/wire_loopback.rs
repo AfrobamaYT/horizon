@@ -1425,6 +1425,25 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
             ))
         }
     }
+    impl BlocksCapabilityProviders for Table {
+        fn block_provider(
+            &self,
+            _: &str,
+            _: BlockKey,
+            index: &mut u32,
+        ) -> Option<(BlockProviderOf, &'static str, bool)> {
+            *index += 4;
+            Some((
+                BlockProviderOf::ResourceHandlerItemResource(Arc::new(
+                    |_: &mut dyn ServerHost, _: BlockSide| {
+                        None::<Box<dyn ResourceHandler<ItemResource>>>
+                    },
+                )),
+                "test:plain_block",
+                false,
+            ))
+        }
+    }
     impl EntitiesCapabilityProviders for Table {
         fn entity_provider(
             &self,
@@ -1538,6 +1557,14 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
         .unwrap();
     assert!(matches!(item, ItemProviderOf::EnergyHandler(_)));
     assert_eq!((index, owner, before), (11, "test:item", true));
+    let (block, owner, before) = guest::Guest
+        .block_provider("test:items", REGISTERED_BLOCK.get().unwrap(), &mut index)
+        .unwrap();
+    assert!(matches!(
+        block,
+        BlockProviderOf::ResourceHandlerItemResource(_)
+    ));
+    assert_eq!((index, owner, before), (15, "test:plain_block", false));
     corrupt.set(true);
     index = 42;
     let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

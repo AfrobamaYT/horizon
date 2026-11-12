@@ -676,6 +676,10 @@ pub mod tests {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
         }
+        /// The shelf stands in no named block, so no block's providers answer for it.
+        fn level_block(&self, _: LevelRef, _: [i32; 3]) -> Option<crate::BlockKey> {
+            None
+        }
     }
     #[cfg(test)]
     impl mod_api::prelude::BlockEntitiesBackend for Shelf {

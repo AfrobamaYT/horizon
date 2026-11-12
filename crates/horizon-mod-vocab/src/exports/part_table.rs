@@ -1,13 +1,13 @@
 mod parts;
 pub use parts::limits as general_entity_limits;
 pub use parts::{
-    Attached, BlockCapabilityProvider, BlockEntityProviders, BlockProvider, BlockProviderOf,
+    Attached, BlockCapabilityProvider, BlockProviders, BlockProvider, BlockProviderOf,
     CapabilityProviders, EntityCapabilityProvider, EntityProvider, EntityProviderOf,
     EntityProviders, GeneralEntityCategory, GeneralEntityRegistrationError, GeneralSavePolicy,
     ItemCapabilityProvider, ItemProvider, ItemProviderOf, OwnProvider, Parts, ProvidedBy,
-    Registrar, block_entity_providers, entity_providers, has_entity_providers,
+    Registrar, block_providers, entity_providers, has_entity_providers,
 };
-pub(crate) use parts::{InstalledProviders, answered, ask_providers, has_part_hook, parts};
+pub(crate) use parts::{InstalledProviders, answered, ask_providers, has_part_hook, next_at_position, parts};
 mod __private {
     #[cfg(any(test, feature = "testing"))]
     pub use crate::parts::install_process_datapack_registry_declarations;

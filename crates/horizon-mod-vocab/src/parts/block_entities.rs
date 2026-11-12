@@ -63,42 +63,71 @@ impl HookParts {
     }
 }
 
-/// The providers mods registered for capability `key` and the type of the block entity at
-/// `at`, for the game's own lookups (a hopper's): none where no mod registered one, so a
-/// vanilla container's lookup costs one table check and allocates nothing, and the game needn't
-/// work out its own answer. [`BlockEntityProviders::ask`] then asks them.
-pub fn block_entity_providers<T: ?Sized + 'static>(
+/// The providers mods registered for capability `key` at `at`, of the block there and of the
+/// type of the block entity standing there, for the game's own lookups (a hopper's): none where
+/// no mod registered one, so a vanilla container's lookup costs one table check for each kind and
+/// allocates nothing, and the game needn't work out its own answer. [`BlockProviders::ask`] then
+/// asks them.
+pub fn block_providers<T: ?Sized + 'static>(
     key: &CapabilityKey<T>,
     host: &dyn Host,
     at: BlockSide,
-) -> Option<BlockEntityProviders<T>> {
-    let parts = installed()?.keys.capabilities.get(key.name)?.get(
-        crate::content::registry_keys::block_entity_type_name(at.kind(host)?)?,
-    )?;
-    Some(BlockEntityProviders {
-        parts,
+) -> Option<BlockProviders<T>> {
+    let keys = &installed()?.keys;
+    let entity = keys
+        .capabilities
+        .get(key.name)
+        .and_then(|by_kind| {
+            by_kind.get(crate::content::registry_keys::block_entity_type_name(
+                at.kind(host)?,
+            )?)
+        })
+        .map_or(&[][..], Vec::as_slice);
+    let block = keys
+        .block_capabilities
+        .get(key.name)
+        .and_then(|by_block| {
+            by_block.get(crate::content::registry_keys::block_id(
+                at.level.block(host, at.pos)?,
+            )?)
+        })
+        .map_or(&[][..], Vec::as_slice);
+    if entity.is_empty() && block.is_empty() {
+        return None;
+    }
+    Some(BlockProviders {
+        entity,
+        block,
         at,
         handler: PhantomData,
     })
 }
 
 // no wire: provider lookup borrows static capability dispatch tables and process-local type identity.
-/// A block entity's providers of one capability ([`block_entity_providers`]).
+/// A position's providers of one capability ([`block_providers`]).
 // exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct BlockEntityProviders<T: ?Sized + 'static> {
-    pub(crate) parts: &'static [CapabilityPart<BlockProviderOf>],
+pub struct BlockProviders<T: ?Sized + 'static> {
+    pub(crate) entity: &'static [CapabilityPart<BlockProviderOf>],
+    pub(crate) block: &'static [CapabilityPart<BlockProviderOf>],
     pub(crate) at: BlockSide,
     pub(crate) handler: PhantomData<fn() -> Box<T>>,
 }
 
-impl<T: ?Sized + 'static> BlockEntityProviders<T> {
+impl<T: ?Sized + 'static> BlockProviders<T> {
     /// A mod's handler where the game would answer with its own unless a mod comes first: one
-    /// registered `before_game`, else, where the game has no answer (`game`), the first mod's.
+    /// registered `before_game`, else, where the game has no answer (`game`), the first mod's,
+    /// in [`LevelRef::capability`]'s order.
     pub fn ask(self, host: &mut dyn ServerHost, game: bool) -> Option<Capability<T>> {
         let at = self.at;
         let answer = ask_providers(
             host,
-            |index| next_provider(self.parts, index),
+            |cursor| {
+                next_at_position(
+                    cursor,
+                    |index| next_provider(self.entity, index),
+                    |index| next_provider(self.block, index),
+                )
+            },
             BlockProviderOf::get::<T>,
             |provider, host| provider.provide(host, at),
             |_| game,

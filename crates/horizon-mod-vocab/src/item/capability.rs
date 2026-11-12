@@ -161,9 +161,10 @@ impl ResourceHandler<ItemResource> for GameItems {
 }
 
 impl LevelRef {
-    /// `key`'s handler for the block entity at `pos` in this level, reached through `side`
-    /// (`Level.getCapability`): the first provider to answer, of those mods registered for its
-    /// type `before_game`, the game's own, and the mods' others, each in registration order. None
+    /// `key`'s handler for the block at `pos` in this level, reached through `side`
+    /// (`Level.getCapability`): the first provider to answer, of those mods registered
+    /// `before_game` for the type of the block entity there and then for the block, the game's
+    /// own, and the mods' others in the same order, each kind in registration order. None
     /// for a stale handle, and for a level not in place ([`LevelRef::in_place`]), whose block
     /// entities the game doesn't write: no provider is asked for one. Disabled mods' providers
     /// are skipped; re-enabling a mod makes its registrations available to the next lookup.
@@ -188,10 +189,20 @@ impl LevelRef {
             .provided(crate::ProvidedBy::BlockEntity, key.name)
             .then(|| at.kind(host))
             .flatten();
+        let block = table
+            .provided(crate::ProvidedBy::Block, key.name)
+            .then(|| self.block(host, pos))
+            .flatten();
         crate::answered(
             crate::ask_providers(
                 host,
-                |index| table.block_entity_provider(key.name, kind?, index),
+                |cursor| {
+                    crate::next_at_position(
+                        cursor,
+                        |index| table.block_entity_provider(key.name, kind?, index),
+                        |index| table.block_provider(key.name, block?, index),
+                    )
+                },
                 crate::BlockProviderOf::get::<T>,
                 |provider, host| provider.provide(host, at),
                 |host| {
