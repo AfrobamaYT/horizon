@@ -5,11 +5,19 @@
 use mod_api::wire::{Id, Reader, WireError, Writer, guest};
 use mod_api::{Hooks, LoopContext, StructurePiece};
 use std::{rc::Rc, sync::Arc};
+#[path = "wire_loopback/block_entity_on_load.rs"]
+mod block_entity_on_load;
 mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
+#[path = "wire_loopback/block_entity_transform.rs"]
+mod block_entity_transform;
+#[path = "wire_loopback/load_conditions.rs"]
+mod load_conditions;
 #[path = "wire_loopback/loot_tags.rs"]
 mod loot_tags_wire;
+#[path = "wire_loopback/piston_push_reaction.rs"]
+mod piston_push_reaction;
 #[path = "wire_loopback/use_item_hand.rs"]
 mod use_item_hand;
 thread_local! {
@@ -149,6 +157,17 @@ impl WasmMod {
         } else {
             bytes
         };
+        let invalid;
+        let bytes = if piston_push_reaction::UNKNOWN_REACTION.get() {
+            // A replacement response is Option<PushReaction>: Some followed by its enum tag.
+            let mut out = Writer::new();
+            out.put(&true);
+            out.put(&u32::MAX);
+            invalid = out.into_bytes();
+            invalid.as_slice()
+        } else {
+            bytes
+        };
         decode(&mut Reader::new(bytes)).ok()
     }
 }
@@ -174,6 +193,16 @@ impl LoopContext for Context {
 fn __horizon_mod_hooks() -> Box<dyn Hooks> {
     struct Mod;
     impl Hooks for Mod {
+        fn datapack_sync(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::DatapackSyncEvent<'_>,
+        ) {
+            if event.player.uuid() == 12 {
+                event.recipe_types.push("testmod:grinding".into());
+            }
+        }
+
         fn loot_function(&self, event: &mut mod_api::LootFunctionEvent<'_>) {
             let tag = event
                 .tags
@@ -192,6 +221,13 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             let item = event.tags.items(tag).unwrap()[0];
             event.holds = event.tags.is_in_tag(item, tag).unwrap();
         }
+        fn register_load_conditions(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterLoadConditionsEvent<'_>,
+        ) {
+            load_conditions::register(event.conditions);
+        }
         fn register(
             &self,
             registrar: &mut dyn mod_api::Registrar,
@@ -200,6 +236,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             arm_pose_registration::check(registrar);
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
             use_item_hand::register(registrar);
+            block_entity_transform::register(registrar);
             REGISTERED_BLOCK.set(Some(registrar.block_key("minecraft:stone")));
             REGISTERED_EFFECT.set(Some(registrar.effect_key("minecraft:poison")));
             let kind = registrar.block_entity_type("counter").blocks(&[]).build();
@@ -286,6 +323,20 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             } else {
                 event.draw.set_light(7);
             }
+        }
+        fn item_picked_up_post(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::ItemPickedUpPostEvent<'_>,
+        ) {
+            PICKED_UP_POST.set(Some((
+                event.player,
+                event.original.count(),
+                event.remaining.as_ref().map(|rest| rest.count()),
+            )));
+            let mut rest = event.original.clone();
+            rest.set_count(3).unwrap();
+            *event.remaining = Some(rest);
         }
         fn game_rule_changed(
             &self,
@@ -398,6 +449,8 @@ impl mod_api::BlockEntityPart for MachineBlock {
 }
 #[test]
 fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     use mod_api::BlockEntityPart;
     let id = guest::add_handler(vec![guest::view::<dyn mod_api::BlockEntityPart>(Arc::new(
         MachineBlock,
@@ -447,6 +500,8 @@ fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
 }
 #[test]
 fn borrowed_view_reply_is_byte_identical_to_owned_snapshot() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     use horizon_core::nbt::Tag;
     install_counter();
     let stack = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 17).unwrap();
@@ -510,6 +565,8 @@ fn static_reply(
 }
 #[test]
 fn static_reply_definitions_are_checked_before_acknowledgement() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     guest::reset_static_strings();
     assert_eq!(
         static_reply(0, 0, None, false),
@@ -578,6 +635,8 @@ fn static_reply_definitions_are_checked_before_acknowledgement() {
 }
 #[test]
 fn static_reply_table_is_bounded() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     guest::reset_static_strings();
     for id in 0..4096 {
         assert_eq!(static_reply(1, id, Some("value"), false).unwrap(), "value");
@@ -588,6 +647,8 @@ fn static_reply_table_is_bounded() {
 }
 #[test]
 fn native_static_reply_resends_until_guest_acknowledges() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     use std::cell::Cell;
     struct World(Cell<usize>);
     impl mod_api::Host for World {}
@@ -635,6 +696,8 @@ fn native_static_reply_resends_until_guest_acknowledges() {
 }
 #[test]
 fn native_static_reply_table_refuses_overflow_without_losing_existing_ids() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     use std::cell::Cell;
     struct World(Cell<&'static str>);
     impl mod_api::Host for World {}
@@ -682,6 +745,8 @@ fn native_static_reply_table_refuses_overflow_without_losing_existing_ids() {
 }
 #[test]
 fn wire_loopback_readonly_private_projection() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     use horizon_core::nbt::Tag;
     struct Client;
     impl mod_api::Host for Client {}
@@ -732,6 +797,8 @@ fn wire_loopback_readonly_private_projection() {
 /// each entry it pushed, after the native one's.
 #[test]
 fn wire_loopback_answered_collect_names_the_guest_mod() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     use mod_api::__private::game::RegistrationContextNew;
     let id = |id: &str| mod_api::Identifier::parse(id).unwrap();
     struct First;
@@ -791,6 +858,8 @@ fn wire_loopback_answered_collect_names_the_guest_mod() {
 
 #[test]
 fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     use mod_api::EffectTickChange;
     struct World;
     impl mod_api::Host for World {}
@@ -856,6 +925,8 @@ fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
 }
 #[test]
 fn wire_loopback_optional_borrowed_render_record() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     struct Client;
     impl mod_api::Host for Client {}
     mod_api::impl_host_areas!(Client);
@@ -910,6 +981,8 @@ fn wire_loopback_optional_borrowed_render_record() {
 }
 #[test]
 fn wire_loopback_optional_borrowed_record() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     struct World;
     impl mod_api::Host for World {}
     mod_api::impl_host_areas!(World);
@@ -938,7 +1011,43 @@ fn wire_loopback_optional_borrowed_record() {
     }
 }
 #[test]
+fn wire_loopback_item_picked_up_post_carries_the_original_and_writes_back_the_remainder() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+    struct World;
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World);
+    impl mod_api::ServerHost for World {}
+    mod_api::impl_server_host_areas!(World);
+    install_counter();
+    let module = WasmMod {
+        group: 0,
+        subscribed: &[],
+        listeners: &[],
+        corrupt: false,
+    };
+    let original = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 5).unwrap();
+    let mut remaining = None;
+    let mut event = mod_api::ItemPickedUpPostEvent {
+        player: 0x1234_5678_9abc_def0_1234_5678_9abc_def0,
+        original: &original,
+        remaining: &mut remaining,
+    };
+    module.item_picked_up_post(&mut World, &mut event);
+    assert_eq!(
+        PICKED_UP_POST.get(),
+        Some((0x1234_5678_9abc_def0_1234_5678_9abc_def0, 5, None))
+    );
+    assert_eq!(
+        remaining.map(|rest| rest.count()),
+        Some(3),
+        "the remainder a guest sets comes back"
+    );
+}
+#[test]
 fn wire_loopback_array_of_optional_borrowed_records() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     use mod_api::BlockEntityDrawContext;
     struct Draw(bool);
     impl BlockEntityDrawContext for Draw {
@@ -985,6 +1094,8 @@ fn wire_loopback_array_of_optional_borrowed_records() {
 }
 #[test]
 fn wire_loopback_borrowed_tuple_inside_optional_context() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     use mod_api::__private::game::BackendRefOf;
     struct World;
     impl mod_api::Host for World {
@@ -1068,6 +1179,8 @@ fn wire_loopback_borrowed_tuple_inside_optional_context() {
 }
 #[test]
 fn wire_loopback_nested_tuple_reference_writes_back() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     let module = WasmMod {
         subscribed: &[],
         listeners: &[],
@@ -1104,6 +1217,7 @@ thread_local! {
     static REGISTERED_EFFECT:std::cell::Cell<Option<mod_api::EffectKey>> = const {std::cell::Cell::new(None)};
     static APPEND_ATTACK:std::cell::Cell<u8> = const {std::cell::Cell::new(0)};
     static REGISTERED_KIND:std::cell::Cell<Option<mod_api::BlockEntityTypeKey>> = const {std::cell::Cell::new(None)};
+    static PICKED_UP_POST: std::cell::Cell<Option<(u128, u32, Option<u32>)>> = const { std::cell::Cell::new(None) };
 }
 fn install_counter() {
     let mods = [mod_api::ModEntry::new(
@@ -1124,6 +1238,8 @@ fn install_counter() {
 }
 #[test]
 fn wire_loopback_registration_attaches_subscribed_part() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     install_counter();
     assert!(
         mod_api::__private::block_entity_types()
@@ -1136,6 +1252,8 @@ fn wire_loopback_registration_attaches_subscribed_part() {
 }
 #[test]
 fn wire_loopback_tagged_frame_enum_preserves_side() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     use mod_api::BlockEntityPart;
     install_counter();
     let index = guest::add_handler(vec![guest::view::<dyn mod_api::BlockEntityPart>(Arc::new(
@@ -1167,6 +1285,8 @@ fn wire_loopback_tagged_frame_enum_preserves_side() {
 }
 #[test]
 fn wire_loopback_owned_box_handlers_inside_result_and_vec() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     use mod_api::ReloadApply;
     let trace = Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut out = Writer::new();
@@ -1217,6 +1337,8 @@ fn wire_loopback_owned_box_handlers_inside_result_and_vec() {
 }
 #[test]
 fn wire_loopback_returned_frame_resource_uses_source_permissions() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     struct Start {
         draws: i64,
     }
@@ -1303,6 +1425,8 @@ fn wire_loopback_returned_frame_resource_uses_source_permissions() {
 }
 #[test]
 fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeback() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     use mod_api::*;
     struct Table;
     impl CapabilityProviders for Table {}
@@ -1450,6 +1574,8 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
 
 #[test]
 fn wire_loopback_panic_hook_without_transport_does_not_panic_again() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     install_counter();
     guest::set_transport(None);
     let panic = std::panic::catch_unwind(|| panic!("native panic after the guest call ended"));
@@ -1458,6 +1584,8 @@ fn wire_loopback_panic_hook_without_transport_does_not_panic_again() {
 
 #[test]
 fn wire_loopback_erased_resource_restores_identity_and_refuses_other_groups() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     struct Capture(std::sync::Mutex<Vec<String>>);
     impl log::Log for Capture {
         fn enabled(&self, _: &log::Metadata<'_>) -> bool {
@@ -1546,6 +1674,8 @@ fn wire_loopback_erased_resource_restores_identity_and_refuses_other_groups() {
 
 #[test]
 fn wire_loopback_builtin_provider_invokes_nested_box_handler() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     use mod_api::{EnergyHandler, ItemCapabilityProvider, ItemProviderOf, ServerHost, Transaction};
     struct Energy(u32);
     impl EnergyHandler for Energy {
@@ -1606,6 +1736,8 @@ fn wire_loopback_builtin_provider_invokes_nested_box_handler() {
 
 #[test]
 fn wire_loopback_bad_import_bytes_are_typed_errors() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     let mut cx = boundary::Cx::default();
     let mut out = Writer::new();
     let id = boundary::import_id("StructureRandom", "next_int_bound").unwrap();
@@ -1617,6 +1749,8 @@ fn wire_loopback_bad_import_bytes_are_typed_errors() {
 }
 #[test]
 fn wire_loopback_owner_thread_guards_access_and_drop() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     use std::sync::atomic::{AtomicUsize, Ordering};
     struct Local {
         _local: Rc<()>,
@@ -1659,6 +1793,8 @@ fn wire_loopback_owner_thread_guards_access_and_drop() {
 }
 #[test]
 fn wire_loopback_roundtrip_and_atomic_writeback() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     let module = WasmMod {
         subscribed: &[],
         listeners: &[],
@@ -1724,6 +1860,8 @@ fn wire_loopback_roundtrip_and_atomic_writeback() {
 
 #[test]
 fn wire_loopback_resource_codec_restores_context_between_groups() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     fn encode() -> Id {
         let apply: Arc<dyn mod_api::ReloadApply> = <dyn mod_api::ReloadApply>::new(|| {}).into();
         let mut writer = Writer::new();
@@ -1763,6 +1901,8 @@ fn wire_loopback_resource_codec_restores_context_between_groups() {
 
 #[test]
 fn wire_loopback_resource_load_restores_module_after_cross_group_unwind() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     fn load(id: Id) -> Arc<dyn StructurePiece> {
         let mut bytes = Writer::new();
         bytes.put(&id);
@@ -1801,6 +1941,8 @@ fn wire_loopback_resource_load_restores_module_after_cross_group_unwind() {
 
 #[test]
 fn listener_metadata_and_cancellation_cross_the_real_guest() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     let module = WasmMod {
         group: 0,
         subscribed: &[],
@@ -1844,6 +1986,8 @@ mod arm_pose_registration;
 
 #[test]
 fn wire_loopback_mob_submit_hidden_parts_write_back() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     struct Client;
     impl mod_api::Host for Client {}
     mod_api::impl_host_areas!(Client);
@@ -1894,3 +2038,232 @@ fn wire_loopback_mob_submit_hidden_parts_write_back() {
     assert!(hidden.contains_named("hat_rim"));
     assert!(hidden.contains(mod_api::HumanoidPart::Head));
 }
+
+#[test]
+fn wrong_phase_service_call_is_a_named_refusal_not_a_panic() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Packages);
+    let id = boundary::import_id("Messages", "text_allowed").unwrap();
+    let mut cx = boundary::Cx::default();
+    let mut input = Writer::new();
+    input.put("hello");
+    let mut out = Writer::new();
+    assert!(matches!(
+        unsafe { boundary::serve(id, &mut cx, input.bytes(), &mut out) },
+        Err(boundary::ServeError::Phase {
+            operation: "messages",
+            phase: mod_api::__private::ModPhase::Packages
+        })
+    ));
+    assert!(out.bytes().is_empty());
+}
+
+#[test]
+fn wrong_phase_fallible_call_returns_unavailable_to_guest() {
+    mod_api::__private::initialize().unwrap();
+    use mod_api::prelude::*;
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Packages);
+    let cx = std::cell::RefCell::new(boundary::Cx::default());
+    guest::set_transport(Some(Rc::new(move |id, bytes| {
+        let mut out = Writer::new();
+        unsafe { boundary::serve(id, &mut *cx.borrow_mut(), bytes, &mut out) }.unwrap();
+        out.into_bytes()
+    })));
+    let level = mod_api::LevelRef::new(
+        mod_api::WorldEpoch::new(1),
+        mod_api::DimensionKey::OVERWORLD,
+    );
+    let result = guest::Guest.level_game_rules(level);
+    guest::set_transport(None);
+    assert_eq!(result, Err(mod_api::LevelReadError::Unavailable));
+}
+
+#[test]
+fn wire_loopback_entity_by_uuid_returns_a_handle_or_absence() {
+    use mod_api::{EntityRef, EntityUuid, ServerHost, WorldEpoch};
+
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+
+    struct World;
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World);
+    impl ServerHost for World {}
+    mod_api::impl_server_host_areas!(World, except(entities));
+    impl mod_api::prelude::EntitiesServerHost for World {
+        fn entity_by_uuid(&self, uuid: EntityUuid) -> Option<EntityRef> {
+            (uuid.0 == 0xfedc_ba98_7654_3210_0123_4567_89ab_cdef)
+                .then(|| EntityRef::new(WorldEpoch::new(4), 19))
+        }
+    }
+
+    let mut frame = boundary::Frame::default();
+    frame.set_server_host(&World);
+    let mut cx = boundary::Cx::default();
+    cx.frames.push(frame);
+    let cx = std::cell::RefCell::new(cx);
+    guest::set_transport(Some(Rc::new(move |id, bytes| {
+        let mut out = Writer::new();
+        unsafe { boundary::serve(id, &mut *cx.borrow_mut(), bytes, &mut out) }.unwrap();
+        out.into_bytes()
+    })));
+
+    let host: &dyn ServerHost = &guest::Guest;
+    let found = host.entity_by_uuid(EntityUuid(0xfedc_ba98_7654_3210_0123_4567_89ab_cdef));
+    let missing = host.entity_by_uuid(EntityUuid(u128::MAX));
+    guest::set_transport(None);
+    assert_eq!(
+        found.map(|entity| (entity.epoch().get(), entity.id())),
+        Some((4, 19))
+    );
+    assert_eq!(missing, None);
+}
+
+#[test]
+fn world_phase_messages_round_trip_returns_filter_decision() {
+    mod_api::__private::initialize().unwrap();
+    struct World;
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World);
+    impl mod_api::ServerHost for World {}
+    mod_api::impl_server_host_areas!(World, except(services));
+    impl mod_api::prelude::ServicesServerHost for World {
+        fn messages(&self) -> &dyn mod_api::Messages {
+            self
+        }
+    }
+    impl mod_api::Messages for World {
+        fn text_allowed(&self, text: &str) -> Option<bool> {
+            assert_eq!(text, "blocked by server filter");
+            Some(false)
+        }
+    }
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+    let world = World;
+    let mut frame = boundary::Frame::default();
+    frame.set_server_host(&world);
+    let mut cx = boundary::Cx::default();
+    cx.frames.push(frame);
+    let id = boundary::import_id("Messages", "text_allowed").unwrap();
+    let mut input = Writer::new();
+    input.put("blocked by server filter");
+    let mut out = Writer::new();
+    unsafe { boundary::serve(id, &mut cx, input.bytes(), &mut out) }.unwrap();
+    assert_eq!(
+        Reader::decode::<Option<bool>>(out.bytes()).unwrap(),
+        Some(false)
+    );
+}
+
+#[test]
+fn wire_loopback_block_entity_data_received_preserves_tag_and_handle() {
+    thread_local! { static CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+    use horizon_core::nbt::Tag;
+    use mod_api::BlockEntityPart;
+    struct Notice;
+    impl mod_api::BlockPart for Notice {
+        fn block_subscribed(&self) -> &'static [Option<mod_api::HookId>] {
+            &[]
+        }
+    }
+    impl BlockEntityPart for Notice {
+        fn block_entity_subscribed(&self) -> &'static [Option<mod_api::HookId>] {
+            &[Some(mod_api::HookId::BlockEntityDataReceived)]
+        }
+        fn block_entity_data_received(
+            &self,
+            _: &dyn mod_api::ClientHost,
+            event: &mut mod_api::BlockEntityDataReceivedEvent<'_>,
+        ) {
+            assert_eq!(event.tag.get(&"count".into()), Some(&Tag::Int(3)));
+            assert_eq!(event.entity, notice_handle());
+            assert_eq!(event.source, mod_api::BlockEntityDataSource::Chunk);
+            CALLS.set(CALLS.get() + 1);
+        }
+    }
+    fn notice_handle() -> mod_api::BlockEntityRef {
+        mod_api::__private::game::block_entity_ref(
+            mod_api::LevelRef::new(
+                mod_api::WorldEpoch::new(1),
+                mod_api::DimensionKey::OVERWORLD,
+            ),
+            [1, 64, 1],
+            1,
+        )
+    }
+    struct Client;
+    impl mod_api::Host for Client {}
+    mod_api::impl_host_areas!(Client);
+    impl mod_api::ClientHost for Client {}
+    mod_api::impl_client_host_areas!(Client);
+    // The platform phase this scope sets is process-wide state another test may not have installed yet.
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+    let index = guest::add_handler(vec![guest::view::<dyn BlockEntityPart>(Arc::new(Notice))]);
+    let proxy = WasmHandler {
+        index,
+        module: WasmMod {
+            group: 0,
+            subscribed: &[],
+            listeners: &[],
+            corrupt: false,
+        },
+    };
+    let tag = [("count".into(), Tag::Int(3))].into();
+    proxy.block_entity_data_received(
+        &Client,
+        &mut mod_api::BlockEntityDataReceivedEvent {
+            entity: notice_handle(),
+            source: mod_api::BlockEntityDataSource::Chunk,
+            tag: &tag,
+        },
+    );
+    assert_eq!(CALLS.get(), 1);
+}
+
+#[test]
+fn datapack_sync_recipient_and_answer_cross_the_wire() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+    struct World;
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World);
+    impl mod_api::ServerHost for World {}
+    mod_api::impl_server_host_areas!(World);
+    install_counter();
+    let module = WasmMod {
+        group: 0,
+        subscribed: &[],
+        listeners: &[],
+        corrupt: false,
+    };
+    for uuid in [12, 13] {
+        let player = mod_api::__private::game::player_ref(
+            mod_api::EntityRef::new(mod_api::WorldEpoch::new(7), uuid as u32),
+            uuid,
+        );
+        let mut types = Vec::new();
+        module.datapack_sync(
+            &mut World,
+            &mut mod_api::DatapackSyncEvent {
+                player,
+                recipe_types: &mut types,
+            },
+        );
+        assert_eq!(
+            types,
+            if uuid == 12 {
+                vec!["testmod:grinding".to_owned()]
+            } else {
+                vec![]
+            }
+        );
+    }
+}
+#[path = "wire_loopback/chunk_queries.rs"]
+mod chunk_queries;
+
+#[path = "wire_loopback/client_fireworks.rs"]
+mod client_fireworks;
+#[path = "wire_loopback/play_hit_sound.rs"]
+mod play_hit_sound;

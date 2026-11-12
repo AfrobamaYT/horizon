@@ -6,6 +6,7 @@ static ENTITY_POST_CALLS: AtomicU32 = AtomicU32::new(0);
 
 pub mod area_macros;
 pub mod datapack;
+pub mod game_payload;
 pub mod interaction;
 pub mod lending;
 pub mod matrix;
@@ -24,6 +25,16 @@ pub struct Mod;
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
+    fn server_tick(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        _: &mut mod_api::ServerTickEvent<'_>,
+    ) {
+        host.messages()
+            .broadcast(mod_api::Text::literal("wasm tick phase regression"))
+            .unwrap();
+    }
+
     fn right_click_block(
         &self,
         host: mod_api::HostSide<'_>,
@@ -155,6 +166,7 @@ impl Hooks for Mod {
     }
 
     fn register(&self, registrar: &mut dyn mod_api::Registrar, cx: &mod_api::RegistrationContext) {
+        game_payload::register(registrar);
         interaction::register(registrar);
         registrar
             .declare_datapack_registry(
