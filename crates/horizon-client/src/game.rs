@@ -4223,7 +4223,7 @@ impl Game<'_> {
     fn aim(&self) -> Option<([f64; 3], [f64; 3])> {
         // Minecraft.pick: from the camera entity's eyes along its view
         // (LivingEntity.getViewYRot: the head's yaw).
-        if let Some(e) = self.camera_entity() {
+        if let Some(e) = self.spectated_camera_snapshot() {
             let [x, y, z] = e.position;
             let eye = [x, y + f64::from(e.eye_height), z];
             return Some((eye, pick_view_vector(e.y_rot, e.x_rot)));
@@ -4273,7 +4273,7 @@ impl Game<'_> {
         Some(b)
     }
     fn outline_context_kind(&self) -> horizon_world::collision_context::EntityContextKind {
-        if self.camera_entity().is_some() {
+        if self.spectated_camera_snapshot().is_some() {
             horizon_world::collision_context::EntityContextKind::Living
         } else {
             horizon_world::collision_context::EntityContextKind::Player
@@ -14592,7 +14592,7 @@ impl Game<'_> {
         // What faces the camera (particles, item sprites, block entity text) faces a mod's.
         // A spectated entity's view is not the local player's yaw and pitch
         // (`Camera.setup` reads the camera entity), so it is kept too.
-        let spectating = self.camera_entity().is_some();
+        let spectating = self.spectated_camera_snapshot().is_some();
         self.posed_rotation = view
             .filter(|posed| spectating || Some(*posed) != vanilla)
             .map(|(_, yaw, pitch)| (yaw, pitch));

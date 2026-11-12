@@ -18,6 +18,21 @@ The incoming LAN port ledger now names `WorldOptions::port_tooltip` and describe
 
 The command corpus adds TNT minecart float-field/default/clamping and stationary explosion scenarios. It remains a developer harness, not a local test executed for this sync. Its fields must correspond to the compiled minecart NBT and blast owners.
 
+## Typed integration decisions
+
+- Arrow saved Air and shared entity fields go through the actual projectile codec. Wolf/cat collar loading narrows to the legacy signed byte before out-of-range white fallback; typed equipment decoding remains authoritative.
+- TNT minecart power and speed factor load/save on the existing inline Minecart owner; stale default fields are removed before nondefault emission. The incoming dead `game/minecarts/nbt.rs` is deleted only after porting behavior. The real lending-aware explosion owner uses the incoming power formula without bypassing hooks, residency, destruction guards or RNG publication.
+- Guest equipment keeps its typed BODY/SADDLE storage; a distinct eight-slot cache owns conversions. Fixed slot comparisons include component state, removals and selected hand changes. GuestList updates own cache mutation; registry reload invalidates it before advancement early exits. Tick-time effect: unchanged stacks avoid network-stack conversion; the existing outgoing equipment snapshot allocation remains. No runtime benchmark was run.
+- Dead incoming `lan/hub_tests.rs` is mapped to compiled inline hub tests, not resurrected. Added cache tests use the actual guest-equipment conversion and reload paths; existing tracking tests inspect decoded packets.
+- Incoming render data is named `spectated_camera_snapshot`, not `camera_entity`: the latter is already the typed epoch-bound EntityRef owner. Rendering, aim, FOV and perspective use the snapshot; native typed getter/lifecycle validation stays intact. Server camera packets support armor stands, but the existing typed setter still rejects them; this sync does not claim full typed setter support.
+- Fox defense goes through the existing validated target hook rather than a duplicate raw setter. Village shelter behavior is retained alongside sync 29 effective-component eligibility, remainder and ordered consumption behavior.
+
+## Test and static-review sweep
+
+Whole-file upstream inventory: 287 declarations across 13 changed test-bearing paths. NBT/minecart families map all 166 declarations; camera/fox map all 43; launcher retains all 21 and LAN tooltip all 8. Of 49 network declarations, 48 map to compiled owners, including one renamed typed client-update test. The historical raw-channel registration test remains omitted because its legacy API is absent; the fork instead owns typed payload negotiation. This is an existing deliberate divergence, not newly removed behavior, and no exhaustive equivalence claim is made.
+
+Independent static review found no remaining integration blocker after the camera-name correction. Initial compile attempts exposed that name collision and two stale fox goal fixture fields; the fixtures now use the actual typed TestLevel context with unchanged seeds and assertions. Static fixture sweeps were not sufficient to establish compilation; the final all-target check remains authoritative.
+
 ## Verification status
 
-Whole-file upstream test inventory: 287 declarations across 13 changed test-bearing paths. Area sweeps, conflict integration and compile-only check pending. No local tests, clippy, parity harnesses or game runs.
+`cargo check --workspace --all-targets` completed successfully with zero warnings before the first push. Touched Rust was formatted. No local tests, clippy, parity harnesses or game runs. Exact-head CI and the root-ordered final static glance remain pending.

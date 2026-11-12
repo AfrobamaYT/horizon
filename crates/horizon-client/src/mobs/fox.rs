@@ -2255,9 +2255,9 @@ mod consume_tests {
 #[cfg(test)]
 mod seek_shelter_tests {
     use super::*;
+    use crate::health::TestLevel;
     use crate::mobs::sensor_scan_tests::kind;
     use crate::mobs::world::with_built_test_world;
-    use horizon_core::random::LegacyRandom;
     use std::sync::Arc;
 
     /// A village bell at (5, 1, 5), and the section the fox stands in lit as
@@ -2302,11 +2302,11 @@ mod seek_shelter_tests {
             let mut fox = Mob::new(1, kind, Vec3::new(0.5, 1.0, 0.5), 0.0);
             let mut goal = SeekShelter::new(1.25);
             goal.interval = 0;
-            let mut lr = LegacyRandom::new(0);
+            let mut level = TestLevel::new(0);
             let mut events = Vec::new();
             let mut cx = Cx {
                 w,
-                lr: &mut lr,
+                level: &mut level.level(),
                 events: &mut events,
             };
             out = Some(goal.can_use(&mut fox, &mut cx));
@@ -2334,9 +2334,9 @@ mod seek_shelter_tests {
 #[cfg(test)]
 mod defend_tests {
     use super::*;
+    use crate::health::TestLevel;
     use crate::mobs::sensor_scan_tests::kind;
     use crate::mobs::world::{test_player, with_built_test_world};
-    use horizon_core::random::LegacyRandom;
     use std::sync::Arc;
 
     /// The player the fox trusts, and the zombie that just hit it.
@@ -2369,11 +2369,11 @@ mod defend_tests {
                 add_trusted_entity(&mut fox, TRUSTED);
                 register(&mut fox);
                 let mut targets = std::mem::take(&mut fox.ai.targets);
-                let mut lr = LegacyRandom::new(0);
+                let mut level = TestLevel::new(0);
                 let mut events = Vec::new();
                 let mut cx = Cx {
                     w: &world,
-                    lr: &mut lr,
+                    level: &mut level.level(),
                     events: &mut events,
                 };
                 // `NearestAttackableTargetGoal`'s random interval: one try in five,

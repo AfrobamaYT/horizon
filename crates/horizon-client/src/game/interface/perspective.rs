@@ -316,7 +316,7 @@ impl Game<'_> {
         }
         // Minecraft.cameraEntity: a server's spectator camera on a mob or
         // another player.
-        let (entity, descending, entity_kind) = match self.camera_entity() {
+        let (entity, descending, entity_kind) = match self.spectated_camera_snapshot() {
             Some(e) => (
                 e,
                 false,

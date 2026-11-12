@@ -131,7 +131,7 @@ impl Game<'_> {
     }
     /// The view of the entity a server attached the camera to, while the
     /// level still holds it: a mob or an armor stand.
-    pub(super) fn camera_entity(&self) -> Option<CameraEntity> {
+    pub(super) fn spectated_camera_snapshot(&self) -> Option<CameraEntity> {
         if let Some(m) = self.camera_mob() {
             return Some(mob_camera_entity(m));
         }

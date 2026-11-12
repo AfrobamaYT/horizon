@@ -98,7 +98,7 @@ impl Game<'_> {
         // A server's spectator camera on a mob or an armor stand: its eye
         // height. Its modifier stays 1 (another player's own modifier is not
         // modelled here); the zoom extra still narrows it.
-        if let Some(e) = self.camera_entity() {
+        if let Some(e) = self.spectated_camera_snapshot() {
             self.view
                 .tick(Some(e.eye_height), self.zoomed_fov_target(1.0));
             return;
