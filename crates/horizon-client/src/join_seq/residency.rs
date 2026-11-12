@@ -2,10 +2,12 @@
 //! Bindings ride with storage when dimensions are parked; no event holds Game.
 use super::JoinSeq;
 use mod_api::DimensionKey;
+#[cfg(any(test, feature = "test-residency-observer"))]
+use std::sync::OnceLock;
 use std::{
     num::NonZeroU32,
     sync::{
-        Arc, Mutex, OnceLock,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -165,6 +167,7 @@ struct Pending {
     events: Mutex<Batches>,
     ready: AtomicBool,
     retired: AtomicBool,
+    #[cfg(any(test, feature = "test-residency-observer"))]
     observer: OnceLock<Journal>,
 }
 
@@ -181,6 +184,7 @@ impl Journal {
     /// Observe structural events without consuming the authoritative queue.
     /// The returned journal is diagnostic only and receives no saved UUID writes.
     /// Repeated calls share the same observation queue for this epoch.
+    #[cfg(any(test, feature = "test-residency-observer"))]
     pub fn observe_structural_events(&self) -> Self {
         self.0.observer.get_or_init(Self::default).clone()
     }
@@ -196,6 +200,7 @@ impl Journal {
             "entity journal was not drained"
         );
         events.structural.push(event);
+        #[cfg(any(test, feature = "test-residency-observer"))]
         if let Some(observer) = self.0.observer.get() {
             observer.push(event);
         }
