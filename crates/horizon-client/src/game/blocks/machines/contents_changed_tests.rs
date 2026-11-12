@@ -573,7 +573,10 @@ fn notices_come_in_first_write_order_once_each_whatever_the_journal_keeps() {
                     Ok::<_, ()>(())
                 })?;
                 assert_eq!(first.insert(host, tx, 1, &sticks, 1), 1);
-                assert!(changes.0.lock().unwrap().is_empty(), "nothing told before the commit");
+                assert!(
+                    changes.0.lock().unwrap().is_empty(),
+                    "nothing told before the commit"
+                );
                 Ok::<_, ()>(())
             });
             assert_eq!(committed, Ok(()));
@@ -628,7 +631,7 @@ fn a_mod_reads_the_open_transaction_its_depth_and_the_root_commits_phase() {
             assert_eq!(items.amount(host, 0), 0);
             // The closed transaction is no longer open.
             let closed =
-                host.transaction(|host, tx| Ok::<_, ()>(mod_api::__private::transaction_token(tx)));
+                host.transaction(|_, tx| Ok::<_, ()>(mod_api::__private::transaction_token(tx)));
             let closed = mod_api::__private::transaction_of(closed.unwrap());
             assert_eq!(host.transaction_depth(&closed), None);
             // The notice of a committed write runs while the root closes.
