@@ -1175,9 +1175,16 @@ impl Game<'_> {
     /// before mobs here, while vanilla ticks a stand that joined after the
     /// pushing `shulker` (one placed on it) after the shulker: `shove` makes
     /// up for the order. A shulker box's lid moves it after every entity's tick.
-    pub(super) fn lid_shoves_armor_stand(&mut self, i: usize, shulker: Option<u32>, delta: Vec3) {
+    /// `grid` holds the stands' obstacles, built once per lid at its first stand.
+    pub(super) fn lid_shoves_armor_stand(
+        &mut self,
+        i: usize,
+        shulker: Option<u32>,
+        delta: Vec3,
+        grid: &mut Option<horizon_client::entities::ObstacleGrid>,
+    ) {
         let joined = shulker.and_then(|id| self.mobs.iter().find(|m| m.id == id).map(|m| m.join));
-        let mut grid = self.stand_entity_collisions();
+        let grid = grid.get_or_insert_with(|| self.stand_entity_collisions());
         let mut nearby = Vec::new();
         let a = &mut self.armor_stands[i];
         // Entity.collide: the entities meeting the box stretched by the push.
