@@ -21,7 +21,7 @@ pub enum RegionError {
     Version(u32),
     /// A cell width outside `1..=2^30` quarts.
     Cell(u32),
-    /// The weights sum to 0 or past `i32::MAX`.
+    /// A mod weight is outside 1..=1000, or the weights sum outside 1..=i32::MAX.
     Weight,
 }
 impl std::fmt::Display for RegionError {
@@ -29,7 +29,9 @@ impl std::fmt::Display for RegionError {
         match self {
             Self::Version(version) => write!(f, "unknown region selector version {version}"),
             Self::Cell(cell) => write!(f, "region cell width {cell} is outside 1..={MAX_CELL}"),
-            Self::Weight => f.write_str("region weights must sum to 1..=2147483647"),
+            Self::Weight => {
+                f.write_str("mod region weights must be 1..=1000 and total weight 1..=2147483647")
+            }
         }
     }
 }
@@ -66,6 +68,13 @@ impl RegionSelector {
         }
         if !(1..=MAX_CELL).contains(&params.cell) {
             return Err(RegionError::Cell(params.cell));
+        }
+        if layout
+            .regions
+            .iter()
+            .any(|region| !(1..=1000).contains(&region.weight))
+        {
+            return Err(RegionError::Weight);
         }
         let cell = params.cell as i32;
         let mut total = 0i32;
@@ -196,7 +205,7 @@ impl RegionBiomeSource {
                 .iter()
                 .map(|index| index.resolver(climate))
                 .collect(),
-            column: None,
+            columns: None,
         }
     }
 }
@@ -204,20 +213,20 @@ impl RegionBiomeSource {
 pub struct RegionResolver<'a> {
     source: &'a RegionBiomeSource,
     searches: Vec<BiomeResolver<'a>>,
-    /// The last column asked and its owner's search: a column's quarts come together.
-    column: Option<([i32; 2], usize)>,
+    /// One chunk's 16 quart columns, retained across interleaved height visits.
+    columns: Option<([i32; 2], [Option<usize>; 16])>,
 }
 impl<'a> RegionResolver<'a> {
     fn search(&mut self, quart: [i32; 3]) -> &mut BiomeResolver<'a> {
-        let column = [quart[0], quart[2]];
-        let search = match self.column {
-            Some((last, search)) if last == column => search,
-            _ => {
-                let search = self.source.routes[self.source.selector.owner(column[0], column[1])];
-                self.column = Some((column, search));
-                search
-            }
-        };
+        let chunk = [quart[0].div_euclid(4), quart[2].div_euclid(4)];
+        if self.columns.as_ref().is_none_or(|(last, _)| *last != chunk) {
+            self.columns = Some((chunk, [None; 16]));
+        }
+        let column = (quart[0].rem_euclid(4) + 4 * quart[2].rem_euclid(4)) as usize;
+        let columns = &mut self.columns.as_mut().expect("chunk cache initialized").1;
+        let search = *columns[column].get_or_insert_with(|| {
+            self.source.routes[self.source.selector.owner(quart[0], quart[2])]
+        });
         &mut self.searches[search]
     }
     pub fn sample(
@@ -242,5 +251,72 @@ impl<'a> RegionResolver<'a> {
         quart: [i32; 3],
     ) -> Result<&'a str, BiomeError> {
         self.search(quart).sample_prepared(volume, quart)
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use crate::worldgen::climate::{Parameter, ParameterPoint};
+    use horizon_core::density::{ConstantSampler, DensitySampler};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    #[test]
+    fn chunk_columns_are_reused_across_heights_and_reset_at_chunk_edges() {
+        let draws = Arc::new(AtomicUsize::new(0));
+        let calls = draws.clone();
+        let source = RegionBiomeSource {
+            indices: vec![
+                MultiNoiseBiomeSource::new(vec![(
+                    ParameterPoint {
+                        coordinates: [Parameter::new(0, 0); 6],
+                        offset: 0,
+                    },
+                    "minecraft:plains".into(),
+                )])
+                .unwrap(),
+            ],
+            routes: vec![0],
+            selector: RegionSelector {
+                cell: 8,
+                ends: vec![10],
+                draw: Box::new(move |_, _| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    [0, 0, 0]
+                }),
+            },
+        };
+        let climate = ClimateSampler::new(std::array::from_fn(|_| {
+            Arc::new(ConstantSampler(0.)) as Arc<dyn DensitySampler>
+        }));
+        let mut resolver = source.resolver(&climate);
+        for x in -4..0 {
+            for y in -8..8 {
+                for z in -4..0 {
+                    resolver.search([x, y, z]);
+                }
+            }
+        }
+        assert_eq!(draws.load(Ordering::Relaxed), 16 * 9);
+        resolver.search([0, 0, 0]);
+        resolver.search([0, 20, 0]);
+        assert_eq!(draws.load(Ordering::Relaxed), 17 * 9);
+        resolver.search([-1, 0, -1]);
+        assert_eq!(draws.load(Ordering::Relaxed), 18 * 9);
+    }
+
+    #[test]
+    fn a_tie_keeps_the_first_cell_and_a_slot_end_belongs_to_the_next_slot() {
+        let selector = RegionSelector {
+            cell: 8,
+            ends: vec![10, 11],
+            draw: Box::new(|x, _| [0, 0, if x < 0 { 10 } else { 9 }]),
+        };
+        assert_eq!(selector.seed(-1, 0), (-8, 0, 1));
+        assert_eq!(selector.seed(0, 0), (0, 0, 0));
+        assert_eq!(selector.owner(-4, 0), 1);
     }
 }

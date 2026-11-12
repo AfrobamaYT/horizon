@@ -33,14 +33,11 @@ The same answer says NeoForge has no API for this: its biome modifiers change bi
 
 ## Choosing a region
 
-- **Seed stream.** `root.from_hash_of("horizon:biome_region")`, where `root` is the generator's existing `random.fork_positional()`. `from_hash_of` is a pure function of root and name and advances nothing, so no vanilla stream moves.
-- **Jittered cells.** Horizontal space is split into square cells of 128 quarts (512 blocks). Each cell gets one uniform draw from the stream at that cell, which gives a jitter point and a region chosen by cumulative weight. A quart belongs to the nearest jitter point among the 3×3 cells around it. Shares then follow the weights in expectation, and borders are irregular. A thresholded `NormalNoise` would not give the declared shares, because its values are not uniformly distributed.
-- **x and z only.** The owner depends on x and z only, so a column never mixes regions vertically, and `carver_biome` (sampled at y = 0) agrees with the chunk fill.
-- **Search.** The nearest-point search then runs in the chosen region's own `ClimateIndex`. Vanilla's region uses the preset index exactly as today.
-- **Pinned by the record.** `selector_version`, the cell size, the salt and the 3×3 rule are read from the world's saved record, never from constants at generation time. A version 2 can then exist beside version 1, and old worlds keep version 1.
-- **No regions, no change.** With no record, or a record that holds only vanilla, generation takes today's path unchanged. The existing seeded preset oracle proves this for the Overworld and the Nether.
+**Choosing a region.** Selector version 1 uses jittered cells in quart coordinates. Each cell draws jitter x, jitter z and a cumulative-weight pick, in that order, from `root.from_hash_of(salt).fork_positional().at(cx, 0, cz)`. `from_hash_of` borrows the positional root and returns a fresh source; the fork advances that derived source only, leaving vanilla's streams unchanged. Positional y is fixed at 0, so ownership is independent of height. The owner is the nearest jitter point among the 3x3 candidate cells, with x scanned inside z and the first candidate winning a tie. This is the neighbourhood definition, not a promise to find the globally nearest jitter point. Negative coordinates use floor division, and a pick at a cumulative slot end belongs to the next slot. A different neighbourhood or draw rule requires a new selector version, not a radius field. Each selected region searches only its own climate index. With no layout or no regions, today's preset source and random draws are unchanged.
 
-**What changes at a border.** Surface material and carvers change at a region border; terrain shape does not, since density reads only climate. A structure whose biome check straddles a border follows vanilla's own check at its sample position.
+With a layout, each resolver caches the 16 quart columns of its current chunk, without allocating per sample. Each first column visit evaluates nine cells and 27 bounded draws; other heights in that chunk reuse the owner. Crossing into another chunk resets that cache. Climate lookup still runs per quart. There is no tick-time change without a layout; no runtime timing has been measured for the enabled path.
+
+**What changes at a border.** Surface material, carvers, features, decoration and structure eligibility follow biome selection. Only base density is unchanged with an unchanged router. A structure whose biome check straddles a border follows vanilla's own check at its sample position. Height-dependent biomes and old-biome blending can make chunk fill and a carver's sample differ within one region.
 
 ## The saved record
 
@@ -55,10 +52,10 @@ One durable world-level file, `data/horizon/biome_regions.dat`, separate from `d
                    substituted: { with: "minecraft:vanilla", missing_mod: "my_mod" } /* only after a choice */ } ] } } }
 ```
 
-- **Contents.** Regions are stored in sorted order with their full points, not hashes. A new world writes the record before its first chunk is generated.
+- **Contents.** Regions are stored in sorted order with their full points, not hashes. A new world writes the record before its first chunk is generated. Version 1 bounds the file and decompressed NBT to 32 MiB, two dimensions, 1024 regions per dimension and 16384 points per region (two million NBT nodes, depth 32). Oversized declarations or records are refused; no truncation occurs. Its point validation is pinned independently of later registration rules. The selector cell is 1 through 2^30, and its total weight fits a positive i32.
 - **Absent record.** Region selection is off and every dimension keeps its existing source, custom dimensions included.
 - **Malformed record.** The open is refused with the reason, and the file is left untouched on disk: no rewrite, no rename, no default record in its place.
-- **Changed mods.** An installed mod whose declared regions differ from the record (points, biomes, or a region added or removed) never changes an existing world silently. The record wins, the difference is reported once by name, and the new layout is taken only through the opt-in below.
+- **Changed mods.** An installed mod whose declared regions differ from the record (points, biomes, or a region added or removed) never changes an existing world silently. The record wins, the difference is reported once by name (the record persists the reported names), and the new layout is taken only through the opt-in below.
 
 ## Missing mods and opting in
 
