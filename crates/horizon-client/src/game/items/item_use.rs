@@ -1167,7 +1167,7 @@ pub(super) mod interact_vibration_tests {
 
     type RecordedEvent = (&'static str, [f64; 3], Option<horizon_client::mobs::Who>);
     thread_local! {
-        static EVENTS: std::cell::RefCell<Vec<RecordedEvent>> = const { std::cell::RefCell::new(Vec::new()) };
+        pub(in crate::game) static EVENTS: std::cell::RefCell<Vec<RecordedEvent>> = const { std::cell::RefCell::new(Vec::new()) };
         static RECORDING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     }
 
@@ -1184,7 +1184,10 @@ pub(super) mod interact_vibration_tests {
     /// Runs `f` on a windowless game built from the prepared resources with
     /// `held` in the main hand and returns the game events it posted;
     /// `None` without the resources.
-    fn with_game(held: &str, f: impl FnOnce(&mut Game<'_>)) -> Option<Vec<String>> {
+    pub(in crate::game) fn with_game(
+        held: &str,
+        f: impl FnOnce(&mut Game<'_>),
+    ) -> Option<Vec<String>> {
         use crate::game::{Audio, Options, Progress, Settings, load_resources};
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES")?);
         let settings = Settings::default();
