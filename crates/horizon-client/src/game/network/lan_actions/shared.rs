@@ -494,6 +494,26 @@ mod tests {
     use crate::game::api_values::TryIntoApi;
     use horizon_client::pose::Pose;
     #[test]
+    fn a_block_break_suppresses_its_positional_duplicate_but_not_an_entity_sound() {
+        let mut sound = horizon_client::audio::CapturedSound {
+            event: "minecraft:block.stone.break".into(),
+            position: [1.5, 64.5, -2.5],
+            volume: 1.0,
+            pitch: 1.0,
+            source: 4,
+            entity: None,
+            except_entity: None,
+        };
+        let broken = [[1.0, 64.0, -3.0]];
+        assert!(super::captured_block_break(&sound, &broken));
+        sound.entity = Some(37);
+        assert!(!super::captured_block_break(&sound, &broken));
+        sound.entity = None;
+        sound.position[0] += 0.25;
+        assert!(!super::captured_block_break(&sound, &broken));
+    }
+
+    #[test]
     fn use_swing_resets_attack_charge_only_when_started() {
         let mut ticker = 20;
         reset_use_attack_strength(&mut ticker, 3, 4);
@@ -2351,6 +2371,7 @@ mod pickup_xp_tests {
                 health: 5,
                 no_gravity: true,
                 following: None,
+                fall_distance: 0.0,
             });
             game.guest_orbs(0);
             let left = game.orbs.iter().any(|o| o.id == 40);

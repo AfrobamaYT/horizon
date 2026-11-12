@@ -324,6 +324,10 @@ pub struct Projectile {
     /// `Entity.needsSync`: a server tells its clients about the change this
     /// tick instead of at the next update interval.
     pub needs_sync: bool,
+    /// `WindCharge.noDeflectTicks`: a player's wind charge turns for nothing
+    /// (`deflect` refuses) until it has ticked 5 times. Not saved, so a
+    /// loaded one starts again at 5.
+    pub no_deflect_ticks: u8,
     /// The bubble column tops this tick's `onAboveBubbleColumn` pushes came
     /// from, for their particles (`sendBubbleColumnParticles`); the caller
     /// drains them.
@@ -342,9 +346,6 @@ pub struct Projectile {
     pub fire_ticks: i32,
     /// `Entity.random` of a projectile.
     pub random: OwnRandom,
-    /// `WindCharge.noDeflectTicks`: five ticks after it is made, it refuses
-    /// every deflection. Counted down after its tick; zero for other kinds.
-    pub no_deflect_ticks: u8,
     pub air_supply: i32,
     pub has_visual_fire: bool,
     /// `Entity.fallDistance` (`fall_distance` in its save): a projectile sets
@@ -628,6 +629,7 @@ impl Projectile {
             bonus: Default::default(),
             acceleration,
             needs_sync: false,
+            no_deflect_ticks,
             bubble_surfaces: Vec::new(),
             touching_water: false,
             no_gravity: false,
@@ -635,7 +637,6 @@ impl Projectile {
             fire_ticks: 0,
             // Entity.random: seeded unpredictably, the position stands in.
             random: OwnRandom(random),
-            no_deflect_ticks,
             air_supply: 300,
             has_visual_fire: false,
             fall_distance: 0.0,
@@ -1610,6 +1611,11 @@ impl Projectile {
         // `WindCharge.tick`: counted down after the tick.
         self.no_deflect_ticks = self.no_deflect_ticks.saturating_sub(1);
         result
+    }
+    /// `Projectile.deflect`, which `WindCharge` refuses while its
+    /// `noDeflectTicks` last.
+    pub fn deflectable(&self) -> bool {
+        self.no_deflect_ticks == 0
     }
     /// `applyEffectsFromBlocks` after the tick's move, for its cobwebs and
     /// powder snow (`makeStuckInBlock`): the last such block its box (deflated

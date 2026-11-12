@@ -319,6 +319,7 @@ mod tests {
                     let p = Vec3::new(x, 70.0, 0.5);
                     ExperienceOrb {
                         attachment_lifetime: Default::default(),
+                        fall_distance: 0.0,
                         rotation: [0.0, 0.0],
                         join: Default::default(),
                         id,
