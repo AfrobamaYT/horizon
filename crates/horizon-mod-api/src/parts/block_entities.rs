@@ -321,6 +321,28 @@ pub mod tests {
 }
 
 impl BlockEntitiesRegistrar for PartRegistrar {
+    fn set_block_entity_transform(
+        &mut self,
+        key: crate::BlockEntityTypeKey,
+        step: Arc<dyn crate::BlockEntityTransform>,
+    ) {
+        let id = self
+            .registry_keys
+            .borrow()
+            .block_entity_types
+            .id(mod_vocab::__private::parts_installation::block_entity_type_key_slot(key))
+            .map(str::to_owned);
+        if let Some(id) = id.filter(|id| {
+            self.block_entity_types.iter().any(|decl| decl.id == *id)
+                && self.owned_declaration_id(id).is_ok()
+        }) {
+            self.block_entity_transforms.insert(id, step);
+        } else {
+            self.refused
+                .push("transform requires an owned block entity declaration".into());
+        }
+    }
+
     fn block_entity_type_key(&mut self, id: &str) -> crate::BlockEntityTypeKey {
         match self
             .registry_keys

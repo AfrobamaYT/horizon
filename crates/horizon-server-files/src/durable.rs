@@ -32,6 +32,9 @@ pub fn replace(from: &Path, to: &Path) -> io::Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
+        // The launcher's Windows suite compiles this file under edition 2021, which sorts
+        // these names differently from the 2024 crates: keep one order for both.
+        #[rustfmt::skip]
         use windows_sys::Win32::Storage::FileSystem::{
             MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
         };
@@ -94,5 +97,29 @@ pub fn remove(path: &Path) -> io::Result<()> {
         Ok(()) => sync_dir(path.parent().unwrap_or(path)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn writes_whole_and_leaves_no_temporary_file() {
+        let name = "durable-whole";
+        let dir =
+            std::env::temp_dir().join(format!("horizon-private-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("api.json");
+        write(&path, b"one").unwrap();
+        write(&path, b"two").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "two");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        remove(&path).unwrap();
+        assert!(!path.exists());
+        remove(&path).unwrap();
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

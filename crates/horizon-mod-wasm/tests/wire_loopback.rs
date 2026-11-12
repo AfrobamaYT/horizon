@@ -10,6 +10,8 @@ mod block_entity_on_load;
 mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
+#[path = "wire_loopback/block_entity_transform.rs"]
+mod block_entity_transform;
 #[path = "wire_loopback/loot_tags.rs"]
 mod loot_tags_wire;
 #[path = "wire_loopback/use_item_hand.rs"]
@@ -176,6 +178,16 @@ impl LoopContext for Context {
 fn __horizon_mod_hooks() -> Box<dyn Hooks> {
     struct Mod;
     impl Hooks for Mod {
+        fn datapack_sync(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::DatapackSyncEvent<'_>,
+        ) {
+            if event.player.uuid() == 12 {
+                event.recipe_types.push("testmod:grinding".into());
+            }
+        }
+
         fn loot_function(&self, event: &mut mod_api::LootFunctionEvent<'_>) {
             let tag = event
                 .tags
@@ -202,6 +214,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             arm_pose_registration::check(registrar);
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
             use_item_hand::register(registrar);
+            block_entity_transform::register(registrar);
             REGISTERED_BLOCK.set(Some(registrar.block_key("minecraft:stone")));
             REGISTERED_EFFECT.set(Some(registrar.effect_key("minecraft:poison")));
             let kind = registrar.block_entity_type("counter").blocks(&[]).build();
@@ -288,6 +301,20 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             } else {
                 event.draw.set_light(7);
             }
+        }
+        fn item_picked_up_post(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::ItemPickedUpPostEvent<'_>,
+        ) {
+            PICKED_UP_POST.set(Some((
+                event.player,
+                event.original.count(),
+                event.remaining.as_ref().map(|rest| rest.count()),
+            )));
+            let mut rest = event.original.clone();
+            rest.set_count(3).unwrap();
+            *event.remaining = Some(rest);
         }
         fn game_rule_changed(
             &self,
@@ -962,6 +989,40 @@ fn wire_loopback_optional_borrowed_record() {
     }
 }
 #[test]
+fn wire_loopback_item_picked_up_post_carries_the_original_and_writes_back_the_remainder() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+    struct World;
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World);
+    impl mod_api::ServerHost for World {}
+    mod_api::impl_server_host_areas!(World);
+    install_counter();
+    let module = WasmMod {
+        group: 0,
+        subscribed: &[],
+        listeners: &[],
+        corrupt: false,
+    };
+    let original = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 5).unwrap();
+    let mut remaining = None;
+    let mut event = mod_api::ItemPickedUpPostEvent {
+        player: 0x1234_5678_9abc_def0_1234_5678_9abc_def0,
+        original: &original,
+        remaining: &mut remaining,
+    };
+    module.item_picked_up_post(&mut World, &mut event);
+    assert_eq!(
+        PICKED_UP_POST.get(),
+        Some((0x1234_5678_9abc_def0_1234_5678_9abc_def0, 5, None))
+    );
+    assert_eq!(
+        remaining.map(|rest| rest.count()),
+        Some(3),
+        "the remainder a guest sets comes back"
+    );
+}
+#[test]
 fn wire_loopback_array_of_optional_borrowed_records() {
     mod_api::__private::initialize().unwrap();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
@@ -1134,6 +1195,7 @@ thread_local! {
     static REGISTERED_EFFECT:std::cell::Cell<Option<mod_api::EffectKey>> = const {std::cell::Cell::new(None)};
     static APPEND_ATTACK:std::cell::Cell<u8> = const {std::cell::Cell::new(0)};
     static REGISTERED_KIND:std::cell::Cell<Option<mod_api::BlockEntityTypeKey>> = const {std::cell::Cell::new(None)};
+    static PICKED_UP_POST: std::cell::Cell<Option<(u128, u32, Option<u32>)>> = const { std::cell::Cell::new(None) };
 }
 fn install_counter() {
     let mods = [mod_api::ModEntry::new(
@@ -2092,4 +2154,44 @@ fn wire_loopback_block_entity_data_received_preserves_tag_and_handle() {
         },
     );
     assert_eq!(CALLS.get(), 1);
+}
+
+#[test]
+fn datapack_sync_recipient_and_answer_cross_the_wire() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+    struct World;
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World);
+    impl mod_api::ServerHost for World {}
+    mod_api::impl_server_host_areas!(World);
+    install_counter();
+    let module = WasmMod {
+        group: 0,
+        subscribed: &[],
+        listeners: &[],
+        corrupt: false,
+    };
+    for uuid in [12, 13] {
+        let player = mod_api::__private::game::player_ref(
+            mod_api::EntityRef::new(mod_api::WorldEpoch::new(7), uuid as u32),
+            uuid,
+        );
+        let mut types = Vec::new();
+        module.datapack_sync(
+            &mut World,
+            &mut mod_api::DatapackSyncEvent {
+                player,
+                recipe_types: &mut types,
+            },
+        );
+        assert_eq!(
+            types,
+            if uuid == 12 {
+                vec!["testmod:grinding".to_owned()]
+            } else {
+                vec![]
+            }
+        );
+    }
 }

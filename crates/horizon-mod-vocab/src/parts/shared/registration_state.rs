@@ -12,6 +12,7 @@ pub(crate) struct Installed {
     pub(crate) keys: Parts,
     pub(crate) tags: TagParts,
     pub(crate) block_entity_types: Vec<BlockEntityTypeDecl>,
+    pub(crate) block_entity_transforms: HashMap<String, Arc<dyn crate::BlockEntityTransform>>,
     pub(crate) entity_attributes: Vec<EntityAttributeDeclaration>,
     pub(crate) world_fluids: Vec<(String, crate::WorldFluid)>,
     pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,

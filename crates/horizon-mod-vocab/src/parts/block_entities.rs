@@ -20,6 +20,22 @@ pub type BlockProvider<T> = dyn BlockCapabilityProvider<T>;
 
 pub use super::capabilities::providers_of::{BlockProviderOf, EntityProviderOf, ItemProviderOf};
 
+/// Snapshot the callbacks once at registry preparation for worldgen workers.
+pub fn block_entity_transforms()
+-> std::collections::HashMap<String, Arc<dyn crate::BlockEntityTransform>> {
+    installed().map_or_else(Default::default, |table| {
+        table.block_entity_transforms.clone()
+    })
+}
+
+/// The registered saved-data transform, looked up only during structure placement.
+pub fn block_entity_transform(id: &str) -> Option<&'static dyn crate::BlockEntityTransform> {
+    installed()?
+        .block_entity_transforms
+        .get(id)
+        .map(AsRef::as_ref)
+}
+
 /// Owned declarations of the block entity types mods registered.
 /// The game converts these snapshots to its content model when registration freezes.
 pub fn block_entity_types() -> &'static [BlockEntityTypeDecl] {
@@ -100,6 +116,7 @@ impl dyn Registrar + '_ {
         crate::BlockEntityTypeBuilder {
             id: id.to_owned(),
             registrar: self,
+            transform: None,
             blocks: Vec::new(),
         }
     }
@@ -151,6 +168,12 @@ impl dyn Registrar + '_ {
 
 /// Registrar operations for block entities.
 pub trait BlockEntitiesRegistrar {
+    /// Set the transform of a type declared by this mod.
+    fn set_block_entity_transform(
+        &mut self,
+        key: crate::BlockEntityTypeKey,
+        step: Arc<dyn crate::BlockEntityTransform>,
+    );
     /// Look up a vanilla or another mod's type. The final registry validates it at load.
     fn block_entity_type_key(&mut self, id: &str) -> crate::BlockEntityTypeKey;
 
