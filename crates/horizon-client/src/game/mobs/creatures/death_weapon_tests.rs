@@ -198,56 +198,36 @@ fn weapon_case(item: &str, enchantment: &str, level: u32, projectile: bool, swap
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn death_weapon_a_longbow_power_ii_survives_hand_change() {
-    horizon_guest_stack::builder()
-        .name(std::thread::current().name().unwrap().to_owned())
-        .spawn(|| {
-            weapon_case("minecraft:bow", "minecraft:power", 2, true, false);
-        })
-        .unwrap()
-        .join()
-        .unwrap();
+    crate::game::native_entity_refs::tests::run_on_guest_stack(|| {
+        weapon_case("minecraft:bow", "minecraft:power", 2, true, false);
+    });
 }
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn death_weapon_b_crossbow_piercing_i() {
-    horizon_guest_stack::builder()
-        .name(std::thread::current().name().unwrap().to_owned())
-        .spawn(|| {
-            weapon_case("minecraft:crossbow", "minecraft:piercing", 1, true, false);
-        })
-        .unwrap()
-        .join()
-        .unwrap();
+    crate::game::native_entity_refs::tests::run_on_guest_stack(|| {
+        weapon_case("minecraft:crossbow", "minecraft:piercing", 1, true, false);
+    });
 }
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn death_weapon_c_trident_loyalty_ii() {
-    horizon_guest_stack::builder()
-        .name(std::thread::current().name().unwrap().to_owned())
-        .spawn(|| {
-            weapon_case("minecraft:trident", "minecraft:loyalty", 2, true, false);
-        })
-        .unwrap()
-        .join()
-        .unwrap();
+    crate::game::native_entity_refs::tests::run_on_guest_stack(|| {
+        weapon_case("minecraft:trident", "minecraft:loyalty", 2, true, false);
+    });
 }
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn death_weapon_d_sharpness_v_sword_reads_live_axe() {
-    horizon_guest_stack::builder()
-        .name(std::thread::current().name().unwrap().to_owned())
-        .spawn(|| {
-            weapon_case(
-                "minecraft:diamond_sword",
-                "minecraft:sharpness",
-                5,
-                false,
-                true,
-            );
-        })
-        .unwrap()
-        .join()
-        .unwrap();
+    crate::game::native_entity_refs::tests::run_on_guest_stack(|| {
+        weapon_case(
+            "minecraft:diamond_sword",
+            "minecraft:sharpness",
+            5,
+            false,
+            true,
+        );
+    });
 }
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

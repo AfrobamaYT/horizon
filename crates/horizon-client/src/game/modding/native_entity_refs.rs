@@ -942,6 +942,17 @@ mod ray_tests {
 
 #[cfg(test)]
 pub(super) mod tests {
+    /// Keep guest setup and calls together, preserving libtest identity and panic payloads.
+    pub(in crate::game) fn run_on_guest_stack(test: impl FnOnce() + Send + 'static) {
+        let mut worker = horizon_guest_stack::builder();
+        if let Some(name) = std::thread::current().name() {
+            worker = worker.name(name.to_owned());
+        }
+        if let Err(payload) = worker.spawn(test).unwrap().join() {
+            std::panic::resume_unwind(payload);
+        }
+    }
+
     /// Resolve a fixture after registration or a late Parts reinstall from its loaded table.
     pub(in crate::game) fn resolve_parts(game: &super::Game<'_>) -> Result<(), String> {
         crate::game::api_values::resolve_block_definitions(game.pack.assets.registry)?;

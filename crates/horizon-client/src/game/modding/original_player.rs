@@ -522,28 +522,18 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn death_clone_retains_original_and_expires_after_dispatch() {
-        horizon_guest_stack::builder()
-            .name(std::thread::current().name().unwrap().to_owned())
-            .spawn(|| {
-                clone_case(true, false);
-                clone_case(true, true);
-            })
-            .unwrap()
-            .join()
-            .unwrap();
+        crate::game::native_entity_refs::tests::run_on_guest_stack(|| {
+            clone_case(true, false);
+            clone_case(true, true);
+        });
     }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn end_return_clone_retains_end_state_and_expires_after_dispatch() {
-        horizon_guest_stack::builder()
-            .name(std::thread::current().name().unwrap().to_owned())
-            .spawn(|| {
-                clone_case(false, true);
-            })
-            .unwrap()
-            .join()
-            .unwrap();
+        crate::game::native_entity_refs::tests::run_on_guest_stack(|| {
+            clone_case(false, true);
+        });
     }
 
     #[test]
