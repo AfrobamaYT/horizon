@@ -48,8 +48,7 @@ impl Goal for ResetUniversalAnger {
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
         self.timestamp = m.ai.last_hurt_by_time;
         // setLastHurtByMob(null) also stamps the time.
-        m.ai.last_hurt_by = None;
-        m.ai.last_hurt_by_time = m.age as i32;
+        m.ai.forget_hurt_by(m.age as i32);
         m.set_ai_target(cx.w, None);
         m.extra.angry_at = None;
         // `TimeUtil.rangeOfSeconds(20, 39)`.

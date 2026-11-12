@@ -67,7 +67,7 @@ LivingEntity.isAlive	port	crates/horizon-client/src/mobs.rs::Mob::alive	not remo
 LivingEntity.setIgnoreFallDamageFromCurrentImpulse	port	crates/horizon-world/src/living_fall.rs::ImpulseContext::set_ignore_fall_damage	40 ticks of grace
 LivingEntity.getDamageAfterArmorAbsorb	inline	crates/horizon-client/src/mobs.rs::Mob::damage_with	the player's armor wear is health.rs hurt_armor; the mob path also scales armor effectiveness (breach)
 LivingEntity.getKillCredit	port	crates/horizon-client/src/game/mobs/creatures/mod.rs::Game::mob_died	the last player to hit it, else the last mob
-LivingEntity.getTicksSinceLastKineticHitFeedback	port	crates/horizon-client/src/game/items/spear.rs::Game::kinetic_hit_ticks	
+LivingEntity.getTicksSinceLastKineticHitFeedback	port	crates/horizon-client/src/game/items/spear.rs::Game::kinetic_hit_ticks
 LivingEntity.swapHandItems	inline	crates/horizon-client/src/game/network/remote/mod.rs::Game::handle_packet	entity event 55 swaps another player's hands; the arm is in `handle_packet`
 LivingEntity.getAttackRangeWith	inline	crates/horizon-client/src/game.rs::Game::reach	gap: minor: only the spear's range is item specific (spear.rs REACH); other items use the default reach
 LivingEntity.getActiveItem	inline	crates/horizon-client/src/game.rs::Game::held	the selected slot; the item in use is the `using` slot

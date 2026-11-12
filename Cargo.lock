@@ -2357,6 +2357,7 @@ dependencies = [
  "horizon-mod-point-emit",
  "horizon-mod-points",
  "horizon-mod-runtime",
+ "horizon-world",
  "log",
  "rustix 1.1.5",
  "serde_json",
@@ -2543,6 +2544,7 @@ name = "horizon-server-files"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "getrandom 0.3.4",
  "horizon-core",
  "horizon-protocol",
  "horizon-world",
