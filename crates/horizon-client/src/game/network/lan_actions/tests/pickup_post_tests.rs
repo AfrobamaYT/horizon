@@ -20,7 +20,7 @@ struct State {
     raise: Option<u32>,
     /// Whether the notice empties the remainder.
     empty: bool,
-    /// Whether the notice kills every item entity.
+    /// Whether the notice removes every entity it can.
     kill: bool,
     /// The notices heard, in order.
     notices: Vec<Notice>,
@@ -81,7 +81,13 @@ impl Probe {
             *remaining = None;
         }
         if kill {
+            // A command where one runs (a LAN host), else the entity handle's removal, which
+            // the level sweeps out of its list later.
             let _ = host.commands().run_command("kill @e[type=minecraft:item]");
+            let level = host.level("minecraft:overworld").unwrap();
+            for entity in level.all_entities(host).unwrap_or_default() {
+                let _ = entity.discard(host);
+            }
         }
     }
 }
@@ -172,6 +178,7 @@ fn host_case(game: &mut Game<'_>, probe: &Probe, case: &Case) -> Outcome {
     let id = spawn(game, [1.5, 64.0, 1.5], case);
     let mut round = game.native_tick_round();
     game.tick_dropped_items(&mut round);
+    game.native_removals_flush();
     let first = game.inventory[0].as_ref().map_or(0, |stack| {
         if &*stack.item == "minecraft:apple" {
             stack.count
@@ -257,15 +264,19 @@ fn host_pickup_tells_whole_and_partial_pickups_apart_and_keeps_listener_changes(
             assert_eq!(host_animations(game), animations + 1);
             assert_eq!(host_stat(game), stat + 8);
 
-            // A kill in the partial notice cannot reach the lifted item: the 3 stay.
+            // The partial listener kills the item, lent back to the level while it hears:
+            // it stays gone, with no take animation, and the pickup counts 8.
+            let (animations, stat) = (host_animations(game), host_stat(game));
             let killed = Case {
                 kill: true,
                 ..partial
             };
             assert_eq!(
                 host_case(game, &probe, &killed),
-                (vec![("partial", 7, 8, Some(3))], Some(3), 64)
+                (vec![("partial", 7, 8, Some(3))], None, 64)
             );
+            assert_eq!(host_animations(game), animations);
+            assert_eq!(host_stat(game), stat + 8);
 
             // Refused by `item_picked_up`: nothing is told.
             let refused = Case {
@@ -321,8 +332,9 @@ fn host_pickup_tells_whole_and_partial_pickups_apart_and_keeps_listener_changes(
             assert_eq!(host_stat(game), stat + 8);
             game.creative = false;
 
-            // The host's pass lifts its items out of the level, so a kill in the
-            // notice cannot reach the one being picked up: no panic, the 3 put back stay.
+            // The post listener puts 3 back, then kills the item: it stays gone, with no panic
+            // and no take animation.
+            let animations = host_animations(game);
             let killed = Case {
                 raise: Some(3),
                 kill: true,
@@ -330,8 +342,9 @@ fn host_pickup_tells_whole_and_partial_pickups_apart_and_keeps_listener_changes(
             };
             assert_eq!(
                 host_case(game, &probe, &killed),
-                (vec![("post", 7, 8, None)], Some(3), 64)
+                (vec![("post", 7, 8, None)], None, 64)
             );
+            assert_eq!(host_animations(game), animations);
             let _ = std::fs::remove_dir_all(scratch);
         });
     });

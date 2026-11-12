@@ -5321,69 +5321,7 @@ impl Game<'_> {
         );
         let feet = [p.position.x, p.position.y, p.position.z];
         let own = self.level.ensure_player_uuid();
-        // The predicate's Game borrow ends before each yielded row's effects.
-        // This cell is stack-local and never accessible to a native callback.
-        let game = std::cell::RefCell::new(&mut *self);
-        for item in items.extract_if_mut(|item| {
-            let mut game = game.borrow_mut();
-            let b = item.bounds();
-            let touching = b.min_position().x < max[0]
-                && b.max_position().x > min[0]
-                && b.min_position().y < max[1]
-                && b.max_position().y > min[1]
-                && b.min_position().z < max[2]
-                && b.max_position().z > min[2];
-            // ItemEntity.playerTouch: `item_picked_up`, then vanilla's delay and target rule.
-            if touching && game.native_pickup_allowed(item, own) {
-                let before = item.stack.count;
-                let kind = item.stack.item.clone();
-                let thrower = item.thrower;
-                // The post or partial notice's `remaining` is all mods reach of the lifted item.
-                let left = match game.native_pickup_insert(&item.stack) {
-                    Some(rest) if rest.count >= before => Some(rest),
-                    Some(rest) => game.native_pickup_partial(&item.stack, rest),
-                    None => game.native_pickup_post(&item.stack),
-                };
-                let Some(left) = left else {
-                    game.award_stat("picked_up", &kind, before as i32);
-                    if let Some(thrower) = thrower {
-                        game.trigger_thrown_picked_up_by_player(&item.stack, thrower);
-                    }
-                    return true;
-                };
-                let taken = before.saturating_sub(left.count);
-                if taken > 0 {
-                    game.award_stat("picked_up", &kind, taken as i32);
-                    if let Some(thrower) = thrower {
-                        game.trigger_thrown_picked_up_by_player(&left, thrower);
-                    }
-                    game.add_pickup(
-                        pickups::Taken::Item(Box::new(item.clone())),
-                        pickups::Collector::Player,
-                    );
-                    // handleTakeItemEntity: the random pitch of a full pickup.
-                    let pitch = ((game.world.random.next_float() - game.world.random.next_float())
-                        * 0.7
-                        + 1.0)
-                        * 2.0;
-                    game.audio
-                        .play("minecraft:entity.item.pickup", Some(feet), 0.2, pitch);
-                }
-                item.stack = left;
-            }
-            false
-        }) {
-            let mut game = game.borrow_mut();
-            game.add_pickup(
-                pickups::Taken::Item(Box::new(item)),
-                pickups::Collector::Player,
-            );
-            let pitch = ((game.world.random.next_float() - game.world.random.next_float()) * 0.7
-                + 1.0)
-                * 2.0;
-            game.audio
-                .play("minecraft:entity.item.pickup", Some(feet), 0.2, pitch);
-        }
+        self.native_player_pickups(&mut items, (min, max), feet, own);
         self.put_back_dropped(items);
         self.spawn_destroyed_contents(destroyed);
     }
