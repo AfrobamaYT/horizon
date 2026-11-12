@@ -1,11 +1,13 @@
 """tools/hot_paths.py: what a published record may hold, which runs a trend compares, and what a dump counts."""
 import copy
-import sys
+import importlib.util
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
-import hot_paths
+# Loaded by path: tools/ on sys.path would shadow tests/ modules that share a name with a tools/ harness.
+_spec = importlib.util.spec_from_file_location('hot_paths', Path(__file__).resolve().parents[1] / 'tools' / 'hot_paths.py')
+hot_paths = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(hot_paths)
 
 
 def run(commit, date, value, host='alpha', checksum='0' * 16, wall=100.0):

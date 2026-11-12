@@ -52,17 +52,15 @@ NOISY = 0.01
 
 
 def scratch_env(root, **extra):
-    """The game's environment for one run: fresh homes under `root`, no audio, no telemetry."""
-    env = dict(os.environ)
+    """The game's environment for one run: lab.game_env with its homes under `root`, and no telemetry."""
+    import lab  # here, so the record and page commands need nothing beside this file
+    homes = {}
     for key in ('HORIZON_HOME', 'HORIZON_LAUNCHER_HOME', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME'):
         folder = Path(root) / key.lower()
         folder.mkdir(parents=True, exist_ok=True)
-        env[key] = str(folder)
-    env.update(HORIZON_NO_AUDIO='1', HORIZON_LAUNCHER_NO_SELF_UPDATE='1', HORIZON_TELEMETRY_URL='off',
-               # The worker pools' size follows the machine's cores unless it is fixed.
-               HORIZON_WORKER_THREADS='2')
-    env.update(extra)
-    return env
+        homes[key] = folder
+    # The worker pools' size follows the machine's cores unless it is fixed.
+    return lab.game_env(HORIZON_TELEMETRY_URL='off', HORIZON_WORKER_THREADS='2', **homes, **extra)
 
 
 # The native mod built into horizon-hot-paths-game: its package beside the executable, as the launcher leaves one.
