@@ -17,6 +17,9 @@ jobs:
       # Inert until the modding book exists on the branch.
       - id: book
         run: test -f docs/modding/book.toml && echo present=true >> "$GITHUB_OUTPUT" || true
+      - name: The pinned Rust (tools/ci/rust-version)
+        if: steps.book.outputs.present == 'true'
+        run: bash tools/ci/rustup_install.sh --profile minimal
       - if: steps.book.outputs.present == 'true'
         run: cargo install mdbook --locked --version 0.4.52
       - if: steps.book.outputs.present == 'true'
