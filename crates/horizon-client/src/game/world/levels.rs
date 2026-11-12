@@ -536,16 +536,6 @@ impl Levels {
         self.parked.values().map(|level| &level.streaming)
     }
 
-    /// The world of the level not in place, in `dim`, to change.
-    pub(super) fn parked_world_mut(&mut self, dim: Dim) -> Option<&mut World> {
-        self.parked.get_mut(&dim).map(|level| &mut level.world)
-    }
-
-    /// The streaming of the level not in place, in `dim`, to change.
-    pub(super) fn parked_streaming_mut(&mut self, dim: Dim) -> Option<&mut Streaming> {
-        self.parked.get_mut(&dim).map(|level| &mut level.streaming)
-    }
-
     /// The level not in place, in `dim`.
     pub(super) fn parked_mut(&mut self, dim: Dim) -> Option<&mut Parked> {
         self.parked.get_mut(&dim)
