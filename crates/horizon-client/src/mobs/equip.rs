@@ -165,31 +165,6 @@ pub trait CanEquip {
     -> bool;
 }
 
-/// The `can_equip` answers a game decided before a click for one entity, lent to a menu the game
-/// cannot be reached from during the click (a guest's inventory menu on the host). Each stack the
-/// click may place has the answer of each slot it was asked about. A stack nobody decided (the
-/// click made it) is refused when a part could answer for it, as an apply refuses what changed
-/// since the decision; with no such part the component's answer stands.
-#[derive(Default)]
-pub struct Decided {
-    /// The entity the answers are for.
-    pub entity: u32,
-    /// Per decided stack, its answer in each slot.
-    pub answers: Vec<(ItemStack, &'static str, bool)>,
-}
-
-impl CanEquip for Decided {
-    fn can_equip(&self, stack: &ItemStack, slot: &str, entity: u32, _: &str, data: bool) -> bool {
-        if !mod_api::__private::item_listens(mod_api::HookId::CanEquip, &stack.item) {
-            return data;
-        }
-        entity == self.entity
-            && self.answers.iter().any(|(decided, decided_slot, answer)| {
-                *answer && *decided_slot == slot && decided.same_item_same_components(stack)
-            })
-    }
-}
-
 /// `LivingEntity.getEquipmentSlotForItem`: the item's own `equippable` slot,
 /// else the main hand. `None` for `body` and `saddle`: those name the wearer
 /// they belong to (`Equippable.canBeEquippedBy`), which Horizon does not

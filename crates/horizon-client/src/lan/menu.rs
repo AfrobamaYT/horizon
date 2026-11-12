@@ -25,11 +25,6 @@ pub trait Rules {
     /// The enchantment definitions: what keeps worn armour on (`PREVENT_ARMOR_CHANGE`).
     fn enchantments(&self) -> &Enchantments;
     fn max_stack(&self, item: &str) -> u32;
-    /// `IItemExtension.canEquip` for the guest's armour slots, decided by the game before the
-    /// click; none keeps the `equippable` component's answer.
-    fn can_equip(&self) -> Option<&dyn crate::mobs::equip::CanEquip> {
-        None
-    }
     /// `Slot.mayPickup`: whether the stack in menu slot `slot` may be taken
     /// out. A block container's slots and the player's own allow it; a mod's
     /// menu can refuse.
@@ -520,14 +515,12 @@ impl View<'_> {
     }
     fn vanilla_may_place(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> bool {
         if self.container.is_none() && (5..=8).contains(&i) {
-            // `ArmorSlot.mayPlace`: `LivingEntity.isEquippableInSlot` for the guest, the stack's
-            // `equippable` component and then the parts of its item.
-            let (slot, player) = (ARMOR_SLOTS[i - 5], "minecraft:player");
+            // `ArmorSlot.mayPlace`: `LivingEntity.isEquippableInSlot` for the guest, from the
+            // stack's `equippable` component. (The game clicks a guest's inventory menu through
+            // `crate::menu`, which also asks the parts of the item.)
             let tags = &rules.enchantments().entity_tags;
-            let data = equippable_in_slot(rules.items(), tags, stack, slot, player);
-            return rules.can_equip().map_or(data, |parts| {
-                parts.can_equip(stack, slot, self.guest.entity_id as u32, player, data)
-            });
+            let player = "minecraft:player";
+            return equippable_in_slot(rules.items(), tags, stack, ARMOR_SLOTS[i - 5], player);
         }
         !(self.shulker
             && self.container.as_ref().is_some_and(|c| i < c.len())
@@ -1498,13 +1491,7 @@ pub(crate) mod tests {
 
     /// The prepared resources' items, or None (the test is skipped) without them.
     fn rules() -> Option<ItemRules> {
-        let root = std::env::var_os("HORIZON_RESOURCES")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| {
-                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../.local/horizon-client")
-                    .join(horizon_core::VANILLA_VERSION)
-            });
+        let root = crate::menu::tests::resource_root();
         if !root.join("items.json").exists() {
             eprintln!("skipping resource-backed menu check: {}", root.display());
             return None;
@@ -2737,23 +2724,6 @@ pub(crate) mod tests {
         }
     }
 
-    /// Rules over the item catalog `0`, lending `1` as the game's decided `can_equip`.
-    struct PartRules<'a>(Items, Option<&'a dyn crate::mobs::equip::CanEquip>);
-    impl Rules for PartRules<'_> {
-        fn items(&self) -> &Items {
-            &self.0
-        }
-        fn enchantments(&self) -> &Enchantments {
-            enchantments()
-        }
-        fn max_stack(&self, _: &str) -> u32 {
-            64
-        }
-        fn can_equip(&self) -> Option<&dyn crate::mobs::equip::CanEquip> {
-            self.1
-        }
-    }
-
     /// Where `stack` ends up in a guest's inventory menu: the armour slots (5 head .. 8 feet) a
     /// click from the cursor puts it in, each tried on its own, and every slot holding anything
     /// after a shift-click of it from the first hotbar slot (36), `usize::MAX` for the cursor.
@@ -2803,10 +2773,9 @@ pub(crate) mod tests {
     /// at all (`moveItemStackTo` refused). Data only: no part answers.
     #[test]
     fn guest_armour_slots_read_the_stacks_own_equippable() {
-        let Some(ItemRules(items)) = rules() else {
+        let Some(rules) = rules() else {
             return;
         };
-        let rules = PartRules(items, None);
         let helmet = |component: Option<Vec<(&str, Tag)>>| {
             let mut helmet = ItemStack::new("minecraft:iron_helmet", 1);
             let (id, value) = match component {
@@ -2831,44 +2800,6 @@ pub(crate) mod tests {
         let player = vec![Tag::String("player".into())];
         let player = helmet(Some(vec![slot("head"), allowed(player)]));
         assert_eq!(worn_by_guest(&rules, &player), (vec![5], vec![5]));
-    }
-
-    /// What a lent `CanEquip` was asked, answering the opposite of the data.
-    #[derive(Default)]
-    struct Contrary(std::cell::RefCell<Vec<(String, u32, String, bool)>>);
-    impl crate::mobs::equip::CanEquip for Contrary {
-        fn can_equip(&self, _: &ItemStack, slot: &str, id: u32, kind: &str, data: bool) -> bool {
-            (self.0.borrow_mut()).push((slot.to_owned(), id, kind.to_owned(), data));
-            !data
-        }
-    }
-
-    /// A guest's armour slots ask the `can_equip` the game decided for the click, for the
-    /// guest's entity with the component's answer, and take its answer either way: the parts
-    /// refuse the head slot to a helmet and give it the other three, and shift-clicked it stays
-    /// in its hotbar slot with nothing moved anywhere else.
-    #[test]
-    fn guest_armour_slots_ask_the_decided_can_equip() {
-        let parts = Contrary::default();
-        let rules = PartRules(Items::for_tests(Default::default()), Some(&parts));
-        let helmet = worn("minecraft:iron_helmet", "head");
-        assert_eq!(worn_by_guest(&rules, &helmet), (vec![6, 7, 8], vec![36]));
-        let entity = guest().entity_id as u32;
-        let asked =
-            |slot: &str, data| (slot.to_owned(), entity, "minecraft:player".to_owned(), data);
-        // A click may ask a slot more than once; each ask is the same.
-        let mut seen = parts.0.take();
-        seen.dedup();
-        assert_eq!(
-            seen,
-            [
-                asked("head", true),
-                asked("chest", false),
-                asked("legs", false),
-                asked("feet", false),
-                asked("head", true),
-            ]
-        );
     }
 
     /// A shift-click from the off-hand slot wears the armour it holds:

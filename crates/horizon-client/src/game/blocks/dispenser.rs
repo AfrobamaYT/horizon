@@ -690,7 +690,7 @@ impl Game<'_> {
         stack: ItemStack,
     ) -> Result<Dispensed> {
         // `ItemStack.has(DataComponents.EQUIPPABLE)`: the stack's own, a removed one included.
-        if equippable(self.res.items(), &stack).is_some() {
+        if equippable(self.items(), &stack).is_some() {
             let mut stack = stack;
             if self.dispense_equipment(pos, facing, &mut stack) {
                 return Ok((Some(stack).filter(|s| s.count > 0), CLICK));

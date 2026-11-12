@@ -4,7 +4,7 @@
 //! asked about it.
 use super::*;
 use crate::game::api_values::TryIntoApi;
-use horizon_client::mobs::equip::{CanEquip, Decided, equippable_in_slot};
+use horizon_client::mobs::equip::CanEquip;
 
 /// A stack converted for the parts of its item, ready for any number of `can_equip` questions.
 /// Empty when no part of the item listens (the component's answer stands and nothing is
@@ -46,31 +46,6 @@ impl Game<'_> {
             &mut can_equip,
         );
         can_equip
-    }
-
-    /// The answers of a click a menu makes without the game at hand (a guest's inventory menu on
-    /// the host), decided before it: each of `stacks` in each armour slot, for the player
-    /// `entity`. Nothing is asked, and nothing allocated, when no part listens to any of them.
-    pub(in crate::game) fn decide_can_equip<'s>(
-        &self,
-        entity: u32,
-        stacks: impl IntoIterator<Item = &'s ItemStack>,
-    ) -> Decided {
-        let mut answers = Vec::new();
-        let tags = &self.stations().enchantments.entity_tags;
-        for stack in stacks {
-            let prepared = self.equip_stack(stack);
-            if prepared.0.is_none() {
-                continue;
-            }
-            for slot in ["head", "chest", "legs", "feet"] {
-                let player = "minecraft:player";
-                let data = equippable_in_slot(self.items(), tags, stack, slot, player);
-                let answer = self.can_equip(&prepared, slot, entity, player, data);
-                answers.push((stack.clone(), slot, answer));
-            }
-        }
-        Decided { entity, answers }
     }
 
     /// `can_equip` lent to a menu click that runs while the game is at hand (the player's own
@@ -157,15 +132,7 @@ mod tests {
 
     /// Runs `test` on a game with the cobbler's part installed, given what it counted.
     fn with_cobbler(test: impl FnOnce(&mut Game<'_>, &AtomicUsize)) {
-        let part = FeetOnly::default();
-        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
-            "cobbler",
-            Box::new(Cobbler(part.clone())),
-        )]
-        .into();
-        crate::entry::install_client_hooks();
-        crate::game::api_values::install_parts(&mods).unwrap();
-        mod_platform::testing::with_mods(mods, || {
+        installed(|asked| {
             crate::game::native_entity_refs::tests::with_game(|game| {
                 // The player in place, admitted as a joined one is, so its handle resolves.
                 let at = horizon_core::geometry::Vec3::new(0.5, 64.0, 0.5);
@@ -173,15 +140,25 @@ mod tests {
                 body.entity_id = 7;
                 game.player = Some(body);
                 game.bind_local_player_residency();
-                test(game, &part.0)
+                test(game, asked)
             });
         });
     }
 
+    /// Runs `test` with the cobbler's mod installed, given what its part counted.
+    fn installed(test: impl FnOnce(&AtomicUsize)) {
+        let part = FeetOnly::default();
+        let cobbler = mod_api::ModEntry::new("cobbler", Box::new(Cobbler(part.clone())));
+        let mods: mod_api::Mods = vec![cobbler].into();
+        crate::entry::install_client_hooks();
+        crate::game::api_values::install_parts(&mods).unwrap();
+        mod_platform::testing::with_mods(mods, || test(&part.0));
+    }
+
     /// Asked once per candidate slot, a warmed `can_equip` allocates nothing, for a stack with
-    /// components, on every path: the player's menu (the game lent), the dispenser's and a
-    /// pickup's prepared stack, and a guest's decided click; nor does an item no part listens
-    /// to. Each answer is the part's.
+    /// components, on every path: a menu the game is lent to (the player's, a guest's), and the
+    /// dispenser's and a pickup's prepared stack; nor does an item no part listens to. Each
+    /// answer is the part's.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn warmed_can_equip_questions_allocate_nothing() {
@@ -205,40 +182,72 @@ mod tests {
                 slots.map(|slot| game.can_equip(&prepared, slot, player, kind, slot == "head"))
             });
             assert_eq!((answers, allocations), (feet_only, 0));
-            let decided = game.decide_can_equip(player, [&helmet]);
-            let (answers, allocations) = horizon_threads::allocation_count::measure(|| {
-                slots.map(|slot| decided.can_equip(&helmet, slot, player, kind, slot == "head"))
-            });
-            assert_eq!((answers, allocations), (feet_only, 0));
-            assert_eq!(asked.load(Ordering::Relaxed), 1 + 4 + 4 + 4);
+            assert_eq!(asked.load(Ordering::Relaxed), 1 + 4 + 4);
         });
     }
 
-    /// A guest's click is decided before it runs, for the stacks it may place: the decided helmet
-    /// takes the part's answers, the same helmet worn down since (a stack the decision never
-    /// saw) is refused everywhere, an item no part listens to keeps its component's answer, and
-    /// an answer is for the player it was decided for.
+    /// A guest's right click with a bundle on the cursor on an empty armour slot takes the
+    /// bundle's next stack out into it (`BundleItem.overrideStackedOnOther`), and the host's
+    /// authoritative menu asks the parts about that inner stack: the cobbler's part keeps the iron
+    /// helmet inside off the head, and the bundle, the armour and the inventory stay as they were;
+    /// it lets it onto the feet, and the bundle is empty after.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn a_decided_click_refuses_what_it_did_not_decide() {
-        with_cobbler(|game, asked| {
-            let helmet = ItemStack::new("minecraft:iron_helmet", 1);
-            let player = game.own_entity_id() as u32;
-            let decided = game.decide_can_equip(player, [&helmet]);
-            assert_eq!(asked.load(Ordering::Relaxed), 4);
-            let kind = "minecraft:player";
-            assert!(decided.can_equip(&helmet, "feet", player, kind, false));
-            assert!(!decided.can_equip(&helmet, "head", player, kind, true));
-            let worn = ItemStack {
-                damage: 7,
-                ..helmet.clone()
-            };
-            assert!(!decided.can_equip(&worn, "feet", player, kind, false));
-            assert!(!decided.can_equip(&helmet, "feet", player + 1, kind, false));
-            let other = ItemStack::new("minecraft:diamond_helmet", 1);
-            assert!(decided.can_equip(&other, "head", player, kind, true));
-            assert!(!decided.can_equip(&other, "feet", player, kind, false));
-            assert_eq!(asked.load(Ordering::Relaxed), 4);
+    fn a_guests_bundle_puts_on_what_the_part_allows() {
+        use horizon_client::bundle::Contents;
+        use horizon_protocol::packets::play::{ContainerClick, Serverbound};
+        installed(|asked| {
+            crate::game::native_guest_turn_tests::with_guests(|game| {
+                game.reset_entity_residency();
+                let mut bundle = ItemStack::new("minecraft:bundle", 1);
+                let mut contents = Contents::of(game.items(), &bundle).unwrap();
+                let mut helmet = ItemStack::new("minecraft:iron_helmet", 1);
+                assert_eq!(contents.try_insert(game.items(), &mut helmet), 1);
+                contents.store(&mut bundle);
+                let held = |game: &Game<'_>| {
+                    let guest = &game.lan.as_ref().unwrap().hub.guests[0];
+                    let name = |s: &Option<ItemStack>| s.as_ref().map(|s| s.item.to_string());
+                    let inside = (guest.carried.as_ref())
+                        .and_then(|b| Contents::of(game.items(), b))
+                        .map(|c| {
+                            c.items()
+                                .iter()
+                                .map(|s| s.item.to_string())
+                                .collect::<Vec<_>>()
+                        });
+                    let inventory = guest.inventory.iter().filter(|s| s.is_some()).count();
+                    (guest.armor.each_ref().map(name), inside, inventory)
+                };
+                // Right clicks (button 1) of the pickup mode on menu slots 5 (head) and 8 (feet).
+                let click = |game: &mut Game<'_>, slot: i16| {
+                    game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                        guest.carried = Some(bundle.clone());
+                    });
+                    let click = ContainerClick {
+                        container: 0,
+                        state: 0,
+                        slot,
+                        button: 1,
+                        input: 0,
+                        changed: Vec::new(),
+                        carried: None,
+                    };
+                    game.lan_guest_packet(12, Serverbound::ContainerClick(click));
+                };
+                let helmet = "minecraft:iron_helmet".to_owned();
+                click(game, 5);
+                assert_eq!(
+                    held(game),
+                    ([None, None, None, None], Some(vec![helmet.clone()]), 0)
+                );
+                click(game, 8);
+                assert_eq!(
+                    held(game),
+                    ([None, None, None, Some(helmet)], Some(Vec::new()), 0)
+                );
+                // The part was asked about the helmet taken out of the bundle.
+                assert!(asked.load(Ordering::Relaxed) > 0);
+            });
         });
     }
 }
