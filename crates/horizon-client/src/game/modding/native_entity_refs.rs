@@ -942,6 +942,17 @@ mod ray_tests {
 
 #[cfg(test)]
 pub(super) mod tests {
+    /// Keep guest setup and calls together, preserving libtest identity and panic payloads.
+    pub(in crate::game) fn run_on_guest_stack(test: impl FnOnce() + Send + 'static) {
+        let mut worker = horizon_guest_stack::builder();
+        if let Some(name) = std::thread::current().name() {
+            worker = worker.name(name.to_owned());
+        }
+        if let Err(payload) = worker.spawn(test).unwrap().join() {
+            std::panic::resume_unwind(payload);
+        }
+    }
+
     /// Resolve a fixture after registration or a late Parts reinstall from its loaded table.
     pub(in crate::game) fn resolve_parts(game: &super::Game<'_>) -> Result<(), String> {
         crate::game::api_values::resolve_block_definitions(game.pack.assets.registry)?;
@@ -1207,6 +1218,9 @@ pub(super) mod tests {
     fn typed_uuid_and_nbt_reads_follow_the_entity_level() {
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
+            // with_game prepares lifecycle, not world-open command registries.
+            // execute in and summon must resolve real dimension and entity keys.
+            game.build_registries();
             let words = [7, 0, 0, 3];
             let uuid = (7u128 << 96) | 3;
             // Harness commands use the console boundary; setting dedicated
