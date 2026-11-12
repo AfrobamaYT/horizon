@@ -6954,7 +6954,7 @@ impl Game<'_> {
         {
             self.mod_harvest_check(pos, state, &mut correct_tool);
         }
-        let removed = self.remove_block_as_player(pos, state, creative, correct_tool);
+        let removed = self.remove_block_as_player(pos, creative, correct_tool);
         if !creative {
             let held = self.held().cloned();
             let mut harvest = !facts.requires_tool

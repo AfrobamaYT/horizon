@@ -16,11 +16,24 @@ type Heard = ([i32; 3], String, Option<mod_api::Compound>);
 
 struct Probe {
     heard: Arc<Mutex<Vec<Heard>>>,
+    /// The hook and the `minecraft:mined` awards, in the order they came.
+    order: Arc<Mutex<Vec<String>>>,
     cancel_break: Arc<AtomicBool>,
 }
 
 #[mod_api::__subscriptions]
 impl Hooks for Probe {
+    fn player_stat_award(
+        &self,
+        _: &mut dyn ServerHost,
+        event: &mut mod_api::PlayerStatAwardEvent<'_>,
+    ) -> Flow {
+        if event.stat_type == "minecraft:mined" {
+            let award = format!("{} {}", event.stat_type, event.stat);
+            self.order.lock().unwrap().push(award);
+        }
+        Flow::Continue
+    }
     fn break_block(&self, _: &mut dyn ServerHost, _: &mut BreakBlockEvent<'_>) -> Flow {
         if self.cancel_break.load(Ordering::Relaxed) {
             Flow::Cancel
@@ -49,6 +62,7 @@ impl Hooks for Probe {
             host.players().acting_player().is_some(),
             "the breaker is the acting player"
         );
+        self.order.lock().unwrap().push("destroyed".into());
         self.heard
             .lock()
             .unwrap()
@@ -90,11 +104,13 @@ fn with_player(game: &mut super::Game<'_>, mode: GameMode, held: Option<ItemStac
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_players_completed_break_is_heard_once_with_the_removed_state() {
     let heard = Arc::new(Mutex::new(Vec::new()));
+    let order = Arc::new(Mutex::new(Vec::new()));
     let cancel_break = Arc::new(AtomicBool::new(false));
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
         "destroyed",
         Box::new(Probe {
             heard: heard.clone(),
+            order: order.clone(),
             cancel_break: cancel_break.clone(),
         }),
     )]
@@ -114,6 +130,11 @@ fn a_players_completed_break_is_heard_once_with_the_removed_state() {
             assert!(game.native_player_break_block(uuid, stone, false));
             assert_eq!(block(game, stone), "minecraft:air");
             assert_eq!(take(), [(stone, "minecraft:stone".to_owned(), None)]);
+            // Heard before `playerDestroy` counts the block mined; the count comes after.
+            assert_eq!(
+                std::mem::take(&mut *order.lock().unwrap()),
+                ["destroyed", "minecraft:mined minecraft:stone"]
+            );
 
             // Creative: no drops and an early return in vanilla, still heard once. A chest
             // carries its saved contents.
@@ -185,4 +206,235 @@ fn a_players_completed_break_is_heard_once_with_the_removed_state() {
             assert!(take().is_empty(), "a level-side break is not a player's");
         });
     });
+}
+
+/// What one `player_destroyed_block` saw of the level and its player while it ran.
+#[derive(Debug, PartialEq)]
+struct Seen {
+    pos: [i32; 3],
+    /// `BlockStateParser.serialize` of the state the hook was told.
+    state: String,
+    /// Whether the acting player was the fake that broke the block.
+    by_breaker: bool,
+    /// Item entities in the level at that moment.
+    items: usize,
+    /// Experience points lying in orbs around the block at that moment.
+    orb_points: i64,
+    /// Whether the event carried block entity data.
+    block_entity: bool,
+}
+
+/// Item entities in the overworld.
+fn items(host: &dyn mod_api::Host) -> usize {
+    let level = host.level("minecraft:overworld").expect("the overworld");
+    level
+        .all_entities(host)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|entity| entity.kind(host).as_deref() == Some("minecraft:item"))
+        .count()
+}
+
+/// Experience points in the orbs within 3 blocks of `pos`.
+fn orb_points(host: &dyn ServerHost, pos: [i32; 3]) -> i64 {
+    let at = pos.map(f64::from);
+    host.experience_orbs(
+        "minecraft:overworld",
+        at.map(|v| v - 3.0),
+        at.map(|v| v + 4.0),
+    )
+    .iter()
+    .map(|orb| i64::from(orb.value) * i64::from(orb.count))
+    .sum()
+}
+
+/// Gives every break 7 experience points, and records and optionally rewrites what
+/// `player_destroyed_block` sees.
+struct OrderProbe {
+    breaker: mod_api::PlayerRef,
+    seen: Arc<Mutex<Vec<Seen>>>,
+    /// A block `break_block` puts in place of the target, without cancelling the break.
+    replace: Option<&'static str>,
+    /// A block `player_destroyed_block` writes where the broken one stood.
+    write: Option<&'static str>,
+}
+
+/// Sets the overworld's block at `pos` to `block`'s default state from a listener.
+fn set(host: &mut dyn ServerHost, pos: [i32; 3], block: &str) {
+    let state = host.block_state_id(block).expect("a known block");
+    let level = host.level("minecraft:overworld").expect("the overworld");
+    assert!(
+        matches!(
+            level.set_block(host, pos, state, mod_api::BlockUpdateFlags::CLIENTS),
+            Ok(true)
+        ),
+        "the level is writable from the hook"
+    );
+}
+
+#[mod_api::__subscriptions]
+impl Hooks for OrderProbe {
+    fn break_block(&self, host: &mut dyn ServerHost, event: &mut BreakBlockEvent<'_>) -> Flow {
+        *event.exp_to_drop = Some(7);
+        if let Some(block) = self.replace {
+            set(host, event.pos, block);
+        }
+        Flow::Continue
+    }
+    fn player_destroyed_block(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut PlayerDestroyedBlockEvent,
+    ) {
+        let acting = host.players().acting_player();
+        let seen = Seen {
+            pos: event.pos,
+            state: host.block_state_string(event.state).unwrap_or_default(),
+            by_breaker: acting == Some(self.breaker),
+            items: items(&*host),
+            orb_points: orb_points(&*host, event.pos),
+            block_entity: event.block_entity.is_some(),
+        };
+        self.seen.lock().unwrap().push(seen);
+        if let Some(block) = self.write {
+            set(host, event.pos, block);
+        }
+    }
+}
+
+/// Runs `test` on a server with a fake player (`fake_action_tests::fake`) holding `item` in
+/// survival, with an `OrderProbe` that puts `replace` and writes `write`: what the probe saw.
+fn with_order_probe(
+    item: &str,
+    replace: Option<&'static str>,
+    write: Option<&'static str>,
+    test: impl FnOnce(&mut super::Game<'_>, mod_api::PlayerRef),
+) -> Vec<Seen> {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    with_game(|game| {
+        let (player, ..) = super::native_server::fake_action_tests::fake(game, Some(item), 0);
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "order",
+            Box::new(OrderProbe {
+                breaker: player,
+                seen: seen.clone(),
+                replace,
+                write,
+            }),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || test(game, player));
+    });
+    std::mem::take(&mut *seen.lock().unwrap())
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_fakes_break_action_is_heard_before_the_drops_and_the_experience() {
+    use mod_api::PlayerAction;
+    let stone = [1, 63, 0];
+    let mut after = None;
+    let seen = with_order_probe("minecraft:diamond_pickaxe", None, None, |game, player| {
+        assert_eq!(
+            game.player_perform_action(player, PlayerAction::BreakBlock { pos: stone }),
+            Ok(mod_api::ActionOutcome::Consumed)
+        );
+        assert_eq!(block(game, stone), "minecraft:air");
+        after = Some((items(game), orb_points(game, stone)));
+    });
+    // Heard once, as the fake's own break, before `playerDestroy`: no dropped item and no
+    // experience yet. (A fake keeps no statistics; the mined count's order is checked with
+    // a real player in `a_players_completed_break_is_heard_once_with_the_removed_state`.)
+    assert_eq!(
+        seen,
+        [Seen {
+            pos: stone,
+            state: "minecraft:stone".into(),
+            by_breaker: true,
+            items: 0,
+            orb_points: 0,
+            block_entity: false,
+        }]
+    );
+    // Then the break finishes: the cobblestone dropped and the 7 points `break_block` asked
+    // for.
+    assert_eq!(after, Some((1, 7)));
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_listener_writes_the_level_where_the_block_stood() {
+    use mod_api::PlayerAction;
+    let stone = [1, 63, 0];
+    let mut after = None;
+    let seen = with_order_probe(
+        "minecraft:diamond_pickaxe",
+        None,
+        Some("minecraft:glass"),
+        |game, player| {
+            assert_eq!(
+                game.player_perform_action(player, PlayerAction::BreakBlock { pos: stone }),
+                Ok(mod_api::ActionOutcome::Consumed)
+            );
+            after = Some((items(game), orb_points(game, stone)));
+            assert_eq!(block(game, stone), "minecraft:glass");
+        },
+    );
+    assert_eq!(seen.len(), 1);
+    // The write does not undo the break: the stone's drops and experience still come.
+    assert_eq!(after, Some((1, 7)));
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn shears_disarm_a_tripwire_and_the_hook_is_told_the_disarmed_string() {
+    use mod_api::PlayerAction;
+    let wire = [1, 64, 0];
+    let seen = with_order_probe("minecraft:shears", None, None, |game, player| {
+        place(game, wire, "minecraft:tripwire");
+        assert_eq!(
+            game.player_perform_action(player, PlayerAction::BreakBlock { pos: wire }),
+            Ok(mod_api::ActionOutcome::Consumed)
+        );
+        assert_eq!(block(game, wire), "minecraft:air");
+    });
+    // TripWireBlock.playerWillDestroy sets the disarmed string in the level (flags 260)
+    // before the removal, and the hook is told what the removal took out. (Vanilla's
+    // Block.destroy is passed the armed one: playerWillDestroy returns the state it was given.)
+    assert_eq!(
+        seen.iter().map(|s| s.state.as_str()).collect::<Vec<_>>(),
+        [
+            "minecraft:tripwire[attached=false,disarmed=true,east=false,north=false,powered=false,south=false,west=false]"
+        ]
+    );
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_target_break_block_replaced_is_told_with_its_own_block_entity() {
+    use mod_api::PlayerAction;
+    let target = [1, 63, 0];
+    let seen = with_order_probe(
+        "minecraft:diamond_pickaxe",
+        Some("minecraft:chest"),
+        None,
+        |game, player| {
+            assert_eq!(
+                game.player_perform_action(player, PlayerAction::BreakBlock { pos: target }),
+                Ok(mod_api::ActionOutcome::Consumed)
+            );
+            assert_eq!(block(game, target), "minecraft:air");
+        },
+    );
+    // `break_block` put a chest where the stone was and let the break go on: the removal
+    // takes the chest out, and the hook hears the chest with the chest's block entity, not
+    // the stone the break started on.
+    assert_eq!(seen.len(), 1);
+    assert_eq!(
+        (seen[0].state.as_str(), seen[0].block_entity),
+        (
+            "minecraft:chest[facing=north,type=single,waterlogged=false]",
+            true
+        )
+    );
 }
