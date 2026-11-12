@@ -322,7 +322,8 @@ fn start(threads: usize) -> std::io::Result<Pool> {
             load: AtomicUsize::new(0),
         });
         let mine = worker.clone();
-        std::thread::Builder::new()
+        // Payload handlers of wasm mods run on these threads (the server's network root).
+        horizon_guest_stack::builder()
             .name(format!("horizon-net-{n}"))
             .spawn(move || run(poll, &mine))?;
         workers.push(worker);

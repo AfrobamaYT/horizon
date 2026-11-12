@@ -380,7 +380,8 @@ impl Session {
         let recorder = Arc::new(Mutex::new(None));
         let thread_recorder = recorder.clone();
         let (address_owned, name_owned) = (address.to_owned(), name.to_owned());
-        let thread = std::thread::Builder::new()
+        // Payload handlers of wasm mods run on this thread (the client's network root).
+        let thread = horizon_guest_stack::builder()
             .name("horizon-net".into())
             .spawn(move || {
                 horizon_threads::favour_current();

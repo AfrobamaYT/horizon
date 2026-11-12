@@ -158,6 +158,7 @@ fn audited_guest_workers_use_the_stack_policy() {
     for file in [
         "crates/horizon-threads/src/jobs.rs",
         "crates/horizon-threads/src/lib.rs",
+        "crates/horizon-client/src/lan/io_pool.rs",
         "crates/horizon-client/src/vanillagen.rs",
         "crates/horizon-client/src/vanillagen/lod.rs",
         "crates/horizon-client/src/game/runtime/resource_load.rs",
