@@ -1306,6 +1306,8 @@ impl Game<'_> {
         }
         // Their victims have been looted and mourned: no charged creeper is
         // waiting any more.
+        // Resolve saved attacker UUIDs before the mobs run baseTick.
+        self.resolve_last_hurt_by_refs();
         self.combat.charged_exploders.clear();
         self.combat.exploded.clear();
         self.combat.exploded_kinds.clear();
