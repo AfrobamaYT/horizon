@@ -63,7 +63,7 @@ impl Seen {
     pub fn visibility_percent(&self, looking: Species) -> f64 {
         let mut visibility = 1.0;
         if self.invisible {
-            visibility *= 0.7 * f64::from(self.cover.armor).max(0.1);
+            visibility *= 0.7 * f64::from(self.cover.armor.max(0.1));
         }
         if let Some(head) = self.cover.head {
             visibility *= f64::from(mob_visibility(head, looking));
