@@ -18,7 +18,7 @@ impl Hooks for Bucket {
 impl ItemPart for Bucket {
     fn creator_mod_id(&self, _: &dyn mod_api::Host, event: &mut CreatorModIdEvent<'_>) {
         if event.stack.count() > 1 {
-            event.mod_id = Some("other_mod".to_owned());
+            *event.mod_id = Some("other_mod".to_owned());
         }
     }
 }
