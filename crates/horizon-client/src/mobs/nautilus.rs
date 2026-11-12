@@ -596,6 +596,7 @@ impl Goal for Charge {
                 x: f64::from(horizon_core::geometry::trig::sin(yaw)),
                 z: -f64::from(horizon_core::geometry::trig::cos(yaw)),
                 source: super::Damage::mob(m.id, from),
+                apply_blocking: None,
             };
             cx.events.push(if who == Who::Player {
                 cx.w.route_player_event(event)
