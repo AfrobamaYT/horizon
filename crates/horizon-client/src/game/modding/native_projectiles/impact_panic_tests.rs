@@ -2,7 +2,7 @@ use super::*;
 use horizon_client::{
     chunk::Chunk,
     join_seq::residency::{
-        Journal, Kind, Owner,
+        Change, Journal, Kind, Owner,
         table::{EntityLookup, EntityTable, SourceEntity},
     },
 };
@@ -88,6 +88,7 @@ fn shoot_listener_panic_after_admission_preserves_owned_rows() {
                 game.world.set(2, 64, 0, stone).unwrap();
                 // Hook handles resolve through the game's canonical residency table.
                 let journal = game.resident_entities.table.borrow().producer();
+                let observation = journal.observe_structural_events();
                 let owner = Owner {
                     dimension: game.dim.key(),
                     kind: Kind::Projectile,
@@ -128,8 +129,21 @@ fn shoot_listener_panic_after_admission_preserves_owned_rows() {
                     panicked.load(Ordering::SeqCst),
                     "did not reach the post-admission listener"
                 );
-                // Queries in the callback may already have consumed journal entries.
-                // The canonical consumer still checks balanced lift/restore ownership.
+                // Observe without stealing events already consumed by hook queries.
+                let mut events = Vec::new();
+                observation.drain_into(&mut events);
+                let mut depth = 0usize;
+                for event in events {
+                    assert_eq!(event.owner, owner);
+                    match event.change {
+                        Change::Lifted => depth += 1,
+                        Change::Restored => {
+                            depth = depth.checked_sub(1).expect("restore without lift")
+                        }
+                        _ => {}
+                    }
+                }
+                assert_eq!(depth, 0, "listener panic abandoned the lifted pass");
                 game.resident_entities
                     .table
                     .borrow_mut()
