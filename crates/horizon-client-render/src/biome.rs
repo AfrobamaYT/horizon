@@ -486,15 +486,15 @@ impl Biomes {
             return id;
         }
         let mut placeholders = self.placeholders.lock().unwrap_or_else(|e| e.into_inner());
+        let mut warned = WARNED_MISSING.lock().unwrap_or_else(|e| e.into_inner());
+        if warned.insert(name.to_owned()) {
+            log::warn!(
+                "saved biome {name} is not in this world's biomes; it plays as plains and is saved unchanged"
+            );
+        }
         let slot = match placeholders.iter().position(|p| p == name) {
             Some(slot) => slot,
             None => {
-                let mut warned = WARNED_MISSING.lock().unwrap_or_else(|e| e.into_inner());
-                if warned.insert(name.to_owned()) {
-                    log::warn!(
-                        "saved biome {name} is not in this world's biomes; it plays as plains and is saved unchanged"
-                    );
-                }
                 placeholders.push(name.to_owned());
                 placeholders.len() - 1
             }
@@ -1132,6 +1132,17 @@ mod placeholder_tests {
             ("minecraft:forest", json!({"effects": {"water_color": 1}})),
             ("minecraft:plains", json!({"effects": {"water_color": 2}})),
         ])
+    }
+
+    #[test]
+    fn an_existing_placeholder_warns_again_in_the_next_world() {
+        let biomes = table();
+        let name = "gone_mod:warning_reset";
+        let id = biomes.saved_id(name);
+        // Simulate the next world's cleared warning set for this name only.
+        assert!(WARNED_MISSING.lock().unwrap().remove(name));
+        assert_eq!(biomes.saved_id(name), id);
+        assert!(WARNED_MISSING.lock().unwrap().contains(name));
     }
 
     #[test]

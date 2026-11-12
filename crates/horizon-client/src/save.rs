@@ -6198,10 +6198,15 @@ mod tests {
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
         let load = || {
-            Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
                 root.clone(),
             ))
-            .expect("biomes")
+            .expect("biomes");
+            // Force the saved palette into global storage with IDs above 255.
+            for i in 0..260 {
+                biomes.saved_id(&format!("gone_mod:unused_{i}"));
+            }
+            biomes
         };
         let palette = |saved: &NamedTag| -> Vec<String> {
             let Some(Tag::List(sections)) = saved.tag.get("sections") else {
@@ -6224,6 +6229,14 @@ mod tests {
         let before = load();
         let mut chunk = Chunk::empty(0, 0);
         chunk.set_biome_cell(1, 20, 2, before.saved_id("gone_mod:highland"));
+        for i in 0..9 {
+            chunk.set_biome_cell(
+                i % 4,
+                20,
+                i / 4,
+                before.saved_id(&format!("gone_mod:cell_{i}")),
+            );
+        }
         let saved = encode(&chunk, assets.registry, &before);
         assert!(palette(&saved).contains(&"gone_mod:highland".to_owned()));
         // Reopened without that mod: the column plays as plains...
@@ -6243,6 +6256,11 @@ mod tests {
         let id = reloaded.biome(4, 16, 8);
         assert_eq!(again.name(id), "minecraft:plains");
         assert_eq!(again.saved_name(id), "gone_mod:highland");
+        for i in 0..9 {
+            let id = reloaded.biome((i % 4) * 4, 16, (i / 4) * 4);
+            assert!(id > 255);
+            assert_eq!(again.saved_name(id), format!("gone_mod:cell_{i}"));
+        }
         assert_eq!(palette(&encode(&reloaded, assets.registry, &again)), names);
     }
 

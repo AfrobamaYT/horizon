@@ -256,9 +256,8 @@ impl Default for ColumnLayout {
     }
 }
 
-/// Biomes are 4x4x4 containers over the biome table (67 entries: a 7-bit
-/// global palette).
-pub const BIOME_STRATEGY: Strategy = Strategy::biomes(8);
+/// Biomes are 4x4x4 containers with 16-bit IDs, including saved placeholders.
+pub const BIOME_STRATEGY: Strategy = Strategy::biomes(16);
 
 /// Bits of the block states' global palette: 16 for vanilla's 35,723 states
 /// (what vanilla servers and clients send), more when content mods add states

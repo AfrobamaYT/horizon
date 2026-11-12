@@ -537,6 +537,10 @@ impl Game<'_> {
             self.level_shapes.get(dim.id()),
             self.level.seed,
             &self.level.enabled_features,
+            self.world_biomes
+                .as_ref()
+                .unwrap_or_else(|| self.res.biomes())
+                .clone(),
             self.server_loot.clone(),
         )?;
         save.install_profession_snapshot(self.stations().professions.clone());
