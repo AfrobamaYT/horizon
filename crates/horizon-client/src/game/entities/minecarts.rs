@@ -3768,7 +3768,8 @@ mod cart_push_tests {
         let name = game.holder_name(Target::Cart(2)).expect("a cart's UUID");
         game.score.board.add_team("cart-2").collision_rule = CollisionRule::Never;
         game.score.board.add_to_team(&name, "cart-2");
-        game.carts[0].velocity = Vec3::new(0.2, 0.0, 0.0);
+        game.carts
+            .update(0, |cart| cart.velocity = Vec3::new(0.2, 0.0, 0.0));
         let mut index = super::CartIndex::default();
         game.push_from_cart(0, &mut index);
         assert_eq!(

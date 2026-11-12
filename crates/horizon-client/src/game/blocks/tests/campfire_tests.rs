@@ -29,7 +29,7 @@ fn campfire_game<'a>(pos: [i32; 3], resources: &'a mut Option<Arc<Resources>>) -
         .default_state("minecraft:campfire")
         .unwrap();
     game.world.set(pos[0], pos[1], pos[2], state).unwrap();
-    game.world.block_entities.put(
+    game.world.block_entities.insert(
         (pos[0], pos[1], pos[2]),
         BlockEntity::Campfire(Box::default()),
     );

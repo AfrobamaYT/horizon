@@ -2153,7 +2153,7 @@ mod mob_equipment_command_tests {
                     .mobs
                     .iter()
                     .find(|m| m.kind.id == "minecraft:sulfur_cube");
-                m.and_then(|m| m.extra.body.clone())
+                m.and_then(|m| m.extra.equipment[horizon_items::equipment::BODY].clone())
             };
             let replace = "item replace entity @e[tag=cube,limit=1] armor.body with";
             assert!(game.run_command(&format!("{replace} white_wool")));

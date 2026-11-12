@@ -1,11 +1,12 @@
-use super::super::native_machines::tests::server_game;
 use super::*;
+use crate::game::game_tests::tests::server_game;
 use horizon_core::position::BlockPos;
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
 fn count_equality_uses_live_stack_bounds_and_command_flow() {
-    let mut game = server_game();
+    let mut resources = None;
+    let mut game = server_game(&mut resources);
     game.build_registries();
     game.set_allow_commands(true);
     game.block_ticks

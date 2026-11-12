@@ -5,8 +5,8 @@
 //! that predicate, so a sitting cat leaves the comparator at 0. A hopper's
 //! `getContainer(.., true)` ignores the block, and the menu path keeps
 //! closing as before.
-use super::super::native_machines::tests::server_game;
 use super::*;
+use crate::game::game_tests::tests::server_game;
 use horizon_client::chunk::Chunk;
 use horizon_core::geometry::Vec3;
 use std::sync::Arc;
@@ -18,8 +18,8 @@ const WIRE: Pos = (2, 64, 0);
 /// A full chest at `CHEST`, a comparator east of it reading west into it,
 /// and the wire that carries the comparator's output, on a floor in a
 /// ticking chunk.
-fn game() -> Game<'static> {
-    let mut game = server_game();
+fn game<'a>(resources: &'a mut Option<Arc<Resources>>) -> Game<'a> {
+    let mut game = server_game(resources);
     game.build_registries();
     game.set_allow_commands(true);
     for x in -1..=1 {
@@ -89,7 +89,8 @@ fn wire_power(game: &Game<'_>) -> i32 {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_sitting_cat_silences_the_comparator_reading_a_chest() {
-    let mut game = game();
+    let mut resources = None;
+    let mut game = game(&mut resources);
     poke(&mut game, "glass");
     assert_eq!(wire_power(&game), 1, "a full chest reads 1");
 
@@ -106,7 +107,8 @@ fn a_sitting_cat_silences_the_comparator_reading_a_chest() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_sitting_cat_leaves_the_hopper_and_the_menu_alone() {
-    let mut game = game();
+    let mut resources = None;
+    let mut game = game(&mut resources);
     summon_cat(&mut game, true);
     assert!(
         game.containers().view(CHEST, false).is_some(),
@@ -125,7 +127,8 @@ fn a_sitting_cat_leaves_the_hopper_and_the_menu_alone() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_conductor_above_a_chest_still_silences_the_comparator() {
-    let mut game = game();
+    let mut resources = None;
+    let mut game = game(&mut resources);
     poke(&mut game, "glass");
     assert_eq!(wire_power(&game), 1);
     assert!(game.run_command("setblock 0 65 0 stone"));

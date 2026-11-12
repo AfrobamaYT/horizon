@@ -13503,11 +13503,17 @@ mod breeding_heart_tests {
             game.mobs
                 .push(Mob::new(2, kind, Vec3::new(9.5, 64.0, 8.5), 0.0));
             game.lan_entity_events.clear();
-            game.breed(1, 2, None);
+            game.breed(
+                1,
+                2,
+                None,
+                None,
+                horizon_client::mobs::BreedExperience::Deferred,
+            );
             let burst = game
                 .lan_entity_events
                 .iter()
-                .filter(|(id, event, _)| *id == 1 && *event == 18)
+                .filter(|(id, event)| *id == 1 && *event == 18)
                 .count();
             assert_eq!(
                 burst, hearts,
