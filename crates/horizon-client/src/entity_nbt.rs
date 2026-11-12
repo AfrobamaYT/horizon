@@ -2763,7 +2763,7 @@ pub fn entity_base_tag(
         motion,
         rotation,
         on_ground: raw.is_some_and(|t| flag(t, "OnGround")),
-        fall_distance: 0.0,
+        fall_distance: raw.map_or(0.0, |t| ground_from_nbt(t).1),
     }
     .tag(raw)
 }
@@ -2867,7 +2867,7 @@ pub fn orb_to_nbt(o: &ExperienceOrb, uuid: [i32; 4]) -> Tag {
         motion: o.velocity,
         rotation: o.rotation,
         on_ground: o.on_ground,
-        fall_distance: 0.0,
+        fall_distance: o.fall_distance,
     };
     let mut tag = base.tag(None);
     for (key, value) in [
@@ -2893,6 +2893,7 @@ pub fn orbs_from_nbt(tag: &Tag) -> Vec<ExperienceOrb> {
     let count = number(tag.get("Count")).unwrap_or(1).max(1) as u32;
     let orb = ExperienceOrb {
         attachment_lifetime: Default::default(),
+        fall_distance: float(tag.get("fall_distance")).unwrap_or(0.0),
         rotation: rotation(tag),
         join: Default::default(),
         no_gravity: flag(tag, "NoGravity"),
@@ -4471,6 +4472,33 @@ mod tests {
         assert_eq!(tag.get("UUID"), Some(&Tag::IntArray(vec![9, 9, 9, 9])));
     }
 
+    /// An entity that never moves (an `AreaEffectCloud`) saves the
+    /// `fall_distance` `Entity.load` read, and 0 when it was made in play.
+    #[test]
+    fn a_base_tag_keeps_the_loaded_fall_distance() {
+        let raw = horizon_core::nbt::parse_snbt(
+            "{id:\"minecraft:area_effect_cloud\",Pos:[1d,200d,1d],fall_distance:5.0d}",
+        )
+        .unwrap()
+        .0;
+        let fall = |raw: Option<&super::Tag>| {
+            let tag = super::entity_base_tag(
+                "minecraft:area_effect_cloud",
+                super::Vec3::new(1.0, 200.0, 1.0),
+                super::Vec3::ZERO,
+                [0.0, 0.0],
+                [1; 4],
+                raw,
+            );
+            match tag.get("fall_distance") {
+                Some(super::Tag::Double(bits)) => f64::from_bits(*bits),
+                other => panic!("no fall_distance: {other:?}"),
+            }
+        };
+        assert_eq!(fall(Some(&raw)), 5.0);
+        assert_eq!(fall(None), 0.0);
+    }
+
     #[test]
     fn empty_saved_tags_are_omitted_without_changing_raw_or_nonempty_tags() {
         let base = Base {
@@ -5125,6 +5153,7 @@ mod tests {
                 no_gravity: true,
                 on_ground: true,
                 fire_ticks: 0,
+                fall_distance: 0.0,
                 sound_event: TRIDENT_HIT_GROUND,
                 item: &trident,
             },
@@ -6228,6 +6257,7 @@ mod tests {
                 no_gravity: false,
                 on_ground: false,
                 fire_ticks: 0,
+                fall_distance: 0.0,
                 sound_event: TRIDENT_HIT_GROUND,
                 item: &trident,
             },
