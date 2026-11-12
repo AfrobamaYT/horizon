@@ -138,7 +138,7 @@ impl ConnectedTextures {
     /// Loaded rules with their tiles inserted into `sprites` (before it finishes).
     /// `face_layer` answers a block state's sprite on a side, for rules that connect by tile.
     pub fn load(
-        root: &ResourceSource,
+        _root: &ResourceSource,
         mut rules: Vec<Rule>,
         registry: &BlockRegistry,
         sprites: &mut Sprites,
