@@ -2,6 +2,7 @@
 use crate::wire::WireError;
 use std::rc::Rc;
 
+// no wire: guest-local storage for prepared arguments; only its slot tokens cross the boundary.
 pub struct PreparedSlots<T> {
     slots: Vec<Option<(u32, Rc<T>)>>,
 }
