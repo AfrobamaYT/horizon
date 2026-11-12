@@ -898,12 +898,10 @@ impl Mob {
         // block, a bed), whichever is larger. A mob never sneaks, so nothing
         // suppresses its bounce there.
         if wanted.y.abs() > 0.0 && vertical || x_hit || z_hit {
-            // Entity.getOnPos(0.2F): the block whose bounce this move sees.
-            let on = (
-                self.position.x.floor() as i32,
-                (self.position.y - f64::from(0.2_f32)).floor() as i32,
-                self.position.z.floor() as i32,
-            );
+            // Entity.getOnPos(0.2F): the block whose bounce this move sees, the supporting
+            // block's column where one holds the mob (a fence or wall's own position).
+            let [x, y, z] = self.block_on_legacy(w);
+            let on = (x, y, z);
             let input = RestitutionInput {
                 block: w.world.block(on.0, on.1, on.2),
                 collided_x: x_hit,
