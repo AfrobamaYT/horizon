@@ -170,11 +170,12 @@ fn audited_guest_workers_use_the_stack_policy() {
     let server =
         std::fs::read_to_string(root.join("crates/horizon-client/src/game/world/integrated.rs"))
             .unwrap();
+    // Production code only: a test may start its own server thread with the same policy.
+    let server = server.split("\n#[cfg(test)]").next().unwrap();
     assert_eq!(
         server.matches(".stack_size(server_thread_stack())").count(),
         2
     );
-    let server = server.split("\n#[cfg(test)]").next().unwrap();
     assert_eq!(server.matches("thread::Builder::new()").count(), 2);
     for form in ["thread::spawn(", "scope.spawn(", "s.spawn("] {
         assert!(
