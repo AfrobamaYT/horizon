@@ -427,7 +427,12 @@ jobs:
         run: cargo +stable build $JOBS --profile test -p horizon-mod-package --features runtime-process --example holder_actor
       - name: Test Rust core and voxel kernel correctness
         if: needs.changes.outputs.rust_required != 'false'
-        run: cargo +stable test $JOBS --profile test --workspace --lib --bins --tests
+        run: cargo +stable test $JOBS --profile test --workspace --lib --bins --tests --timings
+      # What bounds the build: the slowest compile units, from the report --timings writes.
+      - name: Slowest compile units
+        if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' }}
+        continue-on-error: true
+        run: python3 tools/ci/cargo_timings.py target/cargo-timings/cargo-timing.html | tee -a "$GITHUB_STEP_SUMMARY"
       # Prepared-data content-root tests stay in the existing client-lib data leg.
       # Running them again here without the data only rebuilds targets before they return early.
       # One genuine pinned export also validates source staging and listed slots.
