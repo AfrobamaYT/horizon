@@ -4582,8 +4582,8 @@ impl Hub {
                             events.push(HostEvent::Packet(conn, Box::new(S::PlayerCommand(p))));
                         }
                     }
-                    // STOP_SLEEPING.
-                    0 => self.wake(i),
+                    // STOP_SLEEPING: the game wakes the guest, after the mods hear it.
+                    0 => events.push(HostEvent::Packet(conn, Box::new(S::PlayerCommand(p)))),
                     _ => {}
                 },
                 S::Chat(c) => self.handle_chat(i, c, events),

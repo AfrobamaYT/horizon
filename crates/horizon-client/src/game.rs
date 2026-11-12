@@ -12915,11 +12915,18 @@ impl Game<'_> {
         self.occupy_bed(head);
         true
     }
-    fn wake_up(&mut self) {
+    /// `Player.stopSleepInBed(false, update_level)`: `update_level` is false
+    /// only for the morning's `ServerLevel.wakeUpAllPlayers`.
+    fn wake_up(&mut self, update_level: bool) {
         if self.remote.is_some() {
             // InBedChatScreen.sendWakeUp: the server wakes the player.
             self.remote_stop_sleeping();
             return;
+        }
+        // PlayerWakeUpEvent: heard at the start of stopSleepInBed, still in bed.
+        if let (Some(head), Some(player)) = (self.sleeping, self.lan_acting_uuid) {
+            let name = self.lan_acting_name.clone().unwrap_or_default();
+            self.native_player_bed_leave(player, &name, head, false, update_level);
         }
         let Some(head) = self.sleeping.take() else {
             return;
@@ -12931,17 +12938,11 @@ impl Game<'_> {
             && let Some(host) = self.lan.as_mut()
         {
             // The live turn may have changed its bed since entry.
-            {
-                let value = Some(head);
-                host.hub.guests.update(i, |guest| guest.bed = value);
-            }
+            host.hub.guests.update(i, |guest| guest.bed = Some(head));
             host.hub.wake(i);
             // This live body applies the stand-up pose below, not the later
             // wake_woken_guests pass over stored guest bodies.
-            {
-                let value = None;
-                host.hub.guests.update(i, |guest| guest.woke_from = value);
-            }
+            host.hub.guests.update(i, |guest| guest.woke_from = None);
         }
         let stand = self.bed_wake_pose(head, self.yaw);
         if let Some(p) = self.player.as_mut() {
@@ -12963,9 +12964,6 @@ impl Game<'_> {
                 self.snap_player_model_pitch();
             }
         }
-        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
-            self.native_player_bed_leave(player, &name, head);
-        }
     }
     fn tick_sleep(&mut self) {
         self.sleep_timer = tick_sleep_timer(self.sleep_timer, self.sleeping.is_some());
@@ -12983,7 +12981,7 @@ impl Game<'_> {
                     .as_ref()
                     .is_none_or(|p| p.health.dead_or_dying())
             {
-                self.wake_up();
+                self.wake_up(true);
                 return;
             }
             // setPosToBed: the bed's top (`getSleepHeight`) and 0.125 above
@@ -13039,7 +13037,7 @@ impl Game<'_> {
                 self.world.weather.thunder_time = 0;
             }
             if self.sleeping.is_some() {
-                self.wake_up();
+                self.wake_up(false);
             }
             self.wake_guests();
             // SleepStatus.removeAllSleepers: waking everyone is not announced.

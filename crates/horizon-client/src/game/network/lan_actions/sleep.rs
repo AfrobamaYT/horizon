@@ -9,11 +9,6 @@ impl Game<'_> {
             return;
         };
         let yaw = host.hub.guests[gi].yaw;
-        let (player, name) = {
-            let g = &host.hub.guests[gi];
-            (g.uuid, g.name.clone())
-        };
-        self.native_player_bed_leave(player, &name, head);
         let Some((stand, yaw)) = self.bed_wake_pose(head, yaw) else {
             return;
         };
@@ -58,7 +53,20 @@ impl Game<'_> {
         }
     }
 
-    pub(in crate::game) fn wake_guest(&mut self, gi: usize) {
+    /// `ServerPlayer.stopSleepInBed(false, update_level)` for guest `gi`:
+    /// `update_level` is false only for the morning's `wakeUpAllPlayers`.
+    /// The mods hear it first, while the guest still lies in the bed.
+    pub(in crate::game) fn wake_guest(&mut self, gi: usize, update_level: bool) {
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
+        let g = &host.hub.guests[gi];
+        if let Some(head) = g.bed
+            && mod_api::__private::listened(mod_api::HookId::PlayerBedLeave)
+        {
+            let (player, name) = (g.uuid, g.name.clone());
+            self.native_player_bed_leave(player, &name, head, false, update_level);
+        }
         let Some(host) = self.lan.as_mut() else {
             return;
         };
@@ -130,7 +138,7 @@ impl Game<'_> {
                 keep_sleeping = may_continue.unwrap_or(problem.is_none());
             }
             if !keep_sleeping {
-                self.wake_guest(gi);
+                self.wake_guest(gi, true);
             } else if let Some(host) = self.lan.as_mut() {
                 // LivingEntity.tick: a sleeper's xRot is 0.
                 host.hub.guests.update(gi, |g| {
@@ -265,7 +273,7 @@ impl Game<'_> {
         };
         let count = host.hub.guests.len();
         for i in 0..count {
-            self.wake_guest(i);
+            self.wake_guest(i, false);
         }
     }
 
