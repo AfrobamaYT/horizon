@@ -1491,8 +1491,8 @@ mod own_block_entity_tests {
     use crate::game::native_entity_refs::tests::{run_fresh_cases, with_game_at};
     use crate::game::published_loops::LoopFlow;
     use horizon_client::block_entities::Pos;
-    use horizon_core::geometry::Vec3;
     use horizon_client::containers::{BlockEntity, ModBlockEntity};
+    use horizon_core::geometry::Vec3;
     use mod_api::*;
     use std::sync::{Arc, OnceLock};
 
@@ -1648,7 +1648,10 @@ mod own_block_entity_tests {
                 }
                 let (a, b, c) = ((1, 64, 1), (3, 64, 1), (5, 64, 1));
                 let (own_a, (own_b, missing)) = &mut slots;
-                assert_eq!((own_a.visited, own_b.visited, missing.visited), (10, 10, 10));
+                assert_eq!(
+                    (own_a.visited, own_b.visited, missing.visited),
+                    (10, 10, 10)
+                );
                 own_a.mine.sort_unstable();
                 own_b.mine.sort_unstable();
                 assert_eq!(own_a.mine, [a, a, c, c]);
