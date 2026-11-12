@@ -411,7 +411,6 @@ impl Game<'_> {
     ) -> Result<()> {
         (self.world_tables, self.health_resources) =
             self.build_world_tables(stack, false, root, self.mods.data_switched)?;
-        self.refresh_infiniburn();
         self.install_profession_save_snapshots();
         self.mods.datapack_registries = self.mods.datapack_candidate.take().map(|candidate| {
             Arc::new(mod_api::DatapackRegistrySet::first(

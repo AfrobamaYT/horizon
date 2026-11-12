@@ -44,6 +44,13 @@ impl Game<'_> {
         }
     }
 
+    /// An opened world's level becomes current: its `World` was installed after the tables
+    /// were built, so its fire sources resolve now, against the tags just installed.
+    pub(in crate::game) fn enter_opened_dim(&mut self, dim: Dim) {
+        self.dim = dim;
+        self.refresh_infiniburn();
+    }
+
     /// The new remote World and its connection's dimension facts are now both installed.
     pub(super) fn finish_remote_level(&mut self) {
         self.refresh_infiniburn();
