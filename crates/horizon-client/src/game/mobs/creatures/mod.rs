@@ -22,8 +22,8 @@ use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::level_sounds::LevelSound;
 use super::piston_push::Lid;
 use super::{
-    Dim, Game, Hand, InteractTarget, entity_culling::EntityCullDecision,
-    native_mob_draw::PlayerRender, native_projectiles::Impact, view_vector,
+    Dim, Game, InteractTarget, entity_culling::EntityCullDecision, native_mob_draw::PlayerRender,
+    native_projectiles::Impact, view_vector,
 };
 use horizon_assets::item_model::DisplayContext;
 use horizon_client::actions::Action;
@@ -6493,30 +6493,11 @@ impl Game<'_> {
             }
             return Ok(true);
         }
-        if self.held_shears() {
-            let mob = &self.mobs[index];
-            let shearable = match mob.species() {
-                Species::Sheep => !mob.extra.sheared && !mob.is_baby(),
-                Species::Mooshroom => !mob.is_baby(),
-                Species::SnowGolem | Species::Bogged => mob.alive() && !mob.extra.sheared,
-                _ => false,
-            };
-            if shearable
-                && let (Some(player), Some(name)) =
-                    (self.lan_acting_uuid, self.lan_acting_name.clone())
-            {
-                let mut cancel = false;
-                self.native_player_shear_entity(
-                    player,
-                    &name,
-                    mob.id as i32,
-                    self.hand == Hand::Off,
-                    &mut cancel,
-                );
-                if cancel {
-                    return Ok(true);
-                }
-            }
+        // Shears ask the mob's entity parts first, then fire `player_shear_entity`.
+        if self.held_shears()
+            && let Some(consumed) = self.player_shear(index)
+        {
+            return Ok(consumed);
         }
         if self.spawn_egg_offspring(index) {
             self.swing_arm();

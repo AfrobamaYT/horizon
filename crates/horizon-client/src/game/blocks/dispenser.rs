@@ -2034,19 +2034,20 @@ impl Game<'_> {
                 return Ok(true);
             }
             let Target::Mob(i) = t else { continue };
+            let part = self.part_shearable(i, None, &shears);
             let m = &self.mobs[i];
-            if !m.alive() {
+            if !m.alive() || part.is_some_and(|(_, shearable)| !shearable) {
                 continue;
             }
-            let at = m.position;
-            let entity_id = m.id;
-            let kind = m.kind.id.clone();
+            let (at, entity_id, kind) = (m.position, m.id, m.kind.id.clone());
             let sound_at = Some([at.x, at.y, at.z]);
             // shear(level, BLOCKS, tool): level.playSound(null, this, sound, BLOCKS, 1, 1).
             let shear_sound = |name: &'static str| {
                 LevelSound::new(name, [at.x, at.y, at.z], 1.0, 1.0).in_source(SoundSource::Blocks)
             };
             match m.species() {
+                // An entity part said yes (`IShearable`): it shears in the species' place.
+                _ if let Some((part, _)) = part => self.part_shear(i, part, None, &shears),
                 Species::SulfurCube if sulfur_cube::has_body(m) => {
                     // SulfurCube.shear: the swallowed block comes out at the
                     // passenger attachment, and nothing is swallowed for 5 s.
