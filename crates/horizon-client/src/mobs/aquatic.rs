@@ -597,13 +597,13 @@ fn squid_step(m: &mut Mob, client: bool) {
     } else {
         v[TENTACLE_ANGLE] = v[TENTACLE_MOVEMENT].msin().abs() * PI * 0.25;
         if !client {
-            let yd = if let Some((_, _, amp)) = m
+            let yd = if let Some(effect) = m
                 .extra
                 .effects
                 .iter()
-                .find(|e| e.0 == "minecraft:levitation" || e.0 == "levitation")
+                .find(|e| e.id == "minecraft:levitation" || e.id == "levitation")
             {
-                0.05 * f64::from(amp + 1)
+                0.05 * f64::from(effect.amplifier + 1)
             } else {
                 m.velocity.y - m.gravity()
             };

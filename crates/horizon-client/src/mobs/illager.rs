@@ -1170,7 +1170,7 @@ mod tests {
                 let mut sheep = Mob::new(2, Arc::new(sheep_kind), Vec3::new(5.5, 64.0, 0.5), 0.0);
                 sheep.extra.color = 11;
                 if invisible {
-                    sheep.extra.effects.push(("minecraft:invisibility", 200, 0));
+                    sheep.add_effect("minecraft:invisibility", 200, 0);
                 }
                 let seen = [sheep.seen(None)];
                 let world = crate::mobs::MobWorld {
