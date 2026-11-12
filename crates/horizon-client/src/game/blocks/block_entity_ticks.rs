@@ -1487,7 +1487,8 @@ mod slot_mutation_tests {
 /// Slots that pick out their own mod's block entities (`OwnBlockEntities`).
 #[cfg(test)]
 mod own_block_entity_tests {
-    use super::{BlockEntityTick, BlockEntityTickSlot, OwnBlockEntities};
+    use super::{BlockEntityTick, BlockEntityTickSlot, OwnBlockEntities, TickedKind};
+    use crate::game::Game;
     use crate::game::native_entity_refs::tests::{run_fresh_cases, with_game_at};
     use crate::game::published_loops::LoopFlow;
     use horizon_client::block_entities::Pos;
@@ -1498,6 +1499,7 @@ mod own_block_entity_tests {
 
     const A: &str = "own_a:machine";
     const B: &str = "own_b:machine";
+    const DETECTOR: &str = "minecraft:daylight_detector";
 
     /// A mod whose block `block` makes its ticking block entity type of the same id, which is
     /// also valid on the block `also_on` (`BlockEntityType.validBlocks`, added by this mod).
@@ -1540,7 +1542,8 @@ mod own_block_entity_tests {
             }
         }
     }
-    /// Makes block `self.0`'s block entity tick.
+    /// Makes block `self.0`'s block entity tick, and notes each tick in the entity's data:
+    /// [`mark`] of the type whose part ran.
     struct Ticks(&'static str);
     #[mod_api::horizon_part]
     impl BlockPart for Ticks {}
@@ -1551,6 +1554,13 @@ mod own_block_entity_tests {
                 event.ticks = true;
             }
         }
+        fn block_entity_tick(&self, _: &mut dyn ServerHost, event: &mut BlockEntityTickEvent<'_>) {
+            event.entity.data.push(mark(self.0));
+        }
+    }
+    /// What a tick of mod A's type (1) or mod B's (2) leaves in a block entity's data.
+    fn mark(kind: &str) -> i32 {
+        if kind == A { 1 } else { 2 }
     }
 
     /// Counts what it is asked about, and notes those of its own types.
@@ -1578,25 +1588,9 @@ mod own_block_entity_tests {
         }
     }
 
-    /// Two mods' block entities and a hopper in one world, one of mod B's standing on mod A's block
-    /// (B made its type valid there): each mod's slot is asked about all of them and counts only
-    /// its own entities, whatever block they stand on. An id with no type counts nothing.
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
-    fn each_slot_counts_only_its_own_mods_block_entities() {
-        // The content root freezes the process's block entity types.
-        if run_fresh_cases(
-            "game::block_entity_ticks::own_block_entity_tests::each_slot_counts_only_its_own_mods_block_entities",
-            "HORIZON_OWN_BLOCK_ENTITIES_CHILD",
-            &["run"],
-        ) {
-            return;
-        }
-        let mods: Mods = vec![
-            ModEntry::new("own_a", Box::new(Machines::new(A, None))),
-            ModEntry::new("own_b", Box::new(Machines::new(B, Some(A)))),
-        ]
-        .into();
+    /// `mods` installed, a game on the prepared resources with a player over chunk (0, 0), whose
+    /// blocks tick, and `placed` set there as a player's placement sets them.
+    fn with_machines(mods: Mods, placed: &[(Pos, &str)], test: impl FnOnce(&mut Game<'_>)) {
         mod_platform::testing::with_mods(mods.clone(), || {
             crate::game::api_values::install_parts(&mods).unwrap();
             mod_api::__private::mark_game_thread();
@@ -1617,47 +1611,250 @@ mod own_block_entity_tests {
                 );
                 game.update_chunk_tickets();
                 let level = game.level(game.dim.id()).unwrap();
-                let placed = [
-                    ((1, 64, 1), A),
-                    ((3, 64, 1), B),
-                    ((5, 64, 1), A),
-                    ((7, 64, 1), "minecraft:hopper"),
-                ];
-                for ((x, y, z), block) in placed {
+                for &((x, y, z), block) in placed {
                     let state = game.pack.assets.registry.default_state(block).unwrap();
                     assert!(
                         game.level_set_block(level, [x, y, z], state, BlockUpdateFlags::NONE)
                             .unwrap()
                     );
                 }
-                // Mod B's entity on mod A's block, as a save that holds it loads it.
-                let d = (9, 64, 1);
-                assert!(horizon_client::block_entity_types::additional_valid(A, B));
-                let state = game.pack.assets.registry.default_state(A).unwrap();
-                game.world.set(d.0, d.1, d.2, state).unwrap();
-                let entity = ModBlockEntity::new(B.into(), Default::default());
-                game.world
-                    .block_entities
-                    .insert(d, BlockEntity::Mod(Box::new(entity)));
-                let mut slots = (
-                    Count::new(&[A]),
-                    (Count::new(&[B]), Count::new(&["own_a:missing"])),
-                );
-                for _ in 0..2 {
-                    game.tick_block_entities_with(&mut slots).unwrap();
-                }
-                let (a, b, c) = ((1, 64, 1), (3, 64, 1), (5, 64, 1));
-                let (own_a, (own_b, missing)) = &mut slots;
-                assert_eq!(
-                    (own_a.visited, own_b.visited, missing.visited),
-                    (10, 10, 10)
-                );
-                own_a.mine.sort_unstable();
-                own_b.mine.sort_unstable();
-                assert_eq!(own_a.mine, [a, a, c, c]);
-                assert_eq!(own_b.mine, [b, b, d, d]);
-                assert_eq!(missing.mine, []);
+                test(game);
             });
+        });
+    }
+
+    /// The block `block` at `pos` with a new block entity of the mod type `kind` on it, as a save
+    /// that holds it loads it.
+    fn place_mod_entity(game: &mut Game<'_>, pos: Pos, block: &str, kind: &str) {
+        let state = game.pack.assets.registry.default_state(block).unwrap();
+        game.world.set(pos.0, pos.1, pos.2, state).unwrap();
+        let entity = ModBlockEntity::new(kind.into(), Default::default());
+        game.world
+            .block_entities
+            .insert(pos, BlockEntity::Mod(Box::new(entity)));
+    }
+
+    /// The data of the mod block entity at `pos`: a [`mark`] for each of its ticks.
+    fn ticks_of(game: &Game<'_>, pos: Pos) -> Vec<i32> {
+        match game.world.block_entities.get(&pos) {
+            Some(BlockEntity::Mod(entity)) => entity.data.clone(),
+            _ => panic!("no mod block entity at {pos:?}"),
+        }
+    }
+
+    /// Two mods' block entities and a hopper in one world, one of mod B's standing on mod A's block
+    /// (B made its type valid there): each mod's slot is asked about all of them and counts only
+    /// its own entities, whatever block they stand on. An id with no type counts nothing.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
+    fn each_slot_counts_only_its_own_mods_block_entities() {
+        // The content root freezes the process's block entity types.
+        if run_fresh_cases(
+            "game::block_entity_ticks::own_block_entity_tests::each_slot_counts_only_its_own_mods_block_entities",
+            "HORIZON_OWN_BLOCK_ENTITIES_CHILD",
+            &["run"],
+        ) {
+            return;
+        }
+        let mods: Mods = vec![
+            ModEntry::new("own_a", Box::new(Machines::new(A, None))),
+            ModEntry::new("own_b", Box::new(Machines::new(B, Some(A)))),
+        ]
+        .into();
+        let (a, b, c) = ((1, 64, 1), (3, 64, 1), (5, 64, 1));
+        let placed = [(a, A), (b, B), (c, A), ((7, 64, 1), "minecraft:hopper")];
+        with_machines(mods, &placed, |game| {
+            // Mod B's entity on mod A's block.
+            let d = (9, 64, 1);
+            assert!(horizon_client::block_entity_types::additional_valid(A, B));
+            place_mod_entity(game, d, A, B);
+            let mut slots = (
+                Count::new(&[A]),
+                (Count::new(&[B]), Count::new(&["own_a:missing"])),
+            );
+            for _ in 0..2 {
+                game.tick_block_entities_with(&mut slots).unwrap();
+            }
+            let (own_a, (own_b, missing)) = &mut slots;
+            assert_eq!(
+                (own_a.visited, own_b.visited, missing.visited),
+                (10, 10, 10)
+            );
+            own_a.mine.sort_unstable();
+            own_b.mine.sort_unstable();
+            assert_eq!(own_a.mine, [a, a, c, c]);
+            assert_eq!(own_b.mine, [b, b, d, d]);
+            assert_eq!(missing.mine, []);
+        });
+    }
+
+    /// Mod B's block entity standing on a vanilla block, a daylight detector, that B made its type
+    /// valid on, beside each mod's own block and a detector with its vanilla block entity: mod B's
+    /// slot counts it, mod A's doesn't, and it ticks as B's. Neither counts the vanilla detector.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
+    fn a_mods_block_entity_on_a_vanilla_block_is_only_its_own_mods() {
+        // The content root freezes the process's block entity types.
+        if run_fresh_cases(
+            "game::block_entity_ticks::own_block_entity_tests::a_mods_block_entity_on_a_vanilla_block_is_only_its_own_mods",
+            "HORIZON_OWN_BLOCK_ENTITIES_CHILD",
+            &["run"],
+        ) {
+            return;
+        }
+        let mods: Mods = vec![
+            ModEntry::new("own_a", Box::new(Machines::new(A, None))),
+            ModEntry::new("own_b", Box::new(Machines::new(B, Some(DETECTOR)))),
+        ]
+        .into();
+        let (a, b, vanilla) = ((1, 64, 1), (3, 64, 1), (7, 64, 1));
+        with_machines(mods, &[(a, A), (b, B), (vanilla, DETECTOR)], |game| {
+            assert!(matches!(
+                game.world.block_entities.get(&vanilla),
+                Some(BlockEntity::DaylightDetector)
+            ));
+            let d = (5, 64, 1);
+            assert!(horizon_client::block_entity_types::additional_valid(
+                DETECTOR, B
+            ));
+            assert!(!horizon_client::block_entity_types::additional_valid(
+                DETECTOR, A
+            ));
+            place_mod_entity(game, d, DETECTOR, B);
+            let mut slots = (Count::new(&[A]), Count::new(&[B]));
+            for _ in 0..2 {
+                game.tick_block_entities_with(&mut slots).unwrap();
+            }
+            let (own_a, own_b) = &mut slots;
+            assert_eq!((own_a.visited, own_b.visited), (8, 8));
+            own_a.mine.sort_unstable();
+            own_b.mine.sort_unstable();
+            assert_eq!(own_a.mine, [a, a]);
+            assert_eq!(own_b.mine, [b, b, d, d]);
+            assert_eq!(ticks_of(game, d), [2, 2]);
+        });
+    }
+
+    /// Once, when asked about the block entity at `at`, replaces it in place (the loop's ticker
+    /// stays live) with a new one of mod B's type and answers Continue. Notes the entities it
+    /// sees after their tick.
+    struct Swap {
+        at: Option<Pos>,
+        after: Vec<Pos>,
+    }
+    impl BlockEntityTickSlot for Swap {
+        fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
+            if self.at == Some(tick.pos) {
+                self.at = None;
+                let Some(BlockEntity::Mod(entity)) = tick.block_entity() else {
+                    panic!("no mod block entity at {:?}", tick.pos);
+                };
+                **entity = ModBlockEntity::new(B.into(), Default::default());
+            }
+            LoopFlow::Continue
+        }
+        fn after(&mut self, tick: &mut BlockEntityTick<'_, '_>) {
+            self.after.push(tick.pos);
+        }
+    }
+
+    /// For each entry: its position, whether the cursor is of mod A's type and of mod B's, and
+    /// the type of the block entity standing there.
+    type Entry = (Pos, bool, bool, &'static str);
+
+    /// Notes each entry, as [`Entry`], before and after its tick.
+    struct Seen {
+        a: OwnBlockEntities,
+        b: OwnBlockEntities,
+        before: Vec<Entry>,
+        after: Vec<Entry>,
+    }
+    impl Seen {
+        fn new() -> Self {
+            Self {
+                a: OwnBlockEntities::new(&[A]),
+                b: OwnBlockEntities::new(&[B]),
+                before: Vec::new(),
+                after: Vec::new(),
+            }
+        }
+        fn entry(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> Entry {
+            assert_eq!(tick.kind, TickedKind::Mod);
+            let standing = match tick.block_entity() {
+                Some(BlockEntity::Mod(entity)) if entity.id() == A => A,
+                Some(BlockEntity::Mod(entity)) if entity.id() == B => B,
+                _ => "other",
+            };
+            (
+                tick.pos,
+                self.a.contains(tick),
+                self.b.contains(tick),
+                standing,
+            )
+        }
+    }
+    impl BlockEntityTickSlot for Seen {
+        fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
+            let entry = self.entry(tick);
+            self.before.push(entry);
+            LoopFlow::Continue
+        }
+        fn after(&mut self, tick: &mut BlockEntityTick<'_, '_>) {
+            let entry = self.entry(tick);
+            self.after.push(entry);
+        }
+    }
+
+    /// A slot's `before` replaces mod A's block entity with one of mod B's type and continues: a
+    /// later slot's `before` in the same entry still gets the cursor from before the edit (mod
+    /// A's type, though B's entity stands there), the replaced entity does not tick, as A's or at
+    /// all, and no slot's `after` sees it. The next pass visits it as B's.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
+    fn an_entity_replaced_by_another_mods_type_does_not_tick_as_the_old_one() {
+        // The content root freezes the process's block entity types.
+        if run_fresh_cases(
+            "game::block_entity_ticks::own_block_entity_tests::an_entity_replaced_by_another_mods_type_does_not_tick_as_the_old_one",
+            "HORIZON_OWN_BLOCK_ENTITIES_CHILD",
+            &["run"],
+        ) {
+            return;
+        }
+        let mods: Mods = vec![
+            ModEntry::new("own_a", Box::new(Machines::new(A, None))),
+            ModEntry::new("own_b", Box::new(Machines::new(B, Some(A)))),
+        ]
+        .into();
+        let (a, c) = ((1, 64, 1), (3, 64, 1));
+        with_machines(mods, &[(a, A), (c, A)], |game| {
+            let mut slots = (
+                Swap {
+                    at: Some(a),
+                    after: Vec::new(),
+                },
+                Seen::new(),
+            );
+            game.tick_block_entities_with(&mut slots).unwrap();
+            let (swap, seen) = &mut slots;
+            seen.before.sort_unstable();
+            assert_eq!(seen.before, [(a, true, false, B), (c, true, false, A)]);
+            assert_eq!(seen.after, [(c, true, false, A)]);
+            assert_eq!(swap.after, [c]);
+            assert!(ticks_of(game, a).is_empty());
+            assert_eq!(ticks_of(game, c), [1]);
+
+            let (swap, seen) = &mut slots;
+            (swap.after, seen.before, seen.after) = Default::default();
+            game.tick_block_entities_with(&mut slots).unwrap();
+            let (swap, seen) = &mut slots;
+            seen.before.sort_unstable();
+            seen.after.sort_unstable();
+            swap.after.sort_unstable();
+            assert_eq!(seen.before, [(a, false, true, B), (c, true, false, A)]);
+            assert_eq!(seen.after, [(a, false, true, B), (c, true, false, A)]);
+            assert_eq!(swap.after, [a, c]);
+            assert_eq!(ticks_of(game, a), [2]);
+            assert_eq!(ticks_of(game, c), [1, 1]);
         });
     }
 }
