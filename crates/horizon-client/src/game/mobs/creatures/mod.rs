@@ -6836,6 +6836,8 @@ impl Game<'_> {
                 );
                 drops.extend(stacks.into_iter().map(|s| (s.item.to_string(), s.count)));
                 wool = true;
+                let ctx = self.who_context(Some(horizon_client::mobs::Who::Player), None);
+                self.post_game_event("minecraft:shear", feet, ctx);
                 self.damage_held_tool();
             }
             // Entity.interact: shears take a tamed wolf's armor off for its owner.
