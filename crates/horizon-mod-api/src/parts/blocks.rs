@@ -539,7 +539,11 @@ pub mod tests {
                 r.block_part(snow, Layers);
                 let glass = r.block_key("minecraft:glass");
                 r.block_part(glass, Remover);
-                for block in ["minecraft:shulker_box", "minecraft:tripwire"] {
+                for block in [
+                    "minecraft:shulker_box",
+                    "minecraft:tripwire",
+                    "minecraft:ice",
+                ] {
                     let key = r.block_key(block);
                     r.block_part(key, Keep);
                 }

@@ -253,3 +253,24 @@ fn the_harvest_answer_is_read_before_the_removal_for_will_harvest() {
         std::fs::remove_dir_all(scratch).unwrap();
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn denied_ice_does_not_melt_above_solid_ground() {
+    mod_api::__private::part_tests::destroyed_by_player_game_thread();
+    with_game(|game| {
+        let scratch = breaking_player(game);
+        let stone = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:stone")
+            .unwrap();
+        game.world.set(POS[0], POS[1] - 1, POS[2], stone).unwrap();
+        let ice = place(game, "minecraft:ice");
+        game.break_block(POS).unwrap();
+        assert_eq!(at(game), ice);
+        assert_eq!(dropped(game, "minecraft:ice"), 0);
+        std::fs::remove_dir_all(scratch).unwrap();
+    });
+}
