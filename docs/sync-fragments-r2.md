@@ -52,3 +52,15 @@ the fork already owns resident handle queries with explicit off-level semantics.
 No hook moment, duplicate notification, native_ alias, or new type was added.
 
 Converter boundary: `unsupported fragment fields: ['comments', 'doc_summary', 'helpers', 'rust_summary'] or draw contexts; helpers are host methods now, written by hand in crates/horizon-mod-vocab/src/host/<area>.rs`.
+
+## server_settings
+
+Refused: helper-only fragment, no hook moment. Upstream native_server.rs
+reads dedicated_lan's online-mode config, actual listening port, and a
+velocity/none forwarding classification without disclosing its secret; before
+listening or on another side it returns None. No equivalent public typed server
+configuration query exists in this scaffold. Converting that read into an event
+would invent a notification and not provide the requested query. The converter
+rejects helpers; no native_ aliases or internals access were introduced.
+
+Converter boundary: `unsupported fragment fields: ['comments', 'doc_summary', 'helpers', 'rust_summary'] or draw contexts; helpers are host methods now, written by hand in crates/horizon-mod-vocab/src/host/<area>.rs`.
