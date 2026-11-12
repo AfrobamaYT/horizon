@@ -88,8 +88,7 @@ mod tests {
     use horizon_world::native_worldgen_hooks::WorldgenRandom;
     use horizon_world::registry::BlockRegistry;
     use mod_api::{
-        BlockKey, BlockPart, BlockStateRecord, Hooks, ModEntry, Mods, OnTreeGrowEvent,
-        WorldgenHost, testing,
+        BlockKey, BlockPart, BlockStateRecord, Hooks, ModEntry, Mods, OnTreeGrowEvent, WorldgenHost,
     };
     use std::collections::{BTreeMap, HashMap};
     use std::sync::{Arc, Mutex, PoisonError};
@@ -191,7 +190,7 @@ mod tests {
         let _publishing = PUBLISHING.lock().unwrap_or_else(PoisonError::into_inner);
         let mods: Mods = vec![ModEntry::new("soil", Box::new(Soil))].into();
         let mut trunk = Trunk::default();
-        let answer = testing::with_mods(mods.clone(), || {
+        let answer = mod_platform::testing::with_mods(mods.clone(), || {
             crate::game::api_values::install_parts(&mods).unwrap();
             let registry = BlockRegistry::from_facts_json(FACTS.as_bytes()).unwrap();
             resolve_block_definitions(&registry).unwrap();
@@ -237,7 +236,7 @@ mod tests {
     fn the_published_key_and_tag_parts_answer_and_a_feature_keeps_its_tables() {
         let _publishing = PUBLISHING.lock().unwrap_or_else(PoisonError::into_inner);
         let mods: Mods = vec![ModEntry::new("soils", Box::new(KeyAndTag))].into();
-        testing::with_mods(mods.clone(), || {
+        mod_platform::testing::with_mods(mods.clone(), || {
             crate::game::api_values::install_parts(&mods).unwrap();
             let registry = BlockRegistry::from_facts_json(FACTS.as_bytes()).unwrap();
             resolve_block_definitions(&registry).unwrap();
@@ -262,7 +261,7 @@ mod tests {
 
     #[test]
     fn a_state_the_registry_lacks_is_refused_and_the_tree_keeps_its_own_block() {
-        mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
+        mod_platform::__private::part_tests::install_parts_fixture(&[]).unwrap();
         let registry = BlockRegistry::from_facts_json(FACTS.as_bytes()).unwrap();
         resolve_block_definitions(&registry).unwrap();
         let index = block_state::current().unwrap();
