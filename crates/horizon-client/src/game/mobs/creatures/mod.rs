@@ -20,6 +20,7 @@ mod retained_limits_tests;
 mod world_view;
 use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::level_sounds::LevelSound;
+use super::piston_push::Lid;
 use super::{
     Dim, Game, Hand, InteractTarget, entity_culling::EntityCullDecision,
     native_mob_draw::PlayerRender, native_projectiles::Impact, view_vector,
@@ -2619,26 +2620,23 @@ impl Game<'_> {
                         }
                     }
                 },
-                MobEvent::Shift { target, delta } => {
-                    let d = Vec3::new(delta[0], delta[1], delta[2]);
-                    match target {
-                        Who::Player => {
-                            if let Some(p) = self.player.as_mut() {
-                                p.position = p.position.add_vector(d);
-                            }
-                        }
-                        Who::Mob(id) => {
-                            if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                                m.position = m.position.add_vector(d);
-                            }
-                        }
-                    }
-                }
                 MobEvent::LidPush {
                     shulker,
                     area,
                     delta,
-                } => self.lid_pushes_armor_stands(shulker, area, delta),
+                } => {
+                    let (lid, delta) = (
+                        Lid::Shulker(shulker),
+                        Vec3::new(delta[0], delta[1], delta[2]),
+                    );
+                    // A client of a server pushes only its own player, as
+                    // the shulker box's lid does.
+                    if self.remote.is_some() {
+                        self.lid_push_local(lid, area, delta);
+                    } else {
+                        self.lid_push(lid, area, delta);
+                    }
+                }
                 MobEvent::Wololo { mob } => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
                         // DyeColor.RED.

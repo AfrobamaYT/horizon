@@ -27,6 +27,7 @@ horizon-client-render packs::cache::tests::benchmark_real_resource_root HORIZON_
 
 # Tests that read an input only their parity harness provides (REFERENCE is the variable): refused by name at
 # the start of the shard when the variable is unset; with it set they run and must pass. Not known failures.
+# The HORIZON_WASM_FIXTURE ones run in wasm-mods.yml, against the fixture that run builds.
 horizon-client game::end::cooldown_tests::gateway_counters_match_actual_vanilla_methods HORIZON_PORTAL_REFERENCE needs
 horizon-client game::nether_portal::cooldown_tests::portal_contact_and_waiting_handoff_match_vanilla_counters HORIZON_PORTAL_REFERENCE needs
 horizon-client game::functions::typed_state_range_read_tests::loaded_pack_state_ranges_match_typed_controls HORIZON_TYPED_RANGE_PACK needs
@@ -54,7 +55,6 @@ horizon-client-render gfx::pack_post::destination_tests::clear_budget_tests::siz
 horizon-client-render gfx::pack_post::destination_tests::clear_budget_tests::sized_hdr_clear_respects_byte_budget horizon-rust/horizon#9303 flaky
 
 # Client failures exposed after enforcing target completion (#2137).
-horizon-client game::persist::summon_uuid_conflict_tests::summon_skips_a_uuid_taken_earlier_in_the_same_tree #2175
 horizon-client game::explosion::tests::explosion_items_parity_fixture #2177 harness
 horizon-client game::native_live_holder_tests::thousand_live_block_entity_ticks #2177 harness
 horizon-client game::remote_vehicles::tests::steering_mount_control_matches_vanilla #2177 harness
@@ -67,6 +67,3 @@ horizon-client game::levels::tests::features_write_a_full_neighbour_only_through
 horizon-client game::levels::tests::an_old_chunk_saves_the_heights_its_new_neighbour_calculated #2474
 # #2474 dependency: external constructed 1.20.4 save with its partial ring removed; no committed recipe or CI provisioning.
 horizon-client game::levels::tests::the_overworld_cache_holds_the_edge_chunks_calculated_heights #2474
-
-# #2505 dependency: canonical ignored-test runner lacks HORIZON_FISHING_RESOURCES and HORIZON_FISHING_REFERENCE; remove when real oracle inputs are provisioned there.
-horizon-client game::fishing::tests::fishing_retrieve_reference #2505

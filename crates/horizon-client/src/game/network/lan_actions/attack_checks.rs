@@ -256,32 +256,39 @@ mod tests {
         let arrow = summoned(&mut game, "summon arrow 4.5 200.5 3 {NoGravity:1b}");
         let trident = summoned(&mut game, "summon trident 5.5 200.5 3 {NoGravity:1b}");
         let (tx, rx) = mpsc::channel();
-        let mut guest = Guest::new(
-            Joined {
-                conn: 2,
-                uuid: 332,
-                name: "AttackGuest".into(),
-                properties: Vec::new(),
-                info: ClientInformation::new(2),
-                brand: "test".into(),
-                sender: PlayerSender::new(tx, Arc::default()),
-                latency: Arc::new(AtomicI32::new(0)),
-                address: "127.0.0.1:25565".parse().unwrap(),
-                expected: false,
-            },
-            game.next_entity as i32 + 1,
-            [4.5, 200.0, 4.5],
-            2,
-        );
+        let fresh_guest = |conn, entity_id| {
+            let mut guest = Guest::new(
+                Joined {
+                    conn,
+                    uuid: 332,
+                    name: "AttackGuest".into(),
+                    properties: Vec::new(),
+                    info: ClientInformation::new(2),
+                    brand: "test".into(),
+                    sender: PlayerSender::new(tx.clone(), Arc::default()),
+                    latency: Arc::new(AtomicI32::new(0)),
+                    address: "127.0.0.1:25565".parse().unwrap(),
+                    expected: false,
+                },
+                entity_id,
+                [4.5, 200.0, 4.5],
+                2,
+            );
+            guest.dimension = "minecraft:overworld".into();
+            guest.placed = true;
+            guest.loaded = true;
+            guest.load_timeout = 0;
+            guest
+        };
         game.next_entity += 1;
-        guest.dimension = "minecraft:overworld".into();
-        guest.placed = true;
-        guest.loaded = true;
-        guest.load_timeout = 0;
-        let me = guest.entity_id;
-        game.lan.as_mut().unwrap().hub.guests.push(guest);
-        let attack = |game: &mut Game<'_>, id: i32| {
-            game.lan_guest_packet(2, S::Attack(play::Attack { id }));
+        game.lan
+            .as_mut()
+            .unwrap()
+            .hub
+            .guests
+            .push(fresh_guest(2, game.next_entity as i32));
+        let attack = |game: &mut Game<'_>, conn, id: i32| {
+            game.lan_guest_packet(conn, S::Attack(play::Attack { id }));
         };
         let kicked = vec![translatable(
             "multiplayer.disconnect.invalid_entity_attacked",
@@ -290,29 +297,45 @@ mod tests {
 
         let hp = |g: &Game<'_>| g.mobs.iter().find(|m| m.id as i32 == pig).unwrap().health;
         let full = hp(&game);
-        attack(&mut game, pig);
+        attack(&mut game, 2, pig);
         assert_eq!(disconnects(&rx), vec![], "a pig is a target");
         assert!(hp(&game) < full, "the pig is not hurt: {full} health left");
-        attack(&mut game, far_item);
+        attack(&mut game, 2, far_item);
         assert_eq!(disconnects(&rx), vec![], "an item out of reach");
         game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
             guest.inventory[0] = Some(ItemStack::new("minecraft:iron_spear", 1));
             guest.selected = 0;
         });
-        attack(&mut game, item);
+        attack(&mut game, 2, item);
         assert_eq!(disconnects(&rx), vec![], "a spear in hand");
         game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
             guest.inventory[0] = None;
         });
-        for (what, id) in [
-            ("an item", item),
-            ("an experience orb", orb),
-            ("themselves", me),
-            ("an arrow", arrow),
-            ("a thrown trident", trident),
-        ] {
-            attack(&mut game, id);
+        game.lan.as_mut().unwrap().hub.guests.remove(0);
+        for (case, (what, target)) in [
+            ("an item", Some(item)),
+            ("an experience orb", Some(orb)),
+            ("themselves", None),
+            ("an arrow", Some(arrow)),
+            ("a thrown trident", Some(trident)),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            // Each kick ends a connection. A later invalid target needs a new
+            // guest, not another packet from the already disconnected player.
+            game.next_entity += 1;
+            let me = game.next_entity as i32;
+            let conn = 3 + case as u32;
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guests
+                .push(fresh_guest(conn, me));
+            attack(&mut game, conn, target.unwrap_or(me));
             assert_eq!(disconnects(&rx), kicked, "{what}");
+            game.lan.as_mut().unwrap().hub.guests.remove(0);
         }
     }
 }

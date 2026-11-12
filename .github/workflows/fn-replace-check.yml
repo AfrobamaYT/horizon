@@ -102,7 +102,7 @@ jobs:
       - name: Function replacement check (build and link)
         run: |
           launcher="${CARGO_TARGET_DIR:-launcher/target}/release/horizon-launcher"
-          FNR_MODS="alpha beta one ten fdshape support registry lower loop" tools/ci/fn_replace_check.sh \
+          FNR_MODS="alpha beta one ten fdshape support registry lower loop loop_second" tools/ci/fn_replace_check.sh \
             "$launcher" "$FNR_SCRATCH/prebuilt" "$FNR_SCRATCH/check" 2>&1 | tee "$FNR_SCRATCH/fnr-check.log"
           grep -F 'Function replacement:' "$FNR_SCRATCH/fnr-check.log" >> "$GITHUB_STEP_SUMMARY"
       # It also builds horizon-mixins from source, where the runs before it download the prebuilt tool.
