@@ -1110,8 +1110,9 @@ impl Game<'_> {
             self.ui.in_bed_chat = self.screen == Screen::Chat;
         }
     }
-    /// The Leave Bed button of `InBedChatScreen`: its bounds.
-    fn leave_bed_button(width: f32, height: f32) -> (i32, i32, i32, i32) {
+    /// The Leave Bed button of `InBedChatScreen`: its bounds, laid out once
+    /// per build (`ChatLayout`).
+    pub(super) fn leave_bed_button(width: f32, height: f32) -> (i32, i32, i32, i32) {
         (width as i32 / 2 - 100, height as i32 - 40, 200, 20)
     }
     /// The Leave Bed button's draws. It registers as a button
@@ -1120,10 +1121,8 @@ impl Game<'_> {
     fn leave_bed_draws(
         m: &Measure,
         mouse: (i32, i32),
-        width: f32,
-        height: f32,
+        (x, y, w, h): (i32, i32, i32, i32),
     ) -> Vec<horizon_client::screen_draw::Draw> {
-        let (x, y, w, h) = Self::leave_bed_button(width, height);
         let label = Text::literal(horizon_client::lang::get_or(
             "multiplayer.stopSleeping",
             "Leave Bed",
@@ -1400,14 +1399,6 @@ impl Game<'_> {
     }
     pub(super) fn chat_scroll(&mut self, amount: f32) {
         let cursor = self.cursor;
-        let height = self.renderer.as_ref().map_or(720.0, |r| {
-            HudBatch::new(
-                [r.config.width, r.config.height],
-                self.settings.gui_scale_inputs(),
-            )
-            .height
-        });
-        let _ = height;
         let mouse = (cursor.0.floor() as i32, cursor.1.floor() as i32);
         if let Some(screen) = self.ui.chat_screen.as_mut()
             && screen.scroll(mouse, amount as f64)
@@ -1441,7 +1432,9 @@ impl Game<'_> {
                 )
                 .width
             });
-            let (x, y, w, h) = Self::leave_bed_button(width, height);
+            let (x, y, w, h) = self
+                .built_chat(width, height)
+                .map_or_else(|| Self::leave_bed_button(width, height), |l| l.leave_bed);
             if horizon_client::screen_draw::inside((cursor.0 as i32, cursor.1 as i32), x, y, w, h) {
                 self.wake_up();
                 return;
@@ -1729,12 +1722,8 @@ impl Game<'_> {
                 &super::screen_info::tr,
             )
         });
+        // The build made the box at this size (`ChatScreen.resize`).
         let m = Measure(&self.gui.atlas.font);
-        let c = Commands {
-            dispatcher: chat_tree(&self.remote),
-            registries: &self.ui.registries,
-        };
-        screen.resize(&m, &c, batch.width as i32, batch.height as i32);
         // Options.getBackgroundColor(Integer.MIN_VALUE).
         let background = if self.settings.file.bool("backgroundForChatOnly") {
             i32::MIN
@@ -1750,7 +1739,11 @@ impl Game<'_> {
         horizon_client::screen_draw::paint(batch, &self.gui.atlas, &draws);
         self.ui.chat_screen = Some(screen);
         if in_bed {
-            let button = Self::leave_bed_draws(&m, mouse, batch.width, batch.height);
+            let (w, h) = (batch.width, batch.height);
+            let rect = self
+                .built_chat(w, h)
+                .map_or_else(|| Self::leave_bed_button(w, h), |l| l.leave_bed);
+            let button = Self::leave_bed_draws(&m, mouse, rect);
             horizon_client::screen_draw::paint(batch, &self.gui.atlas, &button);
         }
         // The hovered message part's tooltip (`renderComponentHoverEffect`),
@@ -2865,11 +2858,11 @@ mod tests {
             ChatAbilities::new(ChatVisibility::Full),
         );
         screen.draw(&m, (0, 0), 0, 0);
-        Game::leave_bed_draws(&m, (0, 0), width, height);
+        let (x, y, w, h) = Game::leave_bed_button(width, height);
+        Game::leave_bed_draws(&m, (0, 0), (x, y, w, h));
         horizon_client::widgets::end_frame(u64::MAX);
 
         let targets = key_focus::drawn_targets();
-        let (x, y, w, h) = Game::leave_bed_button(width, height);
         let bed = targets
             .iter()
             .copied()
