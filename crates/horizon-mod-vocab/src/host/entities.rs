@@ -639,6 +639,30 @@ pub trait EntitiesBackendMut {
         rotation: Option<[f32; 2]>,
     ) -> bool;
     /// Side: server.
+    /// Runs the command `line` (a leading slash allowed) with the entity as
+    /// its source, as vanilla runs a portal's or a sign's command:
+    /// `ServerPlayer.createCommandSourceStack` (another entity:
+    /// `Entity.createCommandSourceStackForNameResolution`), `.withPermission(level)`,
+    /// then `Commands.performPrefixedCommand`. `level` is the mod's choice, taken
+    /// as given whether it is above or below the entity's own: the line is parsed
+    /// and checked at it. `@s` is the entity, and the command runs from its
+    /// position and rotation in its level. A player is answered as for their own
+    /// command: its feedback and failures reach their chat, and the other
+    /// operators hear of it (`broadcastToAdmins`). Another entity's source is
+    /// silent: nothing reaches anyone (`CommandSource.NULL`). A command a mod
+    /// registered hears a player as `CommandSource::Player` and another entity as
+    /// `CommandSource::Console`, both at `level`. A teleport to another level
+    /// happens at the next tick's start, as `Commands::run_command`'s. Whether
+    /// the command ran: false for a line that fails to parse or to run, and,
+    /// with nothing run, for a stale or removed entity, an entity outside the
+    /// level in place (a player in another level included: that level is
+    /// parked while the hook runs), and on a client.
+    /// During a guest's turn, live players (the acting one included) can run it
+    /// and are reachable; displaced outer players are neither, as on
+    /// `Commands::run_command`.
+    #[access(WorldOnly)]
+    fn entity_run_command(&mut self, entity: EntityRef, line: &str, level: PermissionLevel) -> bool;
+    /// Side: server.
     /// Turns the entity to `yaw` and `pitch` in degrees (`Entity.setYRot`,
     /// `setXRot`): the pitch wraps and is clamped to -90..90. False for kinds
     /// whose rotation Horizon does not fully store, or an unavailable player.

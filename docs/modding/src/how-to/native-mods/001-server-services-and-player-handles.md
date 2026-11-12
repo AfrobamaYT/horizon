@@ -5,7 +5,14 @@
 
 Server hooks reach commands through `host.commands()`: `run_command(line)` uses
 console permission level 4 and the existing console command path, while
-`feedback(text)` answers the current command source. `host.messages()` provides
+`feedback(text)` answers the current command source. To run a line as a player or
+another entity instead, at a level you choose, call
+`entity.run_command(host, line, PermissionLevel::Gamemasters)`: `@s` is that
+entity, `~` its position, and only a player is answered. It returns `false` for a
+line that fails, a stale or removed entity, and an entity outside the level in
+place (a player in another level included: that level is parked while the hook
+runs). To run a command there, do it from a moment in that level or a task
+scheduled there. `host.messages()` provides
 `broadcast(text)` (including the broadcast hook and server log) and
 `text_allowed(text)` (the server chat filter).
 
