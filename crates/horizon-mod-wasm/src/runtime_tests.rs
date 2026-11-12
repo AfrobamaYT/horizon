@@ -1383,7 +1383,8 @@ fn returned_builtin_proxy_does_not_keep_its_group_alive() {
 fn growth_limits_return_failure_without_stopping_the_group() {
     crate::test_stack::on_guest_stack(|| {
         for body in [
-            "i32.const 4096 memory.grow",
+            // Past the default 1 GiB (16,384 pages) on top of what the guest already has.
+            "i32.const 16384 memory.grow",
             "ref.null func i32.const 1048576 table.grow",
         ] {
             let module = module(&format!(
