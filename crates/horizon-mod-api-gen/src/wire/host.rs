@@ -389,19 +389,14 @@ pub(super) fn generate(
     {
         writeln!(code, "({:?},{:?}) => Some({id}),", m.owner, m.name).unwrap();
     }
-    for (hook, _) in prepared_hooks {
-        let ask = surface
-            .methods
-            .iter()
-            .filter(|m| super::exports().contains(&m.owner))
-            .position(|m| m.name == *hook)
-            .ok_or("prepared ask missing")?;
-        for (name, id) in [
-            (format!("prepare_{hook}"), 0xffff_ff10usize),
-            (format!("ask_{hook}"), ask),
-            (format!("release_{hook}"), 0xffff_ff11usize),
-        ] {
-            writeln!(code, "(\"ItemPart\",{name:?}) => Some({id}),").unwrap();
+    for abi in super::prepared::describe(&surface.methods, prepared_hooks)? {
+        for entry in abi.entries {
+            writeln!(
+                code,
+                "(\"ItemPart\",{:?}) => Some({}),",
+                entry.name, entry.id
+            )
+            .unwrap();
         }
     }
     code.push_str("_ => None } }\n");
@@ -812,7 +807,8 @@ impl Cx {
                         &format!("pub fn ask_{name}(&self,prepared:&Prepared<'_>,"),
                         1,
                     );
-                    let ask = method.replacen(&sig, &ask_sig, 1).replacen("let mut frame = Frame::default();", &format!("let Some(slot_id)=[\"head\",\"chest\",\"legs\",\"feet\",\"mainhand\",\"offhand\",\"body\",\"saddle\"].iter().position(|slot| *slot==p{event}.slot).map(|i|i as u32) else {{ p{event}.can_equip=false;return; }}; let Some(kind_id)=prepared.kinds.iter().position(|kind| kind==p{event}.kind).map(|i|i as u32) else {{ p{event}.can_equip=false;return; }}; if !self.module.check(prepared.slot,prepared.generation) {{ p{event}.can_equip=false; return; }} let mut frame = Frame::default();"), 1);
+                    let slots = super::prepared::SLOTS;
+                    let ask = method.replacen(&sig, &ask_sig, 1).replacen("let mut frame = Frame::default();", &format!("let Some(slot_id)={slots:?}.iter().position(|slot| *slot==p{event}.slot).map(|i|i as u32) else {{ p{event}.can_equip=false;return; }}; let Some(kind_id)=prepared.kinds.iter().position(|kind| kind==p{event}.kind).map(|i|i as u32) else {{ p{event}.can_equip=false;return; }}; if !self.module.check(prepared.slot,prepared.generation) {{ p{event}.can_equip=false; return; }} let mut frame = Frame::default();"), 1);
                     writeln!(prepared_impls, "impl crate::WasmHandler {{ pub fn prepare_{name}(&self,stack:&mod_api::ItemStack,kinds:&[&str])->Option<Prepared<'_>> {{ let mut bytes=Writer::new(); bytes.put(stack); let kinds:Vec<String>=kinds.iter().map(|s|s.to_string()).collect(); bytes.put(&kinds); if bytes.error().is_some() {{ return None; }} let (slot,generation)=self.module.prepare(bytes.bytes())?; Some(Prepared {{ slot,generation,kinds,release:Some(Box::new(move || self.module.release(slot,generation))) }}) }} {ask} }}").unwrap();
                 } else {
                     code.push_str(&method);
@@ -878,23 +874,19 @@ fn host_and_coverage(root: &std::path::Path) -> Result<(String, String), String>
         .filter_map(|hook| hook.prepared.map(|parameter| (hook.name, parameter)))
         .collect::<Vec<_>>();
     let mut code = generate(&mut surface, &prepared_hooks)?;
-    let mut entries = Vec::new();
-    for (hook, _) in &prepared_hooks {
-        let ask = surface
-            .methods
-            .iter()
-            .filter(|m| super::exports().contains(&m.owner))
-            .position(|m| m.name == *hook)
-            .ok_or("prepared ask absent")? as u32;
-        entries.push((
-            hook.clone(),
-            [
-                (format!("prepare_{hook}"), 0xffff_ff10u32),
-                (format!("ask_{hook}"), ask),
-                (format!("release_{hook}"), 0xffff_ff11u32),
-            ],
-        ));
-    }
+    let entries = super::prepared::describe(&surface.methods, &prepared_hooks)?
+        .into_iter()
+        .map(|abi| {
+            let entries: [(String, u32); 3] = abi
+                .entries
+                .into_iter()
+                .map(|entry| (entry.name, entry.id))
+                .collect::<Vec<_>>()
+                .try_into()
+                .expect("prepare, ask and release entries");
+            (abi.hook, entries)
+        })
+        .collect::<Vec<_>>();
     writeln!(
         code,
         "pub const PREPARED_EXPORTS: &[(&str, [(&str,u32);3])] = &{entries:?};"

@@ -5,6 +5,9 @@ mod append;
 mod borrowed;
 mod calls;
 mod host;
+mod prepared;
+#[cfg(test)]
+mod prepared_tests;
 pub use host::{generate_coverage, generate_host};
 mod trait_roles;
 mod ty;
@@ -623,12 +626,25 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
         .filter_map(|hook| hook.prepared.map(|field| (hook.name, field)))
         .collect::<Vec<_>>();
     guest.push_str(&calls::dispatch(&surface.types, &surface.methods, &prepared).0);
+    let abis = prepared::describe(&surface.methods, &prepared)?;
     let _ = writeln!(
         wire,
-        "#[doc(hidden)]\npub static WIRE_LAYOUT: ::std::sync::LazyLock<u64> = ::std::sync::LazyLock::new(|| {{ let mut hash = {:#x}; {layouts} hash }});",
+        "#[doc(hidden)]\npub fn wire_core_layout() -> u64 {{ let mut hash = {:#x}; {layouts} hash }}",
         layout(&surface),
         layouts = surface.types.defs.iter().filter(|def| def.lifetimes == 0).map(|def| format!("hash = crate::wire::layout_mix(hash, <{} as crate::wire::Wire>::layout(&mut vec![]));", def.rust.replace("mod_api::", "crate::"))).collect::<String>()
     );
+    writeln!(
+        wire,
+        "#[doc(hidden)] pub fn prepared_abi_layout() -> u64 {{ {} }}",
+        prepared::layout_code(&abis)
+    )
+    .unwrap();
+    let complete = if abis.is_empty() {
+        "wire_core_layout()"
+    } else {
+        "crate::wire::layout_mix(wire_core_layout(),prepared_abi_layout())"
+    };
+    writeln!(wire, "#[doc(hidden)] pub static WIRE_LAYOUT: ::std::sync::LazyLock<u64> = ::std::sync::LazyLock::new(|| {{ {complete} }});").unwrap();
     let sources = surface.types.index.read.take();
     Ok(Generated {
         wire,
@@ -803,7 +819,10 @@ fn public_path(index: &Index<'_>, path: &str) -> bool {
 }
 
 /// A hash of everything the two sides must agree on: every method's id and signature, and
-/// every type's shape (FNV-1a over their descriptions).
+/// every type's shape (FNV-1a over their descriptions). This is the core seed;
+/// `generate` appends owned Wire layouts and the prepared marker/entry ABI layouts
+/// to the final WIRE_LAYOUT. wire_core_layout also supports refusal diagnostics:
+/// a guest presenting it without the prepared component is refused, never accepted.
 fn layout(surface: &Surface<'_>) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
     let mut feed = |text: &str| {

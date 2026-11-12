@@ -801,7 +801,8 @@ fn borrowed_prepared(
             continue;
         }
         if prepared.is_some() && f.rust == "slot" {
-            writeln!(read,"let {local}_id:u32=input.take()?; let {local}= [\"head\",\"chest\",\"legs\",\"feet\",\"mainhand\",\"offhand\",\"body\",\"saddle\"].get({local}_id as usize).copied().ok_or(crate::wire::WireError::Invalid(\"unknown equipment slot\"))?;").unwrap();
+            let slots = super::prepared::SLOTS;
+            writeln!(read,"let {local}_id:u32=input.take()?; let {local}= {slots:?}.get({local}_id as usize).copied().ok_or(crate::wire::WireError::Invalid(\"unknown equipment slot\"))?;").unwrap();
             build.push(format!("{}: {local}", f.rust));
             continue;
         }
@@ -990,11 +991,13 @@ pub(super) fn dispatch(
             .map(|(hook, field)| (hook.as_str(), field.as_str()));
         if let Some((hook, _)) = prepared_parameter {
             let upper = hook.to_uppercase();
+            let prepare = super::prepared::PREPARE;
+            let release = super::prepared::RELEASE;
             writeln!(preparation, "thread_local! {{ static PREPARED_{upper}: std::cell::RefCell<crate::wire::guest::PreparedSlots<(crate::ItemStack,Vec<String>)>> = std::cell::RefCell::default(); }}").unwrap();
-            writeln!(preparation, "#[cfg(target_arch=\"wasm32\")] #[unsafe(export_name=\"prepare_{hook}\")] pub extern \"C\" fn entry_prepare_{hook}()->u64 {{ let (p,n)=crate::wire::guest::run(0xffff_ff10); (p as usize as u64)<<32 | u64::from(n) }}").unwrap();
+            writeln!(preparation, "#[cfg(target_arch=\"wasm32\")] #[unsafe(export_name=\"prepare_{hook}\")] pub extern \"C\" fn entry_prepare_{hook}()->u64 {{ let (p,n)=crate::wire::guest::run({prepare}); (p as usize as u64)<<32 | u64::from(n) }}").unwrap();
             writeln!(preparation, "#[cfg(target_arch=\"wasm32\")] #[unsafe(export_name=\"ask_{hook}\")] pub extern \"C\" fn entry_ask_{hook}()->u64 {{ let (p,n)=crate::wire::guest::run({id}); (p as usize as u64)<<32 | u64::from(n) }}").unwrap();
-            writeln!(preparation, "#[cfg(target_arch=\"wasm32\")] #[unsafe(export_name=\"release_{hook}\")] pub extern \"C\" fn entry_release_{hook}()->u64 {{ let (p,n)=crate::wire::guest::run(0xffff_ff11); (p as usize as u64)<<32 | u64::from(n) }}").unwrap();
-            writeln!(arms, "0xffff_ff10 => {{ let slot:u32=input.take()?; let generation:u32=input.take()?; let stack:crate::ItemStack=input.take()?; let kinds:Vec<String>=input.take()?; if !input.rest().is_empty() {{ return Err(crate::wire::WireError::Trailing); }} PREPARED_{upper}.with(|slots| slots.borrow_mut().prepare(slot,generation,(stack,kinds)))?; out.put(&(slot,generation)); }}, 0xffff_ff11 => {{ let slot:u32=input.take()?; let generation:u32=input.take()?; if !input.rest().is_empty() {{ return Err(crate::wire::WireError::Trailing); }} PREPARED_{upper}.with(|slots| slots.borrow_mut().release(slot,generation))?; }}").unwrap();
+            writeln!(preparation, "#[cfg(target_arch=\"wasm32\")] #[unsafe(export_name=\"release_{hook}\")] pub extern \"C\" fn entry_release_{hook}()->u64 {{ let (p,n)=crate::wire::guest::run({release}); (p as usize as u64)<<32 | u64::from(n) }}").unwrap();
+            writeln!(arms, "{prepare} => {{ let slot:u32=input.take()?; let generation:u32=input.take()?; let stack:crate::ItemStack=input.take()?; let kinds:Vec<String>=input.take()?; if !input.rest().is_empty() {{ return Err(crate::wire::WireError::Trailing); }} PREPARED_{upper}.with(|slots| slots.borrow_mut().prepare(slot,generation,(stack,kinds)))?; out.put(&(slot,generation)); }}, {release} => {{ let slot:u32=input.take()?; let generation:u32=input.take()?; if !input.rest().is_empty() {{ return Err(crate::wire::WireError::Trailing); }} PREPARED_{upper}.with(|slots| slots.borrow_mut().release(slot,generation))?; }}").unwrap();
         }
         let mut body = String::new();
         let mut args = Vec::new();

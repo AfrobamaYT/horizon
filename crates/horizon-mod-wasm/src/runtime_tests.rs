@@ -768,7 +768,7 @@ fn layout_mismatch_is_a_mods_page_refusal() {
         assert!(matches!(refusal, Refusal::Layout { .. }));
         assert_eq!(
             refusal.to_string(),
-            "built for another version of the mod API"
+            "built for another version of the mod API (including the prepared can_equip ABI)"
         );
     })
 }
@@ -2088,4 +2088,94 @@ fn a_group_grows_past_256_mib_to_its_default_limit_and_goes_on_there() {
 #[test]
 fn a_lowered_limit_refuses_growth_inside_the_guest() {
     assert_eq!(grow_until_refused(64), 1_024);
+}
+
+#[test]
+fn old_unprepared_can_equip_fingerprint_is_refused_at_load() {
+    crate::test_stack::on_guest_stack(|| {
+        let old = mod_api::wire_core_layout();
+        assert_ne!(old, *mod_api::wire::LAYOUT);
+        let bytes = guest(old, "unreachable");
+        let refusal = WasmMod::instantiate(
+            &engine().unwrap(),
+            DEFAULT_GROUP_MEMORY_MIB,
+            &[Member {
+                name: "old_can_equip",
+                module: &bytes,
+            }],
+            None,
+        )
+        .err()
+        .unwrap();
+        assert!(
+            refusal
+                .to_string()
+                .contains("prepared can_equip ABI layout mismatch"),
+            "{refusal}"
+        );
+        assert!(refusal.to_string().contains("old unprepared layout"));
+    });
+}
+
+#[test]
+fn refused_prepared_release_stops_group_before_another_stack_can_be_prepared() {
+    crate::test_stack::on_guest_stack(|| {
+        let refusal = (1024u64 << 32) | u64::from(u32::MAX);
+        let exports = format!(
+            r#"
+            (func (export "prepare_can_equip") (result i64)
+                (memory.copy (i32.const 2048) (i32.const 512) (global.get $in_len))
+                (i32.store (i32.const 4000) (i32.add (i32.load (i32.const 4000)) (i32.const 1)))
+                i64.const 2199023255560)
+            (func (export "ask_can_equip") (result i64)
+                (i32.store (i32.const 4004) (i32.const 1)) i64.const 0)
+            (func (export "release_can_equip") (result i64)
+                (i32.store (i32.const 1024) (i32.const 0)) i64.const {refusal})
+        "#
+        );
+        let bytes = guest_with_exports(*mod_api::wire::LAYOUT, "unreachable", &exports);
+        let module = WasmMod::instantiate(
+            &engine().unwrap(),
+            DEFAULT_GROUP_MEMORY_MIB,
+            &[Member {
+                name: "refusing_release",
+                module: &bytes,
+            }],
+            None,
+        )
+        .unwrap()
+        .remove(0);
+        let owner = module.downgrade();
+        let token = owner.prepare(b"first-stack-payload").unwrap();
+        owner.release(token.0, token.1);
+        assert!(module.is_stopped());
+        assert!(!owner.check(token.0, token.1));
+        assert!(owner.prepare(b"second-stack-payload").is_none());
+        let ask = crate::boundary::export_id("ItemPart", "ask_can_equip").unwrap();
+        assert_eq!(
+            module.call(
+                CallClass::Hook,
+                Frame::default(),
+                ask,
+                None,
+                |_| {},
+                |r| r.take::<()>()
+            ),
+            None
+        );
+        let group = module.running.group.lock().unwrap();
+        let memory = group.memory.data(&group.store);
+        assert_eq!(
+            &memory[2056..2056 + b"first-stack-payload".len()],
+            b"first-stack-payload"
+        );
+        assert_eq!(
+            u32::from_le_bytes(memory[4000..4004].try_into().unwrap()),
+            1
+        );
+        assert_eq!(
+            u32::from_le_bytes(memory[4004..4008].try_into().unwrap()),
+            0
+        );
+    });
 }

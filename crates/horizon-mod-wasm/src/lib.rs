@@ -123,7 +123,10 @@ impl std::fmt::Display for Refusal {
             Self::Internals => write!(f, "internals access is native-only"),
             Self::Package(why) => write!(f, "{why}"),
             Self::Runtime(why) => write!(f, "{why}"),
-            Self::Layout { .. } => write!(f, "built for another version of the mod API"),
+            Self::Layout { .. } => write!(
+                f,
+                "built for another version of the mod API (including the prepared can_equip ABI)"
+            ),
             Self::PointLayout { built, game } => {
                 write!(
                     f,

@@ -1,5 +1,6 @@
 //! Sandboxed core-wasm transport. One lock, memory and poison flag per dependency group.
-//! Refusals leave the group running; only faults and native unwinds poison it.
+//! Ordinary refusals leave the group running. Faults, native unwinds and a failed
+//! prepared release poison it, since the guest may still own retained state.
 //! The preallocated call path adds an Arc increment/decrement per call, without
 //! allocating on success. Diagnostic keys are built and checked only on refusal.
 #[cfg(test)]
@@ -308,6 +309,14 @@ impl WeakWasmMod {
             .is_some_and(|running| running.poisoned.load(Ordering::Relaxed))
     }
     pub(crate) fn prepare(&self, bytes: &[u8]) -> Option<(u32, u32)> {
+        if self
+            .running
+            .upgrade()
+            .is_none_or(|running| running.poisoned.load(Ordering::Relaxed))
+        {
+            note("its group has stopped or was unloaded".into());
+            return None;
+        }
         if self.prepared_entries.len() != 3 {
             note(
                 "can_equip requires prepare_can_equip, ask_can_equip and release_can_equip exports"
@@ -376,7 +385,7 @@ impl WeakWasmMod {
             .unwrap_or_else(|e| e.into_inner())
             .release(slot, generation);
         if released && !std::thread::panicking() {
-            self.call(
+            let result = self.call(
                 CallClass::Hook,
                 Frame::default(),
                 crate::prepared::RELEASE,
@@ -387,6 +396,13 @@ impl WeakWasmMod {
                 },
                 |r| r.take::<()>(),
             );
+            if result.is_none() {
+                // The guest may still own the old stack. Stop the shared execution
+                // group before any subsequent preparation can reuse host authority.
+                if let Some(running) = self.running.upgrade() {
+                    running.poisoned.store(true, Ordering::Relaxed);
+                }
+            }
         } else if released {
             // Guest cleanup cannot run safely during a native unwind. Stop the
             // instance's group so retained guest state can never be used again.
@@ -743,6 +759,9 @@ impl WasmMod {
                 .call(&mut group.store, ())
                 .map_err(load)?;
             if layout != *mod_api::wire::LAYOUT {
+                if layout == mod_api::wire_core_layout() {
+                    return Err(Refusal::Runtime("prepared can_equip ABI layout mismatch: guest carries the old unprepared layout; rebuild the wasm mod".into()));
+                }
                 return Err(Refusal::Layout {
                     built: layout,
                     game: *mod_api::wire::LAYOUT,
