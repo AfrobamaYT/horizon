@@ -717,10 +717,7 @@ struct GameLevel<'w> {
     cake_requested: std::cell::Cell<bool>,
     cake_answer: Option<bool>,
     api_level: Option<mod_api::LevelRef>,
-    gateway_servers: &'w mut horizon_client::fast_hash::FxHashMap<
-        [i32; 3],
-        horizon_client::block_entity_anim::EndGateway,
-    >,
+    positions: piston_carry_state::PositionState<'w>,
     border: &'w horizon_core::geometry::border::BorderGeometry,
     world: &'w mut World,
     command_block_transition: Option<command_blocks::CommandBlockTransition>,
@@ -4472,7 +4469,10 @@ impl Game<'_> {
             cake_answer: None,
             api_level: self.level(self.dim.id()),
             command_block_transition: None,
-            gateway_servers: &mut self.be_anims.gateway_servers,
+            positions: piston_carry_state::PositionState {
+                gateways: &mut self.be_anims.gateway_servers,
+                hoppers: &mut self.hoppers,
+            },
             border: self.border.geometry(),
             redstone_experiments: self
                 .level
@@ -9546,7 +9546,7 @@ impl Game<'_> {
                 )
                 .filter(|(block, section_inside)| {
                     let (pos, state) = **block;
-                    self.res.block_entity_render().renders(state)
+                    self.live_block_entity_render(pos, state)
                         && (off_screen(state) || *section_inside || in_view(&pos))
                 })
                 .map(|(block, _)| block)
@@ -9559,7 +9559,7 @@ impl Game<'_> {
                     let listed: HashSet<[i32; 3]> = camera_list.iter().map(|b| b.0).collect();
                     r.shadow_pass_block_entities(camera)
                         .filter(|(pos, state)| {
-                            !listed.contains(pos) && self.res.block_entity_render().renders(*state)
+                            !listed.contains(pos) && self.live_block_entity_render(*pos, *state)
                         })
                         .collect()
                 } else {
@@ -9669,7 +9669,7 @@ impl Game<'_> {
                         |_| false,
                         |_| false,
                     )
-                    .filter(|(block, _)| self.res.block_entity_render().renders(block.1))
+                    .filter(|(block, _)| self.live_block_entity_render(block.0, block.1))
                     .map(|(block, _)| block);
                 (
                     static_block_entities,
@@ -16511,7 +16511,6 @@ pub(crate) fn closest_space_nudge(
 
 #[cfg(test)]
 use inventory_input::drop_whole_stack;
-use prediction::gliding_pieces;
 use subtitles::{Subtitles, in_game_ui, subtitles};
 
 use hud_render::{block_outline_drawn, debug_crosshair_drawn, is_game_master_block};
@@ -16653,32 +16652,6 @@ mod escape_tests {
 impl Game<'_> {
     fn held_mut(&mut self) -> &mut Option<ItemStack> {
         self.stack_in_mut(self.held_slot())
-    }
-    fn glider_worn(&self) -> bool {
-        let items = self.res.items();
-        let hand = |stack: Option<&ItemStack>, slot: &str| {
-            stack.is_some_and(|s| horizon_client::item_sync::can_glide_using(s, slot, items))
-        };
-        gliding_pieces(items, &self.armor).contains(&true)
-            || hand(self.inventory[self.selected].as_ref(), "mainhand")
-            || hand(self.offhand.as_ref(), "offhand")
-    }
-    pub(super) fn wear_glider(&mut self, points: u32) {
-        let gliding = gliding_pieces(self.res.items(), &self.armor);
-        let pieces: Vec<usize> = (0..4).filter(|&i| gliding[i]).collect();
-        if pieces.is_empty() {
-            return;
-        }
-        // `Util.getRandom(slotsWithGliders, this.random)`: the entity's own
-        // random, which never touches the level's stream.
-        let pick = random_source::entity().next_int_bound(pieces.len() as i32);
-        let pick = pieces[pick.unwrap_or(0) as usize];
-        if let Some(stack) = self.armor[pick].clone() {
-            let loss = self.wear(&stack, points);
-            if let Some(piece) = self.armor[pick].as_mut() {
-                piece.damage += loss;
-            }
-        }
     }
     pub(crate) fn wears_freeze_immune(&self) -> bool {
         let immune = self

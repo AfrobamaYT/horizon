@@ -69,6 +69,14 @@ impl Default for HopperState {
 }
 
 impl HopperState {
+    /// A transferred holder keeps its cooldown and starts with a fresh ticker timestamp.
+    pub(super) fn with_cooldown(cooldown: i32) -> Self {
+        Self {
+            cooldown,
+            ticked: 0,
+        }
+    }
+
     /// `HopperBlockEntity.loadAdditional`: only the cooldown is saved; the
     /// last tick time starts at zero for the new block entity.
     pub(super) fn load(tag: &horizon_core::nbt::Tag) -> Self {
@@ -77,10 +85,7 @@ impl HopperState {
             Some(horizon_core::nbt::Tag::Int(value)) => *value,
             _ => -1,
         };
-        Self {
-            cooldown,
-            ticked: 0,
-        }
+        Self::with_cooldown(cooldown)
     }
 }
 

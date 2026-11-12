@@ -4,10 +4,7 @@
 //! damage, fire and the walk animation.
 use super::{Mob, MobEvent, MobWorld};
 use crate::health::DamageLevel;
-use crate::{
-    blocks::Fluid,
-    collisions::{PowderSnowSubject, SceneCollisions},
-};
+use crate::{blocks::Fluid, collisions::SceneCollisions};
 use horizon_core::{
     geometry::{Aabb, Vec3, trig},
     position::BlockPos,
@@ -828,11 +825,7 @@ impl Mob {
         let scene = SceneCollisions {
             world: w.world,
             binding: w.collision,
-            subject: self.kind.flags.lava_walker.then(|| PowderSnowSubject {
-                fall_distance: self.fall_distance,
-                lava_walker: true,
-                ..Default::default()
-            }),
+            subject: Some(self.collision_subject()),
         };
         // Entity.collide: the world border's walls stop the mob too, and so
         // do the entities it may not pass through.

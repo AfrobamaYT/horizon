@@ -7439,12 +7439,6 @@ impl Game<'_> {
                     .collect()
             })
             .unwrap_or_default();
-        // Shulker.onPeekAmountChange: the box of this client's own player, which
-        // an opening lid pushes (EntitySelector.NO_SPECTATORS).
-        let shulker_pushes = self
-            .player_view()
-            .filter(|p| p.alive && !p.spectator)
-            .map(|p| p.bounds);
         let Some(r) = self.remote.as_mut() else {
             return;
         };
@@ -7700,9 +7694,7 @@ impl Game<'_> {
                 // Shulker.tick's onPeekAmountChange: the lid moves this
                 // client's player, whose movement is its own.
                 horizon_client::mobs::Species::Shulker => {
-                    if let Some(player) = shulker_pushes {
-                        horizon_client::mobs::shulker::client_push(m, player, &mut mob_fx);
-                    }
+                    horizon_client::mobs::shulker::client_push(m, &mut mob_fx);
                 }
                 _ => {}
             }
