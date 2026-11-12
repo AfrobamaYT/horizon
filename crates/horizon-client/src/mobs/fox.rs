@@ -1,8 +1,9 @@
 //! Foxes (`net.minecraft.world.entity.animal.fox.Fox`): the goal list, the
 //! flags byte (sleeping, sitting, crouching, interested, pouncing,
 //! faceplanted), stalking and pouncing, napping in the shade by day, seeking
-//! shelter, perching, eating berries and the food held in the mouth (with the
-//! item's on-consumed effects: a chorus fruit teleports it).
+//! shelter, perching, eating berries and the food held in the mouth: its whole
+//! `Consumable.onConsume` (the item's effects, its sounds and the eat game
+//! event), so a chorus fruit teleports it and a golden apple feeds it.
 //! Defending trusted players is not ported yet.
 //! The goal that walks to a dropped item is here; the game side takes the
 //! items (`Fox.pickUpItem`, `game/mobs/foxes.rs`). A totem in the mouth is a
@@ -19,13 +20,14 @@ use super::{
     riders,
     villager_brain::{closer_to_center, sections_to_village, village_sections},
 };
+use horizon_core::position::BlockPos;
 use horizon_core::{
     geometry::{Axis, Vec3},
     jmath,
-    random::RandomSource,
+    random::{LegacyRandom, RandomSource},
 };
-use horizon_core::{position::BlockPos, random::LegacyRandom};
 use horizon_items::items::ConsumeEffect;
+use horizon_world::consumable::EmissionWorld;
 use horizon_world::registry::BlockStateId;
 use horizon_world::teleport_consume::TeleportConsumeWorld;
 use std::convert::Infallible;
@@ -39,7 +41,7 @@ pub const SLEEPING: i32 = 32;
 pub const FACEPLANTED: i32 = 64;
 pub const DEFENDING: i32 = 128;
 /// `Fox.ticksSinceEaten`.
-const TICKS_SINCE_EATEN: usize = 1;
+pub(crate) const TICKS_SINCE_EATEN: usize = 1;
 /// `Fox.interestedAngle` and `crouchAmount` in `anim.v`, the previous tick's
 /// values in `anim.vo`.
 const INTERESTED_ANGLE: usize = 0;
@@ -311,7 +313,7 @@ pub fn decide_consumption(m: &Mob, w: &MobWorld) -> Option<Consumption> {
         || m.no_ai
         || m.species() != Species::Fox
         || m.extra.ints[TICKS_SINCE_EATEN] <= 600
-        || !eats(w, &stack.item)
+        || !eats(w, &stack)
         || m.ai.target.is_some()
         || !m.on_ground
         || flag(m, SLEEPING)
@@ -332,12 +334,15 @@ pub fn apply_consumption(
     decision: &Consumption,
     w: &MobWorld,
     m: &mut Mob,
+    level: &mut crate::health::DamageLevel<'_>,
     events: &mut Vec<MobEvent>,
 ) -> bool {
     if !decision.still_valid(m) {
         return false;
     }
-    consume(w, m, events, &decision.stack);
+    if !consume(w, m, level, events, &decision.stack) {
+        return false;
+    }
     let remainder = w
         .items
         .and_then(|i| i.items.get(&decision.stack.item))
@@ -350,9 +355,14 @@ pub fn apply_consumption(
 /// `Fox.tick` and `Fox.aiStep`: eating, and `SoundEvents.FOX_AGGRO`
 /// (`Entity.playSound` at its feet) while the fox is defending. Only the
 /// server broadcasts that sound.
-pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
+pub fn ai_step(
+    m: &mut Mob,
+    w: &MobWorld,
+    level: &mut crate::health::DamageLevel<'_>,
+    events: &mut Vec<MobEvent>,
+) {
     if let Some(decision) = ai_step_until_consumption(m, w, events) {
-        apply_consumption(&decision, w, m, events);
+        apply_consumption(&decision, w, m, level, events);
         before_living_ai_step(m, w);
     }
     finish_ai_step(m, w, events);
@@ -371,8 +381,8 @@ pub fn ai_step_until_consumption(
         return None;
     }
     m.extra.ints[TICKS_SINCE_EATEN] += 1;
-    if let Some(item) = super::finalize::item(m, super::finalize::MAINHAND)
-        && eats(w, &item)
+    if let Some(stack) = m.extra.main_hand_stack()
+        && eats(w, stack)
         && m.ai.target.is_none()
         && m.on_ground
         && !flag(m, SLEEPING)
@@ -454,10 +464,10 @@ pub fn pre_ai_step(m: &mut Mob) {
     }
 }
 /// `Fox.isConsumableFood`: the item has food and consumable components.
-fn eats(w: &MobWorld, item: &str) -> bool {
-    w.items
-        .and_then(|i| i.items.get(item))
-        .is_some_and(|i| i.food.is_some() && i.consumable.is_some())
+fn eats(w: &MobWorld, stack: &crate::items::ItemStack) -> bool {
+    let info = w.items.and_then(|items| items.items.get(&stack.item));
+    crate::item_sync::food(stack, info.and_then(|i| i.food)).is_some()
+        && stack.consumable(info).is_some()
 }
 
 /// `Consumable.onConsume`'s `on_consume_effects` when a fox finishes an item
@@ -465,16 +475,18 @@ fn eats(w: &MobWorld, item: &str) -> bool {
 fn consume(
     w: &MobWorld,
     m: &mut Mob,
+    level: &mut crate::health::DamageLevel<'_>,
     events: &mut Vec<MobEvent>,
     stack: &horizon_items::items::ItemStack,
-) {
+) -> bool {
     let Some(consumable) = w
         .items
         .and_then(|items| items.items.get(&stack.item))
         .and_then(|info| stack.consumable(Some(info)))
     else {
-        return;
+        return false;
     };
+    consumed_before_effects(w, m, events, stack);
     for effect in &consumable.effects {
         if let ConsumeEffect::TeleportRandomly(teleport) = effect {
             let Ok(_) = teleport.apply(
@@ -485,7 +497,119 @@ fn consume(
                 },
                 (),
             );
+        } else if let ConsumeEffect::PlaySound(sound) = effect {
+            // Level.playSound at the user's block position, not Entity.playSound:
+            // no silence check or random pitch, and effects keep their list order.
+            let block = BlockPos::containing(m.position);
+            events.push(MobEvent::SoundId(
+                sound.clone(),
+                [block.x, block.y, block.z].map(|v| f64::from(v) + 0.5),
+                1.0,
+                1.0,
+            ));
+        } else {
+            m.apply_consume_effect(level, effect);
         }
+    }
+    // `user.gameEvent(animation == DRINK ? GameEvent.DRINK : GameEvent.EAT)` at
+    // its own position, itself the source.
+    events.push(MobEvent::GameEvent {
+        event: if consumable.animation == horizon_world::consumable::UseAnimation::Drink {
+            "minecraft:drink"
+        } else {
+            "minecraft:eat"
+        },
+        at: [m.position.x, m.position.y, m.position.z],
+        source: m.id,
+        state: BlockStateId(0),
+    });
+    true
+}
+
+/// Emit consumption crumbs and food sounds before any effect draws.
+pub fn consumed_before_effects(
+    w: &MobWorld,
+    m: &mut Mob,
+    events: &mut Vec<MobEvent>,
+    stack: &crate::items::ItemStack,
+) {
+    let Some(consumable) = w
+        .items
+        .and_then(|items| items.items.get(&stack.item))
+        .and_then(|info| stack.consumable(Some(info)))
+    else {
+        return;
+    };
+    let food = crate::item_sync::food(
+        stack,
+        w.items
+            .and_then(|items| items.items.get(&stack.item))
+            .and_then(|info| info.food),
+    );
+    let stack = stack.clone();
+    // `emitParticlesAndSounds(random, user, stack, 16)`.
+    let _ = consumable.emit(&mut Eater { m, events }, (), stack, 16);
+    // `FoodProperties.onConsume`, the food component's `ConsumableListener`: the
+    // consumable's sound again, at full volume. A fox is no player, so it eats
+    // no food and does not burp; `Level.playSound` is no `Entity.playSound`, so
+    // a silent fox's food is still heard.
+    if food.is_some() {
+        let pitch = m.random.triangle_float(1.0, 0.4);
+        let at = [m.position.x, m.position.y, m.position.z];
+        events.push(MobEvent::SoundId(consumable.sound.clone(), at, 1.0, pitch));
+    }
+}
+
+/// The fox as `Consumable`'s user: its own random, and its own ears.
+struct Eater<'a> {
+    m: &'a mut Mob,
+    events: &'a mut Vec<MobEvent>,
+}
+impl EmissionWorld for Eater<'_> {
+    type Error = Infallible;
+    type Stack = crate::items::ItemStack;
+    type Sound = String;
+    type Random = ();
+    type Source = LegacyRandom;
+    fn random_source(&mut self, (): ()) -> &mut LegacyRandom {
+        &mut self.m.random
+    }
+    /// `LivingEntity.spawnItemParticles` hands each of the 16 crumbs to
+    /// `Level.addParticle`, which a server does nothing with: the four draws a
+    /// crumb costs still come off the fox's random, as vanilla spends them.
+    fn spawn_item_particles(
+        &mut self,
+        _: crate::items::ItemStack,
+        count: i32,
+    ) -> Result<(), Infallible> {
+        let m = &mut *self.m;
+        let (at, eye) = ([m.position.x, m.position.y, m.position.z], m.eye_y());
+        let (pitch, yaw) = (m.head_pitch, m.yaw);
+        crate::particles::item_use_particles(
+            &mut m.random,
+            pitch,
+            yaw,
+            at,
+            eye,
+            count.max(0) as u32,
+            |_, _| {},
+        );
+        Ok(())
+    }
+    fn overrides_consume_sound(&self) -> bool {
+        false
+    }
+    fn consume_sound(&mut self, _: crate::items::ItemStack) -> Result<String, Infallible> {
+        unreachable!("the consumable plays its own sound")
+    }
+    /// `Entity.playSound`: at the fox's feet, and nothing from a silent fox.
+    fn play_sound(&mut self, sound: String, volume: f32, pitch: f32) -> Result<(), Infallible> {
+        if !self.m.silent {
+            let at = [self.m.position.x, self.m.position.y, self.m.position.z];
+            self.events
+                .push(MobEvent::SoundId(sound, at, volume, pitch));
+        }
+        Ok(())
     }
 }
 
@@ -1534,6 +1658,131 @@ mod consume_tests {
     use super::*;
     use crate::mobs::world::with_built_test_world;
 
+    #[test]
+    fn effective_components_admit_food_and_preserve_removed_consumables() {
+        let _ = with_built_test_world(
+            &[],
+            |_, _| {},
+            |w, types| {
+                let kind = std::sync::Arc::new(types.types["minecraft:fox"].clone());
+                let mut fox = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+                fox.on_ground = true;
+                fox.extra.ints[TICKS_SINCE_EATEN] = 601;
+                for removed in ["!minecraft:food", "!minecraft:consumable"] {
+                    let mut stack = crate::items::ItemStack::new("minecraft:golden_apple", 2);
+                    stack.data_mut().set_other(
+                        removed,
+                        Some(horizon_core::nbt::Tag::Compound(Default::default())),
+                    );
+                    fox.extra.set_main_hand_stack(Some(stack.clone()));
+                    assert!(decide_consumption(&fox, w).is_none(), "{removed}");
+                    let mut events = Vec::new();
+                    ai_step(
+                        &mut fox,
+                        w,
+                        &mut crate::health::TestLevel::new(0).level(),
+                        &mut events,
+                    );
+                    assert_eq!(fox.extra.main_hand_stack(), Some(&stack), "{removed}");
+                    assert!(!events.iter().any(|event| matches!(
+                        event,
+                        MobEvent::GameEvent {
+                            event: "minecraft:eat",
+                            ..
+                        }
+                    )));
+                }
+                let mut stack = crate::items::ItemStack::new("minecraft:stone", 2);
+                stack.data_mut().set_other(
+                    "minecraft:food",
+                    Some(
+                        horizon_core::nbt::parse_snbt("{nutrition:1,saturation:0.1f}")
+                            .unwrap()
+                            .0,
+                    ),
+                );
+                stack.data_mut().set_other(
+                    "minecraft:consumable",
+                    Some(horizon_core::nbt::Tag::Compound(Default::default())),
+                );
+                fox.extra.set_main_hand_stack(Some(stack));
+                let decision =
+                    decide_consumption(&fox, w).expect("effective components make stone edible");
+                let mut events = Vec::new();
+                assert!(apply_consumption(
+                    &decision,
+                    w,
+                    &mut fox,
+                    &mut crate::health::TestLevel::new(0).level(),
+                    &mut events
+                ));
+                assert_eq!(fox.extra.main_hand_stack().unwrap().count, 1);
+                assert!(events.iter().any(|event| matches!(
+                    event,
+                    MobEvent::GameEvent {
+                        event: "minecraft:eat",
+                        source: 1,
+                        ..
+                    }
+                )));
+            },
+        );
+    }
+
+    #[test]
+    fn explicit_consume_sounds_keep_effect_order_even_for_a_silent_fox() {
+        let _ = with_built_test_world(
+            &[],
+            |_, _| {},
+            |w, types| {
+                let kind = std::sync::Arc::new(types.types["minecraft:fox"].clone());
+                let mut fox = Mob::new(1, kind, Vec3::new(-1.2, 64.25, 3.75), 0.0);
+                fox.on_ground = true;
+                fox.silent = true;
+                fox.extra.ints[TICKS_SINCE_EATEN] = 601;
+                let mut stack = crate::items::ItemStack::new("minecraft:golden_apple", 1);
+                stack.data_mut().set_other("minecraft:consumable", Some(horizon_core::nbt::parse_snbt(r#"{has_consume_particles:0b,on_consume_effects:[{type:"minecraft:play_sound",sound:"horizon:first"},{type:"minecraft:play_sound",sound:"horizon:second"}]}"#).unwrap().0));
+                fox.extra.set_main_hand_stack(Some(stack));
+                let decision = decide_consumption(&fox, w).unwrap();
+                let mut events = Vec::new();
+                assert!(apply_consumption(
+                    &decision,
+                    w,
+                    &mut fox,
+                    &mut crate::health::TestLevel::new(0).level(),
+                    &mut events
+                ));
+                let effects: Vec<_> = events
+                    .iter()
+                    .filter_map(|event| match event {
+                        MobEvent::SoundId(sound, at, volume, pitch)
+                            if sound.starts_with("horizon:") =>
+                        {
+                            Some((sound.as_str(), *at, *volume, *pitch))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(
+                    effects,
+                    [
+                        ("horizon:first", [-1.5, 64.5, 3.5], 1.0, 1.0),
+                        ("horizon:second", [-1.5, 64.5, 3.5], 1.0, 1.0)
+                    ]
+                );
+                assert!(matches!(
+                    events.last(),
+                    Some(MobEvent::GameEvent {
+                        event: "minecraft:eat",
+                        source: 1,
+                        ..
+                    })
+                ));
+                assert!(fox.extra.main_hand_stack().is_none());
+            },
+        );
+    }
+
     /// `Item.finishUsingItem` → `Consumable.onConsume`: a fox that finishes a
     /// chorus fruit takes `TeleportRandomlyConsumeEffect`'s teleport, with its
     /// own sound and the portal trail (level event 2017).
@@ -1575,7 +1824,12 @@ mod consume_tests {
                 // Past the 600 ticks `Fox.aiStep` waits before it finishes the item.
                 m.extra.ints[TICKS_SINCE_EATEN] = 601;
                 let mut events = Vec::new();
-                ai_step(&mut m, w, &mut events);
+                ai_step(
+                    &mut m,
+                    w,
+                    &mut crate::health::TestLevel::new(0).level(),
+                    &mut events,
+                );
                 assert_ne!(m.position, Vec3::new(0.5, 1.0, 0.5), "the fruit moved it");
                 // `Entity.randomTeleport` drops the drawn height by one per
                 // step until the block below it is ground: just above the stone.
@@ -1632,6 +1886,103 @@ mod consume_tests {
                         .iter()
                         .any(|e| matches!(e, MobEvent::EntityEvent { event: 46, .. })),
                     "entity event 46: {events:?}"
+                );
+                // `Consumable.onConsume` ends with `user.gameEvent(EAT)`, at the
+                // fox's new position and from the fox itself.
+                let eat = events.iter().position(
+                    |e| matches!(e, MobEvent::GameEvent { event, .. } if *event == "minecraft:eat"),
+                );
+                let Some(eat) = eat else {
+                    panic!("the eat game event: {events:?}");
+                };
+                assert!(
+                    matches!(&events[eat], MobEvent::GameEvent { at, source: 1, .. } if *at == [m.position.x, m.position.y, m.position.z]),
+                    "at its feet, from itself: {:?}",
+                    events[eat]
+                );
+            },
+        );
+        // Without the vanilla data under .local/horizon-client (CI's unit
+        // tests) there is no fox to feed: the test has nothing to check.
+        let _ = ran;
+    }
+
+    /// `Consumable.onConsume` runs the whole of a golden apple's consume, not
+    /// just its effects: the two eat sounds (the consumable's, then the food
+    /// component's own), `ApplyStatusEffectsConsumeEffect`'s regeneration and
+    /// absorption, and `GameEvent.EAT` once they are in place. Vanilla draws the
+    /// crumbs of `spawnItemParticles` but hands them to `Level.addParticle`,
+    /// which a server does nothing with.
+    #[test]
+    fn a_golden_apple_feeds_the_fox_and_posts_the_eat_event() {
+        let ran = with_built_test_world(
+            &[],
+            |_, _| {},
+            |w, types| {
+                let kind = std::sync::Arc::new(types.types["minecraft:fox"].clone());
+                let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+                m.on_ground = true;
+                m.extra.set_main_hand(Some("minecraft:golden_apple".into()));
+                m.extra.ints[TICKS_SINCE_EATEN] = 601;
+                let mut events = Vec::new();
+                ai_step(
+                    &mut m,
+                    w,
+                    &mut crate::health::TestLevel::new(0).level(),
+                    &mut events,
+                );
+                // `ApplyStatusEffectsConsumeEffect`: regeneration II for 100
+                // ticks, then absorption for 2400.
+                assert!(
+                    m.extra
+                        .effects
+                        .iter()
+                        .any(|e| (e.id, e.duration, e.amplifier)
+                            == ("minecraft:regeneration", 100, 1)),
+                    "{:?}",
+                    m.extra.effects
+                );
+                assert!(
+                    m.extra
+                        .effects
+                        .iter()
+                        .any(|e| (e.id, e.duration, e.amplifier)
+                            == ("minecraft:absorption", 2400, 0)),
+                    "{:?}",
+                    m.extra.effects
+                );
+                assert_eq!(m.absorption, 4.0, "a level of absorption is four halves");
+                let eat_sounds: Vec<_> = events
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| {
+                        matches!(e, MobEvent::SoundId(name, ..) if name == "minecraft:entity.generic.eat")
+                    })
+                    .collect();
+                assert_eq!(eat_sounds.len(), 2, "{events:?}");
+                let MobEvent::SoundId(_, at, volume, pitch) = eat_sounds[1].1 else {
+                    unreachable!()
+                };
+                assert_eq!(*volume, 1.0, "the food's own sound is at full volume");
+                assert_eq!(*at, [0.5, 64.0, 0.5]);
+                // `Mth.randomBetween`/`triangle(1.0, 0.4)`: 0.6 to 1.4.
+                assert!((0.6..=1.4).contains(pitch), "its pitch is drawn: {pitch}");
+                assert_eq!(m.extra.main_hand, None, "the apple was eaten");
+                assert_eq!(m.extra.ints[TICKS_SINCE_EATEN], 0);
+                let eat = events.iter().position(
+                    |e| matches!(e, MobEvent::GameEvent { event, .. } if *event == "minecraft:eat"),
+                );
+                let Some(eat) = eat else {
+                    panic!("the eat game event: {events:?}");
+                };
+                assert!(
+                    eat > eat_sounds[1].0,
+                    "the event comes after the sounds, as vanilla's last step"
+                );
+                assert!(
+                    matches!(&events[eat], MobEvent::GameEvent { at, source: 1, .. } if *at == [0.5, 64.0, 0.5]),
+                    "at its feet, from itself: {:?}",
+                    events[eat]
                 );
             },
         );

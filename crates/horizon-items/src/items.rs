@@ -91,6 +91,7 @@ pub fn parse_consumable(
         animation: crate::use_animation::consumable_animation(cons),
         sound: cons["sound"]
             .as_str()
+            .or_else(|| cons["sound"]["sound_id"].as_str())
             .unwrap_or("minecraft:entity.generic.eat")
             .to_owned(),
         particles: cons["has_consume_particles"].as_bool().unwrap_or(true),
@@ -2524,7 +2525,8 @@ impl<R: RandomSource> LootContext<'_, R> {
                     } else {
                         0
                     };
-                    stack.count = (base + n).max(0) as u32;
+                    let total = base.saturating_add(n).max(0);
+                    stack.count = total as u32;
                 }
                 // SetItemDamageFunction.run: check damageability before the
                 // float provider, so ineligible stacks do not draw randomness.
@@ -2569,7 +2571,7 @@ impl<R: RandomSource> LootContext<'_, R> {
                         }
                         "minecraft:uniform_bonus_count" => {
                             let multiplier = params["bonusMultiplier"].as_i64().unwrap_or(1) as i32;
-                            let bound = multiplier.saturating_mul(level).saturating_add(1);
+                            let bound = multiplier.saturating_mul(level).saturating_add(1).max(1);
                             count.saturating_add(random.next_int_bound(bound).unwrap_or(0))
                         }
                         "minecraft:binomial_with_bonus_count" => {

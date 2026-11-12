@@ -4898,7 +4898,7 @@ impl Mob {
         self.extra.hand_protection = None;
         self.health = 1.0;
         for effect in &effects {
-            self.apply_death_effect(level, effect);
+            self.apply_consume_effect(level, effect);
         }
         let at = [self.position.x, self.position.y, self.position.z];
         self.outbox.push(MobEvent::EntityEvent {
@@ -4908,9 +4908,10 @@ impl Mob {
         });
         true
     }
-    /// One `ConsumeEffect` of a `death_protection` component on the mob.
-    /// Teleporting, sounds and a mod's own kinds are not applied to mobs.
-    fn apply_death_effect(
+    /// One `ConsumeEffect` of death protection or a fox's consumed item.
+    /// Damage uses the owning typed level. Teleporting and sounds belong to
+    /// the consumption caller; mod-defined kinds are not applied here.
+    pub fn apply_consume_effect(
         &mut self,
         level: &mut DamageLevel<'_>,
         effect: &crate::items::ConsumeEffect,
@@ -6758,12 +6759,12 @@ mod totem_tests {
                     show_icon: true,
                 }],
             };
-            mob.apply_death_effect(&mut level.level(), &effect);
+            mob.apply_consume_effect(&mut level.level(), &effect);
             assert_eq!(mob.health, 9.0);
-            mob.apply_death_effect(&mut level.level(), &effect);
+            mob.apply_consume_effect(&mut level.level(), &effect);
             assert_eq!(mob.health, 10.0);
             mob.health = 0.0;
-            mob.apply_death_effect(&mut level.level(), &effect);
+            mob.apply_consume_effect(&mut level.level(), &effect);
             assert_eq!(
                 mob.health, 0.0,
                 "instant healing does not revive a dead mob"
@@ -7518,7 +7519,7 @@ mod hidden_speed_mob_tick_tests {
         assert_eq!(to.extra.effect_chains, m.extra.effect_chains);
         to.extra.effect_chains[0].duration = 222;
         assert_eq!(m.extra.effect_chains[0].duration, 300);
-        m.apply_death_effect(
+        m.apply_consume_effect(
             &mut crate::health::TestLevel::new(0).level(),
             &crate::items::ConsumeEffect::RemoveEffects(vec!["minecraft:speed".into()]),
         );
@@ -7535,7 +7536,7 @@ mod hidden_speed_mob_tick_tests {
         assert!(m.extra.effect_chains.is_empty());
         m.add_effect("speed", 5, 1);
         assert_eq!(m.extra.effect_chains[0].duration, 20);
-        m.apply_death_effect(
+        m.apply_consume_effect(
             &mut crate::health::TestLevel::new(0).level(),
             &crate::items::ConsumeEffect::ClearAllEffects,
         );
@@ -7561,7 +7562,7 @@ mod hidden_speed_mob_tick_tests {
         m.add_effect("health_boost", 200, 1);
         assert_eq!(m.attrs.max_health, 18.0);
         m.health = 18.0;
-        m.apply_death_effect(
+        m.apply_consume_effect(
             &mut crate::health::TestLevel::new(0).level(),
             &crate::items::ConsumeEffect::ClearAllEffects,
         );
@@ -7596,7 +7597,7 @@ mod hidden_speed_mob_tick_tests {
         m0.add_effect("absorption", 600, 0);
         assert_eq!(armor::max_absorption(&m0), 4.0);
         assert_eq!(m0.absorption, 4.0);
-        m0.apply_death_effect(
+        m0.apply_consume_effect(
             &mut crate::health::TestLevel::new(0).level(),
             &crate::items::ConsumeEffect::ClearAllEffects,
         );
@@ -7616,7 +7617,7 @@ mod hidden_speed_mob_tick_tests {
         m20.add_effect("absorption", 600, 0);
         assert_eq!(armor::max_absorption(&m20), 24.0);
         assert_eq!(m20.absorption, 4.0);
-        m20.apply_death_effect(
+        m20.apply_consume_effect(
             &mut crate::health::TestLevel::new(0).level(),
             &crate::items::ConsumeEffect::ClearAllEffects,
         );
@@ -7636,7 +7637,7 @@ mod hidden_speed_mob_tick_tests {
         m20_clamp.extra.armor_attributes = Some(Box::new(attrs3));
         m20_clamp.add_effect("absorption", 600, 0);
         m20_clamp.absorption = 24.0;
-        m20_clamp.apply_death_effect(
+        m20_clamp.apply_consume_effect(
             &mut crate::health::TestLevel::new(0).level(),
             &crate::items::ConsumeEffect::RemoveEffects(vec!["minecraft:absorption".into()]),
         );
@@ -7651,7 +7652,7 @@ mod hidden_speed_mob_tick_tests {
         let mut m0_remove = Mob::new(4, kind.clone(), Vec3::ZERO, 0.0);
         m0_remove.add_effect("absorption", 600, 0);
         assert_eq!(m0_remove.absorption, 4.0);
-        m0_remove.apply_death_effect(
+        m0_remove.apply_consume_effect(
             &mut crate::health::TestLevel::new(0).level(),
             &crate::items::ConsumeEffect::RemoveEffects(vec!["minecraft:absorption".into()]),
         );
