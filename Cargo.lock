@@ -2229,6 +2229,7 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mod-runtime",
+ "log",
  "serde_json",
 ]
 
