@@ -314,3 +314,16 @@ their rows have landed or become partial since and should be narrowed when they 
 - **Missing but not in either group:** the remaining block, entity, block-entity and fluid rows marked Missing
   above; they have no follow-up issue yet. The largest are the entity fluid queries, block entity model data and
   fluid tooltips.
+
+### Resource-backed block-part checks
+
+With `HORIZON_TEST_RESOURCES` pointing to prepared resources, run the tool and player-removal
+fixtures together (including the ice-denial regression):
+
+```sh
+for suite in block_part_tool_tests player_destroy_tests; do
+    cargo test -p horizon-client --bin horizon-client "$suite" -- --ignored
+done
+```
+
+These checks require prepared resources; they are not ordinary resource-free unit tests.
