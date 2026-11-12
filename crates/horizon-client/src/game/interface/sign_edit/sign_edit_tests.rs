@@ -198,15 +198,14 @@ impl Edits {
     }
     /// Puts `stack` in `conn`'s main hand and selects it.
     fn hold(&mut self, conn: u32, stack: ItemStack) {
-        let guest = self
-            .host()
+        self.host()
             .hub
             .guests
-            .iter_mut()
-            .find(|g| g.conn == conn)
+            .update_connection(conn, |guest| {
+                guest.inventory[0] = Some(stack);
+                guest.selected = 0;
+            })
             .unwrap();
-        guest.inventory[0] = Some(stack);
-        guest.selected = 0;
     }
     /// The count of the stack `conn` holds.
     fn held(&mut self, conn: u32) -> u32 {
@@ -223,15 +222,14 @@ impl Edits {
     }
     /// Moves `conn`'s body to `at`.
     fn move_to(&mut self, conn: u32, at: [f64; 3]) {
-        let guest = self
-            .host()
+        self.host()
             .hub
             .guests
-            .iter_mut()
-            .find(|g| g.conn == conn)
+            .update_connection(conn, |guest| {
+                guest.position = at;
+                guest.previous_position = at;
+            })
             .unwrap();
-        guest.position = at;
-        guest.previous_position = at;
     }
     /// Whether `conn`'s client was sent an `OpenSignEditor` since the last
     /// call.

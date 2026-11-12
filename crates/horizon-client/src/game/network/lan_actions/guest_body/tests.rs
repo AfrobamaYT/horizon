@@ -45,6 +45,8 @@ fn co_located_guests_own_distinct_streams_and_restore_the_saved_body() {
         food_exhaustion: 1.25,
         food_tick_timer: 17,
         ticks_frozen: 23,
+        invulnerable: true,
+        invulnerable_time: 7,
     };
     first.loaded_body = Some(saved);
     initialize(&resources, &mut first);

@@ -92,7 +92,7 @@ impl Game<'_> {
                 }
                 dragon.parts[0].0 = at;
                 dragon.parts[0].1 = at;
-                self.dragon = Some(dragon);
+                self.dragon.replace(dragon);
                 self.special_targets()[0].1.center()
             }
             "painting" => {
@@ -178,8 +178,6 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::*;
-
     /// Invoke the actual attack methods in an empty scratch Game, without
     /// starting a server, opening a world or entering the game loop.
     #[test]

@@ -2058,7 +2058,7 @@ mod tests {
                     .collect();
                 let mut state = SpawnState::new(&natural, 289, players, &[], |_, _| true);
                 let mut pending = Vec::new();
-                let mut spawn = |l: &GameLevel, r: &SpawnRequest, rng: &mut LevelRandom| {
+                let mut spawn = |l: &GameLevel, r: &SpawnRequest, rng: &mut LegacyRandom| {
                     let spawned = l.finalize_spawned(r, &mut pending, rng);
                     if let Some(s) = &spawned {
                         l.pending.borrow_mut().push(s.bounds);

@@ -2811,10 +2811,10 @@ impl Game<'_> {
         }
         let acting = self.lan_acting;
         let hub_lost = self.lan.is_none();
-        if let (Some(conn), Some(host)) = (acting, self.lan.as_mut())
-            && let Some(guest) = host.hub.guests.iter_mut().find(|g| g.conn == conn)
-        {
-            guest.placed = false;
+        if let (Some(conn), Some(host)) = (acting, self.lan.as_mut()) {
+            host.hub
+                .guests
+                .update_connection(conn, |guest| guest.placed = false);
         }
         if hub_lost {
             warn("The panic interrupted the network tick: players are not saved, only the world");

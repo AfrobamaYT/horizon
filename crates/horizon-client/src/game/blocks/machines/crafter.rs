@@ -416,7 +416,7 @@ mod tests {
         crafter.set_slot_state(3, false);
         game.world
             .block_entities
-            .put(key, BlockEntity::Crafter(crafter));
+            .insert(key, BlockEntity::Crafter(crafter));
         game.container = Some(key);
         game.world.modified.clear();
 

@@ -5542,7 +5542,7 @@ impl Game<'_> {
             golem_chests.extend(self.chest_other_half(key));
         }
         let native_authoritative = self.native_authoritative();
-        let environment_type = self.dimension_type();
+        let environment = self.res.environment_of(&self.dimension_type().id);
         let mut level = GameLevel {
             cake_probe: false,
             cake_requested: std::cell::Cell::new(false),
@@ -5570,7 +5570,7 @@ impl Game<'_> {
             events: &mut self.level_events,
             dimension,
             darken,
-            environment: self.res.environment_of(&environment_type.id),
+            environment,
             raining: rain > 0.2,
             thundering: thunder > 0.9,
             enabled_features: self
