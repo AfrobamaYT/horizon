@@ -2162,6 +2162,17 @@ name = "horizon-hooks"
 version = "0.1.0"
 
 [[package]]
+name = "horizon-hot-paths-game"
+version = "0.1.0"
+dependencies = [
+ "horizon-client",
+ "horizon-guest-stack",
+ "horizon-mod-api",
+ "horizon-mod-host",
+ "horizon-mod-package",
+]
+
+[[package]]
 name = "horizon-internals"
 version = "0.1.0"
 
