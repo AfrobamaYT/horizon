@@ -450,6 +450,16 @@ pub mod tests {
         HARVEST_READS.with(|r| std::mem::take(&mut *r.borrow_mut()))
     }
 
+    std::thread_local! {
+        static POT_READS: std::cell::RefCell<Vec<bool>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// For each server-side harvest read of the pot witness's block (a decorated pot) on this
+    /// thread since the last call, in order: whether the state it was asked about was cracked.
+    pub fn take_pot_harvest_reads() -> Vec<bool> {
+        POT_READS.with(|r| std::mem::take(&mut *r.borrow_mut()))
+    }
+
     fn record_destroy(event: &OnDestroyedByPlayerEvent<'_>) {
         let tool = event.tool.map_or(0, |tool| tool.count());
         DESTROYS.with(|r| r.borrow_mut().push((event.will_harvest, tool)));
@@ -460,7 +470,8 @@ pub mod tests {
     /// vanilla removes it. Glass is removed by the part itself, which answers that it was destroyed.
     /// A shulker box and a tripwire are kept by their part (`Some(false)`), and stone's part
     /// leaves the removal to vanilla while it records where its harvest is read
-    /// (`take_harvest_reads`).
+    /// (`take_harvest_reads`), and a decorated pot's part records whether the state its harvest
+    /// is asked about is cracked (`take_pot_harvest_reads`).
     pub fn destroyed_by_player_game_thread() {
         struct Layers;
         #[mod_api::horizon_part]
@@ -531,6 +542,19 @@ pub mod tests {
                 None
             }
         }
+        struct PotWitness;
+        #[mod_api::horizon_part]
+        impl BlockPart for PotWitness {
+            fn can_harvest_block(&self, host: HostSide<'_>, event: &mut CanHarvestBlockEvent) {
+                let HostSide::Server(host) = host else {
+                    return;
+                };
+                let states = host.block_states();
+                let cracked =
+                    event.state.property(&states, "cracked").ok().flatten() == Some("true");
+                POT_READS.with(|r| r.borrow_mut().push(cracked));
+            }
+        }
         struct DestroyMod;
         #[mod_api::__subscriptions]
         impl Hooks for DestroyMod {
@@ -549,10 +573,13 @@ pub mod tests {
                 }
                 let stone = r.block_key("minecraft:stone");
                 r.block_part(stone, Witness);
+                let pot = r.block_key("minecraft:decorated_pot");
+                r.block_part(pot, PotWitness);
             }
         }
         DESTROYS.with(|r| r.borrow_mut().clear());
         HARVEST_READS.with(|r| r.borrow_mut().clear());
+        POT_READS.with(|r| r.borrow_mut().clear());
         let mods: crate::Mods = vec![ModEntry::new("destroy_test", Box::new(DestroyMod))].into();
         crate::__private::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();

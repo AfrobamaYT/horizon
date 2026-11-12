@@ -6918,6 +6918,8 @@ impl Game<'_> {
         let (removed, state, harvest) =
             self.player_destroy_block_removal(pos, state, &facts, held.as_ref(), filled_hive);
         if !creative {
+            // The stack as the removal left it: a listener may have swapped it.
+            let held = self.held().cloned();
             if removed {
                 self.mine_block_with_held(&facts.name, facts.hardness);
             }

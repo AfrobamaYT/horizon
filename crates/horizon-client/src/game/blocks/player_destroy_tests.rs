@@ -213,11 +213,11 @@ fn the_parts_answer_decides_the_tool_wear_and_the_statistics() {
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-fn the_harvest_answer_is_read_before_the_removal_for_will_harvest() {
+fn the_mods_harvest_answer_is_read_once_after_the_removal() {
     // The fixture's part on stone records whether stone is still in the world when its harvest
-    // is read, and leaves the removal to vanilla. Vanilla 26.3 reads hasCorrectToolForDrops
-    // after playerWillDestroy and removeBlock; the event reads it first, to tell the part
-    // `will_harvest`, so the read sees the block.
+    // is read, and leaves the removal to vanilla. The harvest is read once, after
+    // playerWillDestroy and the removal; the part is told `will_harvest` from the tool alone
+    // before it.
     mod_api::__private::part_tests::destroyed_by_player_game_thread();
     with_game(|game| {
         let scratch = breaking_player(game);
@@ -236,8 +236,8 @@ fn the_harvest_answer_is_read_before_the_removal_for_will_harvest() {
             assert_eq!(at(game), air, "{tool:?}: vanilla's removal");
             assert_eq!(
                 mod_api::__private::part_tests::take_harvest_reads(),
-                vec![true],
-                "{tool:?}: the harvest read saw the block"
+                vec![false],
+                "{tool:?}: one harvest read, after the removal"
             );
             assert_eq!(
                 mod_api::__private::part_tests::take_destroys(),
@@ -250,6 +250,26 @@ fn the_harvest_answer_is_read_before_the_removal_for_will_harvest() {
                 "{tool:?}: drops"
             );
         }
+        std::fs::remove_dir_all(scratch).unwrap();
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_pots_harvest_listener_runs_once_and_sees_it_cracked() {
+    // playerWillDestroy cracks a pot broken with a pickaxe before the removal, and the harvest is
+    // asked of that adjusted state, once.
+    mod_api::__private::part_tests::destroyed_by_player_game_thread();
+    with_game(|game| {
+        let scratch = breaking_player(game);
+        place(game, "minecraft:decorated_pot");
+        *game.held_mut() = Some(ItemStack::new("minecraft:iron_pickaxe", 1));
+        game.break_block(POS).unwrap();
+        assert_eq!(
+            mod_api::__private::part_tests::take_pot_harvest_reads(),
+            vec![true],
+            "one harvest read, of the cracked pot"
+        );
         std::fs::remove_dir_all(scratch).unwrap();
     });
 }

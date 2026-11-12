@@ -4,12 +4,12 @@ pub trait Hooks {
     /// A player removes the block `state` at `pos` (`IBlockExtension.onDestroyedByPlayer`, where
     /// `ServerPlayerGameMode.destroyBlock` runs `playerWillDestroy` and removes the block), with
     /// `tool`, the stack in the player's hand (`None` for a bare hand), and `will_harvest`, whether
-    /// the break will drop loot (never in creative, and false for a tool the block refuses). Asked
-    /// after `break_block` allowed the break, before anything of the break changes the world. To
-    /// give `will_harvest`, the game reads the harvest answer (`can_harvest_block`, then
-    /// `player_harvest_check`) before this hook, from the block still in place; that order is this
-    /// event's contract, not vanilla's: 26.3 runs `playerWillDestroy` and `removeBlock` first and
-    /// reads `hasCorrectToolForDrops` of the adjusted state after them. `destroyed` is whether the
+    /// the break will drop loot as far as the tool goes (never in creative, and false for a tool the
+    /// block refuses). Asked after `break_block` allowed the break, before anything of the break
+    /// changes the world. `will_harvest` is the tool's own answer; the mods' harvest listeners
+    /// (`can_harvest_block`, then `player_harvest_check`) are asked once, after the removal, of the
+    /// adjusted state and the stack in the hand then, as vanilla reads `hasCorrectToolForDrops`.
+    /// `destroyed` is whether the
     /// block was actually destroyed: `Some(true)` says the part removed it itself, `Some(false)`
     /// that it stays (a block of layers losing one layer: change it with the `host` and leave it
     /// standing), and either answer replaces the game's own `playerWillDestroy` (a pot's cracking,
