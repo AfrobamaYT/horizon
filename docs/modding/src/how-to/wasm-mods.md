@@ -161,7 +161,7 @@ owner enable flag and stop behavior as native listeners. Mixins remain native-on
 
 A point's record is a copy of every parameter as an API value, `&mut` parameters copied back
 after the listener, exactly as for a native listener; a point with a parameter that has no API type
-yet refuses an `api` listener at registration, naming it. `access = "internals"` on `[[inject]]` is refused by name on both targets. Native code needing game internals uses `[[native.mixin]]`; wasm cannot declare `[[internals]]` or native transformations.
+yet refuses an `api` listener at registration, naming it. The removed `access` key on `[[inject]]` is refused by name on both targets. Native code needing game internals uses `[[native.mixin]]`; wasm cannot declare `[[internals]]` or native transformations.
 
 ## ABI reference
 

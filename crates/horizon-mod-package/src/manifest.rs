@@ -276,7 +276,7 @@ impl Manifest {
                 && let Some(rows) = table.get("inject").and_then(toml::Value::as_array)
             {
                 for row in rows {
-                    if let Err(error) = row.clone().try_into::<inject::Inject>() {
+                    if let Some(Err(error)) = row.as_table().cloned().map(inject::row) {
                         let field = |key| row.get(key).and_then(toml::Value::as_str).unwrap_or("?");
                         let id = table.get("id").and_then(toml::Value::as_str).unwrap_or("?");
                         return format!(
@@ -393,6 +393,28 @@ impl Manifest {
                 if id.trim().is_empty() || !ids.insert(id) {
                     return Err(format!(
                         "{MANIFEST}: empty or duplicate mixin, bridge, state or loop id"
+                    ));
+                }
+            }
+            // A bridge's id becomes part of its accessor's name: `-` reads as `_`, and case is
+            // dropped, so the id is that alphabet and no two ids may give one name.
+            let mut accessors = std::collections::HashMap::new();
+            for bridge in &native.bridge {
+                let id = &bridge.id;
+                if !id
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+                {
+                    return Err(format!(
+                        "{MANIFEST}: E_MIXIN_INVALID: {}:{id}: invalid id; a bridge id is ASCII letters, digits, `_` and `-`",
+                        m.id
+                    ));
+                }
+                if let Some(other) = accessors.insert(id.replace('-', "_").to_ascii_lowercase(), id)
+                {
+                    return Err(format!(
+                        "{MANIFEST}: E_MIXIN_INVALID: {}:{id}: invalid id; it gives the same accessor name as bridge `{other}`",
+                        m.id
                     ));
                 }
             }
@@ -1658,6 +1680,24 @@ issues = \"http://example.org/issues\"
         let package = Package::read(&root).unwrap();
         assert!(crate::Content::read(&root, &package.manifest).is_err());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn structure_nbt_is_data_but_not_an_executable_exception() {
+        let name = "data/ruby/structure/hut.nbt";
+        // An uncompressed, named NBT root containing an empty compound.
+        let nbt = [10u8, 0, 0, 0];
+        assert!(check_file(name, 0o100644, || Ok(std::io::Cursor::new(nbt))).is_ok());
+        assert!(matches!(
+            check_file(name, 0o100755, || Ok(std::io::Cursor::new(nbt))),
+            Err(ContentFileError::Executable(_))
+        ));
+        for header in [b"\x7fELF", b"MZ!!", b"\0asm"] {
+            assert!(matches!(
+                check_file(name, 0o100644, || Ok(std::io::Cursor::new(header))),
+                Err(ContentFileError::Executable(_))
+            ));
+        }
     }
 
     #[test]

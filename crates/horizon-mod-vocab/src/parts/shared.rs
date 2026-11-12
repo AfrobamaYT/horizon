@@ -88,6 +88,8 @@ pub struct Parts {
     pub(crate) tooltip_appenders: Vec<TooltipAppenderPart>,
     /// Command argument types the mods registered, by namespaced id, in registration order.
     pub(crate) command_arguments: Vec<CommandArgumentInfo>,
+    /// Frozen raw payload declarations and their sole receiving owners.
+    pub(crate) payloads: Option<Arc<crate::parts::payloads::Payloads>>,
     /// Only the parts that override each scoped hook, resolved at load or reload.
     pub(crate) hooks: Vec<Option<HookParts>>,
 }

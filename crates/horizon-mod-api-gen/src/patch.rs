@@ -136,6 +136,8 @@ struct Source {
     /// `macro_rules!` names the crate defines without `#[macro_export]`: a body using one can't
     /// leave the crate.
     local_macros: BTreeSet<String>,
+    /// Each loaded lower crate's library name (`[lib] name`), by its folder's crate name.
+    libraries: BTreeMap<String, String>,
 }
 
 impl Source {
@@ -163,6 +165,7 @@ impl Source {
             files,
             parsed: BTreeMap::new(),
             local_macros,
+            libraries: BTreeMap::new(),
         })
     }
 
@@ -171,7 +174,10 @@ impl Source {
         if self.loaded.contains(krate) {
             return true;
         }
-        let Ok((_, lib)) = crate::source::crate_root(&self.root, krate) else {
+        let Ok((package, lib)) = crate::source::crate_root(&self.root, krate) else {
+            return false;
+        };
+        let Ok(library) = crate::replace::library_name(&package) else {
             return false;
         };
         let dir = lib.parent().expect("a source file has a folder").to_owned();
@@ -188,6 +194,7 @@ impl Source {
         }
         self.local_macros
             .extend(local.into_iter().filter(|name| !exported.contains(name)));
+        self.libraries.insert(krate.to_owned(), library);
         self.loaded.insert(krate.to_owned());
         true
     }
@@ -1227,6 +1234,32 @@ fn qualify_self_sig(
     syn::visit_mut::VisitMut::visit_signature_mut(&mut QualifySelf::new(owner, self_ty, path), sig);
 }
 
+/// An invoker's signature moves into a trait of its own, where `Self::Item` names nothing: an
+/// item of the trait `owner` implements is written `<Type as Trait>::Item`, and any other is
+/// refused, naming it.
+fn invoker_self_items(sig: &mut syn::Signature, owner: &syn::ItemImpl) -> Result<(), String> {
+    if let Some((_, path, _)) = &owner.trait_ {
+        qualify_self_sig(sig, owner, &owner.self_ty, path);
+    }
+    struct Left(Option<String>);
+    impl<'ast> syn::visit::Visit<'ast> for Left {
+        fn visit_path(&mut self, path: &'ast syn::Path) {
+            if self.0.is_none() && path.segments.len() > 1 && path.segments[0].ident == "Self" {
+                self.0 = Some(path.to_token_stream().to_string().replace(' ', ""));
+            }
+            syn::visit::visit_path(self, path);
+        }
+    }
+    let mut left = Left(None);
+    syn::visit::Visit::visit_signature(&mut left, sig);
+    match left.0 {
+        Some(item) => Err(format!(
+            "an invoker's signature names `{item}`, which a bridge cannot name; bridge a function whose signature spells the type out"
+        )),
+        None => Ok(()),
+    }
+}
+
 /// A path's tokens without spaces, as horizon-mixins writes an id.
 fn plain_spaces(text: &str) -> String {
     text.replace(' ', "")
@@ -1239,6 +1272,19 @@ fn prettyplease_or_tokens(tokens: proc_macro2::TokenStream) -> String {
     }
 }
 
+/// The module `path` of the game's source as the patch crate names it: a lower crate's folder
+/// name gives the path's first segment, and its library's name (`[lib] name`) the extern.
+fn original_path(libraries: &BTreeMap<String, String>, path: &str) -> String {
+    let (krate, rest) = path
+        .split_once("::")
+        .map_or((path, None), |(k, r)| (k, Some(r)));
+    let library = libraries.get(krate).map_or(krate, String::as_str);
+    match rest {
+        Some(rest) => format!("::{library}::{rest}"),
+        None => format!("::{library}"),
+    }
+}
+
 /// The mirror of module `path` and its children in `tree`.
 fn mirror(
     source: &mut Source,
@@ -1248,7 +1294,8 @@ fn mirror(
     used: Option<&BTreeSet<String>>,
 ) -> Result<proc_macro2::TokenStream, String> {
     let items = source.module(path)?.items.clone();
-    let original: syn::Path = syn::parse_str(&format!("::{path}")).expect("a module path");
+    let original: syn::Path =
+        syn::parse_str(&original_path(&source.libraries, path)).expect("a module path");
     let reserved: BTreeSet<String> = tree
         .children
         .keys()
@@ -1404,6 +1451,7 @@ fn bridge_trait(
             }
         }
         sig.ident = method.clone();
+        invoker_self_items(&mut sig, owner).map_err(|why| ("E_MIXIN_BRIDGE_TARGET", why))?;
         let call = match &owner.trait_ {
             Some((_, path, _)) => quote!(<#self_ty as #path>::#original(#(#args),*)),
             None => quote!(<#self_ty>::#original(#(#args),*)),
@@ -1520,6 +1568,36 @@ fn collect_names(tree: &syn::UseTree, out: &mut Vec<String>) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_lower_crate_is_mirrored_through_its_library_name() {
+        let root = tempfile::tempdir().unwrap();
+        let package = root.path().join("crates/horizon-mod-render");
+        std::fs::create_dir_all(package.join("src")).unwrap();
+        std::fs::write(
+            package.join("Cargo.toml"),
+            "[package]\nname = 'horizon-mod-render'\n[lib]\nname = 'mod_render'\n",
+        )
+        .unwrap();
+        std::fs::write(package.join("src/lib.rs"), "pub mod render {}\n").unwrap();
+        let mut source = Source {
+            root: root.path().to_owned(),
+            loaded: BTreeSet::new(),
+            files: BTreeMap::new(),
+            parsed: BTreeMap::new(),
+            local_macros: BTreeSet::new(),
+            libraries: BTreeMap::new(),
+        };
+        assert!(source.load("horizon_mod_render"));
+        assert_eq!(
+            original_path(&source.libraries, "horizon_mod_render::render"),
+            "::mod_render::render"
+        );
+        assert_eq!(
+            original_path(&source.libraries, "horizon_client::game::autosave"),
+            "::horizon_client::game::autosave"
+        );
+    }
+
     fn root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
     }
@@ -1602,6 +1680,7 @@ mod tests {
                 },
             )]),
             local_macros: BTreeSet::new(),
+            libraries: BTreeMap::new(),
         };
         let ancestor = mirror(
             &mut source,
@@ -1658,6 +1737,7 @@ mod tests {
             files: BTreeMap::from([("fixture".to_owned(), vec![file])]),
             parsed: BTreeMap::new(),
             local_macros: BTreeSet::new(),
+            libraries: BTreeMap::new(),
         };
         let used = BTreeSet::from(["Arc".to_owned()]);
         let out = mirror(&mut source, "fixture", &Tree::default(), false, Some(&used)).unwrap();
@@ -1684,6 +1764,7 @@ mod tests {
             files: BTreeMap::from([("fixture".to_owned(), vec![outer, included])]),
             parsed: BTreeMap::new(),
             local_macros: BTreeSet::new(),
+            libraries: BTreeMap::new(),
         };
         let out = mirror(&mut source, "fixture", &Tree::default(), false, None).unwrap();
         let parsed: syn::File = syn::parse2(out).unwrap();
@@ -2126,5 +2207,28 @@ mod census {
         for (why, n) in counts {
             println!("  {why}: {n} ({:.1}%)", 100.0 * n as f64 / total as f64);
         }
+    }
+
+    #[test]
+    fn an_invokers_self_items_are_qualified_or_refused_by_name() {
+        let owner: syn::ItemImpl = syn::parse_quote! {
+            impl Convert for Bar {
+                type Error = Failure;
+                fn convert(&self) -> Result<u8, Self::Error> { Ok(0) }
+            }
+        };
+        let mut sig: syn::Signature =
+            syn::parse_quote!(fn convert(&self) -> Result<u8, Self::Error>);
+        invoker_self_items(&mut sig, &owner).unwrap();
+        assert_eq!(
+            sig.to_token_stream().to_string().replace(' ', ""),
+            "fnconvert(&self)->Result<u8,<BarasConvert>::Error>"
+        );
+        // An item the `impl` does not define has no spelling the bridge's trait could use.
+        let mut sig: syn::Signature = syn::parse_quote!(fn convert(&self) -> Self::Other);
+        assert_eq!(
+            invoker_self_items(&mut sig, &owner).unwrap_err(),
+            "an invoker's signature names `Self::Other`, which a bridge cannot name; bridge a function whose signature spells the type out"
+        );
     }
 }

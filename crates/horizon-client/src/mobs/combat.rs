@@ -121,10 +121,8 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
     amount += super::gear::melee_bonus(m, target_species);
     let burn = super::gear::fire_aspect(m);
     if burn > 0 {
-        cx.events.push(cx.w.route_player_event(MobEvent::Ignite {
-            target: who,
-            seconds: burn,
-        }));
+        cx.events
+            .push(cx.w.route_player_event(MobEvent::Ignite(who, burn)));
     }
     // `Mob.doHurtTarget`: `causeExtraKnockback(target, getKnockback(...))`. `getKnockback` is the
     // `attack_knockback` attribute plus the Knockback enchantment, halved; the push goes along the
@@ -143,12 +141,16 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
         }));
         m.velocity = Vec3::new(m.velocity.x * 0.6, m.velocity.y, m.velocity.z * 0.6);
     }
-    // Zombies set their target on fire while burning (Zombie.doHurtTarget).
-    if m.fire_ticks > 0 && matches!(m.species(), Species::Zombie) && m.random.next_float() < 0.3 {
-        cx.events.push(cx.w.route_player_event(MobEvent::Ignite {
-            target: who,
-            seconds: 2,
-        }));
+    // `Zombie.doHurtTarget` (every zombie): drawn here, lit if the blow hurt
+    // (`MobEvent::ZombieIgnite`, resolved once the attack landed).
+    let difficulty = cx.w.difficulty.effective;
+    if m.is_on_fire()
+        && m.extra.main_hand_id().is_none()
+        && super::doors::is_zombie(m.species())
+        && m.random.next_float() < difficulty * 0.3
+    {
+        cx.events
+            .push(cx.w.route_player_event(MobEvent::ZombieIgnite(who, 2 * difficulty as i32)));
     }
     // The effect picked above goes with the hit: it applies only when the
     // target takes damage (a shield-blocked hit gives none), for a mob as for

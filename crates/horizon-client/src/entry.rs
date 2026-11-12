@@ -45,9 +45,6 @@ pub fn prepare() -> Startup {
     }
 }
 
-/// A native function slot, checked against its place's exact type before erasure.
-pub use mod_points::__private::SlotListener as NativeSlot;
-
 /// Refuse startup if any merged copy could not be installed, before loading any mod.
 /// Cells cannot roll back: each copy merges all requesting rows, so stopping the whole
 /// start is how we ensure none of a refused mod's rows run.
@@ -66,10 +63,6 @@ fn installation_refusals(patched: &[(&str, &[&str], bool)]) -> Vec<String> {
         format!("Horizon: {}: {target}: a patched copy was already installed; the game was not started", mods.join(", "))
     }).collect()
 }
-
-/// The places listeners register at, named by the generated `main`.
-#[doc(hidden)]
-pub use mod_points::PointId;
 
 /// Code-runtime services supplied by the platform at startup.
 pub struct CodeRuntime {
@@ -93,7 +86,7 @@ pub(crate) fn code_refusal(id: &str) -> Option<String> {
     CODE_RUNTIME.get().and_then(|runtime| (runtime.refusal)(id))
 }
 
-/// Start with named mods and their function slots in installed dependency order.
+/// Start the engine with dependency-ordered code supplied by the host.
 pub fn start<G>(
     native: horizon_mod_package::runtime::Runtime,
     load: impl FnOnce(
@@ -101,14 +94,8 @@ pub fn start<G>(
         &LaunchArguments,
     ) -> (Vec<&'static str>, G),
     code: CodeRuntime,
-    slots: &[NativeSlot],
     startup: Startup,
 ) {
-    // Platform instrumentation must precede registration and the first mod guard.
-    if let Err(error) = mod_api::__private::initialize() {
-        eprintln!("Horizon: refusing startup because mod instrumentation is unavailable: {error}");
-        std::process::exit(game::exit_code::ERROR);
-    }
     let _ = CODE_RUNTIME.set(code);
     let Startup {
         launch,
@@ -116,6 +103,7 @@ pub fn start<G>(
         _capture,
     } = startup;
     horizon_threads::configure_allocator();
+    horizon_chat_filter::install();
     horizon_look::give();
     // OptiFine's and Polytone's pack formats (platform, docs/layers.md), before any pack loads.
     horizon_client::pack_formats::install();
@@ -160,16 +148,7 @@ pub fn start<G>(
     // The log's first line names the build, so a bug report that carries the log says which one it was.
     log::info!("Horizon {}", crash::version());
     // Mod loading emits refusals; both client and dedicated logs must exist first.
-    let (ids, _loaded_code) = load(&native, &launch);
-    for id in ids {
-        for slot in slots.iter().filter(|slot| slot.id() == id) {
-            if let Err(error) = mod_points::register(slot) {
-                log::error!("Horizon: {id}: {error}");
-                logging::flush();
-                std::process::exit(game::exit_code::ERROR);
-            }
-        }
-    }
+    let (_ids, _loaded_code) = load(&native, &launch);
     crash::install(home.clone(), side);
     if horizon_world::native_load_hooks::install(
         horizon_world::native_load_hooks::NativeLoadHooks {

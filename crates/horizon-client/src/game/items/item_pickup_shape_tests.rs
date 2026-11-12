@@ -131,7 +131,9 @@ fn indexed_pickup_keeps_bound_survivors_and_processes_shifted_tail() {
                 heard.lock().unwrap().clear();
                 notifications.lock().unwrap().clear();
                 posts.lock().unwrap().clear();
-                game.world.random = horizon_core::random::LegacyRandom::new(12345);
+                game.world.random = horizon_core::random::LevelRandom::for_level(
+                    horizon_core::random::LegacyRandom::new(12345),
+                );
                 let mut round = game.native_tick_round();
                 game.tick_dropped_items(&mut round);
                 assert_eq!(

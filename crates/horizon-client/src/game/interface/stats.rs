@@ -574,7 +574,9 @@ mod tests {
                 play.stats.custom("time_since_rest", 200_000);
                 host.play.insert(guest.conn, play);
             }
-            game.world.random = horizon_core::random::LegacyRandom::new(12345);
+            game.world.random = horizon_core::random::LevelRandom::for_level(
+                horizon_core::random::LegacyRandom::new(12345),
+            );
             game.spawn_phantoms();
             assert!(
                 game.mobs
@@ -582,7 +584,9 @@ mod tests {
                     .all(|mob| (mob.position.x - 1000.0).abs() > 20.0)
             );
             let with_fake = game.world.random.next_int();
-            game.world.random = horizon_core::random::LegacyRandom::new(12345);
+            game.world.random = horizon_core::random::LevelRandom::for_level(
+                horizon_core::random::LegacyRandom::new(12345),
+            );
             game.stats.phantom_tick = 0;
             game.lan
                 .as_mut()

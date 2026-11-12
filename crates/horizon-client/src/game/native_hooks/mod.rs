@@ -75,7 +75,7 @@ use mod_api::{
     ClientReloadListeners, ColorResolvers, CommandInvocation, EnchantmentDamageEffects,
     EnchantmentInfo, EntityRef, GameRuleActor, HandRender, InsideEffects, InteractionAttempt,
     InteractionKey, JsonAnimationType, LayerDefinition, LifecycleContext, LivingRef,
-    NoteBlockChange, ParticleProviders, PathComputationType, Placement, PlayerRef,
+    LoadConditions, NoteBlockChange, ParticleProviders, PathComputationType, Placement, PlayerRef,
     PoiTypeExtensions, RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage,
     ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, VillagerProfessions,
     WorldPhase,

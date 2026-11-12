@@ -11,11 +11,15 @@ impl Game<'_> {
         let Some(stack) = self.held().cloned() else {
             return false;
         };
-        let Some(consumable) = stack.consumable(Some(info)) else {
+        let Some(consumable) = self.consumable(&stack) else {
             return false;
         };
-        if info.food.is_some()
-            && (self.player.is_none() || !self.can_eat(Some(&stack), info.can_always_eat))
+        if horizon_client::item_sync::food(&stack, info.food).is_some()
+            && (self.player.is_none()
+                || !self.can_eat(
+                    Some(&stack),
+                    horizon_client::item_sync::can_always_eat(&stack, info.can_always_eat),
+                ))
         {
             return false;
         }
@@ -25,7 +29,7 @@ impl Game<'_> {
             if self.remote.is_none() {
                 // the cooldown of ItemStack.use's applyAfterUseComponentSideEffects.
                 self.apply_use_cooldown(&stack);
-                self.finish_consuming(info, consumable, &stack);
+                self.finish_consuming(info, &consumable, &stack);
             }
             return true;
         }
@@ -173,7 +177,7 @@ impl Game<'_> {
             self.tick_mod_use(slot, ticks, &stack);
             return;
         }
-        let Some(consumable) = stack.consumable(Some(&info)) else {
+        let Some(consumable) = self.consumable(&stack) else {
             self.using = None;
             return;
         };
@@ -183,7 +187,7 @@ impl Game<'_> {
         // Start and Tick left it.
         let remaining = self.use_duration - ticks as i32;
         if consumable.should_emit(remaining) {
-            self.emit_consume(consumable, &stack, 5);
+            self.emit_consume(&consumable, &stack, 5);
         }
         if !self.item_on_use_tick(&stack, ticks) {
             return;

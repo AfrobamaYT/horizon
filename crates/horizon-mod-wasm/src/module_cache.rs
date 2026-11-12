@@ -127,6 +127,18 @@ impl ModuleCache {
         bytes: &[u8],
         child: ChildCompile,
     ) -> wasmtime::Result<(Module, Source)> {
+        self.load_with_child_command(engine, bytes, child)
+    }
+
+    pub(crate) fn load_with_child_command(
+        &self,
+        engine: &Engine,
+        bytes: &[u8],
+        child: Option<(
+            impl FnOnce(&Path, &str) -> std::process::Command,
+            std::time::Duration,
+        )>,
+    ) -> wasmtime::Result<(Module, Source)> {
         if self.disabled.is_some() {
             return Module::new(engine, bytes).map(|module| (module, Source::Compiled));
         }
@@ -487,7 +499,7 @@ mod tests;
 mod gate_tests;
 
 #[cfg(unix)]
-fn production_command(input: &Path, key: &str) -> std::process::Command {
+pub(crate) fn production_command(input: &Path, key: &str) -> std::process::Command {
     let mut command = std::process::Command::new(std::env::current_exe().unwrap_or_default());
     command
         .env_clear()

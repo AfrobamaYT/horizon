@@ -20,10 +20,12 @@ case "$side" in server|client) ;; *) echo "FNR_SIDE must be server or client" >&
 root=$(git rev-parse --show-toplevel)
 # The game revision is the SDK's: its source is what a patched function is copied out of.
 revision=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['commit'])" "$2/horizon-prebuilt.json")
-mixins=$(sed -n 's/^pub const MIXINS_REV: &str = "\(.*\)";$/\1/p' "$root/crates/horizon-mod-package/src/index/native.rs")
+mixins=$(sed -n 's/^pub const REV: &str = "\(.*\)";$/\1/p' "$root/crates/horizon-mod-package/src/mixins_tool.rs")
 archive=$(sed -n 's/^pub const PREBUILT_ARCHIVE: &str = "\(.*\)";$/\1/p' "$root/crates/horizon-mod-package/src/index/native.rs")
 
 # FNR_KEEP=1 keeps the launcher's folder (toolchain, horizon-mixins, source): a warm build.
+# FNR_MIXINS_FROM_SOURCE=1 builds horizon-mixins from its pinned source, dropping a kept tool: the
+# launcher otherwise downloads the prebuilt one, and its source build has to stay proven.
 if [ -n "${FNR_KEEP:-}" ]; then rm -rf "$scratch/mods" "$scratch/engine" "$scratch/run" "$scratch/launcher/native/server-builds" "$scratch/launcher/versions"/native-*; else rm -rf "$scratch"; fi
 mkdir -p "$scratch"/{home,launcher,data,config,trash,clipboard,desktop,mods}
 scratch=$(realpath "$scratch")
@@ -73,7 +75,11 @@ env_vars=(HORIZON_HOME="$scratch/home" HORIZON_LAUNCHER_HOME="$data" XDG_DATA_HO
   HORIZON_LAUNCHER_DESKTOP="$scratch/desktop")
 started=$(date +%s.%N)
 output_args=()
-if [ "$side" = server ]; then output_args=(--server-output "$scratch/engine"); fi
+if [ -n "${FNR_MIXINS_FROM_SOURCE:-}" ]; then
+  rm -rf "$data/native/tools"
+  output_args+=(--mixins-from-source)
+fi
+if [ "$side" = server ]; then output_args+=(--server-output "$scratch/engine"); fi
 env "${env_vars[@]}" "$launcher" native-build "$mods" "${output_args[@]}" --version native-ci --profile optimized \
   --trust-native-code > "$scratch/native-build.out" 2> "$scratch/native-build.err" || built=$?
 cat "$scratch/native-build.out"
@@ -95,7 +101,12 @@ if [ "$side" = server ]; then
   test -z "$(find "$data/versions" -type f -name 'horizon-client*' ! -path "$version/*")"
 fi
 log=$data/native/build.log
-grep -F 'Function replacement:' "$log"
+# Only a `[[native.*]]` row patches a function; a mod of hooks alone must not say it did.
+if grep -qs '^\[\[native\.' "$mods"/*/horizon-mod.toml; then
+  grep -F 'Function replacement:' "$log"
+elif grep -sF 'Function replacement:' "$log"; then
+  echo "a set with no [[native.*]] row logged a function replacement"; exit 1
+fi
 # The prebuilt route, and no game source compiled.
 grep -F '"route": "prebuilt"' "$data"/versions/*/native-mods.json > /dev/null || grep -rF 'prebuilt' "$log" > /dev/null
 test ! -d "$data/native/stage/crates/horizon-client" || { echo "the game was staged for a source build"; exit 1; }
