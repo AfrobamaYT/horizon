@@ -177,7 +177,7 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
     // Entity parts (#1077) carry plain methods beside their scoped hooks
     // (#792): the goal, behavior and spawn-size registrars are not hooks, so
     // their names subscribe nothing.
-    if name.to_string() == "EntityPart" {
+    if name == "EntityPart" {
         const ENTITY_PART_PLAIN: [&str; 3] =
             ["register_goals", "register_behaviors", "spawn_cluster_size"];
         let plain: Vec<bool> = methods
