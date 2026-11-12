@@ -103,8 +103,9 @@ pub struct EffectIcon {
     pub id: String,
     /// `MobEffect.isBeneficial`.
     pub beneficial: bool,
-    /// `MobEffect.getColor`.
-    pub color: i32,
+    /// `IMobEffectExtension.getSortOrder`: `MobEffect.getColor` unless a content mod declared
+    /// an order.
+    pub sort_order: i32,
     pub ambient: bool,
     /// Remaining ticks, -1 for infinite.
     pub duration: i32,
@@ -118,7 +119,7 @@ impl From<&crate::effects::EffectInstance> for EffectIcon {
             id: effect.id.to_owned(),
             beneficial: def
                 .is_some_and(|d| d.category == horizon_client_core::potions::Category::Beneficial),
-            color: def.map_or(0, |d| d.color as i32),
+            sort_order: def.map_or(0, |d| d.sort_order),
             ambient: effect.ambient,
             duration: effect.duration,
             show_icon: effect.show_icon,
@@ -126,16 +127,18 @@ impl From<&crate::effects::EffectInstance> for EffectIcon {
     }
 }
 
-/// `MobEffectInstance.compareTo`.
+/// `MobEffectInstance.compareTo`, with NeoForge's sort order in the colour's place.
 pub(crate) fn compare_effects(a: &EffectIcon, o: &EffectIcon) -> Ordering {
     if (a.duration <= 32147 || o.duration <= 32147) && !(a.ambient && o.ambient) {
         a.ambient
             .cmp(&o.ambient)
             .then((a.duration == -1).cmp(&(o.duration == -1)))
             .then(a.duration.cmp(&o.duration))
-            .then(a.color.cmp(&o.color))
+            .then(a.sort_order.cmp(&o.sort_order))
     } else {
-        a.ambient.cmp(&o.ambient).then(a.color.cmp(&o.color))
+        a.ambient
+            .cmp(&o.ambient)
+            .then(a.sort_order.cmp(&o.sort_order))
     }
 }
 

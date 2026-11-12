@@ -521,6 +521,10 @@ category (`beneficial`, `harmful` or `neutral`) and its RGB colour (0 to `0xFFFF
 { "category": "harmful", "color": 9154528 }
 ```
 
+An optional `sort_order` (an integer) sets where the effect sits among the HUD's icons and the inventory's effect list,
+as NeoForge's `IMobEffectExtension.getSortOrder` does: the lists compare it where vanilla compares the colour, and it
+is the colour when left out. It is fixed per effect, where NeoForge may answer per instance.
+
 It is the effect `<id>:<name>`: `/effect give @s ruby:glow 30` gives it, saves and mobs keep it, and it reaches LAN and
 dedicated server players who run the same mods (its network id follows vanilla's). Its name is the translation
 `effect.<id>.<name>` from the mod's `assets/<id>/lang/`, its icon `assets/<id>/textures/mob_effect/<name>.png` (18x18,
