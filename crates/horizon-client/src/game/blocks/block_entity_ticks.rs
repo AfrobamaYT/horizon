@@ -105,6 +105,64 @@ impl BlockEntityTick<'_, '_> {
     }
 }
 
+/// A mod's own block entity types, for a slot of `block_entities.tick` to pick out its mod's block
+/// entities (book: Published loops). Made from the types' ids; the first [`Self::contains`]
+/// resolves them once into a flag for each block state, set where the state's block makes one of
+/// them (`EntityBlock.newBlockEntity`: a mod block's block entity is the type it declares). Each
+/// visit after that reads the visited block and one flag: no string work, no allocation. A mod
+/// with no slot never makes one.
+#[allow(
+    dead_code,
+    reason = "read by `[[native.loop]]` helpers, compiled in a mod build"
+)]
+pub(crate) struct OwnBlockEntities {
+    /// The types' ids, as the mod registered them (`mymod:machine`).
+    ids: &'static [&'static str],
+    /// By block state id, whether its block makes one of `ids`; `None` until the first visit.
+    by_state: Option<Box<[bool]>>,
+}
+
+#[allow(
+    dead_code,
+    reason = "read by `[[native.loop]]` helpers, compiled in a mod build"
+)]
+impl OwnBlockEntities {
+    /// The block entity types `ids`, such as `&["mymod:machine"]`; resolved on the first visit.
+    pub(crate) const fn new(ids: &'static [&'static str]) -> Self {
+        Self {
+            ids,
+            by_state: None,
+        }
+    }
+    /// Whether the visited block entity is a mod's of one of these types.
+    #[inline]
+    pub(crate) fn contains(&mut self, tick: &BlockEntityTick<'_, '_>) -> bool {
+        if tick.kind != TickedKind::Mod {
+            return false;
+        }
+        let ids = self.ids;
+        let by_state = self
+            .by_state
+            .get_or_insert_with(|| Self::resolve(ids, tick.game));
+        let (x, y, z) = tick.pos;
+        let state = tick.game.world.block(x, y, z);
+        by_state.get(state.0 as usize).copied().unwrap_or(false)
+    }
+    /// For each block state, whether its block makes one of `ids`.
+    #[cold]
+    fn resolve(ids: &[&str], game: &Game<'_>) -> Box<[bool]> {
+        let registry = game.pack.assets.registry;
+        (0..registry.len() as u32)
+            .map(|id| {
+                registry
+                    .state(BlockStateId(id))
+                    .and_then(|state| horizon_client::block_entity_types::type_for(&state.name))
+                    .is_some_and(|kind| ids.contains(&kind))
+            })
+            .collect()
+    }
+}
+
 /// A `[[native.loop]]` slot of `block_entities.tick` (book: Published loops). The loop visits the
 /// block entities in vanilla's order, only those in block-ticking chunks, inside the border, live and
 /// not asleep, and asks each slot about each. Pinned to this build like a mixin's target: its
@@ -1379,5 +1437,135 @@ mod slot_mutation_tests {
                 assert!(game.item_columns.is_none());
             },
         );
+    }
+}
+
+/// Slots that pick out their own mod's block entities (`OwnBlockEntities`).
+#[cfg(test)]
+mod own_block_entity_tests {
+    use super::{BlockEntityTick, BlockEntityTickSlot, OwnBlockEntities};
+    use crate::game::native_entity_refs::tests::{run_fresh_cases, with_game_at};
+    use crate::game::published_loops::LoopFlow;
+    use horizon_client::block_entities::Pos;
+    use horizon_core::geometry::Vec3;
+    use mod_api::*;
+    use std::sync::Arc;
+
+    const A: &str = "own_a:machine";
+    const B: &str = "own_b:machine";
+
+    /// A mod whose block `self.0` makes its ticking block entity type of the same id.
+    struct Machines(&'static str);
+    #[mod_api::__subscriptions]
+    impl Hooks for Machines {
+        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            let kind = r.block_entity_type("machine").blocks(&[self.0]).build();
+            r.block_entity_part(&kind, Ticks(self.0)).unwrap();
+        }
+        fn blocks(&self, _: &RegistrationContext, event: &mut BlocksEvent<'_>) {
+            event
+                .blocks
+                .push(mod_api::Block::new(self.0, "minecraft:stone"));
+        }
+    }
+    /// Makes block `self.0`'s block entity tick.
+    struct Ticks(&'static str);
+    #[mod_api::horizon_part]
+    impl BlockPart for Ticks {}
+    #[mod_api::horizon_part]
+    impl BlockEntityPart for Ticks {
+        fn block_entity_ticks(&self, _: &dyn Host, event: &mut BlockEntityTicksEvent<'_>) {
+            if event.block == self.0 {
+                event.ticks = true;
+            }
+        }
+    }
+
+    /// Counts what it is asked about, and notes those of its own types.
+    struct Count {
+        own: OwnBlockEntities,
+        visited: u32,
+        mine: Vec<Pos>,
+    }
+    impl Count {
+        fn new(ids: &'static [&'static str]) -> Self {
+            Self {
+                own: OwnBlockEntities::new(ids),
+                visited: 0,
+                mine: Vec::new(),
+            }
+        }
+    }
+    impl BlockEntityTickSlot for Count {
+        fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
+            self.visited += 1;
+            if self.own.contains(tick) {
+                self.mine.push(tick.pos);
+            }
+            LoopFlow::Continue
+        }
+    }
+
+    /// Two mods' block entities and a hopper in one world: each mod's slot is asked about all of
+    /// them and counts only its own.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
+    fn each_slot_counts_only_its_own_mods_block_entities() {
+        // The content root freezes the process's block entity types.
+        if run_fresh_cases(
+            "game::block_entity_ticks::own_block_entity_tests::each_slot_counts_only_its_own_mods_block_entities",
+            "HORIZON_OWN_BLOCK_ENTITIES_CHILD",
+            &["run"],
+        ) {
+            return;
+        }
+        let mods: Mods = vec![
+            ModEntry::new("own_a", Box::new(Machines(A))),
+            ModEntry::new("own_b", Box::new(Machines(B))),
+        ]
+        .into();
+        mod_api::testing::with_mods(mods.clone(), || {
+            crate::game::api_values::install_parts(&mods).unwrap();
+            mod_api::__private::mark_game_thread();
+            let base =
+                std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+            let root = crate::game::mods::content_root(&base, &Default::default()).unwrap();
+            with_game_at(root.prepared().to_path_buf(), |game| {
+                game.options.dedicated = Some(Vec::new());
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+                game.player = Some(
+                    horizon_client::motion::PlayerMotion::new(
+                        game.motion,
+                        Vec3::new(8.5, 65.0, 8.5),
+                    )
+                    .unwrap(),
+                );
+                game.update_chunk_tickets();
+                let level = game.level(game.dim.id()).unwrap();
+                let placed = [
+                    ((1, 64, 1), A),
+                    ((3, 64, 1), B),
+                    ((5, 64, 1), A),
+                    ((7, 64, 1), "minecraft:hopper"),
+                ];
+                for ((x, y, z), block) in placed {
+                    let state = game.pack.assets.registry.default_state(block).unwrap();
+                    assert!(
+                        game.level_set_block(level, [x, y, z], state, BlockUpdateFlags::NONE)
+                            .unwrap()
+                    );
+                }
+                let mut slots = (Count::new(&[A]), Count::new(&[B]));
+                for _ in 0..2 {
+                    game.tick_block_entities_with(&mut slots).unwrap();
+                }
+                assert_eq!((slots.0.visited, slots.1.visited), (8, 8));
+                let (a, b, c) = ((1, 64, 1), (3, 64, 1), (5, 64, 1));
+                assert_eq!(slots.0.mine, [a, c, a, c]);
+                assert_eq!(slots.1.mine, [b, b]);
+            });
+        });
     }
 }

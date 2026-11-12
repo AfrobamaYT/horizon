@@ -55,7 +55,7 @@ impl BlockEntityTickSlot for Throttle {
 
 Unlike a mixin helper, this file may hold any Rust items, `pub` or not, with no `use` lines. It sees what the module
 `horizon_client::game::block_entity_ticks` sees: `BlockEntityTickSlot`, `BlockEntityTick`, `LoopFlow`,
-`TickedKind`, `Game`, `BlockEntity` and the rest. Like a [mixin helper](mixins.md#writing-a-helper), it may
+`TickedKind`, `OwnBlockEntities`, `Game`, `BlockEntity` and the rest. Like a [mixin helper](mixins.md#writing-a-helper), it may
 call your mod's crate (`fnr_loop::note`).
 
 ## Fields
@@ -102,11 +102,48 @@ live and not asleep. The cursor `tick` has:
 | `LoopFlow::Skip` | The entity does not tick this tick, and no `after` runs for it. |
 | `LoopFlow::Stop` | No further entity ticks this tick. The work after the loop still runs, such as shulker box lids. |
 
-**Your own mod's block entities.** `TickedKind::Mod` covers every mod's, and today there is no cheap way to
-pick out yours ([#3492](https://github.com/arismoko/horizon/issues/3492)).
+**Your own mod's block entities.** `TickedKind::Mod` covers every mod's. To pick out yours, keep an
+`OwnBlockEntities` in your slot, made from the ids you registered your block entity types under, and ask it
+about each entry. This is the `own` row of the check mod `fnr_loop_second`, without its log line. It runs beside
+`fnr_loop` and counts only its own counters among both mods':
 
-The workaround: when `tick.kind` is `TickedKind::Mod`, match `tick.block_entity()` against `Some(BlockEntity::Mod(entity))`. Then compare
-`entity.id()`, a `&str`, with the id you registered your block entity type under, such as `"mymod:machine"`.
+```rust,ignore
+/// Counts this mod's counters among the block entities the loop visits, and always answers Continue.
+pub struct Own {
+    own: OwnBlockEntities,
+    counted: u64,
+}
+
+impl Default for Own {
+    fn default() -> Self {
+        Self {
+            own: OwnBlockEntities::new(&["fnr_loop_second:counter"]),
+            counted: 0,
+        }
+    }
+}
+
+impl BlockEntityTickSlot for Own {
+    fn before(&mut self, tick: &mut BlockEntityTick<'_, '_>) -> LoopFlow {
+        if self.own.contains(tick) {
+            self.counted += 1;
+        }
+        LoopFlow::Continue
+    }
+}
+```
+
+| `OwnBlockEntities` | What it does |
+| --- | --- |
+| `const fn new(ids: &'static [&'static str]) -> Self` | Your types, such as `&["mymod:machine"]`. Nothing is resolved yet. |
+| `fn contains(&mut self, tick: &BlockEntityTick<'_, '_>) -> bool` | Whether the visited block entity is a mod's of one of your types. |
+
+The first `contains` resolves your ids once, into a flag for each block state: whether its block makes one of
+your types (the type a mod block declares). Every call after it reads the visited block and one flag, with no
+string compare and no allocation, so it costs the same on every tick. Another mod's block entities, and
+vanilla's, answer `false`.
+
+To read or change your block entity, match `tick.block_entity()` against `Some(BlockEntity::Mod(entity))`.
 Its saved data is `entity.nbt`, its item slots `entity.items` and its menu data `entity.data`.
 
 ## What you can rely on
