@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use crate::prelude::PlayersHost;
-    use crate::testing::{FakeGameEvent, FakeHost, FakeSound, FakeTank};
+    use crate::prelude::{EntitiesHost, PlayersHost};
+    use crate::testing::{FakeHost, FakeTank};
     use crate::{
         FluidResource, FluidStack, GameEventContext, Hand, Identifier, ItemStack, ServerHost,
         SoundSource, fluid_util,
@@ -72,25 +72,26 @@ mod tests {
     }
 
     /// The bucket's sound and game event at the centre of the tank, the player its event's source.
-    fn effects(host: &FakeHost, sound: &str, event: &str) -> (Vec<FakeSound>, Vec<FakeGameEvent>) {
+    fn assert_effects(host: &FakeHost, sound: &str, event: &str) {
         let at = [0.5, 64.5, 0.5];
         let source = host.player(PLAYER).map(|player| player.entity());
-        let sound = FakeSound {
-            sound: sound.to_owned(),
-            at,
-            source: SoundSource::Blocks,
-            volume: 1.0,
-            pitch: 1.0,
-        };
-        let event = FakeGameEvent {
-            event: event.to_owned(),
-            at,
-            context: GameEventContext {
+        assert_eq!(host.sounds.len(), 1);
+        let heard = &host.sounds[0];
+        assert_eq!(heard.sound, sound);
+        assert_eq!(heard.at, at);
+        assert_eq!(heard.source, SoundSource::Blocks);
+        assert_eq!((heard.volume, heard.pitch), (1.0, 1.0));
+        assert_eq!(host.game_events.len(), 1);
+        let sent = &host.game_events[0];
+        assert_eq!(sent.event, event);
+        assert_eq!(sent.at, at);
+        assert_eq!(
+            sent.context,
+            GameEventContext {
                 source_entity: source,
                 affected_state: None,
-            },
-        };
-        (vec![sound], vec![event])
+            }
+        );
     }
 
     #[test]
@@ -99,12 +100,11 @@ mod tests {
         assert!(click(&mut host));
         assert_eq!(held(&host), Some(fluid("minecraft:water", 1000)));
         assert_eq!(hand(&host), Some(stack("minecraft:bucket", 1)));
-        let expected = effects(
+        assert_effects(
             &host,
             "minecraft:item.bucket.empty",
             "minecraft:fluid_place",
         );
-        assert_eq!((host.sounds.clone(), host.game_events.clone()), expected);
     }
 
     #[test]
@@ -116,12 +116,11 @@ mod tests {
         assert_eq!(hand(&host), Some(stack("minecraft:bucket", 2)));
         let player = host.players.get(PLAYER).unwrap();
         assert_eq!(player.given, vec![stack("minecraft:lava_bucket", 1)]);
-        let expected = effects(
+        assert_effects(
             &host,
             "minecraft:item.bucket.fill_lava",
             "minecraft:fluid_pickup",
         );
-        assert_eq!((host.sounds.clone(), host.game_events.clone()), expected);
     }
 
     #[test]
@@ -183,12 +182,11 @@ mod tests {
             true,
         );
         assert!(host.sounds.is_empty());
-        let event = FakeGameEvent {
-            event: "minecraft:fluid_pickup".to_owned(),
-            at: [1.0, 2.0, 3.0],
-            context: GameEventContext::default(),
-        };
-        assert_eq!(host.game_events, vec![event]);
+        assert_eq!(host.game_events.len(), 1);
+        let sent = &host.game_events[0];
+        assert_eq!(sent.event, "minecraft:fluid_pickup");
+        assert_eq!(sent.at, [1.0, 2.0, 3.0]);
+        assert_eq!(sent.context, GameEventContext::default());
     }
 
     #[test]
