@@ -258,7 +258,7 @@ fn event_input(
     }
 }
 /// What a proxy answers when its guest call answers nothing. `reason`, where there was a call,
-/// is the expression naming why (the receiver's `refusal()`).
+/// is the expression naming why (`crate::wasm_call_refusal()`, the including crate's).
 fn fallback(types: &super::ty::Types<'_>, m: &Method, reason: Option<&str>) -> String {
     match &m.ret {
         // String-error operations can report a refused VM call directly. In particular,
@@ -701,7 +701,7 @@ impl Cx {
                 let class =
                     super::call_class(types, m).replace("super::Call::", "crate::CallClass::");
                 let tuple = format!("({},)", backs.join(","));
-                writeln!(code,"{sig} {{ let mut frame = Frame::default(); {setup} match self{module}.call({class}, frame, {id}, {}, |w| {{ {put} }}, |r| {{ let answer: {} = r.take()?; {take} if !r.rest().is_empty() {{ return Err(WireError::Tag(u32::MAX)); }} Ok({tuple}) }}) {{ Some({tuple}) => {{ {apply} answer }}, None => {} }} }}",if receiver=="WasmMod" {"None"} else {"Some(self.index)"},rust_ty(types,&m.ret,true),fallback(types,m,Some(&format!("self{}.refusal()",if receiver=="WasmMod" {""} else {".module"}))),module=if receiver=="WasmMod" {""} else {".module"}).unwrap();
+                writeln!(code,"{sig} {{ let mut frame = Frame::default(); {setup} match self{module}.call({class}, frame, {id}, {}, |w| {{ {put} }}, |r| {{ let answer: {} = r.take()?; {take} if !r.rest().is_empty() {{ return Err(WireError::Tag(u32::MAX)); }} Ok({tuple}) }}) {{ Some({tuple}) => {{ {apply} answer }}, None => {} }} }}",if receiver=="WasmMod" {"None"} else {"Some(self.index)"},rust_ty(types,&m.ret,true),fallback(types,m,Some("crate::wasm_call_refusal()")),module=if receiver=="WasmMod" {""} else {".module"}).unwrap();
             }
             code.push_str("}\n");
         }

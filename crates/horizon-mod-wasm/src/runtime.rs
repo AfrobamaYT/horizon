@@ -130,8 +130,6 @@ struct Running {
     poisoned: AtomicBool,
     lending: Arc<AtomicUsize>,
 }
-/// Only faults may leave guest state half-updated. Refusals returned normally.
-#[derive(Debug)]
 thread_local! {
     /// Why this thread's last guest call answered nothing, for the caller's typed error.
     static LAST_REFUSAL: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
@@ -159,6 +157,8 @@ fn fault_reason(error: &wasmtime::Error, budget: u64) -> String {
         None => format!("fault: {error:#}"),
     }
 }
+/// Only faults may leave guest state half-updated. Refusals returned normally.
+#[derive(Debug)]
 enum CallError {
     Refused(wasmtime::Error),
     Fault(wasmtime::Error),
@@ -235,10 +235,6 @@ impl WeakWasmMod {
         self.running
             .upgrade()
             .is_some_and(|running| running.poisoned.load(Ordering::Relaxed))
-    }
-    /// Why this thread's last call answered nothing.
-    pub(crate) fn refusal(&self) -> String {
-        take_refusal()
     }
     /// Refusals answer unavailable without stopping the group; faults stop all members.
     pub(crate) fn call<R>(
@@ -481,10 +477,6 @@ fn host_reply(mut caller: Caller<'_, State>, ptr: u32) -> wasmtime::Result<()> {
 }
 
 impl WasmMod {
-    /// Why this thread's last call answered nothing.
-    pub(crate) fn refusal(&self) -> String {
-        take_refusal()
-    }
     pub(crate) fn downgrade(&self) -> WeakWasmMod {
         WeakWasmMod {
             id: self.id.clone(),
