@@ -2183,6 +2183,8 @@ fn wire_loopback_block_entity_data_received_preserves_tag_and_handle() {
     mod_api::impl_host_areas!(Client);
     impl mod_api::ClientHost for Client {}
     mod_api::impl_client_host_areas!(Client);
+    // The platform phase this scope sets is process-wide state another test may not have installed yet.
+    mod_api::__private::initialize().unwrap();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     let index = guest::add_handler(vec![guest::view::<dyn BlockEntityPart>(Arc::new(Notice))]);
     let proxy = WasmHandler {
@@ -2247,3 +2249,8 @@ fn datapack_sync_recipient_and_answer_cross_the_wire() {
 }
 #[path = "wire_loopback/chunk_queries.rs"]
 mod chunk_queries;
+
+#[path = "wire_loopback/client_fireworks.rs"]
+mod client_fireworks;
+#[path = "wire_loopback/play_hit_sound.rs"]
+mod play_hit_sound;

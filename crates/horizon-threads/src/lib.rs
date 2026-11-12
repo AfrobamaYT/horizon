@@ -85,7 +85,11 @@ pub fn par_chunks_mut_with<T: Send>(
     std::thread::scope(|scope| {
         let helpers = worker_count().saturating_sub(1).clamp(1, count - 1);
         let threads: Vec<_> = (0..helpers)
-            .filter_map(|_| std::thread::Builder::new().spawn_scoped(scope, work).ok())
+            .filter_map(|_| {
+                horizon_guest_stack::builder()
+                    .spawn_scoped(scope, work)
+                    .ok()
+            })
             .collect();
         work();
         for t in threads {

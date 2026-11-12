@@ -1814,6 +1814,7 @@ dependencies = [
  "horizon-engine-slots",
  "horizon-friends",
  "horizon-game-discovery",
+ "horizon-guest-stack",
  "horizon-hdr",
  "horizon-hooks",
  "horizon-items",
@@ -1904,6 +1905,7 @@ dependencies = [
  "horizon-command",
  "horizon-core",
  "horizon-dualsense",
+ "horizon-guest-stack",
  "horizon-hdr",
  "horizon-hooks",
  "horizon-items",
@@ -1966,6 +1968,7 @@ dependencies = [
  "horizon-client-input",
  "horizon-command",
  "horizon-core",
+ "horizon-guest-stack",
  "horizon-hdr",
  "horizon-hooks",
  "horizon-items",
@@ -2087,10 +2090,10 @@ version = "0.1.0"
 dependencies = [
  "horizon-client",
  "horizon-core",
+ "horizon-guest-stack",
  "horizon-mod-host",
  "horizon-mod-package",
  "horizon-protocol",
- "horizon-threads",
  "serde_json",
  "tempfile",
  "winresource",
@@ -2101,6 +2104,13 @@ name = "horizon-game-discovery"
 version = "0.1.0"
 dependencies = [
  "syn 2.0.119",
+]
+
+[[package]]
+name = "horizon-guest-stack"
+version = "0.1.0"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -2243,6 +2253,7 @@ version = "0.1.0"
 dependencies = [
  "horizon-client",
  "horizon-engine-slots",
+ "horizon-guest-stack",
  "horizon-mod-api",
  "horizon-mod-package",
  "horizon-mod-points",
@@ -2363,6 +2374,7 @@ version = "0.1.0"
 dependencies = [
  "horizon-client-core",
  "horizon-core",
+ "horizon-guest-stack",
  "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
@@ -2370,7 +2382,9 @@ dependencies = [
  "horizon-mod-point-emit",
  "horizon-mod-points",
  "horizon-mod-runtime",
+ "horizon-threads",
  "horizon-world",
+ "libc",
  "log",
  "rustix 1.1.5",
  "serde_json",
@@ -2441,6 +2455,7 @@ name = "horizon-platform"
 version = "0.1.0"
 dependencies = [
  "horizon-core",
+ "horizon-guest-stack",
  "horizon-hooks",
  "horizon-mod-api-gen",
  "horizon-mod-point-shape",
@@ -2633,6 +2648,7 @@ version = "0.1.0"
 name = "horizon-threads"
 version = "0.1.0"
 dependencies = [
+ "horizon-guest-stack",
  "libc",
  "libmimalloc-sys",
  "mimalloc",

@@ -32,12 +32,14 @@ Diverges from upstream: incoming entity_nbt/orb.rs, game/item_entities.rs, game/
 
 The incoming world-warp fragment shader has no compiled Rust owner. Its HDR writer behavior maps to the compiled terrain/entity/OIT writers; the dead source-level adapter is not revived.
 
-Whole-file incoming inventory: **604 declarations across 36 changed test-bearing paths**. Entity area accounts for 320, network for 136, render for 114 and system/bench/telemetry/report for 34. Four historical tests are intentionally not reproduced verbatim:
+Whole-file incoming inventory: **604 declarations across 36 changed test-bearing paths**. Entity area accounts for 320, network for 136, render for 114 and system/bench/telemetry/report for 34. Six incoming tests are not on this tree and are not reproduced verbatim:
 
 - `reasons_round_trip`: the old Reason::ALL/string parser API is absent; the typed SpawnReason contract is authoritative. No parser shim or trivial derive test replaces it.
 - `find_join_finds_by_number_in_or_out_of_order`: the raw find_join helper is gone; typed JoinList owns lookup and the retained first_join reorder test exercises production ordering.
 - `horizon_channels_reach_their_handlers_and_others_go_to_the_mods`: the old string classifier is absent; current typed payload admission/dispatch is authoritative.
 - `actual_guest_input_model_pose_reaches_self_metadata`: its externally owned mutable-host setup is absent. Current publisher coverage decodes actual self metadata through GuestList updates, but is not equivalent evidence for the old model-input integration setup.
+- `a_crossbow_rocket_posts_on_its_first_tick_and_a_mob_trident_at_once`: not present on the fork's tree; its rocket-plus-mob-trident first-tick pairing is not covered by another test here.
+- `place_block_alias_survival_consumption_and_client_prediction`: not present on the fork's tree; the alias placement's survival consumption with client prediction is not covered by another test here.
 
 These are explicit existing API divergences, not passing tests or exhaustive equivalence claims. The remaining mappings include inherited unchanged declarations, renamed tests and compiled extracted test modules.
 
@@ -183,7 +185,6 @@ The new wind-charge dedicated-server parity harness additionally requires prepar
 
 - `only_a_server_only_use_swings_back_to_the_player`
 - `ordinary_guest_final_close_posts_to_actual_listener`
-- `actual_guest_input_model_pose_reaches_self_metadata`
 - `failed_stick_use_keeps_group_available_for_placement`
 - `actual_guest_placement_starts_its_cooldown`
 - `actual_guest_second_placement_is_rejected`
@@ -201,7 +202,6 @@ The new wind-charge dedicated-server parity harness additionally requires prepar
 - `bow_launch_uses_only_the_first_tick_event`
 - `crossbow_launch_uses_only_the_first_tick_event`
 - `mob_launch_uses_only_the_first_tick_event`
-- `a_crossbow_rocket_posts_on_its_first_tick_and_a_mob_trident_at_once`
 - `finish_hit_dispatches_once_and_the_next_tick_does_not_repeat_it`
 - `finish_hit_uses_registered_guest_context_and_restores_the_host`
 
@@ -218,7 +218,6 @@ The new wind-charge dedicated-server parity harness additionally requires prepar
 
 - `joining_a_server_empties_the_off_hand_too`
 - `tracking_emitters_follow_the_packet_target`
-- `place_block_alias_survival_consumption_and_client_prediction`
 - `a_servers_client_takes_its_speed_from_the_attributes_not_the_effect`
 - `mod_open_chat_fills_the_box_only_over_the_world`
 - `plugin_player_stack_follows_network_moves_and_local_carriers`
