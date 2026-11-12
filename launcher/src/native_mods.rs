@@ -1764,6 +1764,7 @@ fn pipeline(
         linker()?;
         let rust = rust_toolchain::install(|f| progress(Step::Rust(f)))?;
         progress(Step::PrebuiltMods);
+        let compiling = std::time::Instant::now();
         let (binary, libraries) = prebuilt::compile(
             &rust,
             game,
@@ -1773,6 +1774,15 @@ fn pipeline(
             &resolution,
             options.registry_consent,
         )
+        .map_err(blame)?;
+        // The whole step; the tool's own build and the function replacement have their lines.
+        append_log(&trf(
+            "Mods compiled against the prebuilt game in {seconds} s",
+            &[(
+                "seconds",
+                &format!("{:.1}", compiling.elapsed().as_secs_f64()),
+            )],
+        ))
         .map_err(blame)?;
         check_cancelled()?;
         progress(Step::Install);

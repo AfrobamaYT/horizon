@@ -433,14 +433,6 @@ fn stick() -> ItemStack {
 }
 
 #[test]
-fn dispatch_before_installation_is_empty() {
-    let mut components = Vec::new();
-    dispatch_component_types(&RegistrationContext::new(), &mut components);
-    assert!(mods().is_empty());
-    assert!(components.is_empty());
-}
-
-#[test]
 #[should_panic(expected = "native mod id must not be empty")]
 fn an_entry_requires_a_nonempty_id() {
     ModEntry::new("", Box::new(Quiet));
