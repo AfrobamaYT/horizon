@@ -123,6 +123,14 @@ pub(in crate::game) fn resolve_enchantment_registry(
 pub(in crate::game) fn resolve_block_definitions(
     registry: &horizon_world::registry::BlockRegistry,
 ) -> Result<(), String> {
+    // Without installed parts the completed keys land in one process-wide table that keeps the
+    // first registry resolved; in a test process that is whichever test got there first, so a
+    // test that installed no parts gets its own empty installation, as tests do their mods.
+    #[cfg(test)]
+    if !mod_api::__private::parts_installation::parts_installed() {
+        mod_platform::__private::part_tests::install_parts_fixture(&[])
+            .map_err(|errors| errors.join("\n"))?;
+    }
     block_state::clear();
     if mod_api::__private::block_definitions().is_some() {
         return bind_worker_blocks(registry);
@@ -177,6 +185,32 @@ fn bind_worker_blocks(registry: &horizon_world::registry::BlockRegistry) -> Resu
         super::native_worldgen::retain(registry, index).inspect_err(|_| block_state::clear())?;
     block_state::install(retained);
     Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn a_test_without_parts_resolves_its_own_blocks_after_another_resolved_fewer() {
+    // Another test thread, with no parts installed, resolves a registry of air alone first.
+    std::thread::spawn(|| {
+        let air =
+            r#"{"defaults":{"minecraft:air":0},"states":[["air",true,false,"","minecraft:air"]]}"#;
+        let air = horizon_world::registry::BlockRegistry::from_facts_json(air.as_bytes()).unwrap();
+        resolve_block_definitions(&air).unwrap();
+    })
+    .join()
+    .unwrap();
+    // This one, with no parts installed either, still resolves its own block.
+    let own = r#"{"defaults":{"minecraft:air":0,"regression:own_block":1},"states":[
+        ["air",true,false,"","minecraft:air"],
+        ["b",false,false,"","regression:own_block"]
+    ]}"#;
+    let own = horizon_world::registry::BlockRegistry::from_facts_json(own.as_bytes()).unwrap();
+    resolve_block_definitions(&own).unwrap();
+    let state = own
+        .state(horizon_world::registry::BlockStateId(1))
+        .unwrap()
+        .try_into_api();
+    assert!(state.is_ok(), "{state:?}");
 }
 
 #[cfg(test)]
