@@ -27,9 +27,10 @@ pub(super) fn assemble(ctx: &Context, stacks: &[&ItemStack]) -> Option<ItemStack
     let info = |s: &ItemStack| ctx.facts(s).map(|f| &f.info);
     let max = |s: &ItemStack| i64::from(s.max_damage(info(s)));
     let durability = max(first).max(max(second));
-    let remaining = (max(first) - i64::from(first.effective_damage(info(first))))
-        + (max(second) - i64::from(second.effective_damage(info(second))))
-        + durability * 5 / 100;
+    // `ItemStack.getDamageValue` clamps the damage to `[0, max_damage]`: a patched component may exceed it.
+    let damage = |s: &ItemStack| i64::from(s.effective_damage(info(s))).clamp(0, max(s).max(0));
+    let remaining =
+        (max(first) - damage(first)) + (max(second) - damage(second)) + durability * 5 / 100;
     let mut out = ItemStack::new(&first.item, 1);
     out.data_mut()
         .set_other("minecraft:max_damage", Some(Tag::Int(durability as i32)));

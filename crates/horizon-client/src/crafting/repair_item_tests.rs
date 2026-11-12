@@ -106,3 +106,18 @@ fn repair_takes_the_larger_maximum() {
     assert_eq!(out.max_damage(None), 200);
     assert_eq!(out.damage, 100);
 }
+
+#[test]
+#[ignore = "requires prepared resources"]
+fn repair_clamps_damage_above_the_maximum() {
+    // Both stacks claim damage 150 of 100: each counts as fully broken, so remaining = 0 + 0 + 100 * 5 / 100 = 5.
+    let out = run(
+        "minecraft:diamond_pickaxe",
+        [Some(100), Some(100)],
+        [150, 150],
+        false,
+    )
+    .unwrap();
+    assert_eq!(out.max_damage(None), 100);
+    assert_eq!(out.damage, 95);
+}
