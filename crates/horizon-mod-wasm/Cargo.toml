@@ -26,6 +26,7 @@ horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 rustix = { version = "1", default-features = false, features = ["std", "process", "fs"] }
 
 [dev-dependencies]
+horizon-world = { path = "../horizon-world" }
 tempfile = "3.27.0"
 horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 mod_points = { package = "horizon-mod-points", path = "../horizon-mod-points" }

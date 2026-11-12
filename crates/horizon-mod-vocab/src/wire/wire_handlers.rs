@@ -53,6 +53,7 @@ handler!(dyn ItemPart, "ItemPart");
 handler!(dyn MenuPart, "MenuPart");
 handler!(dyn FluidPart, "FluidPart");
 handler!(dyn ServerReloadListener, "ServerReloadListener");
+handler!(dyn LoadCondition, "LoadCondition");
 handler!(dyn GameTestFunction, "GameTestFunction");
 handler!(dyn ClientReloadListener, "ClientReloadListener");
 handler!(dyn BiomeColorResolver, "BiomeColorResolver");

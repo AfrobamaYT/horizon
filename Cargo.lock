@@ -2358,6 +2358,7 @@ dependencies = [
  "horizon-mod-point-emit",
  "horizon-mod-points",
  "horizon-mod-runtime",
+ "horizon-world",
  "log",
  "rustix 1.1.5",
  "serde_json",
