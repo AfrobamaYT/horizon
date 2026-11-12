@@ -99,6 +99,45 @@ class IgnoredTests(unittest.TestCase):
             self.assertEqual(ignored_tests.main(["horizon-client-lib#2of3"]), 0)
         self.assertEqual(execute.call_args.args, ("horizon-client-lib", [], 2, 3))
 
+    def test_a_parent_that_crashes_after_its_childs_same_count_summary_did_not_complete(self):
+        # A fixture reruns its own test in a child, which reports FAILED and a one-test summary;
+        # the parent then aborts before its own summary. The child's summary has the parent's count.
+        output = target(1, "test fixture::case ... FAILED\n", summary(failed=1))
+        output += ("error: test failed, to rerun pass `-p example --lib`\n\nCaused by:\n"
+                   "  process didn't exit successfully: `target/debug/deps/example` (signal: 6, SIGABRT: process abort signal)\n")
+        result, log = self.run_output(output, 101)
+        self.assertIsNone(result)
+        self.assertIn("example: a test process crashed (cargo exit 101)", log)
+        with patch.object(ignored_tests, "known_failures", return_value={("example", "fixture::case"): None}), \
+                patch.object(ignored_tests, "harness_inputs", return_value={}), \
+                patch.object(ignored_tests.subprocess, "run", return_value=subprocess.CompletedProcess([], 101, output)), \
+                contextlib.redirect_stdout(io.StringIO()) as log:
+            self.assertEqual(ignored_tests.main(["example"]), 1)
+        self.assertIn("example: the test run did not complete", log.getvalue())
+
+    def test_a_target_completes_on_its_own_summary_after_a_childs(self):
+        # The child's one-test summary comes first; the parent's two-test summary closes the target.
+        output = target(2, "test fixture::case ... ok\n" + summary(passed=1) + "test fixture::case ... ok\ntest other ... ok\n",
+                        summary(passed=2))
+        result, log = self.run_output(output)
+        self.assertEqual(result, {"fixture::case": True, "other": True})
+        self.assertIn("example: test result: ok. 2 passed", log)
+        self.assertNotIn("example: test result: ok. 1 passed", log)
+
+    def test_a_target_whose_last_summary_is_a_childs_did_not_complete(self):
+        # The parent started two tests; only the child's one-test summary follows.
+        result, log = self.run_output(target(2, "test fixture::case ... ok\n", summary(passed=1)), 101)
+        self.assertIsNone(result)
+        self.assertIn("test target did not finish", log)
+
+    def test_a_failed_target_exiting_101_is_not_a_crash(self):
+        output = target(1, "test bad ... FAILED\n", summary(failed=1))
+        output += ("error: test failed, to rerun pass `-p example --lib`\n\nCaused by:\n"
+                   "  process didn't exit successfully: `target/debug/deps/example` (exit status: 101)\n")
+        result, log = self.run_output(output, 101)
+        self.assertEqual(result, {"bad": False})
+        self.assertNotIn("crashed", log)
+
     def test_unexplained_nonzero_status(self):
         result, _ = self.run_output(target(1, "test good ... ok\n", summary(passed=1)), 101)
         self.assertIsNone(result)

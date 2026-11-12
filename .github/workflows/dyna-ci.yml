@@ -367,6 +367,8 @@ jobs:
       # reuse across jobs, and an empty one means a cold build (no target, no registry, no toolchain).
       - name: Report what the build folder holds at job start
         if: needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true'
+        # A report only: an unreadable folder or a failed du/find/findmnt never fails the job.
+        continue-on-error: true
         run: |
           for dir in "${DYNA_CI_BUILD:-/build}" "${CARGO_TARGET_DIR:-}" "${CARGO_HOME:-}/registry" "${RUSTUP_HOME:-}/toolchains"; do
             if [ ! -d "$dir" ]; then echo "build-folder $dir: absent"; continue; fi

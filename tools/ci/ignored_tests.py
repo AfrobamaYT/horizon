@@ -473,9 +473,26 @@ def run(package, skip, number=None, count=None):
     ambiguous = set()
     max_name_length = max(map(len, expected), default=0)
     failure_diagnostics(process.stdout)
+    # A target finished only if its LAST summary counts every test it started. Fixtures that rerun this test
+    # executable print their own summaries first, from inside a parent test; the parent's comes after them.
+    last_summary = None
+    crashed = cargo_failure = False
+
+    def finish_target():
+        nonlocal incomplete, target_count, last_summary
+        if target_count is None:
+            return
+        if last_summary is None or sum(map(int, SUMMARY.match(last_summary).groups())) != target_count:
+            incomplete = True
+        else:
+            summaries.append(last_summary)
+            print(f"{package}: {last_summary}")
+        target_count = last_summary = None
+
     for line in process.stdout.splitlines():
         if TARGET.match(line):
-            incomplete |= target_count is not None or awaiting_count
+            incomplete |= awaiting_count
+            finish_target()
             target_number += 1
             awaiting_count = True
         elif awaiting_count and (found := COUNT.match(line)):
@@ -487,16 +504,20 @@ def run(package, skip, number=None, count=None):
             results[found[1]] = results.get(found[1], True) and found[2] == "ok"
         elif line.startswith("screen-effect event loop error: "):
             print(line)
-        elif found := SUMMARY.match(line):
-            # Resource fixtures launch filtered copies of this test executable.
-            # Their summaries are not evidence that the parent target finished.
-            if target_count == sum(map(int, found.groups())):
-                summaries.append(line)
-                target_count = None
-                print(f"{package}: {line}")
-        elif status := re.search(r"\((?:signal|exit status): \d+", line):
+        elif SUMMARY.match(line):
+            if target_count is not None:
+                last_summary = line
+        elif status := re.search(r"\((signal|exit status): (\d+)", line):
             # Emit only the numeric status, never adjacent test output.
             print(f"{package}: {status[0]})")
+            # Cargo's own line for a test process that ended: 101 is libtest's "tests failed"; a signal or any
+            # other status is a crash, whatever summaries came before it.
+            if cargo_failure and "process didn't exit successfully" in line:
+                crashed |= status[1] == "signal" or status[2] != "101"
+                cargo_failure = False
+        if line.startswith("error: test failed, to rerun pass "):
+            # Cargo's report on a test executable; text a test prints can't be told from it otherwise.
+            cargo_failure = True
         if expected:
             for name, status in listed_result_records(line, expected, max_name_length):
                 if status == "ambiguous":
@@ -507,6 +528,10 @@ def run(package, skip, number=None, count=None):
                 # is not promoted to a passing result or missing-test credit.
                 if status != "ignored":
                     results[name] = results.get(name, True) and status == "ok"
+    finish_target()
+    if crashed:
+        print(f"{package}: a test process crashed (cargo exit {process.returncode})")
+        return None
     # A fixture that reruns its own test executable (`run_fresh_cases`, the death-weapon cases) prints the
     # child's result record for the same name beside the parent's. Several records for one name are expected
     # and combined above, so a FAILED among them fails the test; only an unreadable record is a framing problem.
@@ -520,7 +545,7 @@ def run(package, skip, number=None, count=None):
             bounded_record(f"  {safe_identity(name)}; category={category}\n", remaining)
         print(f"{package}: {len(framing_problems)} listed identities have ambiguous result framing")
         return None
-    if incomplete or awaiting_count or target_count is not None:
+    if incomplete or awaiting_count:
         print(f"{package}: test target did not finish (cargo exit {process.returncode})")
         return None
     if process.returncode and not target_number:
