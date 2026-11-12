@@ -1398,6 +1398,31 @@ fn growth_limits_return_failure_without_stopping_the_group() {
     })
 }
 
+/// A refused growth the guest handled is forgotten when its call ends: a later trap's reason
+/// does not blame it.
+#[test]
+fn a_handled_refused_growth_does_not_explain_a_later_trap() {
+    crate::test_stack::on_guest_stack(|| {
+        // First call: memory.grow past 1 GiB answers -1, the guest drops it and replies 42.
+        // Second call: an unrelated trap.
+        let module = module(
+            r#"
+            i32.const 100 i32.const 100 i32.load i32.const 1 i32.add i32.store
+            i32.const 100 i32.load i32.const 1 i32.eq
+            if (result i64)
+                i32.const 16384 memory.grow i32.const -1 i32.ne if unreachable end
+                i64.const 2199023255556
+            else unreachable end"#,
+        );
+        assert_eq!(call(&module), Some(42));
+        assert_eq!(call(&module), None);
+        assert_eq!(
+            take_refusal(),
+            "wasm trap: wasm `unreachable` instruction executed"
+        );
+    })
+}
+
 /// Normal guest returns cannot poison shared memory, even with unusable replies.
 #[test]
 fn refusal_replies_survive_and_report_once() {

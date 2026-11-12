@@ -50,6 +50,8 @@ pub(crate) struct Limits {
     /// The size the last refused `memory.grow` asked for, and whether the system (not the limit)
     /// refused it, for the reason of a call that then failed.
     refused_growth: Option<(usize, bool)>,
+    /// Whether the log already named this group's limit, so a guest at its limit logs once.
+    warned: bool,
 }
 impl Limits {
     pub(crate) fn new(group: Arc<str>, memory_mib: u32) -> Self {
@@ -58,6 +60,7 @@ impl Limits {
             memory: usize::try_from(u64::from(memory_mib) << 20).unwrap_or(usize::MAX),
             allowed_growth: 0,
             refused_growth: None,
+            warned: false,
         }
     }
 }
@@ -72,7 +75,8 @@ impl wasmtime::ResourceLimiter for Limits {
             self.allowed_growth = desired;
             return Ok(true);
         }
-        if self.refused_growth.replace((desired, false)).is_none() {
+        self.refused_growth = Some((desired, false));
+        if !std::mem::replace(&mut self.warned, true) {
             log::warn!(
                 "wasm group {}: memory.grow to {} MiB refused at the group's limit of {} MiB",
                 self.group,
@@ -840,6 +844,12 @@ impl WasmMod {
         store.data_mut().outputs[depth] = output;
         let fault = match &result {
             Err(CallError::Fault(e)) => Some(fault_reason(e, budget, &mut store.data_mut().limits)),
+            // A top-level call that ended without a fault handled any refused growth itself: a
+            // later, unrelated fault must not be blamed on it.
+            _ if depth == 1 => {
+                store.data_mut().limits.refused_growth = None;
+                None
+            }
             _ => None,
         };
         if result.is_err() {
