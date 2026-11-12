@@ -47,7 +47,7 @@ impl Game<'_> {
         let Some(frame) = self.item_frames.iter_mut().find(|f| f.id == id) else {
             return false;
         };
-        frame.rotation = rotation % 8;
+        frame.rotation = (rotation % 8) as i8;
         let pos = frame.pos;
         self.world.modified.insert((pos[0] >> 4, pos[2] >> 4));
         self.frame_output_changed(pos);
