@@ -13,8 +13,7 @@ use std::{collections::BTreeMap, sync::Arc};
 /// frame's partial tick. Plain numbers, so a frame allocates nothing, and one value for native and
 /// wasm mods alike.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[derive(horizon_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, horizon_mod_api_macros::Wire)]
 pub struct EntityRenderState {
     /// The entity's network id, as mod messages name it.
     pub id: u32,
