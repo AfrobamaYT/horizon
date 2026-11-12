@@ -225,7 +225,8 @@ impl Wire for crate::StoragePage {
         out.put(&(limit as u64));
     }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
-        let entries = input.take()?;
+        // The host's cap bounds what a guest's encoded length may allocate.
+        let entries = input.list_with(crate::MAX_STORAGE_PAGE, Wire::take)?;
         let limit = input.take()?;
         Self::from_wire(entries, limit).ok_or(WireError::Invalid("a storage page past its limit"))
     }

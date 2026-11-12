@@ -643,6 +643,30 @@ mod tests {
     }
 
     #[test]
+    fn a_page_whose_encoded_length_passes_the_cap_is_refused_before_its_entries() {
+        let (_, r) = host_with(&["minecraft:stone"]);
+        let entry = {
+            let mut out = crate::wire::Writer::default();
+            crate::wire::Wire::put(&(r[0].clone(), 1u64), &mut out);
+            out.into_bytes()
+        };
+        let encoded = |len: u32, entries: usize| {
+            let mut bytes = len.to_le_bytes().to_vec();
+            for _ in 0..entries {
+                bytes.extend_from_slice(&entry);
+            }
+            bytes.extend_from_slice(&(MAX_STORAGE_PAGE as u64).to_le_bytes());
+            bytes
+        };
+        let decode = |bytes: &[u8]| crate::wire::Reader::decode::<StoragePage>(bytes).map(|page| page.entries().len());
+        assert_eq!(decode(&encoded(MAX_STORAGE_PAGE as u32, MAX_STORAGE_PAGE)), Ok(MAX_STORAGE_PAGE));
+        // Every entry is there, so only the cap can refuse it.
+        let past = MAX_STORAGE_PAGE + 1;
+        assert_eq!(decode(&encoded(past as u32, past)), Err(crate::wire::WireError::Length));
+        assert_eq!(decode(&encoded(u32::MAX, 1)), Err(crate::wire::WireError::Length), "a hostile length");
+    }
+
+    #[test]
     fn a_transfer_moves_billions_in_four_calls() {
         let (mut host, r) = host_with(&["minecraft:cobblestone"]);
         let (from_store, from) = bulk(u64::MAX, &[(&r[0], 5_000_000_000)]);
