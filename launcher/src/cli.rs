@@ -1154,14 +1154,7 @@ fn set_setting(s: &mut backend::Settings, key: &str, value: &str) -> Result<(), 
     Ok(())
 }
 
-/// Every launcher setting, as `settings` shows them.
 /// Runs a subcommand and returns the exit code, or None when the window should open.
-fn registry_consent(inventory: &native_mods::RegistryInventory) -> bool {
-    eprintln!("{}\n{}", inventory.label(), inventory.detail());
-    // The headless native route has already required explicit native-code permission.
-    true
-}
-
 pub fn run() -> Option<i32> {
     use clap::FromArgMatches;
     let no_ai = backend::no_ai();
@@ -4057,7 +4050,7 @@ mod catalog_tests;
 
 #[path = "cli_native_permission.rs"]
 mod native_permission_impl;
-use native_permission_impl::{github_native, native_permission};
+use native_permission_impl::{github_native, native_permission, registry_consent};
 
 mod developer_builds;
 
