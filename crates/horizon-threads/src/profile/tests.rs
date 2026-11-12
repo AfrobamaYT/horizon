@@ -295,8 +295,12 @@ fn wall_samples_of_a_sleeping_thread_are_waiting() {
     );
 }
 
+/// The CPU share `spins` received, in thousandths of its wall time.
+static SPIN_SHARE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 fn spins() {
-    spin_fast(200);
+    let share = crate::sampler::test_support::spin_share_permille(200, spin_fast);
+    SPIN_SHARE.store(share, std::sync::atomic::Ordering::Relaxed);
 }
 
 #[test]
@@ -308,13 +312,20 @@ fn a_wall_session_also_records_cpu_samples_without_mixing_them() {
         agg.total(State::Running, false),
         agg.total(State::Waiting, false),
     );
+    let share = SPIN_SHARE.load(std::sync::atomic::Ordering::Relaxed);
     assert!(
-        cpu > cpu_count(100) && running > 100,
-        "cpu {cpu} running {running}"
+        cpu > cpu_count(100) && running + waiting > 100,
+        "cpu {cpu} running {running} waiting {waiting}"
+    );
+    // A preempted spinner is rightly waiting: running follows the CPU it received, give or take
+    // a fifth. Wall samples filed as CPU ones, or the other way round, break this or the line above.
+    assert!(
+        share >= 333,
+        "the spinning thread ran only {share}/1000 of the time"
     );
     assert!(
-        waiting * 5 <= running,
-        "{waiting} waiting vs {running} running"
+        running * 1000 >= (running + waiting) * (share - 200),
+        "{waiting} waiting vs {running} running, with {share}/1000 of the CPU"
     );
 }
 

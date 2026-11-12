@@ -121,7 +121,6 @@ use loading_window::{
 use self::api_values::TryIntoApi;
 pub(crate) use api_values::{block_jump_factor, block_speed_factor, is_ladder};
 use horizon_client::actions::Action as Mapping;
-use horizon_client::held::Source;
 use horizon_client::spans::{startup, time as span};
 use horizon_client::{
     Result,
@@ -165,6 +164,7 @@ use horizon_client::{
     vanillagen::VanillaTerrain,
     world::World,
 };
+use horizon_client::{fast_hash::FxHashMap, held::Source};
 use horizon_core::{
     biome::{BiomeZoom, obfuscate_seed},
     geometry::{Aabb, Direction},
@@ -2017,7 +2017,7 @@ struct Game<'a> {
     tnts: horizon_client::join_seq::JoinList<tnt::PrimedTnt>,
     hoppers: HashMap<(i32, i32, i32), machines::HopperState>,
     /// The open `host.transaction`s, innermost last (`transactions.rs`).
-    transactions: Vec<transactions::Level>,
+    transactions: transactions::OpenTransactions,
     /// Backing blocks whose contents notice is on the call stack, innermost last.
     contents_changing: Vec<(mod_api::LevelRef, BlockPos)>,
     /// The screen of a mod block's menu open on this client (`native_screen`).
@@ -2137,7 +2137,7 @@ struct Game<'a> {
     persist: persist::EntityMemory,
     /// Missing profession IDs already reported for this world session.
     missing_professions: HashSet<String>,
-    entity_attachments: HashMap<u32, horizon_mod_runtime::attachments::Attachments>,
+    entity_attachments: FxHashMap<u32, horizon_mod_runtime::attachments::Attachments>,
     entity_initialization: entity_initialization::EntityInitialization,
     /// Typed per-level membership follows dimensions, not the temporary world swap.
     attachment_indexes: attachment_index::Indexes,
@@ -3750,7 +3750,7 @@ impl Game<'_> {
         self.persist.uuids.insert(self.next_entity, random.uuid);
         let (bob, yaw) = (random.bob, random.yaw);
         let velocity = velocity.unwrap_or(random.velocity);
-        self.dropped.push(ItemEntity {
+        self.dropped.push(random.state.apply(ItemEntity {
             attachment_lifetime: Default::default(),
             fall_distance: 0.0,
             rotation: [yaw, 0.0],
@@ -3763,7 +3763,7 @@ impl Game<'_> {
                 Vec3::new(velocity[0], velocity[1], velocity[2]),
                 bob,
             )
-        });
+        }));
         // ServerLevel.addFreshEntity.
         if self.native_joins_flush(false, self.next_entity) {
             self.native_item_spawn(self.next_entity, &item, count, position);
@@ -4268,70 +4268,7 @@ impl Game<'_> {
         );
         let feet = [p.position.x, p.position.y, p.position.z];
         let own = self.level.ensure_player_uuid();
-        // The predicate's Game borrow ends before each yielded row's effects.
-        // This cell is stack-local and never accessible to a native callback.
-        let game = std::cell::RefCell::new(&mut *self);
-        for item in items.extract_if_mut(|item| {
-            let mut game = game.borrow_mut();
-            let b = item.bounds();
-            let touching = b.min_position().x < max[0]
-                && b.max_position().x > min[0]
-                && b.min_position().y < max[1]
-                && b.max_position().y > min[1]
-                && b.min_position().z < max[2]
-                && b.max_position().z > min[2];
-            // ItemEntity.playerTouch: `item_picked_up`, then vanilla's delay and target rule.
-            if touching && game.native_pickup_allowed(item, own) {
-                let before = item.stack.count;
-                let kind = item.stack.item.clone();
-                let thrower = item.thrower;
-                let left = match game.native_pickup_insert(&item.stack) {
-                    Some(rest) => rest,
-                    // ItemEntityPickupEvent.Post: `remaining` is all mods reach of the lifted item.
-                    None => match game.native_pickup_post(&item.stack) {
-                        None => {
-                            game.award_stat("picked_up", &kind, before as i32);
-                            if let Some(thrower) = thrower {
-                                game.trigger_thrown_picked_up_by_player(&item.stack, thrower);
-                            }
-                            return true;
-                        }
-                        Some(raised) => raised,
-                    },
-                };
-                let taken = before.saturating_sub(left.count);
-                if taken > 0 {
-                    game.award_stat("picked_up", &kind, taken as i32);
-                    if let Some(thrower) = thrower {
-                        game.trigger_thrown_picked_up_by_player(&left, thrower);
-                    }
-                    game.add_pickup(
-                        pickups::Taken::Item(Box::new(item.clone())),
-                        pickups::Collector::Player,
-                    );
-                    // handleTakeItemEntity: the random pitch of a full pickup.
-                    let pitch = ((game.world.random.next_float() - game.world.random.next_float())
-                        * 0.7
-                        + 1.0)
-                        * 2.0;
-                    game.audio
-                        .play("minecraft:entity.item.pickup", Some(feet), 0.2, pitch);
-                }
-                item.stack = left;
-            }
-            false
-        }) {
-            let mut game = game.borrow_mut();
-            game.add_pickup(
-                pickups::Taken::Item(Box::new(item)),
-                pickups::Collector::Player,
-            );
-            let pitch = ((game.world.random.next_float() - game.world.random.next_float()) * 0.7
-                + 1.0)
-                * 2.0;
-            game.audio
-                .play("minecraft:entity.item.pickup", Some(feet), 0.2, pitch);
-        }
+        self.native_player_pickups(&mut items, (min, max), feet, own);
         self.put_back_dropped(items);
         self.spawn_destroyed_contents(destroyed);
     }
@@ -8912,7 +8849,7 @@ impl Game<'_> {
         let brewed_potion_takes = std::mem::take(&mut menu.brewed_potion_takes);
         let equipped = std::mem::take(&mut menu.equipped);
         let item_crafted = std::mem::take(&mut menu.item_crafted);
-        for (_, stack) in &item_crafted {
+        for (_, stack, _) in &item_crafted {
             if !predicting {
                 self.award_stat("crafted", &stack.item, stack.count as i32);
             }
@@ -9129,13 +9066,13 @@ impl Game<'_> {
                     }
                 }
                 crafted += 1;
-                // `ResultSlot.onTake`: the recipe and the stack taken
-                // (native_item_crafted).
+                // `ResultSlot.onTake` (native_item_crafted): recipe, stack taken, grid before.
                 let player = self.native_acting_id();
-                self.native_item_crafted(player, &format!("minecraft:{recipe}"), &taken);
+                let id = format!("minecraft:{recipe}");
+                self.native_item_crafted(player, &id, &taken, &ingredients);
                 self.tutorial_get_item(Some(&taken));
                 self.award_stat("crafted", &made.0, made.1 as i32);
-                self.award_crafted(&[(format!("minecraft:{recipe}"), ingredients)]);
+                self.award_crafted(&[(id, ingredients)]);
                 if !shift || crafted >= 64 {
                     break;
                 }
@@ -13351,7 +13288,7 @@ impl Game<'_> {
             Err(_) if self.renderer.as_ref().is_some_and(Renderer::device_lost) => false,
             result => result?,
         };
-        self.native_render_frame_post(elapsed);
+        self.finish_render_frame(elapsed);
         if rendered {
             // The submit thread may still hold the frame: a listener hears it after the
             // present, and with none the next frame keeps overlapping it.
@@ -13524,7 +13461,7 @@ impl Game<'_> {
             return Ok(false);
         };
         pr.lap("pr_setup");
-        let alpha = self.clock.fraction();
+        let alpha = self.frame_world_partial_tick();
         // Camera.getCameraEntityPartialTicks: the view, the hand and the
         // player's own model stay smooth while the level is frozen.
         let camera_alpha = self.clock.camera_fraction();
@@ -15260,7 +15197,7 @@ impl<'a> Game<'a> {
             bee_stinger_model: prepared.bee_stinger_model,
             tnts: Default::default(),
             hoppers: HashMap::new(),
-            transactions: Vec::new(),
+            transactions: Default::default(),
             block_entity_tick_key: None,
             block_entity_tick_items: None,
             wasm_dispatch_failures:

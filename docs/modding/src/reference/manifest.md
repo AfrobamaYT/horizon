@@ -95,6 +95,14 @@ Top-level `[dependencies]` declares other mods by id: a semver requirement strin
 Content layers load in dependency order. A missing required dependency, incompatible installed version or dependency cycle refuses startup; an absent optional dependency is ignored. Native code dependencies additionally require API packages
 ([Dependencies between trait mods](../concepts/trait-mods.md#dependencies-between-trait-mods)).
 
+Top-level `[properties]` holds free-form values other mods read: strings, integers, floats and booleans only,
+at most 64 keys and 8 KiB (keys and strings by length, 8 bytes per number, 1 per boolean); a table, an array
+or a larger table refuses the package. A mod reads any loaded package's manifest through
+`context.mods().get(id)`: `PackageInfo` gives `name`, `description`, `authors`, `license`, `homepage`,
+`issues`, `icon_path`, `runtime` (`Native`, `Wasm`, or `None` for content), `dependencies` (id, version
+requirement, optional) and `property(key)`, the same on client and server (NeoForge's
+`ModContainer.getModInfo`, `IModInfo` and `getModProperties`).
+
 ## Original Java jar layers
 
 Content and code mods can list ordered `[[jar]]` references. Use
