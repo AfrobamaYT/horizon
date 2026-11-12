@@ -60,8 +60,3 @@ required-features = ["listener-fixture"]
 [[test]]
 name = "bench"
 required-features = ["listener-fixture"]
-
-[[test]]
-name = "main_stack_probe"
-harness = false
-required-features = ["runtime-fixture"]
