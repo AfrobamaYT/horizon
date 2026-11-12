@@ -3,10 +3,7 @@
 //! directions, undeclared channels and the load-time collision refusal.
 use super::*;
 use crate::lan::{NetEvent, PlayerSender};
-use horizon_protocol::packets::{
-    custom_payload::{CLIENTBOUND_LIMIT, CustomPayload, SERVERBOUND_LIMIT},
-    play,
-};
+use horizon_protocol::packets::{custom_payload::CustomPayload, play};
 use mod_api::{Hooks, IPayloadContext, IPayloadHandler, ModEntry, PayloadBytes, Registrar};
 
 const CHANNEL: &str = "voicechat:secret";
@@ -153,21 +150,26 @@ fn raw_sends_reach_a_vanilla_peer_within_the_clientbound_limit() {
             .unwrap()
             .publish()
             .unwrap();
-        let expected = encode(Phase::Play, Side::Server, &id, PayloadBytes(body));
+        // Play clientbound custom_payload (0x18), the channel as a length-prefixed string,
+        // then the body with no envelope: written out by hand, not by the encoder under test.
+        let mut expected = vec![0x18, 15];
+        expected.extend_from_slice(b"bungeecord:main");
+        expected.extend_from_slice(&body);
         assert!(out().contains(&expected));
+        // ClientboundCustomPayloadPacket's limit, as a literal so a changed constant fails here.
         assert!(
             endpoint
-                .prepare(&epoch, &id, PayloadBytes(vec![0; CLIENTBOUND_LIMIT]))
+                .prepare(&epoch, &id, PayloadBytes(vec![0; 1_048_576]))
                 .is_ok()
         );
         assert_eq!(
             endpoint
-                .prepare(&epoch, &id, PayloadBytes(vec![0; CLIENTBOUND_LIMIT + 1]))
+                .prepare(&epoch, &id, PayloadBytes(vec![0; 1_048_577]))
                 .err(),
             Some(PayloadSendError::PayloadTooLarge {
                 id: id.clone(),
-                size: CLIENTBOUND_LIMIT as u64 + 1,
-                limit: CLIENTBOUND_LIMIT as u64,
+                size: 1_048_577,
+                limit: 1_048_576,
             })
         );
         let undeclared = PayloadId("other:channel".into());
@@ -183,7 +185,7 @@ fn raw_sends_reach_a_vanilla_peer_within_the_clientbound_limit() {
 #[test]
 fn a_raw_channel_keeps_the_vanilla_serverbound_limit() {
     with_vanilla_peer(|transport| {
-        let decode = |len| {
+        let decode = |len: usize| {
             let mut body = horizon_protocol::buf::Writer::new();
             body.string(CHANNEL);
             body.bytes(&vec![0; len]);
@@ -193,8 +195,9 @@ fn a_raw_channel_keeps_the_vanilla_serverbound_limit() {
                 &transport.local.codecs,
             )
         };
-        assert!(decode(SERVERBOUND_LIMIT).is_ok());
-        assert!(decode(SERVERBOUND_LIMIT + 1).is_err());
+        // DiscardedPayload's serverbound limit, as a literal.
+        assert!(decode(32_767).is_ok());
+        assert!(decode(32_768).is_err());
     });
 }
 
