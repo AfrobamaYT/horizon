@@ -53,7 +53,13 @@ const PREFIX: &str = "native-";
 const STAGING: &str = "area-aware-mixins-input-v1";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
 const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
-pub const MIXINS_REV: &str = horizon_mod_package::index::native::MIXINS_REV;
+pub const MIXINS_REV: &str = horizon_mod_package::mixins_tool::REV;
+
+/// `native-build --mixins-from-source`: this process builds the horizon-mixins tool from its
+/// pinned source and never looks for the prebuilt one, so CI keeps that path proven.
+pub fn mixins_from_source() {
+    mixins_patch::FROM_SOURCE.store(true, std::sync::atomic::Ordering::Relaxed);
+}
 
 /// Native mods use the SDK's optimized compilation settings.
 #[derive(

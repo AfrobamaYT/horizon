@@ -856,6 +856,10 @@ enum Cmd {
         /// The game is never rebuilt by a mod build.
         #[arg(long, value_enum)]
         profile: Option<native_mods::Profile>,
+        /// Build the horizon-mixins tool from its pinned source instead of downloading the
+        /// prebuilt one: for CI, which keeps that path proven
+        #[arg(long, hide = true)]
+        mixins_from_source: bool,
     },
     /// Show a release's patch notes (default: the newest)
     Notes { tag: Option<String> },
@@ -1341,8 +1345,12 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
             update,
             trust_native_code,
             profile,
+            mixins_from_source,
         } => {
             native_permission(trust_native_code)?;
+            if mixins_from_source {
+                native_mods::mixins_from_source();
+            }
             if catalog {
                 let discovered =
                     native_mods::pinned_catalog_with_modules(&folder.expect("required by clap"))?;

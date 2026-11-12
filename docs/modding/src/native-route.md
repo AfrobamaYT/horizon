@@ -118,6 +118,12 @@ Prebuilt game: only the mods compile
 Function replacement: 1 functions patched by 1 mixins, without rebuilding the game (copy … ms, horizon-mixins … ms, compile … ms, total … ms)
 ```
 
-The first build with a `[[native.mixin]]` row also downloads and builds the horizon-mixins tool, once per
-`mixins` commit (a mod with only loops, bridges and modules never needs it); on a test machine that first build took a little over a minute. Later builds reuse the tool,
-and a build with a mixin, a loop slot, a bridge and a module took a few seconds there.
+The first build with a `[[native.mixin]]` row also downloads the horizon-mixins tool, once per pinned tool (a
+mod with only loops, bridges and modules never needs it). It comes prebuilt from this repository's
+`mixins-tool-…` release, checked against that release's `SHA256SUMS` and against the commit, patch and platform
+the launcher pins; that is protection against a damaged download, the same as the prebuilt game's, not a
+signature. Where the release has no build for your platform (an Intel Mac, a pin not released yet), the launcher
+downloads the tool's source and builds it instead, which took about a minute on a test machine, and the build log
+says so: `horizon-mixins tool: no prebuilt for <target>; building from source (once per pin)`. A download that
+fails is an error to retry, never a source build. Later builds reuse the tool, and a build with a mixin, a loop
+slot, a bridge and a module took a few seconds on that machine.
