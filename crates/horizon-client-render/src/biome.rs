@@ -8,7 +8,7 @@ pub use mod_api::world::biome::{BiomeColors, SpawnEntry};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -434,6 +434,31 @@ impl Biomes {
         self.index.contains_key(name)
     }
     pub fn get(&self, id: u16) -> &BiomeInfo {
+        if self.list.is_empty() {
+            static DEFAULT: OnceLock<BiomeInfo> = OnceLock::new();
+            return DEFAULT.get_or_init(|| BiomeInfo {
+                spawns: HashMap::new(),
+                spawn_costs: HashMap::new(),
+                creature_probability: 0.0,
+                increased_fire_burnout: false,
+                name: "minecraft:plains".to_owned(),
+                temperature: 0.8,
+                frozen: false,
+                downfall: 0.4,
+                precipitation: false,
+                grass: 0x7f_c0_55,
+                modifier: GrassModifier::None,
+                foliage: 0x6a_ab_37,
+                dry_foliage: 0x79_75_54,
+                water: 0x3f_76_e4,
+                sky: None,
+                fog: None,
+                water_fog: 0x3f_76_e4,
+                ambient_particles: Vec::new(),
+                features: Vec::new(),
+                attributes: Default::default(),
+            });
+        }
         &self.list[usize::from(id).min(self.list.len() - 1)]
     }
     /// The name of biome `id`, plains (as for an unknown name) when the id is
