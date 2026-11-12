@@ -700,7 +700,6 @@ enum GuestUse {
     /// an entity again from the view.
     Entity(Hand, InteractTarget),
 }
-
 /// The entity an interact packet names and where its client clicked it (the
 /// packet's location, measured from the entity's position): what
 /// `ServerGamePacketListenerImpl.handleInteract` takes from
@@ -1670,7 +1669,7 @@ impl LevelAccess for GameLevel<'_> {
         {
             return signal;
         }
-        machines::container_signal(self.world, self.behaviours, self.items, self.registry, pos)
+        machines::container_signal(self, pos)
     }
     fn item_frame_analog_output(&self, pos: BlockPos, facing: Direction) -> Option<i32> {
         let mut frames = self
@@ -1689,9 +1688,14 @@ impl LevelAccess for GameLevel<'_> {
     fn block_entity_signal(
         &self,
         pos: BlockPos,
-        _state: BlockStateId,
+        state: BlockStateId,
         _direction: Direction,
     ) -> i32 {
+        if let Some(BlockEntity::TestBlock(block)) =
+            self.world.block_entities.get(&(pos.x, pos.y, pos.z))
+        {
+            return test_blocks::own_signal(self.registry, state, block.powered);
+        }
         native_level_signals::block_entity_signal(self.world, self.items, self.lid_openers, pos)
     }
     fn biome_name(&self, pos: BlockPos) -> Option<&str> {
@@ -2587,6 +2591,8 @@ struct Game<'a> {
     last_device_recovery: Option<Instant>,
     /// CPU geometry storage retained across frames, including empty/title frames.
     entity_vertices: Vec<Vertex>,
+    /// Falling models by state and selected-model address list; cleared on pack/atlas replacement.
+    falling_vertices: RefCell<HashMap<BlockStateId, Vec<(Vec<usize>, Vec<Vertex>)>>>,
     /// Horizon Extras' dynamic lights this frame (`dynamic_lights.rs`), and how brightly each
     /// item glows (built the first time the extra is on).
     dynamic_lights: Vec<[f32; 4]>,
@@ -3174,9 +3180,9 @@ struct Game<'a> {
     water_plane_memo: std::cell::Cell<Option<f32>>,
     /// The camera's block and the second `water_plane` last scanned at.
     water_plane_scan: std::cell::Cell<Option<([i32; 3], i64)>>,
-    /// The mobs' box reach while the boats and minecarts tick, with the mob count it was
-    /// worked out for (`vehicle_mob_reach`).
-    vehicle_mob_reach: std::cell::Cell<Option<(usize, horizon_client::mobs::BoxReach)>>,
+    /// What the boats' and minecarts' ticks know about the mobs: their box reach
+    /// (`vehicle_mob_reach`) and a grid of their boxes (`mobs_meeting`).
+    vehicle_mobs: boat_passengers::VehicleMobs,
     persist: persist::EntityMemory,
     /// Missing profession IDs already reported for this world session.
     missing_professions: HashSet<String>,
@@ -6897,8 +6903,8 @@ impl Game<'_> {
             self.loot_block_entity(pos, &facts.name)
         };
         if let Some(entity) = self.world.block_entities.get(&key).cloned() {
-            let name = self.world.block_names.get(&key).cloned();
-            self.pending.record(pos, &entity, &facts.name, name);
+            self.pending
+                .record_from(&self.world, pos, &entity, &facts.name);
         } else if let Some(tag) = spill::saved_entity(&self.world, pos) {
             self.pending.record_saved(pos, &tag);
         }
@@ -10900,14 +10906,7 @@ impl Game<'_> {
             let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
             let start = out.len();
             self.mark_motion(start, Self::MOTION_OBJECT | u64::from(f.id));
-            self.block_model_vertices(
-                f.state,
-                horizon_core::random::position_seed(f.start_pos),
-                glam::Mat4::from_translation(o),
-                packed,
-                false,
-                &mut out,
-            );
+            self.falling_model_vertices(f.state, f.start_pos, o, packed, &mut out);
             let tint = horizon_client::mobs::render::abgr(tint);
             for vertex in &mut out[start..] {
                 vertex.color = horizon_client::hud_layout::multiply(vertex.color, tint);
@@ -12845,10 +12844,7 @@ impl Game<'_> {
             }
             if let Some(kind) = mob {
                 if let Some(id) = self.spawn_mob_at(kind, (target[0], target[1], target[2]), true) {
-                    if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                        horizon_client::entity_nbt::apply_item_components(m, stack);
-                    }
-                    self.mob_placed(id)?;
+                    self.mob_placed(id, stack)?;
                 }
                 self.post_block_game_event(
                     "minecraft:entity_place",
@@ -16249,6 +16245,7 @@ impl<'a> Game<'a> {
             renderer: None,
             last_device_recovery: None,
             entity_vertices: Vec::new(),
+            falling_vertices: Default::default(),
             dynamic_lights: Vec::new(),
             luminance: Default::default(),
             see_through_vertices: Vec::new(),
@@ -16580,7 +16577,7 @@ impl<'a> Game<'a> {
             sky_darken_memo: Default::default(),
             water_plane_memo: Default::default(),
             water_plane_scan: Default::default(),
-            vehicle_mob_reach: Default::default(),
+            vehicle_mobs: Default::default(),
             persist: Default::default(),
             missing_professions: Default::default(),
             entity_attachments: Default::default(),
@@ -17450,7 +17447,7 @@ pub(crate) fn run_with(
     horizon_world::datafix::set_resources(
         &std::path::absolute(&vanilla_root).unwrap_or_else(|_| vanilla_root.clone()),
     );
-    if let Some(error) = missing_resources(&vanilla_root) {
+    if let Some(error) = missing_resources(&vanilla_root, horizon_hooks::engine::get_the_game()) {
         // The game build started by hand (the release's zip), not by the
         // launcher: a window says where to get it. Scripts and servers get
         // the error.
