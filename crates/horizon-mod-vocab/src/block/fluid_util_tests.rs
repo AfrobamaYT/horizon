@@ -13,7 +13,11 @@ const PLAYER_ENTITY: u32 = 70;
 /// and player `PLAYER` holding `count` of `item` in the main hand.
 fn host(item: &str, count: u32) -> FakeHost {
     let mut host = FakeHost::new();
-    let items = ["minecraft:bucket", "minecraft:water_bucket", "minecraft:lava_bucket"];
+    let items = [
+        "minecraft:bucket",
+        "minecraft:water_bucket",
+        "minecraft:lava_bucket",
+    ];
     host.registries
         .resolve_items(items.map(|id| Identifier::parse(id).unwrap()))
         .unwrap();
@@ -56,7 +60,9 @@ fn click(host: &mut FakeHost) -> bool {
 }
 
 fn held(host: &FakeHost) -> Option<FluidStack> {
-    host.level.block_entity_at(TANK).unwrap().tanks[0].held.clone()
+    host.level.block_entity_at(TANK).unwrap().tanks[0]
+        .held
+        .clone()
 }
 
 fn hand(host: &FakeHost) -> Option<ItemStack> {

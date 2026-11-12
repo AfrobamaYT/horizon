@@ -17,9 +17,9 @@ pub(crate) mod cauldron_fluid_content;
 pub(crate) mod cauldron_interactions;
 pub(crate) mod fluid_capability;
 pub(crate) mod fluid_model;
+pub(crate) mod fluid_states;
 /// Fluid interaction helpers, as NeoForge's `FluidUtil`.
 pub mod fluid_util;
-pub(crate) mod fluid_states;
 pub(crate) mod item_place;
 pub(crate) mod poi_types;
 pub(crate) mod types;
