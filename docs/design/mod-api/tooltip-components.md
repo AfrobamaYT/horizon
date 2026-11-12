@@ -220,10 +220,13 @@ A bad listener answer must not poison the next ordinary tooltip. No game-state
 mutation is required; any allowed listener transaction follows existing root-commit
 and rollback rules.
 
-With no subscribers or custom data, take O(1) presence checks and run exactly the
-vanilla path: no API element conversion, payload encoding, registry scan, factory
+With no subscribers or custom data, take O(1) presence checks and run the vanilla
+path apart from the contract's screen-fit wrap: no API element conversion, payload encoding, registry scan, factory
 allocation or new validation/clamp/minimum. Built-in constants and default font,
-wrapping, positioning and bundle behavior remain vanilla. Today's unconditional
+positioning and bundle behavior remain vanilla. The screen-fit wrap below is part of
+this contract, not mod work: it applies with or without subscribers (fixtures A–G and
+K, B among them, have no listener; H–J add a listener's maximum on top), and the fast
+path skips only the mod dispatch. Today's unconditional
 API list conversions in `tooltip.rs:120` and `:190` are costs to remove, not the
 promised baseline. With custom data use indexed exact-key dispatch and prepare
 each component once; no per-frame string hashing or formatting.
@@ -359,7 +362,7 @@ there is no pending overflow-boundary row.
 The #2927 implementation starts only after #2974 lands, and carries stages 2–4
 as one complete native/wasm contract: registrar, Wire data envelope, font reference,
 prepared component, removal of both old parts with every caller and the catalog,
-shared item/text-only preparation, exact vanilla no-listener fast path and a book
+shared item/text-only preparation, a no-listener fast path that is vanilla apart from the screen-fit wrap, and a book
 example. Keep new logic in sibling modules rather than growing oversized owners.
 
 Start with failing tests: every acceptance-matrix row must have its own test with
