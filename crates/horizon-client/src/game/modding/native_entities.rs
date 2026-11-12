@@ -54,7 +54,8 @@ pub(super) fn target_id(t: Target) -> Option<u32> {
         | Target::Spawner(id)
         | Target::Cloud(id)
         | Target::Hook(id)
-        | Target::Knot(id) => Some(id),
+        | Target::Knot(id)
+        | Target::General(id) => Some(id),
         Target::Player | Target::Guest(_) => None,
     }
 }
@@ -700,7 +701,7 @@ mod tests {
             }),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.native_joins_skip();
                 let base = game.next_entity;
