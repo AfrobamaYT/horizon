@@ -579,7 +579,9 @@ pub mod tests {
             r.block_capability_before_game(&ITEMS, &ordered_block, |_, at, _, _| {
                 matches!(at.pos[0], 6 | 11).then(|| Box::new(Marked(5)) as _)
             });
-            r.block_capability(&ITEMS, &ordered_block, |_, _, _, _| Some(Box::new(Marked(6))));
+            r.block_capability(&ITEMS, &ordered_block, |_, _, _, _| {
+                Some(Box::new(Marked(6)))
+            });
         }
     }
 

@@ -59,7 +59,7 @@ impl dyn Registrar + '_ {
         + Sync
         + 'static,
     ) {
-        self.provide_block_capability(key.name, block, false, block_provider(provider));
+        self.provide_block_capability(key.name, block, false, block_provider(*block, provider));
     }
     /// `block_capability`, asked ahead of the game's own provider.
     pub fn block_capability_before_game<T: ?Sized + 'static>(
@@ -76,14 +76,15 @@ impl dyn Registrar + '_ {
         + Sync
         + 'static,
     ) {
-        self.provide_block_capability(key.name, block, true, block_provider(provider));
+        self.provide_block_capability(key.name, block, true, block_provider(*block, provider));
     }
 }
 
 /// A block provider as the table keeps it: one asked by position and side, which reads the block
 /// state and block entity there for `provider`. A position whose block can't be read (a stale
-/// level, an unloaded chunk) has no answer.
+/// level, an unloaded chunk), or is no longer `block`, has no answer.
 fn block_provider<T: ?Sized + 'static>(
+    block: crate::BlockKey,
     provider: impl Fn(
         &mut dyn ServerHost,
         BlockSide,
@@ -95,6 +96,11 @@ fn block_provider<T: ?Sized + 'static>(
     + 'static,
 ) -> BlockProviderOf {
     BlockProviderOf::of(Arc::new(move |host: &mut dyn ServerHost, at: BlockSide| {
+        // The block may have changed since the lookup chose this provider: an earlier provider
+        // replaced it, say. Then it is another block's position, and this one has no answer.
+        if at.level.block(host, at.pos)? != block {
+            return None;
+        }
         let state = at.level.block_state(host, at.pos)?;
         let entity = host.block_entity(at.level, at.pos);
         provider(host, at, state, entity)

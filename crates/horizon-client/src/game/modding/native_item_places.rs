@@ -1961,7 +1961,12 @@ pub(super) mod tests {
                 let host: &mut dyn ServerHost = game;
                 let level = host.level("minecraft:overworld").unwrap();
                 let bin = level
-                    .capability(host, &mod_api::ITEMS, [0, 63, 0], Some(mod_api::Direction::Up))
+                    .capability(
+                        host,
+                        &mod_api::ITEMS,
+                        [0, 63, 0],
+                        Some(mod_api::Direction::Up),
+                    )
                     .expect("the lodestone's provider");
                 assert_eq!(bin.owner(), "trash_can");
                 assert_eq!(bin.amount(host, 0), 0);

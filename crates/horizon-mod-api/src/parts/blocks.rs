@@ -1192,7 +1192,12 @@ impl BlocksRegistrar for PartRegistrar {
         provider: BlockProviderOf,
     ) {
         let slot = mod_vocab::__private::parts_installation::block_key_slot(*block);
-        let id = self.registry_keys.borrow().blocks.id(slot).map(str::to_owned);
+        let id = self
+            .registry_keys
+            .borrow()
+            .blocks
+            .id(slot)
+            .map(str::to_owned);
         let Some(id) = id else {
             self.refused.push(format!(
                 "mod {}: invalid block key slot {slot}",

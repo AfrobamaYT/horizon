@@ -53,8 +53,7 @@ impl PartRegistrar {
         };
         let answered = |table: &Capabilities<P>| {
             let other = table.get(name)?.values().flatten().next()?;
-            (other.type_name != handler)
-                .then(|| format!("{} by {}", other.type_name, other.mod_id))
+            (other.type_name != handler).then(|| format!("{} by {}", other.type_name, other.mod_id))
         };
         let other = answered(table(&mut self.parts))
             .or_else(|| shares_names.and_then(|shares| answered(shares(&self.parts))));
@@ -64,13 +63,24 @@ impl PartRegistrar {
             ));
             return;
         }
-        self.registered += 1;
-        let order = self.registered;
         let providers = table(&mut self.parts)
             .entry(name)
             .or_default()
             .entry(id.into())
             .or_default();
+        // A position's lookup keeps its place in a block's and a block entity type's lists in
+        // one cursor, which bounds each.
+        if shares_names.is_some()
+            && providers.len() >= mod_vocab::__private::parts_installation::max_providers_at()
+        {
+            self.refused.push(format!(
+                "{me} answered capability {name} for {id}, which already has the most providers \
+                 one block or block entity type may have"
+            ));
+            return;
+        }
+        self.registered += 1;
+        let order = self.registered;
         // Those asked ahead of the game first, each kind in registration order.
         let at = if before_game {
             providers.partition_point(|part| part.before_game)
@@ -500,6 +510,13 @@ pub mod tests {
             .ask(host, false)
             .expect("the bin's handler");
         assert_eq!(hopper.size(host), 1);
+        // Providers chosen for the bin don't answer once the block there is another (an earlier
+        // provider replaced it, say).
+        let chosen = block_providers(&ITEMS, host, on(bin, None)).expect("the bin's providers");
+        world.level.set_block(bin, "minecraft:stone");
+        let host: &mut dyn ServerHost = &mut world;
+        assert!(chosen.ask(host, false).is_none());
+        world.level.set_block(bin, "test:void_bin");
         // The provider is given the block entity standing there, and this one declines then.
         world.level.block_entity(bin);
         let host: &mut dyn ServerHost = &mut world;
@@ -558,7 +575,12 @@ pub mod tests {
         const SAME_ENERGY: CapabilityKey<dyn EnergyHandler> = CapabilityKey::new("test:same");
         let items = type_name::<dyn ResourceHandler<ItemResource>>();
         let energy = type_name::<dyn EnergyHandler>();
-        let battery = |at| Some(Box::new(ModBattery { at, lie: Lie::GivesMore }) as _);
+        let battery = |at| {
+            Some(Box::new(ModBattery {
+                at,
+                lie: Lie::GivesMore,
+            }) as _)
+        };
 
         let mut r = super::PartRegistrar::new("first");
         let chest = r.block_entity_type_key("test:ordered");

@@ -43,11 +43,15 @@ pub(crate) fn next<P: Clone>(
     next_provider(table.get(name)?.get(id)?, index)
 }
 
+/// The most providers one capability may have for one block or one block entity type: a
+/// position's lookup keeps its place in both lists in the one `u32` cursor, 16 bits each.
+pub(crate) const MAX_PROVIDERS_AT: usize = u16::MAX as usize;
+
 /// The next enabled provider of two lists asked as one, `first` and `second` (a block entity
 /// type's and a block's): those asked ahead of the game, then the others, each group in
-/// registration order across both lists. `index` counts the registrations visited, as
-/// [`next_provider`]'s does; the merge is walked again from the start each call, as a position
-/// has a few providers at most.
+/// registration order across both lists. `index` holds the place in each list, `first`'s in
+/// its low 16 bits and `second`'s in its high ones, so each step looks at the two lists' next
+/// provider and takes one, past disabled ones, as [`next_provider`] does for one list.
 pub(crate) fn next_merged<P: Clone>(
     first: &[CapabilityPart<P>],
     second: &[CapabilityPart<P>],
@@ -55,20 +59,28 @@ pub(crate) fn next_merged<P: Clone>(
 ) -> Option<(P, &'static str, bool)> {
     // Each list is already in this order: those ahead of the game first, by registration.
     let rank = |part: &CapabilityPart<P>| (!part.before_game, part.order);
-    let (mut first, mut second) = (first.iter().peekable(), second.iter().peekable());
-    let merged = std::iter::from_fn(|| match (first.peek(), second.peek()) {
-        (Some(a), Some(b)) if rank(b) < rank(a) => second.next(),
-        (Some(_), _) => first.next(),
-        (None, _) => second.next(),
-    })
-    .skip(*index as usize);
-    for part in merged {
-        *index += 1;
+    let (mut at_first, mut at_second) = (*index & 0xffff, *index >> 16);
+    loop {
+        let part = match (first.get(at_first as usize), second.get(at_second as usize)) {
+            (Some(a), Some(b)) if rank(b) < rank(a) => {
+                at_second += 1;
+                b
+            }
+            (Some(a), _) => {
+                at_first += 1;
+                a
+            }
+            (None, Some(b)) => {
+                at_second += 1;
+                b
+            }
+            (None, None) => return None,
+        };
+        *index = at_first | at_second << 16;
         if crate::mod_index_on(part.mod_index) {
             return Some((part.provider.clone(), part.mod_id, part.before_game));
         }
     }
-    None
 }
 
 /// A provider by its handler type: one case for each handler type `mod_api`'s keys name

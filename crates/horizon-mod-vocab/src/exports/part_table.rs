@@ -1,7 +1,7 @@
 mod parts;
 pub use parts::limits as general_entity_limits;
 pub use parts::{
-    Attached, BlockCapabilityProvider, BlockProviders, BlockProvider, BlockProviderOf,
+    Attached, BlockCapabilityProvider, BlockProvider, BlockProviderOf, BlockProviders,
     CapabilityProviders, EntityCapabilityProvider, EntityProvider, EntityProviderOf,
     EntityProviders, GeneralEntityCategory, GeneralEntityRegistrationError, GeneralSavePolicy,
     ItemCapabilityProvider, ItemProvider, ItemProviderOf, OwnProvider, Parts, ProvidedBy,
