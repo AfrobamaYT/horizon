@@ -1198,10 +1198,15 @@ fn idle_proxy_called_during_unwind_stops_and_clears_resources() {
         }
         let module = module("i64.const 4398046511108");
         let dropped = hold_stop_probe(&module);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _callback = OnUnwind(module.downgrade());
-            panic!("unrelated native panic");
-        }));
+        let weak = module.downgrade();
+        let result = std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(move || {
+                let _callback = OnUnwind(weak);
+                panic!("unrelated native panic");
+            })
+            .unwrap()
+            .join();
         assert!(result.is_err());
         assert!(module.is_stopped());
         assert!(dropped.load(Ordering::Relaxed));
@@ -1666,7 +1671,17 @@ fn deep_guest_stack_and_overflow_attribution() {
         );
         drop(registration);
         let runaway = module_for_runaway();
-        assert_eq!(call(&runaway), None);
+        assert_eq!(
+            runaway.call(
+                CallClass::Load,
+                Frame::default(),
+                0,
+                None,
+                |_| {},
+                |r| r.take::<u32>()
+            ),
+            None
+        );
         assert!(runaway.is_stopped());
     });
     assert!(
@@ -1752,7 +1767,7 @@ fn small_calling_thread_refuses_without_poisoning_the_mod() {
             .stack_size(1024 * 1024)
             .spawn(move || {
                 assert!(
-                    horizon_threads::guest_stack::check_current()
+                    horizon_guest_stack::check_current()
                         .unwrap_err()
                         .starts_with("GuestStackUnavailable")
                 );
@@ -1848,10 +1863,42 @@ fn plain_spawn_refuses_guest_entry() {
         let module = module("i64.const 2199023255556");
         let error = std::thread::spawn(move || {
             assert_eq!(call(&module), None);
-            horizon_threads::guest_stack::check_current().unwrap_err()
+            horizon_guest_stack::check_current().unwrap_err()
         })
         .join()
         .unwrap();
         assert!(error.starts_with("GuestStackUnavailable"));
+    });
+}
+
+#[test]
+fn subscription_stack_refusal_is_not_cached() {
+    crate::test_stack::on_guest_stack(|| {
+        let mut names = Writer::new();
+        names.put(&vec!["server_tick".to_owned()]);
+        let stores: String = names
+            .bytes()
+            .iter()
+            .enumerate()
+            .map(|(i, b)| format!("i32.const {} i32.const {b} i32.store8 ", 1024 + i))
+            .collect();
+        let module = module(&format!(
+            "{stores} i64.const {}",
+            (1024u64 << 32) | names.bytes().len() as u64
+        ));
+        let export = crate::boundary::export_id("Hooks", "subscribed")
+            .unwrap_or(crate::boundary::SUBSCRIBED);
+        let handler = WasmHandler::new(&module, Id(1));
+        let small = std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(move || {
+                assert!(handler.subscriptions("Hooks", export).is_empty());
+                handler
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        let subscriptions = small.subscriptions("Hooks", export);
+        assert!(matches!(subscriptions, [Some(mod_api::HookId::ServerTick)]));
     });
 }

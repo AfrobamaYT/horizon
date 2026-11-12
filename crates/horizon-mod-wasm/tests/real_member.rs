@@ -102,6 +102,7 @@ fn real_member() {
                 "HORIZON_WASM_FIXTURE and HORIZON_WASM_STD must be set: run with the wasm-mods workflow's environment"
             );
         };
+        mod_api::__private::initialize().unwrap();
         matrix_checks::baseline();
         let path = std::path::Path::new(&fixture);
         let manifest = Package::read(path).unwrap().manifest;

@@ -395,9 +395,13 @@ pub trait ProjectileWorld {
     /// `Entity.isInWater` as `updateFluidInteraction` sets it: some water
     /// block's surface reaches the bottom of the box (deflated by 0.001).
     fn in_water(&self, bounds: Aabb) -> bool;
+    /// `velocity` after the currents of the water and the lava the box
+    /// touches (`EntityFluidInteraction.applyCurrentTo`): a projectile is
+    /// pushed by fluids like any entity (`Entity.isPushedByFluid`).
+    fn pushed_by_currents(&self, _bounds: Aabb, velocity: Vec3) -> Vec3 {
+        velocity
+    }
     fn targets(&self) -> &[(Who, Aabb)];
-    /// Server-only mod-block contacts along the completed movement.
-    fn block_contacts(&self, _entity: i32, _from: Vec3, _to: Vec3, _bounds: Aabb) {}
     /// `Level.isEmptyBlock`.
     fn empty(&self, _p: [i32; 3]) -> bool {
         true
@@ -1485,7 +1489,9 @@ impl Projectile {
         if self.applies_block_effects() {
             self.bubble_columns_along(w, from);
         }
-        w.block_contacts(self.id as i32, from, self.position, self.bounds());
+        // The block sweep runs at the batch that ticks the projectile
+        // (Game::sweep_projectile_inside), where the level host for a part's
+        // contact is: this tick's world view is read-only.
         self.fire_tick(w, client_side);
         self.stuck_tick(w, from);
         if !base_first {
@@ -1693,8 +1699,10 @@ impl Projectile {
         if !self.is_fireball() && !self.turns_with_update_rotation() {
             self.update_rotation();
         }
-        // Entity.baseTick's updateFluidInteraction, after the move.
+        // Entity.baseTick's updateFluidInteraction, after the move: the fluids
+        // it touches now, and their currents push it.
         self.touching_water = w.in_water(self.bounds());
+        self.velocity = w.pushed_by_currents(self.bounds(), self.velocity);
         let alive =
             self.position.y > -128.0 && self.age < if self.is_fireball() { 1200 } else { 6000 };
         (alive, Hit::None)

@@ -27,7 +27,7 @@ pub fn resources(bin: &str) {
     println!(
         "cargo:rerun-if-changed={}",
         manifest_dir
-            .join("../horizon-threads/src/guest_stack_constants.rs")
+            .join("../horizon-guest-stack/src/guest_stack_constants.rs")
             .display()
     );
     let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();

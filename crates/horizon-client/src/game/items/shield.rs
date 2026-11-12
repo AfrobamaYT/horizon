@@ -404,3 +404,7 @@ mod durability_tests {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "tests/shield_ram_tests.rs"]
+mod ram_tests;

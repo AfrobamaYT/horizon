@@ -2,7 +2,7 @@
 use crate::{CallClass, Refusal, WasmMod, WeakWasmMod, boundary::Frame};
 use horizon_mod_package::manifest::{
     Manifest,
-    inject::{Access, Inject, Kind},
+    inject::{Inject, Kind},
 };
 use mod_points::__private::{Forward, PointHost, SlotListener};
 use mod_points::PointId;
@@ -170,9 +170,7 @@ fn checked_place(id: &str, inject: &Inject, place: u32) -> Result<PointId, Strin
             inject.at
         ));
     };
-    if inject.access != Access::Api
-        || !matches!(inject.kind, Kind::Head | Kind::Replace | Kind::Return)
-        || (inject.kind == Kind::Return) != at_return
+    if (inject.kind == Kind::Return) != at_return
         || horizon_mod_point_emit::plain_path(&inject.at)
             != horizon_mod_point_emit::plain_path(target)
     {
@@ -199,7 +197,6 @@ mod tests {
             at: at.into(),
             kind,
             with: "own".into(),
-            access: Access::Api,
             priority: 0,
             hash: Some("pin".into()),
         }

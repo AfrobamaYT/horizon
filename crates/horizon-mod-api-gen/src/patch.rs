@@ -736,13 +736,11 @@ pub fn generate(
         let mut sig = found.function.sig.clone();
         // A loop's function is copied for the one slot type its entry's copy runs it with:
         // horizon-mixins patches only non-generic functions.
-        if let Some(slots) = extras
+        let filled_block = extras
             .loops
             .iter()
             .find(|l| loop_generic && l.published.generic_target() == *target)
-        {
-            fill_slot(&mut sig, slots);
-        }
+            .map(|slots| fill_slot(&mut sig, &found.function.block, slots));
         let entry_of = extras.loops.iter().find(|l| l.published.entry == *target);
         let loop_block = match entry_of
             .map(|slots| {
@@ -762,7 +760,10 @@ pub fn generate(
                 continue;
             }
         };
-        let block = loop_block.as_ref().unwrap_or(&found.function.block);
+        let block = loop_block
+            .as_ref()
+            .or(filled_block.as_ref())
+            .unwrap_or(&found.function.block);
         let install = format_ident!("__fnr_install_{}", name);
         let constructor = format_ident!("__fnr_{}", name);
         let module_path = found.module.split("::").skip(1).collect::<Vec<_>>();
@@ -970,10 +971,12 @@ pub fn generate(
 }
 
 /// The loop function's signature `sig` with its slot type parameter replaced by the slots `slots`
-/// fills it with (`()` with none).
-fn fill_slot(sig: &mut syn::Signature, slots: &LoopSlots) {
+/// fills it with (`()` with none), and its body `block` with the same replacement: the type in
+/// type position, and `<Slots>::NAME` for a path through it (`S::RECHECK`).
+fn fill_slot(sig: &mut syn::Signature, block: &syn::Block, slots: &LoopSlots) -> syn::Block {
+    let mut block = block.clone();
     let Some(param) = sig.generics.type_params().next().map(|p| p.ident.clone()) else {
-        return;
+        return block;
     };
     sig.generics.params = sig
         .generics
@@ -989,16 +992,48 @@ fn fill_slot(sig: &mut syn::Signature, slots: &LoopSlots) {
         syn::parse_quote!(#ty)
     };
     struct Fill(syn::Ident, syn::Type);
+    impl Fill {
+        /// `S::rest` as `<Slots>::rest`; `None` for any other path.
+        fn through(&self, qself: &Option<syn::QSelf>, path: &syn::Path) -> Option<syn::TypePath> {
+            let first = path.segments.first()?;
+            if qself.is_some()
+                || path.leading_colon.is_some()
+                || path.segments.len() < 2
+                || first.ident != self.0
+                || !first.arguments.is_none()
+            {
+                return None;
+            }
+            let ty = &self.1;
+            let rest = path.segments.iter().skip(1);
+            Some(syn::parse_quote!(<#ty>::#(#rest)::*))
+        }
+    }
     impl syn::visit_mut::VisitMut for Fill {
         fn visit_type_mut(&mut self, ty: &mut syn::Type) {
             if matches!(ty, syn::Type::Path(p) if p.qself.is_none() && p.path.is_ident(&self.0)) {
                 *ty = self.1.clone();
-            } else {
-                syn::visit_mut::visit_type_mut(self, ty);
+                return;
             }
+            if let syn::Type::Path(p) = ty
+                && let Some(filled) = self.through(&p.qself, &p.path)
+            {
+                *p = filled;
+            }
+            syn::visit_mut::visit_type_mut(self, ty);
+        }
+        fn visit_expr_path_mut(&mut self, expr: &mut syn::ExprPath) {
+            if let Some(filled) = self.through(&expr.qself, &expr.path) {
+                expr.qself = filled.qself;
+                expr.path = filled.path;
+            }
+            syn::visit_mut::visit_expr_path_mut(self, expr);
         }
     }
-    syn::visit_mut::VisitMut::visit_signature_mut(&mut Fill(param, filled), sig);
+    let mut fill = Fill(param, filled);
+    syn::visit_mut::VisitMut::visit_signature_mut(&mut fill, sig);
+    syn::visit_mut::VisitMut::visit_block_mut(&mut fill, &mut block);
+    block
 }
 
 /// A published loop's name as an identifier part (`block_entities_tick`).
@@ -1192,6 +1227,32 @@ fn qualify_self_sig(
     syn::visit_mut::VisitMut::visit_signature_mut(&mut QualifySelf::new(owner, self_ty, path), sig);
 }
 
+/// An invoker's signature moves into a trait of its own, where `Self::Item` names nothing: an
+/// item of the trait `owner` implements is written `<Type as Trait>::Item`, and any other is
+/// refused, naming it.
+fn invoker_self_items(sig: &mut syn::Signature, owner: &syn::ItemImpl) -> Result<(), String> {
+    if let Some((_, path, _)) = &owner.trait_ {
+        qualify_self_sig(sig, owner, &owner.self_ty, path);
+    }
+    struct Left(Option<String>);
+    impl<'ast> syn::visit::Visit<'ast> for Left {
+        fn visit_path(&mut self, path: &'ast syn::Path) {
+            if self.0.is_none() && path.segments.len() > 1 && path.segments[0].ident == "Self" {
+                self.0 = Some(path.to_token_stream().to_string().replace(' ', ""));
+            }
+            syn::visit::visit_path(self, path);
+        }
+    }
+    let mut left = Left(None);
+    syn::visit::Visit::visit_signature(&mut left, sig);
+    match left.0 {
+        Some(item) => Err(format!(
+            "an invoker's signature names `{item}`, which a bridge cannot name; bridge a function whose signature spells the type out"
+        )),
+        None => Ok(()),
+    }
+}
+
 /// A path's tokens without spaces, as horizon-mixins writes an id.
 fn plain_spaces(text: &str) -> String {
     text.replace(' ', "")
@@ -1369,6 +1430,7 @@ fn bridge_trait(
             }
         }
         sig.ident = method.clone();
+        invoker_self_items(&mut sig, owner).map_err(|why| ("E_MIXIN_BRIDGE_TARGET", why))?;
         let call = match &owner.trait_ {
             Some((_, path, _)) => quote!(<#self_ty as #path>::#original(#(#args),*)),
             None => quote!(<#self_ty>::#original(#(#args),*)),
@@ -1525,71 +1587,6 @@ mod tests {
         .unwrap_err();
         let codes: Vec<_> = error.iter().map(|r| r.code).collect();
         assert_eq!(codes, ["E_MIXIN_TARGET_MISSING", "E_MIXIN_NOT_REPLACEABLE"]);
-    }
-
-    #[test]
-    fn a_trait_method_moves_into_a_helper_trait_under_its_own_name() {
-        let target = find_trait_method();
-        let crate_ = generate(
-            &root(),
-            "horizon_patch",
-            std::slice::from_ref(&target),
-            &Extras::default(),
-        )
-        .unwrap();
-        let patched = &crate_.patched[0];
-        assert!(patched.id.contains("_as_"), "{}", patched.id);
-        assert!(
-            patched
-                .id
-                .ends_with(&format!("::__fnr_{}", target.rsplit("::").next().unwrap()))
-        );
-        assert!(
-            patched.install.as_ref().unwrap().contains("__fnr_install_"),
-            "{}",
-            patched.install.as_deref().unwrap_or_default()
-        );
-    }
-
-    /// The first method of a trait impl in the game module, as `module::<Type as Trait>::name`.
-    fn find_trait_method() -> String {
-        let mut source = Source::new(&root()).unwrap();
-        let modules: Vec<String> = source.files.keys().cloned().collect();
-        for module in modules
-            .iter()
-            .filter(|m| m.starts_with("horizon_client::game::"))
-        {
-            let items = source.module(module).unwrap().items.clone();
-            for item in items {
-                if let Item::Impl(block) = item
-                    && let Some((_, path, _)) = &block.trait_
-                    && block.generics.params.is_empty()
-                    && let syn::Type::Path(ty) = &*block.self_ty
-                    && ty.path.segments.len() == 1
-                    && path.segments.len() == 1
-                    && let Some(ImplItem::Fn(f)) =
-                        block.items.iter().find(|i| matches!(i, ImplItem::Fn(_)))
-                    && f.sig.receiver().is_some_and(|r| r.reference.is_some())
-                    && f.sig.generics.params.is_empty()
-                {
-                    let target = format!(
-                        "{module}::<{} as {}>::{}",
-                        ty.path.segments[0].ident, path.segments[0].ident, f.sig.ident
-                    );
-                    if generate(
-                        &root(),
-                        "horizon_patch",
-                        std::slice::from_ref(&target),
-                        &Extras::default(),
-                    )
-                    .is_ok()
-                    {
-                        return target;
-                    }
-                }
-            }
-        }
-        panic!("no trait method");
     }
 
     #[test]
@@ -1880,6 +1877,14 @@ mod tests {
             "{}",
             both.libs[0].1
         );
+        // The copy is for the one slot type: a path through the slot parameter names that type,
+        // since the copy declares no `S` (`S::RECHECK` failed to build).
+        assert!(
+            lib.contains("if<__FnrLoopSlots_block_entities_tick>::RECHECK"),
+            "{}",
+            both.libs[0].1
+        );
+        assert!(!lib.contains("ifS::RECHECK"), "{}", both.libs[0].1);
         // The copy holds the loop itself, not a call to it: a call-site row inside the loop (the
         // check mod's selector) finds its one call there.
         assert_eq!(
@@ -2148,5 +2153,28 @@ mod census {
         for (why, n) in counts {
             println!("  {why}: {n} ({:.1}%)", 100.0 * n as f64 / total as f64);
         }
+    }
+
+    #[test]
+    fn an_invokers_self_items_are_qualified_or_refused_by_name() {
+        let owner: syn::ItemImpl = syn::parse_quote! {
+            impl Convert for Bar {
+                type Error = Failure;
+                fn convert(&self) -> Result<u8, Self::Error> { Ok(0) }
+            }
+        };
+        let mut sig: syn::Signature =
+            syn::parse_quote!(fn convert(&self) -> Result<u8, Self::Error>);
+        invoker_self_items(&mut sig, &owner).unwrap();
+        assert_eq!(
+            sig.to_token_stream().to_string().replace(' ', ""),
+            "fnconvert(&self)->Result<u8,<BarasConvert>::Error>"
+        );
+        // An item the `impl` does not define has no spelling the bridge's trait could use.
+        let mut sig: syn::Signature = syn::parse_quote!(fn convert(&self) -> Self::Other);
+        assert_eq!(
+            invoker_self_items(&mut sig, &owner).unwrap_err(),
+            "an invoker's signature names `Self::Other`, which a bridge cannot name; bridge a function whose signature spells the type out"
+        );
     }
 }

@@ -88,7 +88,7 @@ impl Builder {
         tx: mpsc::Sender<LodDetail>,
         background: bool,
     ) -> thread::JoinHandle<()> {
-        horizon_threads::guest_stack::builder()
+        horizon_guest_stack::builder()
             .name("Far decoration".into())
             .spawn(move || {
                 if background {

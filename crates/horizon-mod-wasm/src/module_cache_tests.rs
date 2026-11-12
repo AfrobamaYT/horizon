@@ -105,12 +105,11 @@ fn configurations_coexist_without_eviction() {
     let production = crate::runtime::engine().unwrap();
     let mut config = wasmtime::Config::new();
     config.epoch_interruption(crate::runtime::ENGINE_CONFIG.1);
-    config.max_wasm_stack(horizon_threads::guest_stack::GUEST_STACK_BYTES);
+    config.max_wasm_stack(horizon_guest_stack::GUEST_STACK_BYTES);
     // Wasmtime validates this bound even for synchronous engines. No async
     // support or fiber execution is enabled by setting its size.
     config.async_stack_size(
-        horizon_threads::guest_stack::GUEST_STACK_BYTES
-            + horizon_threads::guest_stack::HOST_HEADROOM,
+        horizon_guest_stack::GUEST_STACK_BYTES + horizon_guest_stack::HOST_HEADROOM,
     );
     config.cranelift_opt_level(wasmtime::OptLevel::None);
     let other = Engine::new(&config).unwrap();

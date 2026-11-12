@@ -1,6 +1,7 @@
 //! A remote player: connection, position, chunk and entity views, and the
 //! player state (inventory, health, game mode) that the host's gameplay code
 //! operates on when it acts for them.
+use super::prediction::record::{Change, Record};
 use super::{Joined, PlayerSender, entity::Tracker};
 use crate::{
     items::ItemStack,
@@ -134,6 +135,27 @@ struct GuestInit {
     expected: bool,
 }
 
+/// One physical connection's ordered main-thread input. Provider credit follows
+/// the value through the inbox and derived HostEvent segments, never a wire-size
+/// refund/re-reserve gap. Raw work is not subject to vanilla movement freezing.
+pub enum InboxItem {
+    Packet(
+        play::Serverbound,
+        Option<crate::net::ingress::ReceiveLease<super::NetEvent>>,
+    ),
+    Raw(
+        Box<crate::raw_payloads::Delivery>,
+        crate::net::ingress::ReceiveLease<super::NetEvent>,
+    ),
+}
+#[cfg(test)]
+impl InboxItem {
+    /// Unit-test input without a network provider reservation.
+    pub fn uncredited(packet: play::Serverbound) -> Self {
+        Self::Packet(packet, None)
+    }
+}
+
 pub struct Guest {
     /// Identity generation and journal binding travel with the actual player record.
     pub residency: crate::join_seq::residency::member::Member,
@@ -168,6 +190,7 @@ pub struct Guest {
     pub latency: Arc<AtomicI32>,
     pub info: ClientInformation,
     pub brand: String,
+    pub recipe_sync: super::recipes::PlayerRecipeSync,
     /// The chunk radius this client is sent.
     pub view_distance: i32,
     pub position: [f64; 3],
@@ -261,10 +284,19 @@ pub struct Guest {
     pub position_this_tick: bool,
     /// Violation levels and the checks' state (the anticheat, when on).
     pub anticheat: horizon_anticheat::Player,
+    /// The client ticks the movement prediction plays again (only while it records).
+    pub record: Option<Box<Record>>,
+    /// Sprinting as the client's own commands left it (ServerboundPlayerCommandPacket's
+    /// START_SPRINTING and STOP_SPRINTING: LocalPlayer.wasSprinting), which the record's ticks take.
+    /// Not the server's player: a hit with extra knockback stops its sprint
+    /// (Player.causeExtraKnockback), the client's own `Player.attack` doesn't (a mob's `hurtClient`
+    /// is false), and once the server's flag reaches it LocalPlayer.aiStep starts the sprint again
+    /// while the sprint key is held, with nothing to say: wasSprinting never changed.
+    pub client_sprinting: bool,
     /// The movement prediction's replay of the client's own moves (only while it runs).
     pub replay: Option<Box<super::prediction::Replay>>,
     /// What the server sent this tick that changes how the client moves (only while it records).
-    pub changes: std::sync::Mutex<Vec<horizon_anticheat::prediction::Change>>,
+    pub changes: std::sync::Mutex<Vec<Change>>,
     /// It accepted a move since the last entity range checks
     /// (ServerChunkCache.move), which then check all of its pairs again.
     pub moved: bool,
@@ -388,8 +420,7 @@ pub struct Guest {
     pub ack_up_to: std::cell::Cell<i32>,
     pub sent_selected: usize,
     /// Packets waiting for the player's next turn, and their bytes on the wire.
-    pub inbox: VecDeque<(play::Serverbound, usize)>,
-    pub inbox_bytes: usize,
+    pub inbox: VecDeque<InboxItem>,
     pub joined_tick: u64,
     pub ticks: u64,
     /// The moves accepted since the game last looked (movement, on ground),
@@ -618,6 +649,7 @@ impl Guest {
             view_distance: i32::from(j.info.view_distance).max(2).min(view_distance),
             info: j.info,
             brand: j.brand,
+            recipe_sync: Default::default(),
             position,
             previous_position: position,
             yaw: 0.0,
@@ -663,6 +695,8 @@ impl Guest {
             support_blocks_sent: 0,
             position_this_tick: false,
             anticheat: Default::default(),
+            record: None,
+            client_sprinting: false,
             replay: None,
             changes: Default::default(),
             moved: false,
@@ -722,7 +756,6 @@ impl Guest {
             ack_up_to: std::cell::Cell::new(-1),
             sent_selected: 0,
             inbox: VecDeque::new(),
-            inbox_bytes: 0,
             joined_tick: 0,
             ticks: 0,
             moves: Vec::new(),
@@ -771,7 +804,7 @@ impl Guest {
         if !self.participates_online() {
             return;
         }
-        if self.anticheat.record.is_some() {
+        if self.record.is_some() {
             self.note_change(packet);
         }
         match packet.try_encode() {
@@ -801,7 +834,6 @@ impl Guest {
     /// What `packet` changes about how the client moves, for the prediction's replay: kept until
     /// the tick's ping places it (`Hub::anticheat_ping`).
     fn note_change(&self, packet: &play::Clientbound) {
-        use horizon_anticheat::prediction::Change;
         use play::Clientbound as C;
         let own = |id: i32| id == self.entity_id;
         let change = match packet {

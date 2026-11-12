@@ -33,7 +33,7 @@ fn main() {
     );
     println!(
         "cargo:rerun-if-changed={}",
-        root.join("crates/horizon-threads/src/guest_stack_constants.rs")
+        root.join("crates/horizon-guest-stack/src/guest_stack_constants.rs")
             .display()
     );
     for arg in windows_exe::executable_link::arguments(&target_os, &target_env) {

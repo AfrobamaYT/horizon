@@ -398,7 +398,7 @@ pub(super) fn spawn_loader(
     let world = launch_world(options).map(str::to_owned);
     let role = options.execution_role;
     let progress = progress.clone();
-    let handle = horizon_threads::guest_stack::builder()
+    let handle = horizon_guest_stack::builder()
         .name("resource-loader".into())
         .spawn(move || {
             let mut pack_error = None;

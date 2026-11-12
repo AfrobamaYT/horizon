@@ -104,7 +104,7 @@ impl WorldRequest {
         // The loot data does not need the world: it loads beside it (the generator's decoration
         // keeps one core busy) and is done before it opens.
         std::thread::scope(|scope| {
-            let loot = horizon_threads::guest_stack::builder()
+            let loot = horizon_guest_stack::builder()
                 .spawn_scoped(scope, loot)
                 .expect("loot loader thread");
             let prepared = self.prepare_world(res, pack, options, settings, upgrade);
@@ -318,7 +318,7 @@ impl WorldRequest {
         )?;
         drop(streaming_step);
         streaming.radius = settings.render_distance;
-        let mut world = World::new(res.facts().air, level.seed);
+        let mut world = Game::world_for_mods(res.facts().air, level.seed);
         world.attachments = save.load_attachments();
         world.shape = shape;
         world.fast_lava = horizon_world::dimension_type::DimensionFacts::of_level(
@@ -379,7 +379,7 @@ impl WorldLoader {
         settings: Settings,
         upgrade: Arc<horizon_world::datafix::progress::UpgradeProgress>,
     ) -> Result<Self> {
-        let handle = horizon_threads::guest_stack::builder()
+        let handle = horizon_guest_stack::builder()
             .name("World initialization".into())
             .spawn(move || {
                 request
@@ -439,7 +439,7 @@ pub(super) fn preload_world_data(
             let resources = resources.to_owned();
             let data_source = data_source.clone();
             let item_data = Arc::clone(item_data);
-            let spawned = horizon_threads::guest_stack::builder()
+            let spawned = horizon_guest_stack::builder()
                 .name("World data preload".into())
                 .spawn(move || {
                     horizon_threads::behind_server();
@@ -514,7 +514,7 @@ pub(super) fn preload_launch_world(
     let resources = resources.to_owned();
     let data_source = data_source.clone();
     let additional = additional.to_vec();
-    let spawned = horizon_threads::guest_stack::builder()
+    let spawned = horizon_guest_stack::builder()
         .name("World data preload".into())
         .spawn(move || {
             // Not behind the server: the world's opening waits for it.
@@ -577,7 +577,7 @@ pub(super) fn preload_server_loot(resources: &std::path::Path, item_data: &Arc<I
     }
     let resources = resources.to_owned();
     let item_data = Arc::clone(item_data);
-    let spawned = horizon_threads::guest_stack::builder()
+    let spawned = horizon_guest_stack::builder()
         .name("Loot preload".into())
         .spawn(move || {
             horizon_threads::behind_server();

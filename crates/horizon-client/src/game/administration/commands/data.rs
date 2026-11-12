@@ -107,6 +107,8 @@ impl Game<'_> {
             // Neither is saved: `FishingHook.shouldBeSaved` and
             // `EnderDragonPart.shouldBeSaved` are false.
             Target::Hook(_) | Target::DragonPart(_) => return None,
+            // Stage 3's save owns the general record; none is saved here.
+            Target::General(_) => return None,
             Target::Guest(_) => {
                 return self
                     .for_player(t, |g| g.command_target_nbt(Target::Player))
@@ -581,9 +583,11 @@ impl Game<'_> {
                     new.join = old.join;
                     // ItemFrame.readAdditionalSaveData: ItemStack.matches includes
                     // count, item and components, before adopting the new stack.
+                    // It compares the stack as read; setItem keeps one of it
+                    // only after, as `new.item` already does.
+                    let read = tag.get("Item").and_then(save::item_from_nbt);
                     if old.item.as_ref().is_some_and(|a| {
-                        new.item
-                            .as_ref()
+                        read.as_ref()
                             .is_none_or(|b| a.count != b.count || !a.same_item_same_components(b))
                     }) {
                         let old = old.clone();
@@ -1641,7 +1645,15 @@ impl Game<'_> {
         }
         // The root of the stack is the first entity spawned.
         let id = before + 1;
-        if self.mobs.iter().any(|m| m.id == id) {
+        if self
+            .resident_entities
+            .general
+            .rows
+            .iter()
+            .any(|row| row.id == id)
+        {
+            Some(Target::General(id))
+        } else if self.mobs.iter().any(|m| m.id == id) {
             Some(Target::Mob(id))
         } else if self.dropped.iter().any(|e| e.id == id) {
             Some(Target::Item(id))

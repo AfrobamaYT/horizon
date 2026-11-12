@@ -25,7 +25,7 @@ pub const GAME_IDENTITY: [u8; horizon_mod_package::game_identity::MARK.len()] =
 /// Runs the game with the hooks registered so far, and returns when it ends. Register hooks
 /// (`horizon_platform::hooks::register`) before calling it.
 pub fn main() {
-    horizon_threads::guest_stack::prepare_main();
+    horizon_guest_stack::prepare_main();
     horizon_mod_host::exit_if_compile_child();
     let startup = horizon_client::entry::prepare();
     std::hint::black_box(&horizon_mod_package::holder::CAPABILITY);
@@ -33,4 +33,4 @@ pub fn main() {
 }
 
 /// Establish the executable main thread stack before initialization.
-pub use horizon_threads::guest_stack::prepare_main as prepare_main_stack;
+pub use horizon_guest_stack::prepare_main as prepare_main_stack;

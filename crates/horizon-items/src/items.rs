@@ -552,26 +552,9 @@ fn parse_instrument(v: &Value) -> Instrument {
         range: v["range"].as_f64().unwrap_or(0.0) as f32,
     }
 }
-/// Select one JSON resource per ID before applying the owning load's conditions.
-/// A skipped winning resource stays absent; it never uncovers a lower version.
-pub(crate) fn data_files(root: &Path, kind: &str, overlay: &PackOverlay) -> HashMap<String, Value> {
-    let mut files: HashMap<_, _> = horizon_world::damage_source::resource_files(root, kind)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|(id, bytes)| {
-            serde_json::from_slice::<Value>(&bytes)
-                .ok()
-                .map(|v| (id, v))
-        })
-        .collect();
-    for (id, versions) in overlay.kind(kind) {
-        if let Ok(value) = serde_json::from_slice::<Value>(PackOverlay::top(versions)) {
-            files.insert(id.to_owned(), value);
-        }
-    }
-    files.retain(|_, value| overlay.conditions.allows(value));
-    files
-}
+#[path = "condition_files.rs"]
+mod condition_files;
+pub(crate) use condition_files::data_files;
 fn load_instruments(root: &Path, overlay: &PackOverlay) -> HashMap<String, Instrument> {
     data_files(root, "instrument", overlay)
         .into_iter()
@@ -630,8 +613,9 @@ pub(crate) fn load_tag_lists(
     overlay: &PackOverlay,
 ) -> Result<HashMap<String, Vec<String>>> {
     let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
-    let loaded =
-        |id: &str| id == "minecraft" || inventory.server_ids().any(|enabled| enabled == id);
+    let conditions = overlay
+        .conditions
+        .with_mod_inventory(inventory.server_ids());
     let mut raw: HashMap<String, Vec<String>> = HashMap::new();
     /// Through `json_folder`: from the prepared data file, and read once for
     /// the tables a load builds from the same tags.
@@ -639,11 +623,11 @@ pub(crate) fn load_tag_lists(
         dir: &Path,
         namespace: &str,
         raw: &mut HashMap<String, Vec<String>>,
-        loaded: &horizon_world::conditions::ModLoaded<'_>,
+        conditions: &horizon_world::conditions::LoadConditions,
     ) -> Result<()> {
         for file in &horizon_world::json_folder::read(dir)?.files {
             let v: Value = serde_json::from_slice(file.bytes()?)?;
-            if !horizon_world::conditions::conditions_hold(&v, loaded) {
+            if !conditions.allows_path(&v, dir, &file.name) {
                 continue;
             }
             let values = v["values"]
@@ -660,7 +644,7 @@ pub(crate) fn load_tag_lists(
     for namespace in crate::content_namespaces::tag_namespaces(root) {
         let dir = root.join(format!("data/{namespace}/tags/{kind}"));
         if dir.exists() {
-            walk(&dir, &namespace, &mut raw, &loaded)?;
+            walk(&dir, &namespace, &mut raw, &conditions)?;
         }
     }
     // The packs' entries join the game's own, in pack order; a `replace`
@@ -673,7 +657,7 @@ pub(crate) fn load_tag_lists(
             let Ok(v) = serde_json::from_slice::<Value>(bytes) else {
                 continue;
             };
-            if !horizon_world::conditions::conditions_hold(&v, &loaded) {
+            if !conditions.allows_tag(&v, kind, &id) {
                 continue;
             }
             let slot = raw.entry(id.to_owned()).or_default();
@@ -1459,6 +1443,26 @@ impl Items {
             );
         }
         self.get(&stack.item)?.tool_damage_per_block
+    }
+    /// `Weapon.itemDamagePerAttack`: the stack's `weapon` component, else the
+    /// item's prototype. A removed component leaves no weapon.
+    pub fn weapon_damage(&self, stack: &ItemStack) -> Option<u32> {
+        if stack.count == 0 || &*stack.item == "minecraft:air" {
+            return None;
+        }
+        if stack
+            .data()
+            .is_some_and(|d| d.other("!minecraft:weapon").is_some())
+        {
+            return None;
+        }
+        if let Some(weapon) = stack.data().and_then(|d| d.other("minecraft:weapon")) {
+            return Some(
+                horizon_world::datafix::dynamic::as_int(weapon.get("item_damage_per_attack"), 1)
+                    .max(0) as u32,
+            );
+        }
+        self.get(&stack.item)?.weapon_damage
     }
     /// Mining wear on an already durable item prototype. Custom durability on
     /// non-durable items needs item-aware DAMAGE-presence decoding first.
@@ -3116,6 +3120,28 @@ mod tests {
 
     /// The ids `/loot ... loot <id>` takes: a content mod's table in the
     /// root and a world pack's table over it.
+    #[test]
+    fn weapon_damage_comes_from_the_stack() {
+        let items = Items::for_tests(HashMap::new());
+        let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
+        sword.data_mut().set_other(
+            "minecraft:weapon",
+            Some(horizon_core::nbt::Tag::compound([(
+                "item_damage_per_attack",
+                horizon_core::nbt::Tag::Int(3),
+            )])),
+        );
+        assert_eq!(items.weapon_damage(&sword), Some(3));
+        sword.data_mut().set_other(
+            "!minecraft:weapon",
+            Some(horizon_core::nbt::Tag::compound(Vec::<(
+                &str,
+                horizon_core::nbt::Tag,
+            )>::new())),
+        );
+        assert_eq!(items.weapon_damage(&sword), None);
+    }
+
     #[test]
     fn loot_table_ids_list_the_roots_and_the_packs_tables() {
         let root = std::env::temp_dir().join(format!("horizon-loot-ids-{}", std::process::id()));
