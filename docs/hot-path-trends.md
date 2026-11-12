@@ -57,6 +57,9 @@ python3 tools/hot_paths.py measure --game target/release/horizon-hot-paths-game 
 python3 tools/hot_paths.py measure ... --only server.tick.mobs      # some workloads only
 ```
 
+In CI, a push to a branch named `<something>-hot-paths` measures that commit on a runner and uploads the result
+as the run's `hot-paths` artifact, recording nothing: point such a branch at a suspect commit to measure it.
+
 To compare two commits, measure each and read the two tables; `record` and `page` build a page from any folder of
 results:
 
