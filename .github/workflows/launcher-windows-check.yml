@@ -33,6 +33,8 @@ concurrency:
 
 jobs:
   test:
+    # A contributor's pull request (its head in a fork) skips what compiles; a reviewer dispatches it (tools/ci/pr_gate.py).
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-latest
     timeout-minutes: 40
     defaults:
@@ -62,6 +64,8 @@ jobs:
       - run: cargo test --no-fail-fast --release --locked
 
   runtime-leases:
+    # A contributor's pull request (its head in a fork) skips what compiles; a reviewer dispatches it (tools/ci/pr_gate.py).
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-latest
     timeout-minutes: 40
     steps:

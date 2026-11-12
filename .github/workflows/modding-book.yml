@@ -11,6 +11,8 @@ on:
   workflow_dispatch:
 jobs:
   book:
+    # A contributor's pull request (its head in a fork) skips what compiles; a reviewer dispatches it (tools/ci/pr_gate.py).
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
