@@ -707,9 +707,9 @@ pub mod tests {
             fn beacon_color_multiplier(
                 &self,
                 _: &dyn Host,
-                event: &mut BeaconColorMultiplierEvent,
+                event: &mut BeaconColorMultiplierEvent<'_>,
             ) {
-                event.color = Some(0xFFFF_0000);
+                *event.color = Some(0xFFFF_0000);
             }
         }
         struct Bookshelf;
