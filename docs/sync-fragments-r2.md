@@ -20,3 +20,13 @@ native_entity_refs.rs clips eye-to-eye within the current level or clips an
 empty-context segment. Do not add native_ aliases or a second notification.
 
 Converter boundary: `unsupported fragment fields: ['comments', 'doc_summary', 'helpers', 'rust_summary'] or draw contexts; helpers are host methods now, written by hand in crates/horizon-mod-vocab/src/host/<area>.rs`.
+
+## map_colors_read
+
+Refused as a hook fragment: there are no hooks. Existing LevelRef::map_data
+(host/levels.rs) returns the typed MapState with colors and metadata. Upstream's
+maps.rs native_map_read reads a resident map or its saved file without loading
+it, refusing clients and absent worlds. A second map_colors/map_meta API would
+split the existing typed read into raw-id aliases; none was added.
+
+Converter boundary: `unsupported fragment fields: ['doc_summary', 'helpers', 'rust_summary'] or draw contexts; helpers are host methods now, written by hand in crates/horizon-mod-vocab/src/host/<area>.rs`.
