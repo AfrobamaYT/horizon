@@ -545,7 +545,7 @@ impl Game<'_> {
         #[cfg(test)]
         let run_server = mod_api::testing::inherit_mods(run_server);
         let thread = std::thread::Builder::new()
-            .name("Server thread".into())
+            .name(horizon_client::crash::INTEGRATED_SERVER_THREAD.into())
             .stack_size(server_thread_stack())
             .spawn(move || run_server(&()))?;
         let handle = Integrated {
@@ -1377,7 +1377,7 @@ impl Game<'_> {
         options.execution_role = ExecutionRole::IntegratedServer;
         options.dedicated = Some(Vec::new());
         let result = std::thread::Builder::new()
-            .name("Server thread".into())
+            .name(horizon_client::crash::INTEGRATED_SERVER_THREAD.into())
             .stack_size(server_thread_stack())
             .spawn(move || {
                 let run = || -> Result<()> {
@@ -1428,10 +1428,77 @@ fn refused(owner: bool, published: bool, split_seat: bool, memory: bool) -> bool
     }
 }
 
+impl Game<'_> {
+    /// The report is already saved on the server. Join through the normal halt path
+    /// before exiting, without returning an error that would create another report.
+    pub(super) fn exit_after_server_crash(&mut self) {
+        if horizon_client::crash::server_crashed() {
+            if let Some(mut server) = self.integrated.take()
+                && let Err(error) = server.halt()
+            {
+                log::error!("Horizon: crashed integrated server: {error}");
+            }
+            std::process::exit(101);
+        }
+    }
+}
+
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
     use mod_api::prelude::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn posted_native_panic_writes_one_server_report() {
+        let scratch = tempfile::tempdir().unwrap();
+        let home = scratch.path().to_path_buf();
+        let previous = std::panic::take_hook();
+        horizon_client::crash::install(home.clone(), "client");
+        let (tasks, receiver) = channel::<Task>();
+        let mut server = Integrated {
+            flags: Arc::new(Flags::default()),
+            thread: None,
+            tasks,
+            world_name: String::new(),
+            save_folder: String::new(),
+            rule_registry: Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
+        };
+        assert!(server.post(|_| {
+            let _guard = horizon_client::crash::enter_native_mod(horizon_client::crash::ModCall {
+                id: "example:posted",
+                hook: "server_tick",
+                part: None,
+            });
+            panic!("posted integrated panic 3494");
+        }));
+        server.thread = Some(
+            std::thread::Builder::new()
+                .name(horizon_client::crash::INTEGRATED_SERVER_THREAD.into())
+                .stack_size(server_thread_stack())
+                .spawn(move || {
+                    crate::game::native_entity_refs::tests::with_game(|game| {
+                        receiver.recv().unwrap()(game);
+                    });
+                })
+                .unwrap(),
+        );
+        assert_eq!(
+            server.halt().unwrap_err().to_string(),
+            "the integrated server panicked"
+        );
+        std::panic::set_hook(previous);
+        let reports: Vec<_> = std::fs::read_dir(home.join("crash-reports"))
+            .unwrap()
+            .map(|p| p.unwrap().path())
+            .collect();
+        assert_eq!(reports.len(), 1);
+        let text = std::fs::read_to_string(&reports[0]).unwrap();
+        assert!(text.contains("Description: Exception in server tick loop"));
+        assert!(text.contains("Server thread"));
+        assert!(text.contains("posted integrated panic 3494"));
+        assert!(text.contains("in native mod example:posted, hook server_tick"));
+    }
 
     /// The server thread keeps the main thread's 8 MB, and a larger `RUST_MIN_STACK` still
     /// reaches it (#2430).

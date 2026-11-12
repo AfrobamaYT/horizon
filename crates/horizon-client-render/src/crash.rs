@@ -562,6 +562,16 @@ pub fn panic_report(info: &std::panic::PanicHookInfo, side: &'static str) -> Rep
     }
 }
 
+/// Shared with the integrated server spawn so reporting follows its exact name.
+pub const INTEGRATED_SERVER_THREAD: &str = "Server thread";
+
+static SERVER_CRASHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the server has already delivered the fatal report.
+pub fn server_crashed() -> bool {
+    SERVER_CRASHED.load(std::sync::atomic::Ordering::Acquire)
+}
+
 /// Whether `name` is one of the shared worker pool's threads (`horizon_threads::jobs`), vanilla's
 /// `Util` worker threads.
 fn is_worker_thread(name: Option<&str>) -> bool {
@@ -579,7 +589,7 @@ pub fn worker_panic_report(info: &std::panic::PanicHookInfo, side: &'static str)
 }
 
 /// Reports panics: on the main thread a crash report (the panic then ends the game, exit code
-/// 101); on a worker thread (`Util.onThreadException`) a crash report too, and the game ends
+/// 101); on the integrated server thread a server report relayed to the window; on a worker thread (`Util.onThreadException`) a crash report too, and the game ends
 /// with it; on other threads the error goes to the log, as vanilla's uncaught exception handler
 /// does. The default hook still prints the panic. A panic inside `contain` is only logged. A
 /// panic inside a native mod's hook names the mod and the hook.
@@ -591,7 +601,14 @@ pub fn install(home: PathBuf, side: &'static str) {
         }
         default(info);
         let main = std::thread::current().name() == Some("main");
-        if main {
+        if std::thread::current().name() == Some(INTEGRATED_SERVER_THREAD) {
+            let report = Report {
+                description: "Exception in server tick loop".into(),
+                ..panic_report(info, side)
+            };
+            deliver(&home, report);
+            SERVER_CRASHED.store(true, std::sync::atomic::Ordering::Release);
+        } else if main {
             deliver(&home, panic_report(info, side));
         } else if is_worker_thread(std::thread::current().name()) {
             deliver(&home, worker_panic_report(info, side));
@@ -707,6 +724,80 @@ mod tests {
 
     /// The panic hook is process-wide: tests that swap it hold this so they never overlap.
     static PANIC_HOOK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn reporting_threads_write_once_and_contained_server_panics_write_nothing() {
+        let _lock = PANIC_HOOK.lock().unwrap_or_else(|e| e.into_inner());
+        for (name, native, contained, count, title) in [
+            (
+                "Server thread",
+                false,
+                false,
+                1,
+                "Exception in server tick loop",
+            ),
+            (
+                "Server thread",
+                true,
+                false,
+                1,
+                "Exception in server tick loop",
+            ),
+            ("Server thread", false, true, 0, ""),
+            ("main", false, false, 1, "Unexpected error"),
+        ] {
+            let scratch = tempfile::tempdir().unwrap();
+            let home = scratch.path().to_path_buf();
+            let previous = std::panic::take_hook();
+            REPORTED.store(false, Ordering::SeqCst);
+            install(
+                home.clone(),
+                if name == "main" { "server" } else { "client" },
+            );
+            let result = std::thread::Builder::new()
+                .name(name.into())
+                .spawn(move || {
+                    let crash = || {
+                        let _guard = native.then(|| {
+                            enter_native_mod(ModCall {
+                                id: "example:broken",
+                                hook: "server_tick",
+                                part: None,
+                            })
+                        });
+                        panic!("posted server crash 3494");
+                    };
+                    if contained {
+                        assert!(contain(crash).is_err());
+                    } else {
+                        crash();
+                    }
+                })
+                .unwrap()
+                .join();
+            std::panic::set_hook(previous);
+            assert_eq!(result.is_ok(), contained);
+            let reports: Vec<_> = std::fs::read_dir(home.join("crash-reports"))
+                .into_iter()
+                .flatten()
+                .map(|p| p.unwrap().path())
+                .collect();
+            assert_eq!(reports.len(), count);
+            if count == 1 {
+                let text = std::fs::read_to_string(&reports[0]).unwrap();
+                assert!(text.contains(&format!("Description: {title}")));
+                assert!(text.contains("posted server crash 3494"));
+                if name == "Server thread" {
+                    assert!(text.contains("Server thread"));
+                }
+                if native {
+                    assert!(text.contains("in native mod example:broken, hook server_tick"));
+                }
+            }
+            REPORTED.store(false, Ordering::SeqCst);
+            SERVER_CRASHED.store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
 
     #[test]
     fn an_emulated_build_names_both_architectures() {

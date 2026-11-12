@@ -1706,6 +1706,7 @@ impl Game<'_> {
                         }
                         self.frames += 1;
                         self.fps_frames += 1;
+                        self.exit_after_server_crash();
                         horizon_client::crash::debug_crash_tick();
                         if self.fps_at.elapsed() >= Duration::from_secs(1) {
                             self.fps = self.fps_frames as f32 / self.fps_at.elapsed().as_secs_f32();
