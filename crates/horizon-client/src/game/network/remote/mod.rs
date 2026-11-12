@@ -6791,6 +6791,7 @@ impl Game<'_> {
             jump: held(Action::Jump),
             shift: held(Action::Sneak),
             sprint: held(Action::Sprint),
+            sprint_suppressed: false,
             analog: None,
         }
         .with_stick(stick.filter(|_| playing));
@@ -6801,20 +6802,7 @@ impl Game<'_> {
         if self.integrated.is_none() && self.server_address().is_some() {
             keys.analog = None;
         }
-        let [mut strafe, mut forward] = keys.direction();
-        let original = [strafe, forward];
-        self.native_movement_input(&mut forward, &mut strafe, &mut keys.jump, &mut keys.shift);
-        if [strafe, forward] != original {
-            if forward != original[1] {
-                keys.forward = forward > 0.0;
-                keys.backward = forward < 0.0;
-            }
-            if strafe != original[0] {
-                keys.left = strafe > 0.0;
-                keys.right = strafe < 0.0;
-            }
-            keys.analog = Some([strafe, forward]);
-        }
+        let keys = self.mod_movement_keys(keys);
         let input = u8::from(keys.forward)
             | u8::from(keys.backward) << 1
             | u8::from(keys.left) << 2
@@ -16506,6 +16494,8 @@ mod tests {
 #[cfg(test)]
 #[path = "player_tick_tests.rs"]
 mod player_tick_tests;
+#[cfg(test)]
+mod movement_input_tests;
 
 /// Whether a synchronized dimension type's values are inside the codec's ranges
 /// (`DimensionType.java`: a coordinate scale of `1.0E-5F` to `3.0E7`, a monster spawn block light

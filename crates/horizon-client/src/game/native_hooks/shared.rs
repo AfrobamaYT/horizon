@@ -4440,18 +4440,7 @@ mod tests {
                 }
                 let collect_trace = trace.lock().unwrap().clone();
                 trace.lock().unwrap().clear();
-                let (mut forward, mut strafe, mut jump, mut sneak) = (1.0, 0.0, false, false);
-                if fire {
-                    game.fire_movement_input(&mut forward, &mut strafe, &mut jump, &mut sneak);
-                } else {
-                    mod_api::dispatch_movement_input(
-                        &game,
-                        &mut forward,
-                        &mut strafe,
-                        &mut jump,
-                        &mut sneak,
-                    );
-                }
+                let forward = game.movement_dispatch_fixture(fire);
                 (
                     canceled,
                     cancel_trace,
