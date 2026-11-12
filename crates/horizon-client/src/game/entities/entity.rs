@@ -30,7 +30,7 @@ use std::collections::{HashMap, HashSet};
 
 /// Assign a stored owner's delayed id at its existing allocation point.
 /// Kinds without a lifetime slot pass None; a bound owner must keep its id.
-pub(super) fn assign_stored_id(
+pub(in crate::game) fn assign_stored_id(
     next: &mut u32,
     id: &mut u32,
     lifetime: Option<&horizon_mod_runtime::attachments::AttachmentLifetime>,
@@ -44,7 +44,7 @@ pub(super) fn assign_stored_id(
 /// nothing (projectiles, rockets, TNT, falling blocks, armor stands here) stays
 /// untouched. A strike runs the stages in this order.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum ThunderHit {
+pub(in crate::game) enum ThunderHit {
     Untouched,
     /// Burns, takes 5 damage, and the kinds with their own `thunderHit` change.
     Mob,
@@ -58,16 +58,16 @@ pub(super) enum ThunderHit {
 
 /// What a blast knows about itself, for the entities in its reach to answer.
 #[derive(Clone, Copy)]
-pub(super) struct Blast {
+pub(in crate::game) struct Blast {
     /// `VehicleEntity.ignoreExplosion`: a mob's blast, with mob griefing off.
-    pub(super) vehicles_ignore: bool,
+    pub(in crate::game) vehicles_ignore: bool,
     /// `ItemEntity.ignoreExplosion` (`shouldAffectBlocklikeEntities`).
-    pub(super) items_ignore: bool,
+    pub(in crate::game) items_ignore: bool,
     /// The exploding mob, which `getEntities(source, box)` leaves out.
-    pub(super) spared: Option<u32>,
+    pub(in crate::game) spared: Option<u32>,
 }
 
-pub(super) trait Entity: EntityRules {
+pub(in crate::game) trait Entity: EntityRules {
     /// The kind's serializer overlays its object-owned attachments itself (for
     /// recursive object trees); the common save walk must not encode them twice.
     const SERIALIZES_ATTACHMENTS: bool = false;
@@ -271,6 +271,11 @@ pub(super) trait Entity: EntityRules {
     fn portal_size(&self) -> Option<(f32, f32)> {
         None
     }
+    /// Whether [`Self::portal_size`] is Some, without working the size out (a
+    /// mob's depends on its age, scale and pose).
+    fn sweeps_portals(&self) -> bool {
+        self.portal_size().is_some()
+    }
     /// `Entity.canUsePortal(false)` for a kind in `portal_size`. A kind that
     /// cannot stays tracked, so its cooldown and process run out.
     fn can_use_portal(&self, _game: &Game<'_>) -> bool {
@@ -279,6 +284,14 @@ pub(super) trait Entity: EntityRules {
     /// A boat or minecart: the kinds whose portal pass opens the tick, before
     /// they move (`AbstractMinecart.tick` handles its portal first).
     fn is_vehicle(&self) -> bool {
+        false
+    }
+    /// `Entity.getDimensionChangingDelay`, overridden by vehicles and projectiles.
+    fn dimension_changing_delay(&self) -> i32 {
+        horizon_client::nether_portal::ENTITY_DELAY
+    }
+    /// Whether movement applies portal block effects before Entity's base tick.
+    fn portal_after_move(&self) -> bool {
         false
     }
     /// Where it stood at the start of its tick, for the kinds that store it
@@ -318,7 +331,7 @@ pub(super) trait Entity: EntityRules {
 
 /// Bounds and identity needed by the render occlusion culler. Moving renderers
 /// use interpolated entity bounds; attached entities use their own world bounds.
-pub(super) trait RenderEntityBounds {
+pub(in crate::game) trait RenderEntityBounds {
     fn render_id(&self) -> u32;
     fn render_bounds(&self, alpha: f64) -> Aabb;
     fn render_glowing(&self, game: &Game<'_>) -> bool {
@@ -342,7 +355,14 @@ impl RenderEntityBounds for Mob {
             self.species(),
             Species::Guardian | Species::ElderGuardian | Species::Phantom
         ) {
-            let radius = width.max(height) * 2.5 + 3.0;
+            // The model's root scales its appendages too (the elder guardian
+            // uses 2.35), so the margin must grow along with the model.
+            let root_scale = self.kind.model.pose[6..]
+                .iter()
+                .copied()
+                .map(f32::abs)
+                .fold(1.0, f32::max);
+            let radius = width.max(height) * 2.5 + 3.0 * f64::from(root_scale * self.model_scale());
             return Aabb::of_size(at, Vec3::new(radius * 2.0, radius * 2.0, radius * 2.0));
         }
 
@@ -618,7 +638,7 @@ impl Game<'_> {
     /// and explicit consumption by a block-contact handler. `escape_speed`:
     /// the item is inside a block and moves without physics this tick, pushed
     /// out at this speed.
-    pub(super) fn tick_item_with_block_contacts(
+    pub(in crate::game) fn tick_item_with_block_contacts(
         &mut self,
         item: &mut ItemEntity,
         escape_speed: Option<f32>,
@@ -748,20 +768,20 @@ macro_rules! define_entity_handles {
         /// Every list, borrowed apart from the rest of `Game`, for
         /// [`for_each_entity`] while the world is borrowed mutably.
         #[derive(Clone, Copy)]
-        pub(super) struct EntityLists<'w> {
-            $(pub(super) $field: &'w [$ty],)*
+        pub(in crate::game) struct EntityLists<'w> {
+            $(pub(in crate::game) $field: &'w [$ty],)*
         }
 
         /// One entity, by list and index.
         #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-        pub(super) enum EntityHandle {
+        pub(in crate::game) enum EntityHandle {
             $($kind(usize),)*
         }
 
         /// Every list moved out of `Game`, for [`for_each_entity_mut`]: the
         /// world stays readable while the entities change.
-        pub(super) struct TakenEntities {
-            $(pub(super) $field: horizon_client::join_seq::JoinList<$ty, { $crate::game::entity::direct_entity_edit!($kind) }>,)*
+        pub(in crate::game) struct TakenEntities {
+            $(pub(in crate::game) $field: horizon_client::join_seq::JoinList<$ty, { $crate::game::entity::direct_entity_edit!($kind) }>,)*
         }
 
 
@@ -772,7 +792,7 @@ macro_rules! define_entity_handles {
             /// a list out of join order, or an entity that never joined, stops
             /// the walk with the entity at fault.
             #[allow(dead_code, reason = "the tick order work that reads this has not landed yet")]
-            pub(super) fn walk_in_join_order(
+            pub(in crate::game) fn walk_in_join_order(
                 self,
                 visit: impl FnMut(EntityHandle, JoinSeq),
             ) -> Result<(), JoinOrderError> {
@@ -802,12 +822,12 @@ macro_rules! define_entity_handles {
 
         impl Game<'_> {
             /// Moves every list out; give it back with `restore_entities`.
-            pub(super) fn take_entities(&mut self) -> TakenEntities {
+            pub(in crate::game) fn take_entities(&mut self) -> TakenEntities {
                 TakenEntities {
                     $($field: self$(.$list)+.lift(),)*
                 }
             }
-            pub(super) fn restore_entities(&mut self, taken: TakenEntities) {
+            pub(in crate::game) fn restore_entities(&mut self, taken: TakenEntities) {
                 $({
                     let expected = self$(.$list)+.len() + taken.$field.len();
                     self$(.$list)+.restore(taken.$field, horizon_client::join_seq::RestoreOrder::SurvivorsFirst);
@@ -816,13 +836,13 @@ macro_rules! define_entity_handles {
             }
             /// Every entity's handle: lengths read now, nothing allocated, and
             /// no borrow of `Game` held, so the caller can change it mid-walk.
-            pub(super) fn entity_handles(&self) -> impl Iterator<Item = EntityHandle> + use<> {
+            pub(in crate::game) fn entity_handles(&self) -> impl Iterator<Item = EntityHandle> + use<> {
                 std::iter::empty()
                     $(.chain((0..self$(.$list)+.len()).map(EntityHandle::$kind)))*
             }
 
             /// Takes the entity out of its list (`Entity.discard` before it ever ticked).
-            pub(super) fn discard_entity(&mut self, handle: EntityHandle) {
+            pub(in crate::game) fn discard_entity(&mut self, handle: EntityHandle) {
                 match handle {
                     $(EntityHandle::$kind(i) => {
                         self$(.$list)+.remove(i);
@@ -832,7 +852,7 @@ macro_rules! define_entity_handles {
 
             /// [`Self::entity_handles`], last of each list first, so the
             /// caller can remove the entity it is on.
-            pub(super) fn entity_handles_rev(&self) -> impl Iterator<Item = EntityHandle> + use<> {
+            pub(in crate::game) fn entity_handles_rev(&self) -> impl Iterator<Item = EntityHandle> + use<> {
                 std::iter::empty()
                     $(.chain((0..self$(.$list)+.len()).rev().map(EntityHandle::$kind)))*
             }
@@ -847,7 +867,7 @@ pub(crate) use define_entity_handles;
     dead_code,
     reason = "the tick order work that reads this has not landed yet"
 )]
-pub(super) enum JoinOrderError {
+pub(in crate::game) enum JoinOrderError {
     /// Never put in its list through the list's own `push`, so it has no
     /// join number.
     Unjoined(EntityHandle),
@@ -931,7 +951,7 @@ macro_rules! with_entity {
         $crate::game::entity::entity_lists!(match_entity, shared, $entity, $game, $handle, $body)
     };
 }
-pub(super) use with_entity;
+pub(in crate::game) use with_entity;
 
 macro_rules! borrow_lists {
     (($game:expr) $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
@@ -948,7 +968,7 @@ macro_rules! entity_lists_of {
         $crate::game::entity::entity_lists!(borrow_lists, $game)
     };
 }
-pub(super) use entity_lists_of;
+pub(in crate::game) use entity_lists_of;
 /// The level `$game` ticks, lent to a hit's damage hooks with its block registry and merged
 /// tag tables, so a mob or the player beside them can take the hit. With `$attack` (an
 /// [`Attack`](horizon_client::health::Attack) the site took first), the level of that attack.
@@ -984,7 +1004,7 @@ macro_rules! damage_level_of {
         )
     };
 }
-pub(super) use damage_level_of;
+pub(in crate::game) use damage_level_of;
 
 macro_rules! walk_lists {
     (($lists:expr, $entity:ident, $body:block)
@@ -1003,7 +1023,7 @@ macro_rules! for_each_entity {
         $crate::game::entity::entity_lists!(walk_lists, $lists, $entity, $body)
     };
 }
-pub(super) use for_each_entity;
+pub(in crate::game) use for_each_entity;
 
 macro_rules! walk_lists_mut {
     (($lists:expr, $entity:ident, $body:block)
@@ -1019,7 +1039,7 @@ macro_rules! for_each_entity_mut {
         $crate::game::entity::entity_lists!(walk_lists_mut, $lists, $entity, $body)
     };
 }
-pub(super) use for_each_entity_mut;
+pub(in crate::game) use for_each_entity_mut;
 
 /// [`with_entity`], with the entity mutable.
 macro_rules! with_entity_mut {
@@ -1027,7 +1047,7 @@ macro_rules! with_entity_mut {
         $crate::game::entity::entity_lists!(match_entity, exclusive, $entity, $game, $handle, $body)
     };
 }
-pub(super) use with_entity_mut;
+pub(in crate::game) use with_entity_mut;
 
 macro_rules! save_lists {
     (($game:expr, $keys:expr, $out:expr)
@@ -1125,7 +1145,7 @@ impl Game<'_> {
     }
     /// Whether `load_listed` loads `kind` as a vehicle that takes its mob
     /// riders (`take_mob_passengers`): a mob, boat, minecart or primed TNT.
-    pub(super) fn listed_kind_takes_riders(&self, kind: &str) -> bool {
+    pub(in crate::game) fn listed_kind_takes_riders(&self, kind: &str) -> bool {
         self.loads_as_mob(kind)
             || self.loads_as_boat(kind)
             || loads_as_cart(kind)
@@ -1133,7 +1153,7 @@ impl Game<'_> {
     }
     /// Loads a saved entity as the first kind in `entity_lists!` that claims
     /// its type id: `Err` hands the compound back when none does.
-    pub(super) fn load_listed(
+    pub(in crate::game) fn load_listed(
         &mut self,
         kind: &str,
         uuid: Option<[i32; 4]>,
@@ -1145,7 +1165,7 @@ impl Game<'_> {
     /// Restore a live portal object with its explicitly captured runtime ownership.
     /// This dispatch covers only reconstructible portal kinds; ordinary disk loads
     /// continue through the canonical kind walk without transfer state.
-    pub(super) fn load_listed_transferred(
+    pub(in crate::game) fn load_listed_transferred(
         &mut self,
         kind: &str,
         uuid: Option<[i32; 4]>,
@@ -1158,7 +1178,7 @@ impl Game<'_> {
     }
 
     /// The ids of the entities that are not on the walk of `entity_lists!`.
-    pub(super) fn entity_ids_off_walk(&self) -> impl Iterator<Item = u32> + '_ {
+    pub(in crate::game) fn entity_ids_off_walk(&self) -> impl Iterator<Item = u32> + '_ {
         self.cushions
             .iter()
             .map(|e| e.id)
@@ -1186,7 +1206,7 @@ impl Game<'_> {
             .chain(self.natural_knot_id_iter())
     }
     /// The ids of every entity in the level that is not removed: one walk.
-    pub(super) fn live_entity_ids(&self) -> HashSet<u32> {
+    pub(in crate::game) fn live_entity_ids(&self) -> HashSet<u32> {
         let mut alive: HashSet<u32> = self.entity_ids_off_walk().collect();
         for_each_entity!(entity_lists_of!(self), entity => {
             if !entity.is_removed() {
@@ -1196,7 +1216,7 @@ impl Game<'_> {
         alive
     }
     /// Saves every entity of every kind that lies in `keys` into `out`, by chunk.
-    pub(super) fn save_every_entity(
+    pub(in crate::game) fn save_every_entity(
         &mut self,
         keys: &HashSet<ChunkKey>,
         out: &mut HashMap<ChunkKey, Vec<(u32, JoinSeq, Tag)>>,
@@ -1266,6 +1286,9 @@ impl Entity for Mob {
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((self.width(), self.height()))
+    }
+    fn sweeps_portals(&self) -> bool {
+        true
     }
     fn can_use_portal(&self, game: &Game<'_>) -> bool {
         game.mob_portal_eligible(self)
@@ -1497,6 +1520,9 @@ impl Entity for Boat {
         // A boat keeps no fall distance here.
     }
 
+    fn dimension_changing_delay(&self) -> i32 {
+        10
+    }
     fn set_on_ground(&mut self, on_ground: bool) {
         self.on_ground = on_ground;
     }
@@ -1585,6 +1611,9 @@ impl Entity for Minecart {
         self.fall_distance = 0.0;
     }
 
+    fn dimension_changing_delay(&self) -> i32 {
+        10
+    }
     fn set_on_ground(&mut self, on_ground: bool) {
         self.on_ground = on_ground;
     }
@@ -1949,6 +1978,16 @@ impl Entity for Projectile {
             arrow.fall_distance = 0.0;
         }
     }
+    fn portal_after_move(&self) -> bool {
+        !matches!(
+            self.kind,
+            horizon_client::projectiles::ProjectileKind::LlamaSpit
+                | horizon_client::projectiles::ProjectileKind::ShulkerBullet { .. }
+        )
+    }
+    fn dimension_changing_delay(&self) -> i32 {
+        2
+    }
     fn rotation(&self) -> [f32; 2] {
         [self.yaw, self.pitch]
     }
@@ -2105,6 +2144,9 @@ impl Entity for Rocket {
     fn reset_fall_distance(&mut self) {
         // A firework rocket keeps no fall distance here.
     }
+    fn dimension_changing_delay(&self) -> i32 {
+        2
+    }
     fn rotation(&self) -> [f32; 2] {
         self.rotation
     }
@@ -2183,6 +2225,12 @@ impl Entity for Rocket {
 impl Entity for ThrownTrident {
     fn reset_fall_distance(&mut self) {
         // A thrown trident keeps no fall distance here.
+    }
+    fn portal_after_move(&self) -> bool {
+        true
+    }
+    fn dimension_changing_delay(&self) -> i32 {
+        2
     }
     fn rotation(&self) -> [f32; 2] {
         [self.yaw, self.pitch]
