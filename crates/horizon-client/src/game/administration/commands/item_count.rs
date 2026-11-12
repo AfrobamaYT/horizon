@@ -1,7 +1,7 @@
 //! The `count` wrapper of an item predicate (`ItemPredicateArgument`): both
 //! `count=` and `count~` read the live stack count.
 
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 /// `MinMaxBounds.Ints.matches` on the stack count: an exact Int, or a
 /// compound with optional Int `min` and `max`.
