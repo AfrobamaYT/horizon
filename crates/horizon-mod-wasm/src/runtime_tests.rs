@@ -1844,12 +1844,20 @@ fn generated_client_and_server_hooks_complete_sixty_thousand_frames() {
         let mut host = Host;
         let mut reply = Writer::default();
         reply.put(&Duration::from_secs(60000));
+        reply.put(&0.25f32);
+        reply.put(&0.5f32);
         let client = recursive_hook(&reply);
         let mut render = mod_api::RenderFramePreEvent {
             elapsed: Duration::from_secs(1),
+            world_partial_tick: 0.25,
+            partial_tick: 0.5,
         };
         client.render_frame_pre(&mut host, &mut render);
         assert_eq!(render.elapsed, Duration::from_secs(60000));
+        assert_eq!(
+            (render.world_partial_tick, render.partial_tick),
+            (0.25, 0.5)
+        );
         assert_eq!(call(&client), Some(60000));
 
         let mut reply = Writer::default();

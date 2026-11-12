@@ -247,6 +247,13 @@ impl ItemResource {
     pub fn use_duration(&self, host: &dyn Host) -> Option<i32> {
         backend_of(host)?.item_resource_use_duration(&self.0)
     }
+    /// `IItemExtension.getCreatorModId`: the mod that made this stack, for a
+    /// recipe viewer or a tooltip to name. The item id's namespace, unless the
+    /// item's `creator_mod_id` Part answers another mod or none. None for an
+    /// unknown item or a host without the engine backend.
+    pub fn creator_mod_id(&self, host: &dyn Host) -> Option<String> {
+        backend_of(host)?.item_resource_creator_mod_id(&self.0)
+    }
     /// `ItemStack.isBarVisible`, `getBarWidth` and `getBarColor`: the visible
     /// vanilla durability or bundle bar, after effective components. None when
     /// no bar is visible. Client drawing hooks can later replace this bar.

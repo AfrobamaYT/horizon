@@ -112,6 +112,8 @@ pub mod vex;
 pub mod villager;
 pub mod villager_brain;
 pub mod villager_hats;
+pub mod visibility;
+pub use visibility::mob_visibility;
 pub mod warden;
 pub mod warden_brain;
 pub mod witch;
@@ -2719,6 +2721,8 @@ pub struct Seen {
     pub hurt_by: Option<(Who, i32)>,
     /// `Entity.isInvisible`: the flag, or the invisibility effect.
     pub invisible: bool,
+    /// What decides how visible it is to a mob that looks for it.
+    pub cover: visibility::Cover,
     /// `PathfinderMob.isPanicking`: a running panic goal or the brain's
     /// `IS_PANICKING` memory.
     pub panicking: bool,
@@ -2954,6 +2958,7 @@ impl Mob {
             section: (m.extra.section, m.extra.section_seq),
             delay: m.extra.ints[5],
             hurt_by: m.ai.last_hurt_by.map(|w| (w, m.ai.last_hurt_by_time)),
+            cover: visibility::cover(m),
             panicking: m.ai.panicking,
             active_raid: raider::has_active_raid(m),
             opened_chest: m.extra.opened_chest,
@@ -3368,22 +3373,6 @@ impl PlayerView {
         self.effects.contains(&effect)
     }
 }
-/// The `mob_visibility` component vanilla gives an item by default
-/// (`Item.Properties.loweredMobVisibility`): how visible its wearer is to a
-/// mob of type `looking`, 1 for every other item and mob. Only the mob
-/// heads have one, each for exactly the types named (a skeleton skull fools
-/// a skeleton, not a stray or a bogged), and all four are head equipment,
-/// the slot `PlayerView::head` holds.
-pub fn mob_visibility(item: &str, looking: Species) -> f32 {
-    let lowered = match item {
-        "minecraft:skeleton_skull" => looking == Species::Skeleton,
-        "minecraft:zombie_head" => looking == Species::Zombie,
-        "minecraft:creeper_head" => looking == Species::Creeper,
-        "minecraft:piglin_head" => matches!(looking, Species::Piglin | Species::PiglinBrute),
-        _ => false,
-    };
-    if lowered { 0.5 } else { 1.0 }
-}
 /// `Animal.finalizeSpawnChildFromBreeding`: draw only when mob drops are enabled.
 pub fn breeding_experience(parent: &mut Mob, mob_drops: bool) -> Option<u32> {
     mob_drops.then(|| 1 + parent.random.next_int_bound(7).unwrap_or(0) as u32)
@@ -3541,6 +3530,11 @@ pub trait MobHooks {
     /// `LivingVisibilityEvent`: `visibility`, the player's visibility
     /// percent as mob `looking` targets it, as mods scale it.
     fn living_visibility(&self, player: &PlayerView, looking: u32, visibility: f64) -> f64;
+    /// `LivingVisibilityEvent` for a mob target `target`: its visibility
+    /// percent as mob `looking` targets it, as mods scale it.
+    fn living_visibility_mob(&self, _target: u32, _looking: u32, visibility: f64) -> f64 {
+        visibility
+    }
     /// A proposed target change. A listener may cancel or substitute a target.
     fn living_change_target(
         &self,

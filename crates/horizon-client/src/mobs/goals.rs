@@ -1936,7 +1936,7 @@ impl Goal for NearestTarget {
                     .map(|s| (s.id, s.position))
                     .collect();
                 for (cid, cpos) in candidates {
-                    if m.distance_sqr(cpos) > range * range {
+                    if m.distance_sqr(cpos) > cx.w.reach_sqr(cid, m, range) {
                         continue;
                     }
                     if self.beyond_sqr.is_some_and(|d| m.distance_sqr(cpos) <= d) {

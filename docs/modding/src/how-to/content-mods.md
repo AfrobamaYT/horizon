@@ -53,7 +53,7 @@ cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks
   `--horizon <commit>`'s) so the launcher downloads the game instead of building it, root `Cargo.toml`
   and `src/lib.rs`, and empty `assets/` and `data/` directories. `update` repins it the same way. Its root `impl Hooks` uses
   `#[mod_api::horizon_mod]`. Compile it with `horizon-launcher native-build <path> --trust-native-code`
-  ([trait mods](../concepts/trait-mods.md#trait-mods-draft)). Any other `--template` is refused.
+  ([trait mods](../concepts/trait-mods.md#writing-a-trait-mod)). Any other `--template` is refused.
 - `build` packs the checked project into `target/horizon-mod/<id>.hmod`: `horizon-mod.toml`, `assets/`,
   `data/`, optional `icon.png` and, for code, the root Cargo project. It validates content with the same
   checks as the game; it does not compile code. Code requires both `Cargo.toml` and `[native]`; inconsistent
@@ -85,6 +85,9 @@ api = "0.2"                  # content mods
 side = "both"
 capabilities = ["registries"]
 namespaces = []              # optional: more namespaces the mod's files use (below)
+
+[properties]                 # optional: values other mods read (reference/manifest.md)
+tier = 3
 ```
 
 The optional fields fill the game's Mods screen, which lists every mod with its icon, name, version, id, license,
@@ -521,6 +524,10 @@ category (`beneficial`, `harmful` or `neutral`) and its RGB colour (0 to `0xFFFF
 { "category": "harmful", "color": 9154528 }
 ```
 
+An optional `sort_order` (an integer) sets where the effect sits among the HUD's icons and the inventory's effect list,
+as NeoForge's `IMobEffectExtension.getSortOrder` does: the lists compare it where vanilla compares the colour, and it
+is the colour when left out. It is fixed per effect, where NeoForge may answer per instance.
+
 It is the effect `<id>:<name>`: `/effect give @s ruby:glow 30` gives it, saves and mobs keep it, and it reaches LAN and
 dedicated server players who run the same mods (its network id follows vanilla's). Its name is the translation
 `effect.<id>.<name>` from the mod's `assets/<id>/lang/`, its icon `assets/<id>/textures/mob_effect/<name>.png` (18x18,
@@ -544,7 +551,8 @@ the thrower (the snowball's 3 to blazes is not copied):
 
 It is the entity type `<id>:<name>`, with its network id after vanilla's. Using its item throws it as a snowball is
 thrown: same speed, spread, sound and cooldown, and one item used outside creative. It flies as a snowball, breaks on
-what it hits with its item's crumbs, and is drawn as its item's model (`ThrownItemRenderer`). Its name is the translation
+what it hits with its item's crumbs, and is drawn as its item's model (`ThrownItemRenderer`), unless a client
+mod registers a renderer for it ([entity renderers](entity-renderers.md)). Its name is the translation
 `entity.<id>.<name>`. It works in single player and on LAN with the same mods. Dedicated servers share that code,
 untested so far. Clients join a server only with the same mods' entity types, as with its blocks. It is saved with its
 chunk, `/summon <id>:<name>` makes one, and it has its template's row in `entity-types.json`, with `template` naming
@@ -920,7 +928,7 @@ outside 1 to 1000, no points or an invalid point refuse the mods at startup, nam
 declared regions in `data/horizon/biome_regions.dat`, and from then on that record decides: a changed or added region
 reaches an existing world only when its owner opts in, and a world whose region's mod is missing asks before it opens
 (a dedicated server reads `[biome_regions] missing = "refuse" | "vanilla"` in `server.toml`). The full contract is in
-[the design](../concepts/mod-biome-regions.md).
+[the design](https://github.com/arismoko/horizon/blob/main/docs/design/mod-api/mod-biome-regions.md).
 
 The modifiers rewrite the biomes when the content root builds, and the generator orders every biome's features as
 vanilla's `FeatureSorter` does, so an added feature takes its place in that order (its random seed follows from it). A

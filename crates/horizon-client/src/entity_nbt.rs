@@ -7322,6 +7322,7 @@ mod sheep_nbt_tests {
             "testfx:glow".to_owned(),
             1,
             crate::brewing::Category::Harmful,
+            None,
         )]);
         let mut m = Mob::new(1, types["minecraft:pig"].clone(), Vec3::ZERO, 0.0);
         m.add_effect(crate::brewing::effect("testfx:glow").unwrap().id, 200, 2);

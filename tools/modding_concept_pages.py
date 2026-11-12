@@ -23,6 +23,9 @@ INCLUDE = re.compile(r"(\{\{#(?:rustdoc_)?include )([^ }]+)(\s*\}\})")
 # their place, the rest follow in title order.
 FOLDERS = {"Concepts": "concepts", "How-to": "how-to"}
 TITLE = re.compile(r"<!-- chapter: (.+) -->\n(?:<!-- separator: (\d+) -->\n)?\n")
+# The book documents what the game does. A page titled as one of these is a design, a plan or a work list,
+# and lives in docs/design/ instead.
+NOT_A_MANUAL = re.compile(r"\b(design|designs|proposal|proposed|draft|roadmap|tracker|status|plan)\b", re.IGNORECASE)
 
 
 def headings(text):
@@ -154,7 +157,20 @@ def expand(book, src):
     discover(book, src, contents)
     missing = unrendered(book, src)
     assert not missing, f"pages the book doesn't render (list them in SUMMARY.md): {missing}"
+    refuse_designs(book)
     return book
+
+
+def refuse_designs(book):
+    """Fails on a chapter whose name or first heading reads as a design or a work list."""
+    for chapter in chapters(book["sections"]):
+        if not chapter["path"]:
+            continue
+        titles = [chapter["name"], *(title for title, _ in headings(chapter["content"]))][:2]
+        for title in titles:
+            assert not NOT_A_MANUAL.search(title), (
+                f"{chapter['path']}: \"{title}\" reads as a design or a work list; the book documents what "
+                "the game does, and designs, plans and trackers live in docs/design/")
 
 
 def chapters(items):
