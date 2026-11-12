@@ -36,7 +36,7 @@ use horizon_client::{
     crafting::Recipes,
     graphics::EntityCullingMode,
     health::{Attack, HealthEvent, HurtSource, Hurting, Knock},
-    items::ItemStack,
+    items::{ItemStack, Items},
     mesher::Vertex,
     mobs::{
         Damage, DamageKind, Mob, MobEvent, MobWorld, PlayerView, Seen, SpawnSetup, Species, Who,
@@ -356,8 +356,8 @@ fn flame_geometry(
         ss += 1;
     }
 }
-pub(super) fn seen(m: &Mob, player: Option<[i32; 4]>) -> Seen {
-    m.seen(player)
+pub(super) fn seen(m: &Mob, player: Option<[i32; 4]>, items: &Items) -> Seen {
+    m.seen(player, items)
 }
 /// Whether a mob a packet named may take the click: `mob_hit` skips a mob in
 /// its death animation, the one the player rides (it shares the player's root
@@ -1321,7 +1321,7 @@ impl Game<'_> {
             m.on_climbable = climbing;
         }
         let mut snapshot = std::mem::take(&mut self.creatures.seen_buf);
-        snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid)));
+        snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid, self.items())));
         let mut events = std::mem::take(&mut self.creatures.event_buf);
         events.clear();
         let passenger_objects = self.retained_passenger_snapshot(uuid);
@@ -10012,7 +10012,7 @@ mod breeding_tests {
                 seed,
             },
         );
-        let others = [partner.seen(None)];
+        let others = [partner.seen(None, game.items())];
         let mut events = Vec::new();
         let mut test_level = horizon_client::health::TestLevel::new(321);
         let mut experience = None;
@@ -10380,7 +10380,7 @@ mod breeding_tests {
                 .clone();
             let mut mate = Mob::new(2, kind.clone(), Vec3::new(0.5, 64.0, 0.0), 0.0);
             mate.extra.in_love = 600;
-            let others = [mate.seen(None)];
+            let others = [mate.seen(None, game.items())];
             let run = || {
                 let world = MobWorld {
                     others: &others,
