@@ -1,3 +1,4 @@
+#![cfg(test)]
 // Item model callbacks carry owned values and a separate runtime selection.
 use crate::*;
 
@@ -39,8 +40,8 @@ impl Hooks for Selected {
 
 #[test]
 fn model_callbacks_receive_owned_counts_and_the_exact_runtime_selection() {
-    install_parts(&[], &crate::parts::tests::rule_schema(), |_| false).unwrap();
-    let stack = crate::parts::tests::stack("minecraft:stick", 2, 0);
+    install_parts(&[], &crate::__private::part_tests::rule_schema(), |_| false).unwrap();
+    let stack = crate::__private::part_tests::stack("minecraft:stick", 2, 0);
     let mods = vec![ModEntry::new("selected", Box::new(Selected))].into();
     testing::with_mods(mods, || {
         for (selected, boolean, number, text, tint) in [
@@ -87,3 +88,9 @@ fn model_callbacks_receive_owned_counts_and_the_exact_runtime_selection() {
         }
     });
 }
+
+#[cfg(test)]
+use super::*;
+
+#[cfg(test)]
+use crate::testing;

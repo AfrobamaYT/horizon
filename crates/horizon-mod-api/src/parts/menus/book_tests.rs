@@ -48,9 +48,7 @@ fn registration_refuses_unknown_books_duplicate_menus_and_overlapping_roles() {
             )
             .is_err()
     );
-    let unknown = crate::RecipeBookTypeKey {
-        id: "demo:unknown".into(),
-    };
+    let unknown = mod_vocab::__private::parts_installation::recipe_book_type("demo:unknown".into());
     assert!(
         registrar
             .menu_recipe_book(

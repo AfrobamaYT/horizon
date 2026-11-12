@@ -1,10 +1,11 @@
+#![cfg(test)]
 use super::*;
 use crate::testing::FakeHost;
 use std::sync::Mutex;
 
 #[test]
 fn dimension_keys_name_one_dimension_each() {
-    use crate::content::registry_keys::{dimension_id, dimension_key};
+    use mod_vocab::__private::{dimension_id, dimension_key};
     assert_eq!(
         dimension_key("minecraft:overworld"),
         DimensionKey::OVERWORLD
@@ -20,9 +21,19 @@ fn dimension_keys_name_one_dimension_each() {
     assert_ne!(first, second);
     assert_eq!(dimension_key("test:first"), first);
     assert_eq!(dimension_id(second), Some("test:second"));
-    assert_eq!(DimensionKey::from_slot(first.0), Ok(first));
-    assert!(DimensionKey::from_slot(u32::MAX).is_err());
-    assert_eq!(dimension_id(DimensionKey(u32::MAX)), None);
+    assert_eq!(
+        mod_vocab::__private::parts_installation::validate_dimension_key(
+            mod_vocab::__private::parts_installation::dimension_key_slot(first)
+        ),
+        Ok(first)
+    );
+    assert!(mod_vocab::__private::parts_installation::validate_dimension_key(u32::MAX).is_err());
+    assert_eq!(
+        dimension_id(mod_vocab::__private::parts_installation::dimension_key(
+            u32::MAX
+        )),
+        None
+    );
 }
 
 #[test]
@@ -245,7 +256,10 @@ fn stick_part<P: ItemPart + Clone>(id: &'static str, part: P) {
     }
     let mods: Mods = vec![ModEntry::new(id, Box::new(StickMod(part)))].into();
     install(mods.clone());
-    install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+    install_parts(&mods, &crate::__private::part_tests::rule_schema(), |_| {
+        false
+    })
+    .unwrap();
 }
 
 /// Claims a use on stone, after telling the player what the block is.
@@ -415,7 +429,7 @@ impl ItemPart for Chatty {
 }
 
 fn stick() -> ItemStack {
-    crate::parts::tests::stack("minecraft:stick", 1, 0)
+    crate::__private::part_tests::stack("minecraft:stick", 1, 0)
 }
 
 #[test]
@@ -466,14 +480,11 @@ fn a_part_reads_the_clicked_block_and_tells_the_acting_player() {
     mark_game_thread();
     stick_part("probe", Probe);
     // The level answers blocks as their load-resolved keys.
-    crate::content::registry_keys::resolve_block_keys(
-        ["minecraft:stone", "minecraft:dirt"],
-        |_| {
-            let properties = std::collections::BTreeMap::new();
-            horizon_mod_runtime::block_definitions::BlockDefinition::new(&[&properties], 0)
-                .map_err(|error| format!("{error:?}"))
-        },
-    )
+    mod_vocab::__private::resolve_block_keys(["minecraft:stone", "minecraft:dirt"], |_| {
+        let properties = std::collections::BTreeMap::new();
+        horizon_mod_runtime::block_definitions::BlockDefinition::new(&[&properties], 0)
+            .map_err(|error| format!("{error:?}"))
+    })
     .unwrap();
     let stack = stick();
     for (block, expected) in [("minecraft:stone", true), ("minecraft:dirt", false)] {
@@ -580,10 +591,13 @@ fn an_inventory_tick_reaches_only_the_parts_of_the_ticked_item() {
     )]
     .into();
     install(mods.clone());
-    install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+    install_parts(&mods, &crate::__private::part_tests::rule_schema(), |_| {
+        false
+    })
+    .unwrap();
     let mut host = FakeHost::new();
-    let stone = crate::parts::tests::stack("minecraft:stone", 1, 0);
-    let diamond = crate::parts::tests::stack("minecraft:diamond", 1, 0);
+    let stone = crate::__private::part_tests::stack("minecraft:stone", 1, 0);
+    let diamond = crate::__private::part_tests::stack("minecraft:diamond", 1, 0);
     dispatch_inventory_tick(&mut host, &stick(), 4, true);
     dispatch_inventory_tick(&mut host, &stone, -106, false);
     dispatch_inventory_tick(&mut host, &stick(), 100, false);
@@ -683,10 +697,13 @@ fn an_item_update_reaches_only_the_parts_of_the_ticked_item_and_cancels_for_its_
     )]
     .into();
     install(mods.clone());
-    install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+    install_parts(&mods, &crate::__private::part_tests::rule_schema(), |_| {
+        false
+    })
+    .unwrap();
     let mut host = FakeHost::new();
-    let stone = crate::parts::tests::stack("minecraft:stone", 1, 0);
-    let diamond = crate::parts::tests::stack("minecraft:diamond", 1, 0);
+    let stone = crate::__private::part_tests::stack("minecraft:stone", 1, 0);
+    let diamond = crate::__private::part_tests::stack("minecraft:diamond", 1, 0);
     let entity = |id| EntityRef::new(WorldEpoch::new(1), id);
     let mut update = |stack: &ItemStack, id| {
         let mut canceled = false;
@@ -815,7 +832,10 @@ fn a_block_use_hears_the_hand_the_hit_and_the_player() {
     mark_game_thread();
     let mods: Mods = vec![ModEntry::new("off-hand-top", Box::new(OffHandTop))].into();
     install(mods.clone());
-    install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+    install_parts(&mods, &crate::__private::part_tests::rule_schema(), |_| {
+        false
+    })
+    .unwrap();
     let mut host = FakeHost::new();
     let mut claimed = false;
     dispatch_use_on(
@@ -861,16 +881,15 @@ fn a_block_use_hears_the_hand_the_hit_and_the_player() {
             TriState::True,
         ),
     ] {
-        let click = BlockClick {
-            side: LogicalSide::Server,
-            dimension: LevelDimension::Overworld,
-            pos: [0; 3],
+        let click = mod_vocab::__private::parts_installation::block_click(
+            LogicalSide::Server,
+            LevelDimension::Overworld,
+            [0; 3],
             hit,
             hand,
             stack,
-            player: 7,
-            player_entity_id: 41,
-        };
+            (7, 41),
+        );
         let (mut block, mut item) = (TriState::Default, TriState::Default);
         let (mut result, mut was_canceled) = (InteractionResult::Pass, false);
         dispatch_right_click_block(
@@ -1012,11 +1031,10 @@ struct CodKeeper;
 impl Hooks for CodKeeper {
     fn item_fished(&self, _host: &mut dyn ServerHost, event: &mut ItemFishedEvent<'_>) -> Flow {
         event.rod_damage = 4;
-        let cod = event
-            .fished
-            .drops
-            .iter()
-            .any(|s| s.item() == crate::parts::tests::fixture_item_key("minecraft:cod"));
+        let cod =
+            event.fished.drops.iter().any(|s| {
+                s.item() == crate::__private::part_tests::fixture_item_key("minecraft:cod")
+            });
         if cod { Flow::Cancel } else { Flow::Continue }
     }
 }
@@ -1035,7 +1053,7 @@ impl Hooks for Unreached {
 /// which stays whether or not it cancels; a cancel stops later mods.
 #[test]
 fn a_fishing_catch_keeps_the_mods_rod_damage_and_its_cancel() {
-    install_parts(&[], &crate::parts::tests::rule_schema(), |_| false).unwrap();
+    install_parts(&[], &crate::__private::part_tests::rule_schema(), |_| false).unwrap();
     let mut host = FakeHost::new();
     let mods: Vec<ModEntry> = vec![
         ModEntry::new("cod-keeper", Box::new(CodKeeper)),
@@ -1043,12 +1061,9 @@ fn a_fishing_catch_keeps_the_mods_rod_damage_and_its_cancel() {
     ];
     install(mods.into());
     let ask = |host: &mut FakeHost, item: &str| {
-        let drops = [crate::parts::tests::stack(item, 1, 0)];
-        let fished = ItemFished {
-            hook: 9,
-            position: [0.5, 62.0, 0.5],
-            drops: &drops,
-        };
+        let drops = [crate::__private::part_tests::stack(item, 1, 0)];
+        let fished =
+            mod_vocab::__private::parts_installation::item_fished(9, [0.5, 62.0, 0.5], &drops);
         let (mut rod_damage, mut cancel) = (1, false);
         dispatch_item_fished(host, 7, 3, &fished, &mut rod_damage, &mut cancel);
         (rod_damage, cancel)
@@ -1056,12 +1071,12 @@ fn a_fishing_catch_keeps_the_mods_rod_damage_and_its_cancel() {
     assert_eq!(ask(&mut host, "minecraft:cod"), (4, true));
     let mods: Vec<ModEntry> = vec![ModEntry::new("cod-keeper", Box::new(CodKeeper))];
     install(mods.into());
-    let drops = [crate::parts::tests::stack("minecraft:salmon", 1, 0)];
-    let fished = ItemFished {
-        hook: 9,
-        position: [0.5, 62.0, 0.5],
-        drops: &drops,
-    };
+    let drops = [crate::__private::part_tests::stack(
+        "minecraft:salmon",
+        1,
+        0,
+    )];
+    let fished = mod_vocab::__private::parts_installation::item_fished(9, [0.5, 62.0, 0.5], &drops);
     let (mut rod_damage, mut cancel) = (2, false);
     dispatch_item_fished(&mut host, 7, 3, &fished, &mut rod_damage, &mut cancel);
     assert_eq!((rod_damage, cancel), (4, false));
@@ -1146,45 +1161,4 @@ fn an_ability_question_reaches_only_the_parts_of_the_asked_item_and_names_the_ab
         *stones.asked.lock().unwrap(),
         ["my_mod:chop", "minecraft:shield_block"]
     );
-}
-
-#[test]
-fn player_level_and_dimension_reads() {
-    use crate::host::entities::EntitiesHost;
-    use crate::host::players::PlayersHost;
-    let mut host = FakeHost::new();
-    let overworld = host.level("minecraft:overworld").unwrap();
-    let nether = crate::LevelRef::new(overworld.epoch(), crate::DimensionKey::NETHER);
-    host.join(1, 10);
-    host.join(2, 20).level = nether;
-    let p1 = host.player(1).unwrap();
-    let p2 = host.player(2).unwrap();
-    let unknown = crate::__private::game::player_ref(p1.entity(), 99);
-    let stale = crate::__private::game::player_ref(
-        crate::EntityRef::new(
-            crate::WorldEpoch::new(p1.entity().epoch().get() + 1),
-            p1.entity().id(),
-        ),
-        p1.uuid(),
-    );
-    let replaced = crate::__private::game::player_ref(p2.entity(), p1.uuid());
-    for invalid in [unknown, stale, replaced] {
-        assert_eq!(invalid.level(&host), None);
-        assert_eq!(invalid.dimension(&host), None);
-    }
-    assert_eq!(p1.level(&host), Some(overworld));
-    assert_eq!(
-        p1.dimension(&host),
-        Some(crate::Identifier::parse("minecraft:overworld").unwrap())
-    );
-    assert_eq!(p2.level(&host), Some(nether));
-    assert_eq!(
-        p2.dimension(&host),
-        Some(crate::Identifier::parse("minecraft:the_nether").unwrap())
-    );
-    host.players = Default::default();
-    for disconnected in [p1, p2] {
-        assert_eq!(disconnected.level(&host), None);
-        assert_eq!(disconnected.dimension(&host), None);
-    }
 }

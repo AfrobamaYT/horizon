@@ -16023,7 +16023,7 @@ impl<'a> Game<'a> {
         audio: Audio,
         prepared: Option<GameCpuResources>,
     ) -> Result<Self> {
-        let phase = match mod_api::__private::current_phase() {
+        let phase = match Self::mod_phase_for_construction() {
             mod_api::__private::ModPhase::Packages if cfg!(test) => {
                 mod_api::__private::ModPhase::World
             }

@@ -1,9 +1,5 @@
 mod parts;
-#[cfg(test)]
-pub(crate) use parts::install_parts;
 pub use parts::limits as general_entity_limits;
-#[cfg(test)]
-pub(crate) use parts::mark_game_thread;
 pub use parts::{
     Attached, BlockCapabilityProvider, BlockEntityProviders, BlockProvider, BlockProviderOf,
     CapabilityProviders, EntityCapabilityProvider, EntityProvider, EntityProviderOf,
@@ -15,6 +11,8 @@ pub(crate) use parts::{InstalledProviders, answered, ask_providers, has_part_hoo
 mod __private {
     #[cfg(any(test, feature = "testing"))]
     pub use crate::parts::install_process_datapack_registry_declarations;
+    #[cfg(any(test, feature = "testing"))]
+    pub use crate::parts::tests as part_tests;
     pub use crate::parts::{
         AttributeDeclaration, BiomeModifierDeclaration, EntityAttributeDeclaration,
         EntityAttributeModification, GeneralEntityTypeDeclaration, HookParts, ItemKeyError,
@@ -27,10 +25,5 @@ mod __private {
         has_scoped_hook, install_parts, install_resolved_parts, item_listens, key_mappings,
         mark_game_thread, menu_listens, parts, prepare_parts, resolve_parts, setting, settings,
         spawn_placement_declarations, tooltip_appenders,
-    };
-    #[cfg(any(test, feature = "testing"))]
-    pub use crate::{
-        parts::tests as part_tests,
-        world::phase::{with_test_packages, with_test_registration_data},
     };
 }
