@@ -8767,6 +8767,7 @@ impl Game<'_> {
             enchantments: &self.stations().enchantments,
             maps: Some(&maps),
         };
+        let menu_can_equip = self.menu_can_equip();
         let env = Env {
             crafting_remainder: Some(self),
             player: self
@@ -8782,10 +8783,9 @@ impl Game<'_> {
             enchantments: self.item_enchantments(),
             names: &self.pack.names,
             trade: Some(&trade_env),
-            maps: level_maps
-                .as_ref()
-                .map(|m| m as &dyn horizon_client::menu::Maps),
+            maps: level_maps.as_ref().map(|m| m as _),
             limited_crafting: self.limited_crafting(),
+            can_equip: Some(&menu_can_equip),
             known_recipes: Some(&self.level.recipe_book),
         };
         menu.creative = creative;
