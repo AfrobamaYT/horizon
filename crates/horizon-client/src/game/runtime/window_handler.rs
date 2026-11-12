@@ -1926,10 +1926,16 @@ impl ApplicationHandler for Game<'_> {
         };
         self.handle_window_event(event_loop, id, event, input_trace::InputOrigin::User);
         if let Some((event, modifiers)) = key {
+            use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
             let name = match event.physical_key {
                 PhysicalKey::Code(code) => horizon_client::keybinds::key_name(code),
                 PhysicalKey::Unidentified(_) => None,
             };
+            let layout_key = horizon_client::keybinds::layout_key_name(
+                event.physical_key,
+                &event.key_without_modifiers(),
+            );
+            let raw_code = horizon_client::keybinds::raw_key_code(event.physical_key);
             let action = match (event.state, event.repeat) {
                 (winit::event::ElementState::Released, _) => mod_api::KeyAction::Release,
                 (_, false) => mod_api::KeyAction::Press,
@@ -1937,7 +1943,13 @@ impl ApplicationHandler for Game<'_> {
             };
             // Still the key's handling: a mod's key hook may reach the clipboard.
             self.with_user_input(true, |game| {
-                game.native_input_key(name.unwrap_or("key.keyboard.unknown"), action, modifiers);
+                game.native_input_key(
+                    name.unwrap_or("key.keyboard.unknown"),
+                    layout_key,
+                    raw_code,
+                    action,
+                    modifiers,
+                );
             });
         }
     }
