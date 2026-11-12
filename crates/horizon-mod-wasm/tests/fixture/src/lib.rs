@@ -20,11 +20,23 @@ pub use replace::own_average;
 pub use shutdown::on_shutdown;
 pub use turn::turn_angle;
 
+mod strict_math_checks;
+
 #[derive(Default)]
 pub struct Mod;
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
+    fn tick_target_millis(
+        &self,
+        _: &dyn mod_api::ClientHost,
+        event: &mut mod_api::TickTargetMillisEvent,
+    ) {
+        // All expected values are literal JDK reference bits linked into this
+        // guest. The unused host means no math operation can be a host echo.
+        event.millis = strict_math_checks::check_vectors() as f32;
+    }
+
     fn server_tick(
         &self,
         host: &mut dyn mod_api::ServerHost,
