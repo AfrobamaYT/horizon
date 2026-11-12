@@ -11,6 +11,7 @@ use horizon_client::{
     item_data::{StackData, WrittenBook},
     items::ItemStack,
     menu::{Kind, Menu},
+    mobs::Who,
     text::Text,
     ui,
     widgets::{self, Narratable, ScreenInfo},
@@ -893,6 +894,20 @@ impl Game<'_> {
             b.lectern_update_below(level, ticks, p, state);
         });
     }
+    /// `LecternBlock.resetBookState`: the property with the block change event.
+    fn set_lectern_has_book(&mut self, key: (i32, i32, i32), has_book: bool, who: Option<Who>) {
+        // `LecternBlock.resetBookState`: `setBlockAndUpdate` writes the state and
+        // the `block_change` post follows unconditionally, not only when the
+        // state differs.
+        self.set_lectern_property(key, "has_book", has_book);
+        let after = self.world.block(key.0, key.1, key.2);
+        self.post_block_game_event(
+            "minecraft:block_change",
+            [key.0, key.1, key.2],
+            who,
+            Some(after),
+        );
+    }
     fn set_lectern_property(&mut self, key: (i32, i32, i32), name: &str, value: bool) {
         let state = self.world.block(key.0, key.1, key.2);
         let registry = self.pack.assets.registry;
@@ -960,7 +975,7 @@ impl Game<'_> {
                 page: 0,
             }),
         );
-        self.set_lectern_property(key, "has_book", true);
+        self.set_lectern_has_book(key, true, self.remote.is_none().then_some(Who::Player));
         if !self.creative {
             self.consume_held();
         }
@@ -1184,7 +1199,7 @@ impl Game<'_> {
         l.page = menu.data[0];
         if had && l.book.is_none() {
             self.set_lectern_powered(key, false);
-            self.set_lectern_property(key, "has_book", false);
+            self.set_lectern_has_book(key, false, None);
             self.container_changed(key);
         } else if menu.data[0] != before {
             self.set_lectern_powered(key, true);

@@ -771,7 +771,10 @@ impl Game<'_> {
         let scale = if end {
             1.0
         } else {
-            Dim::teleportation_scale(source, target)
+            horizon_world::dimension_type::DimensionFacts::teleportation_scale(
+                self.dimension_type_of(source),
+                self.dimension_type_of(target),
+            )
         };
         self.end_portal_travel = end;
         // Leaving the End: the player's own respawn point.

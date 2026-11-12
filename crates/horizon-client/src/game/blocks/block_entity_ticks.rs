@@ -340,6 +340,7 @@ impl Game<'_> {
         // Items move between passes: the columns hold for this one only.
         this.item_columns = None;
         this.pass_mobs = None;
+        this.tick_sign_editors();
         this.update_song_volumes();
         this.scan_for_hearts();
         // The client ticks (particles, sounds, the turning mob) are for a

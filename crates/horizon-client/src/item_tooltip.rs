@@ -417,10 +417,11 @@ pub fn bundle_tooltip(
     x: f32,
     y: f32,
     box_width: f32,
+    description_lines: usize,
 ) -> Option<TooltipLayout> {
     tooltip_display(stack)
         .shows("minecraft:bundle_contents")
-        .then(|| crate::bundle::tooltip_layout(items, stack, x, y, box_width))
+        .then(|| crate::bundle::tooltip_layout(items, stack, x, y, box_width, description_lines))
         .flatten()
 }
 
@@ -1142,6 +1143,39 @@ pub fn enchantment_lines(
     lines
 }
 
+/// `ItemAttributeModifiers` from the stack's component, else the item's.
+fn stack_modifiers(
+    stack: &ItemStack,
+    info: Option<&ItemInfo>,
+) -> Vec<(String, String, f64, String, String)> {
+    let data = stack.data();
+    if data.is_some_and(|d| d.other("!minecraft:attribute_modifiers").is_some()) {
+        return Vec::new();
+    }
+    if let Some(horizon_world::nbt::Tag::List(entries)) =
+        data.and_then(|d| d.other("minecraft:attribute_modifiers"))
+    {
+        return entries
+            .iter()
+            .filter_map(|entry| {
+                let string = |key: &str| match entry.get(key) {
+                    Some(horizon_world::nbt::Tag::String(s)) => Some(s.to_string_lossy()),
+                    _ => None,
+                };
+                Some((
+                    string("type")?,
+                    string("id")?,
+                    horizon_world::datafix::dynamic::as_number(entry.get("amount")?)?.float_value()
+                        as f64,
+                    string("operation").unwrap_or_else(|| "add_value".into()),
+                    string("slot").unwrap_or_else(|| "any".into()),
+                ))
+            })
+            .collect();
+    }
+    info.map(|info| info.modifiers.clone()).unwrap_or_default()
+}
+
 /// The lines of `stack` below its name that its components give, in
 /// `ItemStack.addDetailsToTooltip` order.
 pub fn detail_lines(
@@ -1604,10 +1638,10 @@ mod tests {
         let items = Items::for_tests(Default::default());
         let mut bundle = ItemStack::new("minecraft:bundle", 1);
         bundle.data_mut().bundle_contents = vec![ItemStack::new("minecraft:stone", 3)];
-        assert!(bundle_tooltip(&items, &bundle, 0.0, 0.0, 96.0).is_some());
+        assert!(bundle_tooltip(&items, &bundle, 0.0, 0.0, 96.0, 2).is_some());
         // A stack that is not a bundle has no grid.
         let stone = ItemStack::new("minecraft:stone", 1);
-        assert!(bundle_tooltip(&items, &stone, 0.0, 0.0, 96.0).is_none());
+        assert!(bundle_tooltip(&items, &stone, 0.0, 0.0, 96.0, 2).is_none());
         // A display that hides the contents component hides the grid.
         bundle.data_mut().set_other(
             "minecraft:tooltip_display",
@@ -1616,13 +1650,13 @@ mod tests {
                 Tag::List(vec![Tag::String("minecraft:bundle_contents".into())]),
             )])),
         );
-        assert!(bundle_tooltip(&items, &bundle, 0.0, 0.0, 96.0).is_none());
+        assert!(bundle_tooltip(&items, &bundle, 0.0, 0.0, 96.0, 2).is_none());
         // So does one that hides the whole tooltip.
         bundle.data_mut().set_other(
             "minecraft:tooltip_display",
             Some(Tag::compound([("hide_tooltip", Tag::Byte(1))])),
         );
-        assert!(bundle_tooltip(&items, &bundle, 0.0, 0.0, 96.0).is_none());
+        assert!(bundle_tooltip(&items, &bundle, 0.0, 0.0, 96.0, 2).is_none());
         // A component the display does not name leaves the grid alone.
         bundle.data_mut().set_other(
             "minecraft:tooltip_display",
@@ -1631,7 +1665,7 @@ mod tests {
                 Tag::List(vec![Tag::String("minecraft:lore".into())]),
             )])),
         );
-        assert!(bundle_tooltip(&items, &bundle, 0.0, 0.0, 96.0).is_some());
+        assert!(bundle_tooltip(&items, &bundle, 0.0, 0.0, 96.0, 2).is_some());
     }
 
     #[test]
@@ -2566,5 +2600,48 @@ mod tests {
         );
         let texts: Vec<String> = lines.iter().map(|(text, _)| text.plain()).collect();
         assert_eq!(texts, ["scale"]);
+    }
+}
+
+#[cfg(test)]
+mod stack_modifier_tests {
+    use super::stack_modifiers;
+    use horizon_client::items::ItemStack;
+
+    #[test]
+    fn tooltip_attributes_come_from_the_stack() {
+        let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
+        let attack = horizon_world::nbt::Tag::compound([
+            (
+                "type",
+                horizon_world::nbt::Tag::String("minecraft:attack_damage".into()),
+            ),
+            (
+                "id",
+                horizon_world::nbt::Tag::String("minecraft:test".into()),
+            ),
+            ("amount", horizon_world::nbt::Tag::Double(5.0f64.to_bits())),
+            (
+                "operation",
+                horizon_world::nbt::Tag::String("add_value".into()),
+            ),
+            ("slot", horizon_world::nbt::Tag::String("mainhand".into())),
+        ]);
+        sword.data_mut().set_other(
+            "minecraft:attribute_modifiers",
+            Some(horizon_world::nbt::Tag::List(vec![attack])),
+        );
+        let modifiers = stack_modifiers(&sword, None);
+        assert_eq!(modifiers.len(), 1);
+        assert_eq!(modifiers[0].0, "minecraft:attack_damage");
+        assert_eq!(modifiers[0].2, 5.0);
+        sword.data_mut().set_other(
+            "!minecraft:attribute_modifiers",
+            Some(horizon_world::nbt::Tag::compound(Vec::<(
+                &str,
+                horizon_world::nbt::Tag,
+            )>::new())),
+        );
+        assert!(stack_modifiers(&sword, None).is_empty());
     }
 }

@@ -10,8 +10,6 @@ pub(super) enum MenuOpen {
 /// Per-guest state of the gameplay code that lives outside `Guest`.
 #[derive(Default)]
 pub(super) struct GuestPlay {
-    /// The sign this guest may write on (`SignBlockEntity.playerWhoMayEdit`).
-    pub(super) sign_editing: Option<[i32; 3]>,
     mining: Option<Mining>,
     destroy_delay: u32,
     using: Option<(usize, u32)>,

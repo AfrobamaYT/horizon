@@ -12,7 +12,7 @@ use horizon_client::{
     snbt,
     text::{self, ClickEvent, InlineObject, Style, Text},
 };
-use horizon_core::nbt::Tag;
+use horizon_core::nbt::{JavaString, Tag};
 use horizon_protocol::packets::{
     Empty,
     play::{self, Clientbound as C, DialogHolder},
@@ -387,6 +387,12 @@ impl Game<'_> {
             .waypoint_icons
             .get(&self.waypoint_target(t))
             .cloned()
+            // The player's own icon comes back from their saved `locator_bar_icon`.
+            .or_else(|| {
+                (t == Target::Player)
+                    .then(|| Self::waypoint_icon_from_saved(self.level.player_extra.as_ref()))
+                    .flatten()
+            })
             .unwrap_or_default()
     }
     /// `WaypointArgument.getWaypoint`.
@@ -504,6 +510,9 @@ impl Game<'_> {
     }
     /// `WaypointCommand.mutateIcon`: untrack, change, track again.
     pub(in crate::game) fn set_waypoint_icon(&mut self, t: Target, icon: Icon) {
+        if t == Target::Player {
+            Self::save_waypoint_icon(&icon, &mut self.level.player_extra);
+        }
         let t = self.waypoint_target(t);
         self.cmds.waypoint_icons.insert(t, icon);
         self.waypoint_transmitters();
@@ -1302,3 +1311,43 @@ impl Game<'_> {
     }
 }
 impl Game<'_> {}
+
+impl Game<'_> {
+    /// `Waypoint.Icon.hasData`.
+
+    /// `LivingEntity.readAdditionalSaveData`'s `locator_bar_icon`
+    /// (`Waypoint.Icon.CODEC`: a required `style` and an optional int `color`).
+    /// None when the key is missing or does not decode, which is the default icon.
+    fn waypoint_icon_from_saved(entity: Option<&Tag>) -> Option<Icon> {
+        let icon = entity?.get("locator_bar_icon")?;
+        let Some(Tag::String(style)) = icon.get("style") else {
+            return None;
+        };
+        let color = match icon.get("color") {
+            Some(Tag::Int(rgb)) => Some(*rgb),
+            _ => None,
+        };
+        Some(Icon {
+            style: style.to_string_lossy(),
+            color,
+        })
+    }
+    /// `LivingEntity.addAdditionalSaveData`'s `locator_bar_icon`: written only
+    /// when the icon `hasData`, so any other icon takes the key out.
+    fn save_waypoint_icon(icon: &Icon, entity: &mut Option<Tag>) {
+        if icon.style == "minecraft:default" && icon.color.is_none() {
+            if let Some(Tag::Compound(map)) = entity {
+                map.remove(&JavaString::from("locator_bar_icon"));
+            }
+            return;
+        }
+        let mut fields = vec![("style", Tag::String(icon.style.as_str().into()))];
+        if let Some(rgb) = icon.color {
+            fields.push(("color", Tag::Int(rgb)));
+        }
+        if let Tag::Compound(map) = entity.get_or_insert_with(|| Tag::Compound(Default::default()))
+        {
+            map.insert("locator_bar_icon".into(), Tag::compound(fields));
+        }
+    }
+}

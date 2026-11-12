@@ -1584,28 +1584,16 @@ impl Game<'_> {
                                 self.gpu_utilization =
                                     f64::from(gpu) * 100.0 / f64::from(ms(cpu).max(0.001));
                             }
-                            if self.settings.horizon.gpu_culling
-                                == horizon_client::graphics::GpuCullingMode::Auto
-                                && self.screen == Screen::Playing
-                                && !self.streaming.terrain_loading()
-                                && horizon_client::graphics::gpu_culling_offer()
-                                    .reason()
-                                    .is_none()
-                                && let Some(on) = self.gpu_culling_auto.observe(
-                                    ms(cpu),
-                                    r.gpu_times.last().copied(),
-                                    ms(elapsed),
-                                )
-                            {
-                                log::info!(
-                                    "Horizon: GPU Culling Auto turns it {} ({})",
-                                    if on { "on" } else { "off" },
-                                    self.gpu_culling_auto.state()
-                                );
-                                if r.set_gpu_culling(on).is_err() {
-                                    self.gpu_culling_auto.reset();
-                                }
-                            }
+                            let settled =
+                                self.screen == Screen::Playing && !self.streaming.terrain_loading();
+                            frame_autotune::observe(
+                                &self.settings.horizon,
+                                settled,
+                                (&mut self.gpu_culling_auto, &mut self.dynamic_resolution),
+                                &mut self.frame_graph,
+                                r,
+                                (ms(cpu), ms(elapsed)),
+                            );
                             self.frame_stats.record_cpu(ms(cpu));
                             let render = r.last_encode;
                             self.frame_stats.record_phases([
@@ -1922,6 +1910,10 @@ impl ApplicationHandler for Game<'_> {
             }
         };
         horizon_client::window::settle_created_fullscreen(&window, fullscreen);
+        #[cfg(target_os = "windows")]
+        if let Some(hwnd) = hwnd(&window) {
+            horizon_threads::system_menu::suppress(hwnd);
+        }
         drop(window_step);
         match self.new_renderer(window.clone()) {
             Ok(r) => {

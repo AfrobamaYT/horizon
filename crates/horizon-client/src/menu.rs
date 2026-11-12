@@ -3155,15 +3155,9 @@ impl Menu {
             return None;
         }
         if after_take || matches!(self.kind, Kind::Inventory | Kind::Crafting) {
-            // Furnace and merchant takes pass the remaining slot stack.
-            let taken = if matches!(self.kind, Kind::Furnace(_))
-                || self.slots[index].role == Role::MerchantResult
-            {
-                &mut stack
-            } else {
-                &mut clicked
-            };
-            self.on_take(env, index, taken);
+            // A merchant result reports the stack it moved, a crafting result the copy it
+            // takes (which Item.onCraftedBy may still change).
+            self.take_after_quick_move(env, index, &mut clicked, &mut stack);
         }
         // What the result slot's move left over is dropped.
         if (index == 0 && matches!(self.kind, Kind::Inventory | Kind::Crafting))

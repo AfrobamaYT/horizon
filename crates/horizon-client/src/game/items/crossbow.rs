@@ -368,7 +368,9 @@ impl Game<'_> {
                     a.fired_from_weapon = Some(weapon.clone());
                     a.pierce = pierce;
                 }
-                arrow.shoot(&mut self.world.random, dir.to_array(), power, 1.0);
+                // Flame: the arrow is spawned burning (EnchantmentHelper.onProjectileSpawned).
+                self.ignite_spawned_arrow(&weapon, &mut arrow);
+                arrow.shoot_own(dir.to_array(), power, 1.0);
                 self.spawn_projectile(arrow, ammo);
                 let (player, name, projectile) = (
                     horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid()),

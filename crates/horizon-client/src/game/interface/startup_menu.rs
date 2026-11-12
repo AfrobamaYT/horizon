@@ -613,6 +613,14 @@ impl Loading {
                     let _ = std::fs::create_dir_all(&dir);
                     packs::open_folder(&dir);
                 }
+                Event::ImportPacks(paths) => {
+                    packs::import_resource_packs(
+                        &mut self.menu.options,
+                        &self.vanilla_root,
+                        &[],
+                        &paths,
+                    );
+                }
                 Event::DownloadPack(i) => {
                     let dir = packs::packs_dir();
                     if let Some(screen) = &mut self.menu.options.pack_screen
@@ -1118,7 +1126,16 @@ impl Loading {
             // `PackSelectionScreen.onFilesDrop`: a pack dropped on the window
             // joins the Create New World screen's data packs.
             WindowEvent::DroppedFile(path) => {
-                if let Some(title) = &mut self.menu.title {
+                let batch = HudBatch::new(self.menu_size());
+                let handled = self.menu.options_open
+                    && self.gui.as_ref().is_some_and(|gui| {
+                        self.menu.options.drop_resource_pack(
+                            path.clone(),
+                            &gui.atlas,
+                            (batch.width, batch.height),
+                        )
+                    });
+                if !handled && let Some(title) = &mut self.menu.title {
                     title.drop_file(path);
                 }
             }

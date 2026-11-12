@@ -116,6 +116,7 @@ pub fn start<G>(
         _capture,
     } = startup;
     horizon_threads::configure_allocator();
+    horizon_chat_filter::install();
     horizon_look::give();
     // OptiFine's and Polytone's pack formats (platform, docs/layers.md), before any pack loads.
     horizon_client::pack_formats::install();

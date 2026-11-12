@@ -918,6 +918,7 @@ impl PlayerMotion {
             blocking,
             blocked: 0.0,
             shield_damage: 0,
+            blocking_item_used: false,
             fully_blocked: false,
             block_sound: false,
             knocked: false,
@@ -998,6 +999,7 @@ impl PlayerMotion {
             hurt,
             blocked: hit.blocked,
             shield_damage: hit.shield_damage,
+            blocking_item_used: hit.blocking_item_used,
             fully_blocked: hit.fully_blocked,
             sound: hit.block_sound,
             knockback: hit.knocked,
@@ -1095,6 +1097,7 @@ impl PlayerMotion {
             blocking: hit.blocking.take(),
             blocked: hit.blocked,
             shield_damage: hit.shield_damage,
+            blocking_item_used: hit.blocking_item_used,
             fully_blocked: hit.fully_blocked,
             block_sound: hit.block_sound,
             knocked: hit.knocked,
@@ -1118,6 +1121,7 @@ impl PlayerMotion {
         hit.blocking = environment.blocking;
         hit.blocked = environment.blocked;
         hit.shield_damage = environment.shield_damage;
+        hit.blocking_item_used = environment.blocking_item_used;
         hit.fully_blocked = environment.fully_blocked;
         hit.block_sound = environment.block_sound;
         hit.knocked = environment.knocked;
@@ -1184,6 +1188,7 @@ pub(crate) struct Environment<'a> {
     pub(crate) blocked: f32,
     /// The durability the blocking item loses.
     pub(crate) shield_damage: i32,
+    pub(crate) blocking_item_used: bool,
     /// What it blocked covers the whole hit, as difficulty scaled it.
     pub(crate) fully_blocked: bool,
     pub(crate) block_sound: bool,
@@ -1230,6 +1235,7 @@ pub struct PausedHurt {
     blocking: Option<Blocking>,
     blocked: f32,
     shield_damage: i32,
+    blocking_item_used: bool,
     fully_blocked: bool,
     block_sound: bool,
     knocked: bool,
@@ -1312,6 +1318,8 @@ pub struct AttackRecord {
 /// The outcome of a hurt with a raised blocking item.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BlockOutcome {
+    /// `hurtBlockingItem` ran, including when reductions resolve to zero.
+    pub blocking_item_used: bool,
     pub hurt: bool,
     pub blocked: f32,
     /// The durability the blocking item loses (`ItemDamageFunction`, or what a
@@ -1615,6 +1623,7 @@ impl HurtWorld for Environment<'_> {
         else {
             return Ok(0.0);
         };
+        self.blocking_item_used = true;
         self.blocked = block.blocked_damage;
         // `setShieldDamage` is what the item loses if `blocked` holds, whatever
         // `blocked_damage` says; below 0, the item's own `itemDamage` of what is stopped.

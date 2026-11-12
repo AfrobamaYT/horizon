@@ -7,8 +7,8 @@
 //! draws the item's own random, which the copy carries. A merge before its turn can change its
 //! count, age and pickup delay: such an item moves at its turn instead. With a native mod loaded
 //! (its hooks see every item) or a mod listening to the round, every item moves at its turn.
-use super::super::{boats::fall_reset, entity::Entity as _, native_ticks};
 use super::*;
+use super::{boats::fall_reset, entity::Entity as _, native_ticks};
 use horizon_client::{
     blocks::BlockFacts,
     entities::{ItemEntity, ItemSplash, ItemStep, ObstacleGrid},

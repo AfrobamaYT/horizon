@@ -616,7 +616,7 @@ fn tick_with<R>(
                 break;
             };
             if vehicle == index
-                || controller(&mobs[vehicle], w).is_none_or(|r| r.id != mobs[owner].id)
+                || controller(mobs[vehicle], w).is_none_or(|r| r.id != mobs[owner].id)
             {
                 break;
             }

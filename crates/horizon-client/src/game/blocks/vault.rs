@@ -14,7 +14,7 @@ use horizon_client::{
     mesher::Vertex,
     vault::{Vault, VaultEvent, VaultLevel, VaultPlayer, VaultState},
 };
-use horizon_core::random::LegacyRandom;
+use horizon_core::random::{LegacyRandom, LevelRandom};
 
 type Pos = (i32, i32, i32);
 

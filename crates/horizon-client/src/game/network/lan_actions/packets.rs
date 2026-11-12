@@ -328,7 +328,7 @@ impl Game<'_> {
                 }
                 4 | 5 => {
                     if !spectator {
-                        self.as_guest(conn, |g| g.drop_held(a.action == 4));
+                        self.guest_drop_held(gi, conn, a.action == 4);
                     }
                 }
                 // RELEASE_USE_ITEM: ServerPlayer.releaseUsingItem.

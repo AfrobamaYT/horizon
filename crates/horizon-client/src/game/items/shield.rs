@@ -25,6 +25,20 @@ pub(super) fn block_delay_passed(
 }
 
 impl Game<'_> {
+    /// `AbstractArrow.onHitEntity` on the player: a piercing arrow passes item blocking, whoever
+    /// shot it, because `applyItemBlocking` reads the direct entity's pierce level.
+    pub(super) fn arrow_hits_player(
+        &mut self,
+        amount: f32,
+        p: &horizon_client::projectiles::Projectile,
+    ) -> bool {
+        self.combat.piercing_hit = p.arrow.as_ref().is_some_and(|a| a.pierce > 0);
+        self.mob_hits_player(
+            amount,
+            [p.previous.x, p.previous.y, p.previous.z],
+            "minecraft:arrow",
+        )
+    }
     /// The stack in an inventory slot, the off hand at `OFFHAND_SLOT`.
     pub(super) fn stack_in(&self, slot: usize) -> Option<&ItemStack> {
         if slot == OFFHAND_SLOT {
@@ -162,6 +176,13 @@ impl Game<'_> {
         {
             let pitch = 0.8 + self.world.random.next_float() * 0.4;
             self.audio.play(sound, at, 1.0, pitch);
+        }
+        // BlocksAttacks.hurtBlockingItem counts use even when nothing is blocked.
+        if !outcome.blocking_item_used {
+            return;
+        }
+        if self.remote.is_none() {
+            self.award_stat("used", &stack.item, 1);
         }
         // ItemDamageFunction.apply (or what a native mod set, kept only for a hit
         // the event left blocked), then hurtAndBreak.
