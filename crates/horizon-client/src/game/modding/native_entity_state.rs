@@ -119,6 +119,52 @@ impl Game<'_> {
             Body::Other(_) => None,
         }
     }
+    /// The fluids the entity touched at its last fluid update, each with how deep its box is in
+    /// it (`IEntityExtension.getFluidTypeHeight`), highest first; empty in no fluid. Players and
+    /// mobs: water and lava, the fluids Horizon's entity update tracks.
+    pub(super) fn entity_fluid_heights(&self, entity: EntityRef) -> Option<Vec<(String, f64)>> {
+        use horizon_client::motion::{LAVA, WATER};
+        let [(water, in_water), (lava, in_lava)] = match self.native_entity_body(entity)? {
+            Body::Player(p) => [
+                (p.fluid_height(WATER), p.fluids.was_touching_water),
+                (p.fluid_height(LAVA), p.is_in_lava()),
+            ],
+            Body::Mob(m) => [
+                (m.fluids.water, m.fluids.in_water),
+                (m.fluids.lava, m.fluids.in_lava),
+            ],
+            Body::Other(_) => return None,
+        };
+        let mut heights: Vec<(String, f64)> = [
+            ("minecraft:water", water, in_water),
+            ("minecraft:lava", lava, in_lava),
+        ]
+        .into_iter()
+        .filter(|&(_, _, touched)| touched)
+        .map(|(fluid, height, _)| (fluid.to_owned(), height))
+        .collect();
+        // Highest first; water before lava at the same height (`getMaxHeightFluidType`'s order).
+        heights.sort_by(|a, b| b.1.total_cmp(&a.1));
+        Some(heights)
+    }
+    /// The fluid at the entity's eyes from its last fluid update
+    /// (`IEntityExtension.getFirstEyeInFluidType`): water or lava, none in air. Players and mobs.
+    pub(super) fn entity_eye_fluid(&self, entity: EntityRef) -> Option<Option<String>> {
+        use horizon_client::motion::{LAVA, WATER};
+        let (water, lava) = match self.native_entity_body(entity)? {
+            Body::Player(p) => (p.is_eye_in_fluid(WATER), p.is_eye_in_fluid(LAVA)),
+            Body::Mob(m) => (m.fluids.eye_in_water, m.fluids.eye_in_lava),
+            Body::Other(_) => return None,
+        };
+        Some(
+            (if water {
+                Some("minecraft:water")
+            } else {
+                lava.then_some("minecraft:lava")
+            })
+            .map(str::to_owned),
+        )
+    }
     /// Whether the entity's type never burns (`EntityType.fireImmune`):
     /// players and mobs.
     pub(super) fn entity_fire_immune(&self, entity: EntityRef) -> Option<bool> {

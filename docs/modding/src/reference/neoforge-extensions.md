@@ -34,7 +34,7 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 | `IBlockExtension` | 60 | 20 | 13 | 27 | 0 |
 | `IBlockStateExtension` | 57 | 19 | 12 | 26 | 0 |
 | `IItemExtension` | 46 | 19 | 10 | 17 | 0 |
-| `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
+| `IEntityExtension` | 33 | 9 | 12 | 12 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
 | `IBlockEntityExtension` | 9 | 2 | 3 | 3 | 1 |
 | `IFluidExtension` | 9 | 0 | 6 | 3 | 0 |
@@ -211,14 +211,14 @@ and global hooks. On the server a mod can act on entities through `EntityRef` an
 | `revive()` | Missing | — | No entity revive API. |
 | `isMultipartEntity()` | Missing | — | The dragon's parts are internal to the engine. |
 | `getParts()` | Missing | — | Same; `EntityRef` names dragon parts in some reads but does not expose the array. |
-| `getFluidTypeHeight(type)` | Missing | — | Fluid properties are per-fluid data; no per-entity height. |
-| `getMaxHeightFluidType()` | Missing | — | Same. |
-| `isInFluidType(state)` | Partial | `host.entity_is_in_water`, `entity_is_in_lava` | Only water and lava answered; no arbitrary fluid. |
-| `isInFluidType(type)` | Partial | `host.entity_is_in_water`, `entity_is_in_lava` | Same. |
-| `isInFluidType(predicate)` | Partial | `host.entity_is_in_water`, `entity_is_in_lava` | No predicate form. |
-| `isInFluidType()` | Partial | `host.entity_is_in_water`, `entity_is_in_lava` | "Any fluid" is water-or-lava only. |
-| `getFirstEyeInFluidType()` | Missing | — | Eye position per fluid is engine-owned. |
-| `isEyeInFluidType(type)` | Missing | — | Same. |
+| `getFluidTypeHeight(type)` | Covered | `host.entity_fluid_heights` | Each fluid the entity touched with its height, from its last fluid update. Server-side. |
+| `getMaxHeightFluidType()` | Covered | `host.entity_fluid_heights` | The first entry: the list is highest first. |
+| `isInFluidType(state)` | Covered | `host.entity_fluid_heights` | Whether the state's fluid is in the list. Entities track water and lava; mod fluids join once the entity update tracks them. |
+| `isInFluidType(type)` | Covered | `host.entity_fluid_heights` | Same. |
+| `isInFluidType(predicate)` | Covered | `host.entity_fluid_heights` | The mod applies its predicate to the list. |
+| `isInFluidType()` | Covered | `host.entity_fluid_heights` | A non-empty list. |
+| `getFirstEyeInFluidType()` | Covered | `host.entity_eye_fluid` | Water or lava at the eyes from the last fluid update; mobs now track lava there too. |
+| `isEyeInFluidType(type)` | Covered | `host.entity_eye_fluid` | Compare its answer. |
 | `canStartSwimming()` | Missing | — | Swimming start is engine-owned. |
 | `getFluidMotionScale(type)` | Missing | — | No per-entity fluid scale. |
 | `isPushedByFluid(type)` | Partial | `FluidTypeProperties.can_push_entity` | Per-fluid data, not a per-entity answer. |
