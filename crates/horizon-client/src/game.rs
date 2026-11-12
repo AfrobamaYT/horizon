@@ -17573,7 +17573,6 @@ pub(crate) fn closest_space_nudge(
 
 #[cfg(test)]
 use inventory_input::drop_whole_stack;
-use prediction::gliding_pieces;
 use subtitles::{Subtitles, in_game_ui, subtitles};
 
 use hud_render::{block_outline_drawn, debug_crosshair_drawn, is_game_master_block};
@@ -17715,32 +17714,6 @@ mod escape_tests {
 impl Game<'_> {
     fn held_mut(&mut self) -> &mut Option<ItemStack> {
         self.stack_in_mut(self.held_slot())
-    }
-    fn glider_worn(&self) -> bool {
-        let items = self.res.items();
-        let hand = |stack: Option<&ItemStack>, slot: &str| {
-            stack.is_some_and(|s| horizon_client::item_sync::can_glide_using(s, slot, items))
-        };
-        gliding_pieces(items, &self.armor).contains(&true)
-            || hand(self.inventory[self.selected].as_ref(), "mainhand")
-            || hand(self.offhand.as_ref(), "offhand")
-    }
-    pub(super) fn wear_glider(&mut self, points: u32) {
-        let gliding = gliding_pieces(self.res.items(), &self.armor);
-        let pieces: Vec<usize> = (0..4).filter(|&i| gliding[i]).collect();
-        if pieces.is_empty() {
-            return;
-        }
-        // `Util.getRandom(slotsWithGliders, this.random)`: the entity's own
-        // random, which never touches the level's stream.
-        let pick = random_source::entity().next_int_bound(pieces.len() as i32);
-        let pick = pieces[pick.unwrap_or(0) as usize];
-        if let Some(stack) = self.armor[pick].clone() {
-            let loss = self.wear(&stack, points);
-            if let Some(piece) = self.armor[pick].as_mut() {
-                piece.damage += loss;
-            }
-        }
     }
     pub(crate) fn wears_freeze_immune(&self) -> bool {
         let immune = self
