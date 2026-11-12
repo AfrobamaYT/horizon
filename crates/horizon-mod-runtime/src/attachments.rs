@@ -997,7 +997,11 @@ impl Attachments {
         // instead of repeatedly growing the short key buffers during encoding.
         let [owned_namespace, owned_name] = [namespace, name].map(|text| {
             let mut units = Vec::with_capacity(text.len());
-            units.extend(text.encode_utf16());
+            if text.is_ascii() {
+                units.extend(text.bytes().map(u16::from));
+            } else {
+                units.extend(text.encode_utf16());
+            }
             JavaString(units)
         });
         let key = (owned_namespace, owned_name);
