@@ -72,6 +72,10 @@ pub(super) struct CodeSwitches {
 
 #[derive(Clone, Default)]
 pub(super) struct ModsState {
+    pub(super) active_condition_root: Option<Arc<()>>,
+    pub(super) load_condition_candidate: Option<horizon_world::conditions::LoadConditions>,
+    pub(super) load_conditions:
+        Arc<std::sync::OnceLock<Result<crate::game::load_conditions::ConditionTable, String>>>,
     pub(super) profession_declarations:
         Arc<std::sync::OnceLock<Vec<(String, mod_api::ProfessionDefinition)>>>,
     /// Saved switches gate the first data inventory while registration keeps
@@ -128,6 +132,15 @@ impl ModsState {
         }
     }
 
+    pub(super) fn code_owner_enabled(&self, owner: &str) -> bool {
+        let initially_disabled = self.code_switches.as_ref().is_some_and(|switches| {
+            !switches.applied.load(std::sync::atomic::Ordering::Acquire)
+                && switches.disabled.contains(owner)
+        });
+        !initially_disabled
+            && mod_api::__private::mod_index(owner).is_some_and(mod_api::__private::mod_index_on)
+    }
+
     /// One admission rule for initial composition and later code-only toggles.
     /// Content acceptance belongs to the generation; code admission belongs to
     /// the installed dispatch entries, including their live enabled switches.
@@ -149,13 +162,7 @@ impl ModsState {
         horizon_mod_package::enabled::EnabledMods::new(native.chain(selected).filter_map(
             |(manifest, code)| {
                 let enabled = if code {
-                    let initially_disabled = self.code_switches.as_ref().is_some_and(|switches| {
-                        !switches.applied.load(std::sync::atomic::Ordering::Acquire)
-                            && switches.disabled.contains(&manifest.id)
-                    });
-                    !initially_disabled
-                        && mod_api::__private::mod_index(&manifest.id)
-                            .is_some_and(mod_api::__private::mod_index_on)
+                    self.code_owner_enabled(&manifest.id)
                 } else {
                     accepted_content(&manifest.id)
                 };
@@ -809,7 +816,9 @@ pub(super) fn content_overlay(
     // Content admission and the live code-dispatch boundary jointly determine
     // what loaded. Namespaces and raw startup metadata cannot answer this.
     let inventory = sources.enabled_inventory(|id| mods.iter().any(|loaded| loaded.id == id));
-    let prepared = mod_content::resource_root(root, jar_store, &mods, &cache, &inventory)?;
+    let prepared = super::load_conditions::content_root_with_conditions(
+        root, jar_store, &mods, &cache, &inventory, sources,
+    )?;
     let root = mod_content::resolved_resources(root, prepared, jar_store, &mods, cache)?;
     let _ = sources.content_base.set(original_base);
     Ok(ContentOverlay {
@@ -1395,6 +1404,7 @@ impl Game<'_> {
     }
 
     pub(super) fn install_loop_context(&mut self, context: PreparedLoopContext) {
+        self.protect_condition_root();
         self.loop_context = context.game;
         self.refresh_recipe_property_context();
         self.setting_overrides.borrow_mut().clear();
@@ -1406,7 +1416,7 @@ impl Game<'_> {
         }
     }
 
-    /// Stage a fresh root only when live code admission changes the inventory.
+    /// Stage a fresh root when admission changes or registered conditions need reevaluation.
     /// The caller publishes it after every server reload listener prepared.
     pub(super) fn stage_enabled_inventory(
         &self,
@@ -1415,7 +1425,7 @@ impl Game<'_> {
         let next = self
             .mods
             .enabled_inventory(|id| previous.client_ids().any(|loaded| loaded == id));
-        if previous == next {
+        if previous == next && !self.condition_root_needs_reload() {
             return Ok(None);
         }
         let base = self

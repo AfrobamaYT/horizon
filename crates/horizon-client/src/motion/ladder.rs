@@ -111,7 +111,7 @@ impl LivingAirWorld for MotionWorld<'_, '_, '_> {
             == "minecraft:scaffolding")
     }
     fn suppressing_ladder_slide(&mut self) -> Result<bool> {
-        Ok(self.player.shift_key_down)
+        Ok(self.player.shift_key_down && !(self.player.client_side && self.player.flying))
     }
     fn is_player_class(&self) -> bool {
         true
