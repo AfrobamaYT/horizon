@@ -1030,10 +1030,10 @@ struct CodKeeper;
 impl Hooks for CodKeeper {
     fn item_fished(&self, _host: &mut dyn ServerHost, event: &mut ItemFishedEvent<'_>) -> Flow {
         event.rod_damage = 4;
-        let cod =
-            event.fished.drops.iter().any(|s| {
-                s.item() == crate::__private::part_tests::fixture_item_key("minecraft:cod")
-            });
+        let cod = event
+            .drops
+            .iter()
+            .any(|s| s.item() == crate::__private::part_tests::fixture_item_key("minecraft:cod"));
         if cod { Flow::Cancel } else { Flow::Continue }
     }
 }
@@ -1060,24 +1060,39 @@ fn a_fishing_catch_keeps_the_mods_rod_damage_and_its_cancel() {
     ];
     install(mods.into());
     let ask = |host: &mut FakeHost, item: &str| {
-        let drops = [crate::__private::part_tests::stack(item, 1, 0)];
-        let fished =
-            mod_vocab::__private::parts_installation::item_fished(9, [0.5, 62.0, 0.5], &drops);
+        let mut drops = vec![crate::__private::part_tests::stack(item, 1, 0)];
+        let fished = mod_vocab::__private::parts_installation::item_fished(9, [0.5, 62.0, 0.5]);
         let (mut rod_damage, mut cancel) = (1, false);
-        dispatch_item_fished(host, 7, 3, &fished, &mut rod_damage, &mut cancel);
+        dispatch_item_fished(
+            host,
+            7,
+            3,
+            &fished,
+            &mut rod_damage,
+            &mut cancel,
+            &mut drops,
+        );
         (rod_damage, cancel)
     };
     assert_eq!(ask(&mut host, "minecraft:cod"), (4, true));
     let mods: Vec<ModEntry> = vec![ModEntry::new("cod-keeper", Box::new(CodKeeper))];
     install(mods.into());
-    let drops = [crate::__private::part_tests::stack(
+    let mut drops = vec![crate::__private::part_tests::stack(
         "minecraft:salmon",
         1,
         0,
     )];
-    let fished = mod_vocab::__private::parts_installation::item_fished(9, [0.5, 62.0, 0.5], &drops);
+    let fished = mod_vocab::__private::parts_installation::item_fished(9, [0.5, 62.0, 0.5]);
     let (mut rod_damage, mut cancel) = (2, false);
-    dispatch_item_fished(&mut host, 7, 3, &fished, &mut rod_damage, &mut cancel);
+    dispatch_item_fished(
+        &mut host,
+        7,
+        3,
+        &fished,
+        &mut rod_damage,
+        &mut cancel,
+        &mut drops,
+    );
     assert_eq!((rod_damage, cancel), (4, false));
 }
 
