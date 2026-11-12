@@ -64,6 +64,7 @@ impl Game<'_> {
                 .is_some();
                 if let Some(motion) = g.motion.as_deref_mut() {
                     motion.glider = glider;
+                    motion.leather_boots = super::worn_boots::leather_boots(&g.armor);
                     motion.item_use_speed = item_use.map(|(speed, _)| speed);
                     motion.item_use_slows_sprint = item_use.is_some_and(|(_, slows)| slows);
                 }

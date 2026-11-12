@@ -296,15 +296,6 @@ impl Rules for ItemRules<'_> {
     fn max_stack(&self, item: &str) -> u32 {
         self.0.get(item).map_or(64, |i| i.max_stack)
     }
-    fn armor_index(&self, item: &str) -> Option<usize> {
-        match self.0.get(item)?.equip_slot.as_deref()? {
-            "head" => Some(0),
-            "chest" => Some(1),
-            "legs" => Some(2),
-            "feet" => Some(3),
-            _ => None,
-        }
-    }
 }
 
 /// `Player.isWithinEntityInteractionRange(entity, buffer)` for a guest: the

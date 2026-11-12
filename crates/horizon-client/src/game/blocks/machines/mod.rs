@@ -1289,7 +1289,7 @@ impl Game<'_> {
             pos: [pos.0, pos.1, pos.2],
             side: Some(side),
         };
-        let providers = mod_api::block_entity_providers(&mod_api::ITEMS, self, at)?;
+        let providers = mod_api::block_providers(&mod_api::ITEMS, self, at)?;
         let game = self.container_size(at).is_some();
         providers.ask(self, game)
     }
