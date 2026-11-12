@@ -31,7 +31,7 @@ const HOSTS: [&str; 4] = [
     "https://gitlab.com/",
 ];
 /// No mod jar is this large; a bigger answer is not one.
-const MAX_JAR: u64 = 512 << 20;
+pub(crate) const MAX_JAR: u64 = 512 << 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
