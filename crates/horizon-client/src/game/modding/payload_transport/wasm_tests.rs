@@ -130,6 +130,27 @@ fn compiled_guest_runs_in_actual_game_roots_on_guest_stack() {
     mods.push(ModEntry::new("raw_probe", Box::new(Native)));
     // A megabyte through a debug-built host on a loaded runner can pass a hook's 100 ms; this
     // checks where the guest runs and what it publishes, not how fast. Each case has its process.
+    // This case's process keeps the runtime's warnings and errors, so a failure can say what
+    // trapped or refused (the guest's panic, a deadline, a refusal).
+    struct Kept;
+    impl log::Log for Kept {
+        fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+            metadata.level() <= log::Level::Warn
+        }
+        fn log(&self, record: &log::Record<'_>) {
+            if self.enabled(record.metadata()) {
+                LOGGED
+                    .lock()
+                    .unwrap()
+                    .push(format!("{}: {}", record.level(), record.args()));
+            }
+        }
+        fn flush(&self) {}
+    }
+    static LOGGED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    if log::set_logger(&Kept).is_ok() {
+        log::set_max_level(log::LevelFilter::Warn);
+    }
     horizon_mod_wasm::copy_probe::with_load_budget(|| {
         mod_platform::testing::with_mods(mods.into(), || {
             super::super::native_entity_refs::tests::with_client_game(|game| {
@@ -228,7 +249,10 @@ fn compiled_guest_runs_in_actual_game_roots_on_guest_stack() {
                 assert_eq!(
                     prepared.work,
                     usize::from(network || case == "network_handler_trap"),
-                    "the guest must successfully prepare work before its intentional trap"
+                    "the guest must successfully prepare work before its intentional trap; \
+                     endpoints {:?}; runtime log {:#?}",
+                    staging.diagnostics(),
+                    LOGGED.lock().unwrap()
                 );
                 assert_eq!(
                     prepared.replies,

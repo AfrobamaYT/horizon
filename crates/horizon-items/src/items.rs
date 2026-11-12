@@ -777,9 +777,11 @@ fn worn_mob_visibility(
         parse_mob_visibility(components.get("minecraft:mob_visibility")?, tags)?,
     ))
 }
-/// Every item of the last item registry loaded with its `villager_food`
-/// nutrition (0 without the component): what the mobs' villagers read, since
-/// a mob does not hold the registry (`None` until one is loaded).
+/// Every item of the last game registry loaded ([`Items::load`]) with its
+/// `villager_food` nutrition (0 without the component): what the mobs' villagers
+/// read, since a mob does not hold the registry (`None` until one is loaded).
+/// [`Items::catalog`] leaves it alone, so a headless or test catalog of other
+/// items never replaces the game's table.
 static VILLAGER_FOOD: std::sync::RwLock<Option<HashMap<Arc<str>, i32>>> =
     std::sync::RwLock::new(None);
 fn set_villager_food(items: &HashMap<Arc<str>, ItemInfo>) {
@@ -854,6 +856,7 @@ impl Items {
             }
         }
         let mut items = Self::load_with(root, &block_for_item, overlay, defaults)?;
+        set_villager_food(&items.items);
         let path = root.join(MOD_ITEM_BLOCKS);
         match fs::read(&path) {
             Ok(bytes) => {
@@ -1118,7 +1121,6 @@ impl Items {
         // game's own: one map with the loot data of the same root and packs.
         let loot = horizon_world::loot::shared_tables(root, overlay)?;
         let registry_order = registry_order(root, &order);
-        set_villager_food(&items);
         Ok(Self {
             items,
             mob_visibility,

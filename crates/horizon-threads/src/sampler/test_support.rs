@@ -35,3 +35,13 @@ pub fn cpu_count(nominal_at_1000_hz: u64) -> u64 {
         scaled.max(1)
     }
 }
+
+/// The share of wall time, in thousandths, that this thread ran while `spin` burned `cpu_ms` of
+/// CPU. On a loaded runner a spinning thread is preempted, and its wall samples then rightly say
+/// waiting; tests judge the running label against this share.
+pub fn spin_share_permille(cpu_ms: u64, spin: fn(u64)) -> u64 {
+    let (wall, cpu) = (std::time::Instant::now(), super::os::thread_cpu_ns());
+    spin(cpu_ms);
+    let ran = super::os::thread_cpu_ns() - cpu;
+    (ran * 1000 / (wall.elapsed().as_nanos() as u64).max(1)).min(1000)
+}

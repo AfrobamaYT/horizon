@@ -121,7 +121,6 @@ use loading_window::{
 use self::api_values::TryIntoApi;
 pub(crate) use api_values::{block_jump_factor, block_speed_factor, is_ladder};
 use horizon_client::actions::Action as Mapping;
-use horizon_client::held::Source;
 use horizon_client::spans::{startup, time as span};
 use horizon_client::{
     Result,
@@ -165,6 +164,7 @@ use horizon_client::{
     vanillagen::VanillaTerrain,
     world::World,
 };
+use horizon_client::{fast_hash::FxHashMap, held::Source};
 use horizon_core::{
     biome::{BiomeZoom, obfuscate_seed},
     geometry::{Aabb, Direction},
@@ -2137,7 +2137,7 @@ struct Game<'a> {
     persist: persist::EntityMemory,
     /// Missing profession IDs already reported for this world session.
     missing_professions: HashSet<String>,
-    entity_attachments: HashMap<u32, horizon_mod_runtime::attachments::Attachments>,
+    entity_attachments: FxHashMap<u32, horizon_mod_runtime::attachments::Attachments>,
     entity_initialization: entity_initialization::EntityInitialization,
     /// Typed per-level membership follows dimensions, not the temporary world swap.
     attachment_indexes: attachment_index::Indexes,
@@ -8912,7 +8912,7 @@ impl Game<'_> {
         let brewed_potion_takes = std::mem::take(&mut menu.brewed_potion_takes);
         let equipped = std::mem::take(&mut menu.equipped);
         let item_crafted = std::mem::take(&mut menu.item_crafted);
-        for (_, stack) in &item_crafted {
+        for (_, stack, _) in &item_crafted {
             if !predicting {
                 self.award_stat("crafted", &stack.item, stack.count as i32);
             }
@@ -9129,13 +9129,13 @@ impl Game<'_> {
                     }
                 }
                 crafted += 1;
-                // `ResultSlot.onTake`: the recipe and the stack taken
-                // (native_item_crafted).
+                // `ResultSlot.onTake` (native_item_crafted): recipe, stack taken, grid before.
                 let player = self.native_acting_id();
-                self.native_item_crafted(player, &format!("minecraft:{recipe}"), &taken);
+                let id = format!("minecraft:{recipe}");
+                self.native_item_crafted(player, &id, &taken, &ingredients);
                 self.tutorial_get_item(Some(&taken));
                 self.award_stat("crafted", &made.0, made.1 as i32);
-                self.award_crafted(&[(format!("minecraft:{recipe}"), ingredients)]);
+                self.award_crafted(&[(id, ingredients)]);
                 if !shift || crafted >= 64 {
                     break;
                 }

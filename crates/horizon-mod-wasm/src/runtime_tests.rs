@@ -98,7 +98,7 @@ fn module(body: &str) -> WasmMod {
     let bytes = guest(*mod_api::wire::LAYOUT, body);
     WasmMod::instantiate(
         &engine,
-        &[],
+        DEFAULT_GROUP_MEMORY_MIB,
         &[Member {
             name: "test",
             module: &bytes,
@@ -345,7 +345,7 @@ fn a_member_cannot_bypass_group_limits_with_private_memories() {
                 .unwrap();
         let refusal = WasmMod::instantiate(
             &engine().unwrap(),
-            &[],
+            DEFAULT_GROUP_MEMORY_MIB,
             &[Member {
                 name: "private",
                 module: &bytes,
@@ -369,7 +369,7 @@ fn guest_input_pool_stays_flat_for_100k_no_import_calls() {
         .unwrap();
         let module = WasmMod::instantiate(
             &engine().unwrap(),
-            &[],
+            DEFAULT_GROUP_MEMORY_MIB,
             &[
                 Member {
                     name: "std",
@@ -447,7 +447,7 @@ fn real_members_link_when_built() {
         let engine = engine().unwrap();
         let modules = WasmMod::instantiate(
             &engine,
-            &[],
+            DEFAULT_GROUP_MEMORY_MIB,
             &[
                 Member {
                     name: "std",
@@ -593,7 +593,7 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
         let engine = engine().unwrap();
         let modules = WasmMod::instantiate(
             &engine,
-            &[],
+            DEFAULT_GROUP_MEMORY_MIB,
             &[
                 Member {
                     name: "first",
@@ -623,7 +623,7 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
     .unwrap();
         let refusal = WasmMod::instantiate(
             &engine,
-            &[],
+            DEFAULT_GROUP_MEMORY_MIB,
             &[
                 Member {
                     name: "first",
@@ -756,7 +756,7 @@ fn layout_mismatch_is_a_mods_page_refusal() {
         let bytes = guest(*mod_api::wire::LAYOUT ^ 1, "i64.const 0");
         let refusal = WasmMod::instantiate(
             &engine,
-            &[],
+            DEFAULT_GROUP_MEMORY_MIB,
             &[Member {
                 name: "test",
                 module: &bytes,
@@ -787,7 +787,7 @@ fn point_record_layout_mismatch_is_refused() {
         .unwrap();
         let refusal = WasmMod::instantiate(
             &engine().unwrap(),
-            &[],
+            DEFAULT_GROUP_MEMORY_MIB,
             &[Member {
                 name: "points",
                 module: &bytes,
@@ -1404,7 +1404,8 @@ fn returned_builtin_proxy_does_not_keep_its_group_alive() {
 fn growth_limits_return_failure_without_stopping_the_group() {
     crate::test_stack::on_guest_stack(|| {
         for body in [
-            "i32.const 4096 memory.grow",
+            // Past the default 1 GiB (16,384 pages) on top of what the guest already has.
+            "i32.const 16384 memory.grow",
             "ref.null func i32.const 1048576 table.grow",
         ] {
             let module = module(&format!(
@@ -1530,7 +1531,7 @@ fn trap_stops_group_not_independent_group() {
         let echo = guest(*mod_api::wire::LAYOUT, "i64.const 2199023255556");
         let members = WasmMod::instantiate(
             &engine,
-            &[],
+            DEFAULT_GROUP_MEMORY_MIB,
             &[
                 Member {
                     name: "trap",
@@ -1570,7 +1571,7 @@ fn a_refusal_keeps_every_member_of_the_group_answering() {
         let echo = guest(*mod_api::wire::LAYOUT, "i64.const 2199023255556");
         let members = WasmMod::instantiate(
             &engine,
-            &[],
+            DEFAULT_GROUP_MEMORY_MIB,
             &[
                 Member {
                     name: "flaky",
@@ -1927,12 +1928,41 @@ fn subscription_stack_refusal_is_not_cached() {
 #[test]
 fn a_guest_call_that_answers_nothing_names_why() {
     assert_eq!(
-        fault_reason(&wasmtime::Error::new(wasmtime::Trap::Interrupt), 100),
+        fault_reason(
+            &wasmtime::Error::new(wasmtime::Trap::Interrupt),
+            100,
+            &mut Limits::new("a+b".into(), 64)
+        ),
         "epoch deadline: the call ran past its budget of 100 ticks (about 100 ms)"
     );
     assert_eq!(
-        fault_reason(&wasmtime::Error::new(wasmtime::Trap::StackOverflow), 100),
+        fault_reason(
+            &wasmtime::Error::new(wasmtime::Trap::StackOverflow),
+            100,
+            &mut Limits::new("a+b".into(), 64)
+        ),
         "wasm trap: call stack exhausted"
+    );
+    // A trap after a refused memory.grow names the group and its limit, once.
+    let mut limits = Limits::new("a+b".into(), 64);
+    assert!(
+        !wasmtime::ResourceLimiter::memory_growing(&mut limits, 64 << 20, 65 << 20, None).unwrap()
+    );
+    assert_eq!(
+        fault_reason(
+            &wasmtime::Error::new(wasmtime::Trap::UnreachableCodeReached),
+            100,
+            &mut limits
+        ),
+        "wasm trap: wasm `unreachable` instruction executed, after memory.grow to 65 MiB was refused at group a+b's limit of 64 MiB"
+    );
+    assert_eq!(
+        fault_reason(
+            &wasmtime::Error::new(wasmtime::Trap::UnreachableCodeReached),
+            100,
+            &mut limits
+        ),
+        "wasm trap: wasm `unreachable` instruction executed"
     );
     note("its group has stopped after an earlier fault".into());
     assert_eq!(
@@ -1960,7 +1990,7 @@ fn prepared_runtime_writes_payload_once_for_eight_scalar_asks() {
         let engine = engine().unwrap();
         let module = WasmMod::instantiate(
             &engine,
-            &[],
+            DEFAULT_GROUP_MEMORY_MIB,
             &[Member {
                 name: "test",
                 module: &bytes,
@@ -2004,4 +2034,58 @@ fn prepared_runtime_writes_payload_once_for_eight_scalar_asks() {
             assert!(!weak.check(token.0, token.1));
         }
     });
+}
+
+/// Grows the group's memory a page at a time until `memory.grow` answers -1, then writes and reads
+/// its last byte: the guest goes on at the limit. Answers the pages it reached.
+fn grow_until_refused(memory_mib: u32) -> i32 {
+    let engine = engine().unwrap();
+    let mut store = Store::new(
+        &engine,
+        State::new(Limits::new("grower".into(), memory_mib)),
+    );
+    store.limiter(|state| &mut state.limits);
+    store.set_epoch_deadline(30_000);
+    let memory = Memory::new(&mut store, wasmtime::MemoryType::new(1, None)).unwrap();
+    let module = wasmtime::Module::new(
+        &engine,
+        wat::parse_str(
+            r#"(module
+            (import "env" "memory" (memory 1))
+            (func (export "grow") (result i32)
+                (local $pages i32)
+                (block $refused
+                    (loop $more
+                        (br_if $refused (i32.eq (memory.grow (i32.const 1)) (i32.const -1)))
+                        (br $more)))
+                (local.set $pages (memory.size))
+                (i32.store8 (i32.sub (i32.mul (local.get $pages) (i32.const 65536)) (i32.const 1)) (i32.const 7))
+                (if (i32.ne (i32.load8_u (i32.sub (i32.mul (local.get $pages) (i32.const 65536)) (i32.const 1))) (i32.const 7))
+                    (then unreachable))
+                (local.get $pages)))"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let instance = wasmtime::Instance::new(&mut store, &module, &[memory.into()]).unwrap();
+    let grow = instance
+        .get_typed_func::<(), i32>(&mut store, "grow")
+        .unwrap();
+    let pages = grow.call(&mut store, ()).unwrap();
+    assert_eq!(
+        store.data().limits.refused_growth,
+        Some(((pages as usize) + 1) << 16)
+    );
+    pages
+}
+
+#[test]
+fn a_group_grows_past_256_mib_to_its_default_limit_and_goes_on_there() {
+    // 1 GiB of 64 KiB pages: four times the old 256 MiB.
+    assert_eq!(grow_until_refused(DEFAULT_GROUP_MEMORY_MIB), 16_384);
+}
+
+#[test]
+fn a_lowered_limit_refuses_growth_inside_the_guest() {
+    assert_eq!(grow_until_refused(64), 1_024);
 }
