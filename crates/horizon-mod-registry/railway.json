@@ -9,6 +9,7 @@
       "/crates/horizon-mod-api-gen/**",
       "/crates/horizon-game-discovery/**",
       "/crates/horizon-mod-vocab/**",
+      "/crates/horizon-client/src/game/native_hooks/**",
       "/crates/horizon-mod-runtime/**",
       "/crates/horizon-mod-api-macros/**",
       "/crates/horizon-mod-point-shape/**",

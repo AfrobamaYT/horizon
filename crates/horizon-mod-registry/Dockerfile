@@ -9,6 +9,8 @@ COPY crates/horizon-core crates/horizon-core
 COPY crates/horizon-mod-api-gen crates/horizon-mod-api-gen
 COPY crates/horizon-game-discovery crates/horizon-game-discovery
 COPY crates/horizon-mod-vocab crates/horizon-mod-vocab
+# Vocab generation tracks native hook declarations without building gameplay.
+COPY crates/horizon-client/src/game/native_hooks crates/horizon-client/src/game/native_hooks
 COPY crates/horizon-mod-runtime crates/horizon-mod-runtime
 COPY crates/horizon-mod-api-macros crates/horizon-mod-api-macros
 COPY crates/horizon-mod-point-shape crates/horizon-mod-point-shape
