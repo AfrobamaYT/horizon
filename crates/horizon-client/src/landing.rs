@@ -723,8 +723,8 @@ impl LivingFallWorld for FallCall<'_, '_, '_, '_> {
     fn play_fall_sound(&mut self, sound: SceneSound) -> Result<()> {
         self.world.entity_sound(sound, 1.0, 1.0)
     }
-    /// `LivingEntity.playBlockFallSound`. Its `isSilent()` early return has no player
-    /// counterpart here: Horizon stores no Silent flag for players.
+    /// `LivingEntity.playBlockFallSound`. The server keeps no Silent flag for a player,
+    /// so its `isSilent()` return is the landing client's (`remote::fall_sound`).
     fn play_block_fall_sound(&mut self) -> Result<()> {
         let p = self.world.player.position;
         let position = BlockPos::containing(Vec3::new(p.x, p.y - 0.20000000298023224, p.z));
