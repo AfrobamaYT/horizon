@@ -2170,7 +2170,11 @@ mod holder_set_tests {
         let specs = item_specs(&json!({"type": "neoforge:or",
             "values": ["#minecraft:swords", "minecraft:stick"]}));
         assert!(Enchantments::item_in(&items, &specs, "minecraft:stick"));
-        assert!(Enchantments::item_in(&items, &specs, "minecraft:iron_sword"));
+        assert!(Enchantments::item_in(
+            &items,
+            &specs,
+            "minecraft:iron_sword"
+        ));
         assert!(!Enchantments::item_in(&items, &specs, "minecraft:dirt"));
     }
 }

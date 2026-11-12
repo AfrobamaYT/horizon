@@ -320,7 +320,7 @@ impl super::block_predicate::PredicateBlockResolver for FeatureBlockBindings<'_>
             }
             return self
                 .blocks
-                .get(&identifier(&name)?)
+                .get(&identifier(name)?)
                 .cloned()
                 .ok_or_else(|| DecodeError::Registry(format!("unknown predicate block {name}")));
         }
