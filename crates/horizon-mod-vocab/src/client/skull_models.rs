@@ -3,7 +3,7 @@
 
 /// A skull type a native mod registers once at start: the `kind` a `minecraft:head` item model
 /// names, the model layer it is drawn with, and its default texture (`SKIN_BY_TYPE`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 // exhaustive: a mod builds it with a literal, as `registerSkullModel` takes a type and its model
 #[derive(horizon_mod_api_macros::Wire)]
 pub struct SkullModel {

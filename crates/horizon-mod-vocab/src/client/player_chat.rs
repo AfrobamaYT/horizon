@@ -7,6 +7,7 @@ use crate::*;
 /// message as the player sent it, beside the decorated line the chat shows.
 /// The signature bytes are left out; `signed` says whether one validated.
 #[derive(Clone, Debug, Default, PartialEq, horizon_mod_api_macros::Wire)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct PlayerChatInfo {
     /// `signedBody().content()`: the plain text the player typed.
     pub body: String,
