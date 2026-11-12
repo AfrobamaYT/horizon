@@ -16,6 +16,8 @@ mod block_entity_transform;
 mod load_conditions;
 #[path = "wire_loopback/loot_tags.rs"]
 mod loot_tags_wire;
+#[path = "wire_loopback/piston_push_reaction.rs"]
+mod piston_push_reaction;
 #[path = "wire_loopback/use_item_hand.rs"]
 mod use_item_hand;
 thread_local! {
@@ -152,6 +154,17 @@ impl WasmMod {
         };
         let bytes = if self.corrupt || APPEND_ATTACK.get() == 3 {
             &bytes[..bytes.len().saturating_sub(1)]
+        } else {
+            bytes
+        };
+        let invalid;
+        let bytes = if piston_push_reaction::UNKNOWN_REACTION.get() {
+            // A replacement response is Option<PushReaction>: Some followed by its enum tag.
+            let mut out = Writer::new();
+            out.put(&true);
+            out.put(&u32::MAX);
+            invalid = out.into_bytes();
+            invalid.as_slice()
         } else {
             bytes
         };

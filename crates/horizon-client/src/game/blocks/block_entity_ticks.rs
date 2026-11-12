@@ -621,7 +621,7 @@ impl Game<'_> {
     }
     /// `AbstractFurnaceBlockEntity.serverTick` of the furnace at `pos`, and
     /// its block's `lit` following it.
-    fn tick_furnace(&mut self, pos: Pos) -> Result<()> {
+    pub(super) fn tick_furnace(&mut self, pos: Pos) -> Result<()> {
         // What the hooks need from before the tick, without cloning stacks: the
         // fuel's id only while the furnace is out (it can light this tick), the
         // input's id (a last item is gone after it smelts) and the result count.

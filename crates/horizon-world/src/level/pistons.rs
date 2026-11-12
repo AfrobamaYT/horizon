@@ -349,26 +349,23 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             if b.facts(state).hardness == -1.0 {
                 return false;
             }
-            match b.facts(state).push {
+            match b.piston_reaction(state) {
                 PushReaction::Immoveable => return false,
                 PushReaction::Popped => return allow_destroyable,
-                PushReaction::Push => return direction == connection,
+                PushReaction::Push if direction != connection => return false,
                 _ => {}
             }
         } else if b.table.bool(state, b.props.extended) {
             return false;
         }
-        // `!state.hasBlockEntity()`, extended to mod block entities. A part's
-        // `piston_carries_block_entity` answers first: `Some(true)` moves a mod block entity
-        // with its block (#3184), never a vanilla one, whose state other
-        // tables keep by position.
-        let mod_entity = self.level.has_mod_block_entity(pos);
-        let vanilla_entity =
-            !mod_entity && b.has_flag(state, super::data::state_flags::BLOCK_ENTITY);
-        match self.level.adjust_piston_carries_block_entity(pos, state) {
-            Some(movable) => movable && !vanilla_entity,
-            None => !vanilla_entity && !mod_entity && !self.level.has_native_block_entity(state),
-        }
+        // One order for every moving reaction: reaction first, then the block-entity rule.
+        // Diverges from vanilla: push only never discards a block entity.
+        let has_entity = b.has_flag(state, super::data::state_flags::BLOCK_ENTITY)
+            || self.level.has_mod_block_entity(pos)
+            || self.level.has_native_block_entity(state);
+        self.level
+            .adjust_piston_carries_block_entity(pos, state)
+            .unwrap_or(!has_entity)
     }
     fn is_slime_or_honey(&self, state: BlockStateId) -> bool {
         self.b.is_block(state, self.b.named.slime_block)
@@ -415,7 +412,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         };
         let next = self.state(r.start);
         if !self.is_pushable(next, r.start, r.push_direction, false, r.piston_direction) {
-            if r.extending && self.b.facts(next).push == PushReaction::Popped {
+            if r.extending
+                && self.b.piston_reaction(next) == PushReaction::Popped
+                && self.is_pushable(next, r.start, r.push_direction, true, r.piston_direction)
+            {
                 r.to_destroy.push(r.start);
                 return Some((r.to_push, r.to_destroy, r.push_direction));
             }
@@ -503,7 +503,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             {
                 return false;
             }
-            if self.b.facts(next).push == PushReaction::Popped {
+            if self.b.piston_reaction(next) == PushReaction::Popped {
                 r.to_destroy.push(pos);
                 return true;
             }
@@ -592,9 +592,12 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             let state = self.state(*pos);
             shapes.push(state);
             delete_after.put(PosKey(*pos), state);
-            // A mod block entity `is_pushable` let through travels with its
-            // block, taken out before any source is overwritten (#3184).
-            if self.level.has_mod_block_entity(*pos) {
+            // An allowed block entity travels through the existing carry machinery,
+            // taken out before any source is overwritten (#3184).
+            if b.has_flag(state, super::data::state_flags::BLOCK_ENTITY)
+                || self.level.has_mod_block_entity(*pos)
+                || self.level.has_native_block_entity(state)
+            {
                 self.level
                     .carry_block_entity(*pos, rel(*pos, move_direction));
             }
@@ -792,7 +795,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                             false,
                             direction,
                         )
-                        || (b.facts(moving_state).push != PushReaction::PushPull && !is_piston)
+                        || (b.piston_reaction(moving_state) != PushReaction::PushPull && !is_piston)
                     {
                         self.remove_block(rel(pos, direction), false);
                     } else {

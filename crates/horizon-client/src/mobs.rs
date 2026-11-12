@@ -2017,15 +2017,9 @@ pub enum MobEvent {
         from: [f64; 3],
         direction: [f64; 3],
     },
-    /// `Entity.move(MoverType.SHULKER, delta)`: shift a target's position
-    /// (an opening shulker lifts what stands on its shell).
-    Shift {
-        target: Who,
-        delta: [f64; 3],
-    },
-    /// `Shulker.onPeekAmountChange` for the entities kept outside the mob
-    /// list: the opening lid of `shulker` moves every armor stand with
-    /// physics whose box meets `area` (the box the lid swept) by `delta`.
+    /// `Shulker.onPeekAmountChange`: the opening lid of `shulker` moves every
+    /// entity it may push whose box meets `area` (the box the lid swept) by
+    /// `Entity.move(MoverType.SHULKER, delta)`.
     LidPush {
         shulker: u32,
         area: Aabb,

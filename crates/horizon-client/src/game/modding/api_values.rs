@@ -405,6 +405,7 @@ where
 /// Validate a mod value against the game's registry before admitting it to engine state.
 #[path = "api_values/content_declarations.rs"]
 mod content_declarations;
+pub(in crate::game) use content_declarations::push_reaction;
 
 pub(crate) trait TryIntoEngine<Context: ?Sized = Items> {
     type Engine;
