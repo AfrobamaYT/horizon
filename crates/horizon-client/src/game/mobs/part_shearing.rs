@@ -7,7 +7,7 @@ use horizon_client::{
     items::ItemStack,
     mobs::{Species, Who},
 };
-use horizon_core::geometry::Vec3;
+use horizon_core::{geometry::Vec3, random::RandomSource};
 use mod_api::{
     PlayerRef,
     content::crash::{ModCall, enter_native_mod},
