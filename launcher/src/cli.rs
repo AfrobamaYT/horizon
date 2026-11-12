@@ -1341,9 +1341,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
             mixins_from_source,
         } => {
             native_permission(trust_native_code)?;
-            if mixins_from_source {
-                native_mods::mixins_from_source();
-            }
+            native_mods::mixins_from_source(mixins_from_source);
             if catalog {
                 let discovered =
                     native_mods::pinned_catalog_with_modules(&folder.expect("required by clap"))?;

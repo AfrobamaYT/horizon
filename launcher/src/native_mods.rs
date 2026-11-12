@@ -57,8 +57,8 @@ pub const MIXINS_REV: &str = horizon_mod_package::mixins_tool::REV;
 
 /// `native-build --mixins-from-source`: this process builds the horizon-mixins tool from its
 /// pinned source and never looks for the prebuilt one, so CI keeps that path proven.
-pub fn mixins_from_source() {
-    mixins_patch::FROM_SOURCE.store(true, std::sync::atomic::Ordering::Relaxed);
+pub fn mixins_from_source(on: bool) {
+    mixins_patch::FROM_SOURCE.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Native mods use the SDK's optimized compilation settings.
