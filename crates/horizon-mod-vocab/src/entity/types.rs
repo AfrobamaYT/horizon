@@ -98,6 +98,10 @@ pub struct ServerPlayer {
     pub address: String,
 }
 
+/// A persistent entity UUID in the same bit order as the value from `EntityRef::uuid`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, horizon_mod_api_macros::Wire)]
+pub struct EntityUuid(pub u128);
+
 /// An entity of the open world, for the `Host` methods that read or change one
 /// (`entity.position(host)`). It holds the world's epoch and the entity's id: ids
 /// are shared by every server level and never reused while the server world is

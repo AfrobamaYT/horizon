@@ -23,6 +23,12 @@ pub trait EntitiesHost {
 #[horizon_mod_api_macros::host_area]
 pub trait EntitiesServerHost {
     /// Side: server.
+    /// Finds a loaded entity by UUID in the server level in place for this
+    /// hook. Returns None when the entity is unloaded, in another level, or
+    /// temporarily unavailable. The lookup leaves entity and level state alone.
+    #[access(WorldOnly)]
+    fn entity_by_uuid(&self, uuid: EntityUuid) -> Option<EntityRef>;
+    /// Side: server.
     /// Spawns an entity of `kind` (`minecraft:item_display`) at `pos` in the
     /// level in place, `dimension`, from `nbt` (its compound, as `/summon
     /// <kind> <pos> <nbt>` takes it; passengers included): its id. None on a
