@@ -1196,13 +1196,12 @@ impl<'a> Game<'a> {
         horizon_client::spans::time("spawn_raids", || self.tick_raids());
         horizon_client::spans::time("spawn_natural", || self.spawn_natural());
         // ServerChunkCache.tickChunks: the custom spawners tick only with spawn_mobs.
-        if self.ui.rules.bool("spawn_mobs") {
-            horizon_client::spans::time("spawn_custom", || {
-                self.tick_wandering_trader();
-                self.tick_patrol_spawner();
-                self.tick_cat_spawner();
-                self.tick_village_siege();
-            });
+        if self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
+        {
+            horizon_client::spans::time("spawn_custom", || self.tick_custom_spawners());
         }
         self.lan_synced_since(from);
     }
