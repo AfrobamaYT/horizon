@@ -48,14 +48,14 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   executable alternative takes precedence over a denied one; equally valid alternatives keep registration order.
   A name vanilla has, or a usage that doesn't parse, is left out with a warning in the log.
 
-- **`run_mod_command`**: `event.command` is an owned `CommandInvocation`
-  with its literal path and named `CommandArgumentValue` values, not raw command text. Integer, number and boolean
+- **`run_mod_command`**: `event.command` is an owned `CommandInvocation` with its literal path, its `dimension` and
+  `position` after `execute in/at`, and named `CommandArgumentValue` values, not raw command text. Integer, number and boolean
   values retain the dispatcher's types; word and greedy text are strings. Player selectors resolve to a single live
   `PlayerRef`, items become component-bearing stacks of one, and block positions resolve source-relative/local
   coordinates without requiring loaded chunks. A custom argument is `CommandArgumentValue::Custom { kind, value }`,
   where `kind` is its registered type's id and `value` what its parser returned. Missing optional arguments are
-  absent. Parsing, permission and
-  resolution failures produce feedback without calling listeners. The console resolves from the Overworld spawn's
+  absent. `PlayerRef::profile` and `ServerHost::advancement` read the source's profile and loaded advancements.
+  Parsing, permission and resolution failures produce feedback without calling listeners. The console resolves from the Overworld spawn's
   block corner with zero rotation and no source entity (`@s` fails). Return `Flow::Cancel` when handled.
 - **`native_armor_stand_manipulate(player, name, stand_id, slot, cancel)`**: a player takes an item from an armor stand or
   puts one on it, heard after the stand's disabled-slot checks and before anything moves. `slot` is `mainhand`,

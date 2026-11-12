@@ -33,11 +33,11 @@ pub use entity::types::{
     ActiveEffect, AttributeModifier, AttributeOperation, AttributeRegistrationError, Billboard,
     ChannelRef, ChatVisibility, ClientInfo, Deflection, DisplayKind, DisplayRef, DragonPhase,
     DragonRef, EffectApplicable, EffectKey, EffectTickChange, EntityAttributeError, EntityRef,
-    EntityTypeKey, FishingHookRef, GoalSpec, ItemEntityRef, LeashHolder, LivingRef, MainHand,
-    MerchantRef, MinecartKind, MinecartRef, MobFilter, MobGoalEntry, MobRef, ModifierLifetime,
-    OriginalPlayerRef, PierceLevelError, PlayerAbilities, PlayerAction, PlayerActionSetup,
-    PlayerExperience, PlayerFood, PlayerRef, ProjectileRef, RemovalReason, ServerPlayer,
-    TextAlignment, Transformation, UnspawnedMobRef,
+    EntityTypeKey, FishingHookRef, GameProfile, GoalSpec, ItemEntityRef, LeashHolder, LivingRef,
+    MainHand, MerchantRef, MinecartKind, MinecartRef, MobFilter, MobGoalEntry, MobRef,
+    ModifierLifetime, OriginalPlayerRef, PierceLevelError, PlayerAbilities, PlayerAction,
+    PlayerActionSetup, PlayerExperience, PlayerFood, PlayerRef, ProfileProperty, ProjectileRef,
+    RemovalReason, ServerPlayer, TextAlignment, Transformation, UnspawnedMobRef,
 };
 pub use item::types::{
     ArmorHurt, ArrowPickup, ClientMiningPrediction, Dispensed, EnchantmentInfo, EnchantmentKey,

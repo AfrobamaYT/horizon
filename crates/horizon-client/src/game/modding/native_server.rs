@@ -2189,7 +2189,7 @@ impl Game<'_> {
         context: Context,
     ) -> Result<mod_api::CommandInvocation, horizon_client::command::CommandError> {
         use super::commands::err;
-        use mod_api::{CommandArgument, CommandArgumentValue as Value, CommandInvocation};
+        use mod_api::{CommandArgument, CommandArgumentValue as Value};
         let mut arguments = Vec::with_capacity(context.args.len());
         for argument in context.args {
             let value = match argument.value {
@@ -2275,7 +2275,7 @@ impl Game<'_> {
             };
             arguments.push(CommandArgument::new(argument.name, value));
         }
-        Ok(CommandInvocation::new(context.literals, arguments))
+        Ok(self.native_invocation(context.literals, arguments))
     }
 
     /// A guest's command for the mods, inside their swap
