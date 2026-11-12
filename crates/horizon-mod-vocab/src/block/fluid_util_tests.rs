@@ -181,3 +181,25 @@ fn a_fluid_without_a_bucket_sound_sends_only_its_game_event() {
     };
     assert_eq!(host.game_events, vec![event]);
 }
+
+#[test]
+fn a_stale_player_cannot_transfer_from_a_replacement_players_hand() {
+    let mut host = host("minecraft:water_bucket", 1);
+    let player = host.player(PLAYER).unwrap();
+    let level = player.level(&host).unwrap();
+    host.players = Default::default();
+    host.join(PLAYER, PLAYER_ENTITY + 1)
+        .slots
+        .insert(0, stack("minecraft:water_bucket", 1));
+    assert!(!fluid_util::interact_with_fluid_handler(
+        &mut host,
+        player,
+        Hand::Main,
+        level,
+        TANK,
+        None,
+    ));
+    assert_eq!(held(&host), None);
+    assert_eq!(hand(&host), Some(stack("minecraft:water_bucket", 1)));
+    assert!(host.sounds.is_empty() && host.game_events.is_empty());
+}

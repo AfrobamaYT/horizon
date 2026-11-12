@@ -66,6 +66,9 @@ pub fn interact_with_handler(
     pos: Option<[i32; 3]>,
     handler: &Capability<dyn ResourceHandler<FluidResource>>,
 ) -> bool {
+    let Some(level) = player.level(host) else {
+        return false;
+    };
     let place = ItemPlace::PlayerHand {
         player: player.uuid(),
         hand,
@@ -85,7 +88,7 @@ pub fn interact_with_handler(
         Some([x, y, z]) => Some([x, y, z].map(|c| f64::from(c) + 0.5)),
         None => player.entity().position(host),
     };
-    if let (Some(level), Some(at)) = (player.level(host), at) {
+    if let Some(at) = at {
         trigger_sound_and_game_event(host, &fluid, level, at, Some(player), pickup);
     }
     true
