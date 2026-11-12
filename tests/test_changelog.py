@@ -5,7 +5,8 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from tools.changelog import collect, members, merged_prs, render
+from tools.changelog import collect, escaped, get, members, merged_prs, render
+from urllib.error import HTTPError
 
 
 class ChangelogTests(unittest.TestCase):
@@ -74,6 +75,62 @@ class ChangelogTests(unittest.TestCase):
         get.return_value = {'data': {'search': {'issueCount': 1001}}}
         with self.assertRaisesRegex(RuntimeError, '1,000 results'):
             merged_prs('2026-11-13')
+
+    @patch('tools.changelog.search', return_value=[])
+    @patch('tools.changelog.merged_prs', return_value=[])
+    @patch('tools.changelog.get')
+    def test_old_release_does_not_stop_pagination(self, api, pulls, search):
+        old = {'published_at': '2020-01-01T00:00:00Z'}
+        recent = {'published_at': '2026-11-13T00:00:00Z'}
+        api.side_effect = [[old] * 100, [recent]]
+        self.assertEqual(collect(self.now, 1)['releases'][-1], recent)
+        self.assertEqual(api.call_count, 2)
+
+    @patch('tools.changelog.DEADLINE', None)
+    @patch('tools.changelog.REQUESTS', 99)
+    @patch('tools.changelog.time.sleep')
+    @patch('tools.changelog.urlopen')
+    def test_retry_counts_against_limit(self, open_url, sleep):
+        open_url.side_effect = HTTPError('url', 429, 'limited', {}, None)
+        with self.assertRaisesRegex(RuntimeError, 'budget exceeded before retry'):
+            get('https://api.github.com/test')
+        self.assertEqual(open_url.call_count, 1)
+
+    @patch('tools.changelog.DEADLINE', 10)
+    @patch('tools.changelog.REQUESTS', 0)
+    @patch('tools.changelog.time.monotonic', side_effect=[0, 0, 0, 11])
+    @patch('tools.changelog.time.sleep')
+    @patch('tools.changelog.urlopen')
+    def test_retry_rechecks_deadline(self, open_url, sleep, clock):
+        open_url.side_effect = HTTPError('url', 429, 'limited', {}, None)
+        with self.assertRaisesRegex(RuntimeError, 'budget exceeded before retry'):
+            get('https://api.github.com/test')
+        self.assertEqual(open_url.call_count, 1)
+
+    def test_tool_prerelease_is_labelled(self):
+        self.data['releases'] = [{'id': 1, 'draft': False, 'prerelease': True,
+            'tag_name': 'tool-v1', 'name': 'Tool', 'published_at': '2026-11-13T00:00:00Z'}]
+        self.assertIn('(tool pre-release)', render(self.data, self.now))
+
+    def test_readable_hostile_title(self):
+        title = "# Hello_foo: 'x' (#12), a-b [link](bad) <img> `code` | @all"
+        output = escaped(title)
+        self.assertIn("Hello_foo: 'x' (#12), a-b", output)
+        for char in '[]<>`|@':
+            self.assertNotIn(char, output)
+
+    def test_contributors_are_uncapped_and_maintenance_is_separate(self):
+        base = self.data['prs'][0]
+        self.data['prs'] = [dict(copy.deepcopy(base), number=n) for n in range(20)]
+        output = render(self.data, self.now)
+        self.assertIn('#### @author (20)', output)
+        self.assertEqual(output.count('/pull/'), 20)
+        for pr in self.data['prs']:
+            pr['user']['login'] = 'arismoko'
+        output = render(self.data, self.now)
+        self.assertIn('### Maintenance', output)
+        self.assertEqual(output.count('/pull/'), 5)
+        self.assertIn('15 more maintenance', output)
 
     def test_bot_filter_and_label_override(self):
         self.data['prs'] = [self.data['prs'][0]]
