@@ -24,6 +24,7 @@ mod fixes_legacy;
 mod fixes_mid;
 mod fixes_old;
 mod items;
+mod single;
 pub mod json;
 pub mod progress;
 pub mod schema;
@@ -32,8 +33,9 @@ mod text;
 pub mod world_upgrader;
 
 use dynamic::{as_str, string};
-use horizon_core::nbt::{Compound, Tag};
+use horizon_core::nbt::Tag;
 use schema::{Key, Ty, key, walk};
+pub use single::{UpgradeError, upgrade_block_entity, upgrade_entity};
 pub use tables::{available as tables_available, set_resources};
 
 /// The DataVersion of the game.
@@ -331,43 +333,6 @@ pub fn native_upgrade_block_state(
     };
     let new = block_state_data::upgrade_state(&old);
     (new.name, new.props)
-}
-
-/// One block entity's NBT saved at `data_version`, upgraded as the chunk loader upgrades the block entities of a
-/// chunk of that version: each block entity type's fixes, up to the current DataVersion. A block entity whose `id`
-/// that version doesn't know stays as it is, as a chunk keeps it. Fixes of the whole chunk (the blocks around it,
-/// the removal of bed block entities) have no chunk to act on and don't run. A tag the fixes can't read comes back
-/// as it was saved.
-pub fn upgrade_block_entity(data_version: i32, tag: Compound) -> Compound {
-    let value = Tag::Compound(tag.clone());
-    if schema::block_entity_known(&value, key(data_version.max(0) as u32, 0)) {
-        upgrade_value(Ty::BlockEntity, tag, data_version)
-    } else {
-        tag
-    }
-}
-
-/// One entity's NBT saved at `data_version`, upgraded as the entity chunk loader upgrades the entities of a chunk
-/// of that version: each entity type's fixes, its passengers' included, up to the current DataVersion. A tag the
-/// fixes can't read comes back as it was saved.
-pub fn upgrade_entity(data_version: i32, tag: Compound) -> Compound {
-    upgrade_value(Ty::EntityTree, tag, data_version)
-}
-
-/// [`update`] of one value of type `root` up to [`CURRENT`]: a value the fixes panic on comes back as it was.
-fn upgrade_value(root: Ty, tag: Compound, data_version: i32) -> Compound {
-    if data_version >= CURRENT {
-        return tag;
-    }
-    let mut value = Tag::Compound(tag.clone());
-    let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        update(root, &mut value, data_version, CURRENT);
-    }))
-    .is_ok();
-    match value {
-        Tag::Compound(upgraded) if done => upgraded,
-        _ => tag,
-    }
 }
 
 /// `SimpleRegionStorage.upgradeChunkTag` for entity chunks (default version -1)
