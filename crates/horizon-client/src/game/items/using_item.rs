@@ -89,12 +89,12 @@ impl Game<'_> {
             return;
         };
         // `isSameItem(getItemInHand(hand), useItem)`: another item stops the use
-        // of the stack it began with, without a release.
+        // of the stack it began with, without a release. The same item goes on;
+        // only the item is compared, so the start's stack is kept as it was.
         if let Some(item) = self.use_item.take_if(|item| item.item != stack.item) {
             self.stop_using_item(&item);
             return;
         }
-        self.use_item = Some(stack.clone());
         let hand_changed = self.use_hand_changed(slot);
         if !self.right || hand_changed || self.screen != Screen::Playing {
             self.using = None;
