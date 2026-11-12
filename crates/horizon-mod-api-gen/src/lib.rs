@@ -637,6 +637,18 @@ thread_local! {
     static CAPTURED_RERUNS: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
 }
 
+/// Tracks the stager's stamp, `.horizon-source-staged`, only in a staged copy. Cargo reruns a build
+/// script on every build while a tracked path is missing, so tracking an absent stamp rebuilt
+/// horizon-mod-points, horizon-client and every crate above them on each `cargo` invocation of an
+/// ordinary checkout. A stamp never appears in a tree that was already built: staging writes it
+/// first, into a fresh copy, and refuses a tree that already has one.
+pub(crate) fn rerun_if_staged(root: &std::path::Path) {
+    let stamp = root.join(".horizon-source-staged");
+    if stamp.is_file() {
+        rerun_if_changed(&stamp.display());
+    }
+}
+
 /// Tells the build script's Cargo to rerun it when `path` changes.
 pub(crate) fn rerun_if_changed(path: &impl std::fmt::Display) {
     #[cfg(test)]
