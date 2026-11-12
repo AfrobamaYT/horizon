@@ -11,6 +11,13 @@ pub struct ConditionError {
     pub message: String,
 }
 
+impl std::fmt::Display for ConditionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+impl std::error::Error for ConditionError {}
+
 impl ConditionError {
     /// A refusal with `message` as its diagnostic.
     pub fn new(message: impl Into<String>) -> Self {
@@ -106,5 +113,19 @@ impl LoadConditions for LoadConditionDeclarations {
         }
         self.entries.insert(name, (owner.to_owned(), condition));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod error_tests {
+    #[test]
+    fn condition_error_supports_standard_error_propagation() {
+        fn propagate() -> Result<(), Box<dyn std::error::Error>> {
+            let value: Result<(), super::ConditionError> =
+                Err(super::ConditionError::new("bad value"));
+            value?;
+            Ok(())
+        }
+        assert_eq!(propagate().unwrap_err().to_string(), "bad value");
     }
 }

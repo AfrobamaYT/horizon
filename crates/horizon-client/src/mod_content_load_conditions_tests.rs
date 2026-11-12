@@ -19,7 +19,9 @@ fn worldgen_entry_reads_the_feature_folder() {
 #[ignore = "full content root: requires prepared resources"]
 fn registered_conditions_select_content_root_tags_and_structure_modifiers() {
     let scratch = tempfile::tempdir().unwrap();
-    let base = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+    let Some(base) = prepared() else {
+        return;
+    };
     let inventory = horizon_mod_package::enabled::EnabledMods::new([(
         "testmod".into(),
         horizon_mod_package::Side::Both,
@@ -137,4 +139,44 @@ fn tags_merge_without_repeats() {
         merged["values"],
         serde_json::json!(["minecraft:stone", "ruby:ruby_block"])
     );
+}
+
+#[test]
+#[ignore = "full content root: requires prepared resources"]
+fn failed_condition_build_removes_generated_staging() {
+    let Some(base) = prepared() else {
+        return;
+    };
+    let scratch = tempfile::tempdir().unwrap();
+    let package = folder_mod(
+        &scratch.path().join("module"),
+        &[
+            ("horizon-mod.toml", &manifest("testmod", "")),
+            (
+                "data/testmod/tags/block/bad.json",
+                r#"{"neoforge:conditions":[{"type":"testmod:flag","value":"bad"}],"values":["minecraft:stone"]}"#,
+            ),
+        ],
+    );
+    let conditions = LoadConditions::new([]).with_lookup(
+        BTreeMap::from([("testmod".into(), "testmod".into())]),
+        |name, _| (name == "testmod:flag").then(|| Err("bad value".into())),
+    );
+    let out = scratch.path().join("candidate");
+    let error = super::super::build_with_conditions(
+        &base,
+        Path::new(""),
+        &[package],
+        &out,
+        &horizon_mod_package::enabled::EnabledMods::default(),
+        &conditions,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        error.contains("data/testmod/tags/block/bad.json"),
+        "{error}"
+    );
+    assert!(!out.exists());
+    assert!(!scratch.path().join("candidate-tables").exists());
 }

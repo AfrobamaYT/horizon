@@ -24,13 +24,31 @@ impl Game<'_> {
         }
         self.prepare_server_reload(stack, resources)
     }
+    pub(super) fn prepare_pack_condition_reload(
+        &mut self,
+        stack: &super::functions::PackStack,
+    ) -> Result<
+        super::server_reload::PreparedServerReload,
+        mod_api::__private::reload::ReloadStageError,
+    > {
+        self.mods.load_condition_candidate = None;
+        self.begin_condition_reload(stack, &self.options.resources.clone())
+    }
+
     pub(super) fn stage_condition_inventory(
         &mut self,
     ) -> horizon_client::Result<Option<horizon_assets::resource_source::ResourceRoot>> {
+        self.protect_condition_root();
         self.mods.load_condition_candidate = None;
         let inventory = horizon_mod_package::enabled::EnabledMods::read(&self.options.resources)?;
         self.mods.load_condition_candidate = Some(conditions_for_mods(&self.mods, &inventory)?);
         self.stage_enabled_inventory()
+    }
+
+    pub(super) fn protect_condition_root(&mut self) {
+        self.mods.active_condition_root = Some(horizon_client::mod_content::retain_root(
+            &self.options.resources,
+        ));
     }
 
     pub(super) fn condition_root_needs_reload(&self) -> bool {
@@ -76,6 +94,9 @@ pub(super) fn conditions_for_mods(
     if table.is_empty() {
         return Ok(conditions);
     }
+    let mut enabled: std::collections::BTreeSet<_> =
+        table.values().map(|(owner, _)| owner.clone()).collect();
+    enabled.retain(|owner| sources.code_owner_enabled(owner));
     let owned = table
         .iter()
         .map(|(name, (owner, _))| (name.namespace().to_owned(), owner.clone()))
@@ -83,6 +104,9 @@ pub(super) fn conditions_for_mods(
     Ok(conditions.with_lookup(owned, move |name, args| {
         let id = mod_api::Identifier::parse(name).ok()?;
         let (owner, handler) = table.get(&id)?;
+        if !enabled.contains(owner) {
+            return Some(Ok(false));
+        }
         let mut arguments = args.as_object().cloned().unwrap_or_default();
         arguments.remove("type");
         Some(

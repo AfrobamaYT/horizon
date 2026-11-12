@@ -74,6 +74,7 @@ pub fn build_with_conditions(
         "{}-tables",
         out.file_name().unwrap_or_default().to_string_lossy()
     ));
+    let _staging = super::root_lifetime::StagingRoot(tables_root.clone());
     let overlay = Overlay::new(base, &tables_root)?;
     let jobs = table_jobs(base, &overlay)?;
     tables(base, &plan, &overlay, &jobs)?;

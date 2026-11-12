@@ -2855,6 +2855,9 @@ fn link_file(
     fs::copy(target, at).map(|_| ())
 }
 
+mod root_lifetime;
+use root_lifetime::prune_roots;
+pub use root_lifetime::retain_root;
 mod load_conditions;
 use load_conditions::merge_tag;
 pub use load_conditions::{build_with_conditions, resource_root_with_conditions};
@@ -3191,6 +3194,7 @@ pub fn resolved_resources(
         let generated: Vec<String> =
             serde_json::from_slice(&fs::read(prepared.join(GENERATED_FILES))?)?;
         let generated_source = ResourceSource::directory(prepared.clone());
+        root_lifetime::retain_source(&prepared, &generated_source);
         let mut generated_assets = BTreeMap::new();
         for name in generated {
             if !horizon_assets::resource_source::stays_inside(&name) {
@@ -3280,62 +3284,6 @@ const KEEP_ROOTS: std::time::Duration = std::time::Duration::from_secs(24 * 3600
 /// The file beside `root` whose time is its last reuse (`<root>.used`).
 fn used_path(root: &Path) -> PathBuf {
     root.with_extension("used")
-}
-
-/// Removes from `roots` the roots other than `current` whose stamp is older
-/// than `keep`, and what an older game left there (one root built straight in
-/// the folder). A game still running on a removed root was started more than
-/// `keep` ago and reads its tables already; only the folders' own names are
-/// touched.
-fn prune_roots(roots: &Path, current: &Path, keep: std::time::Duration) {
-    let Ok(entries) = fs::read_dir(roots) else {
-        return;
-    };
-    let old_layout = roots.join(STAMP).exists();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path == current {
-            continue;
-        }
-        let name = entry.file_name();
-        let is_root = name.len() == ROOT_NAME
-            && name
-                .to_string_lossy()
-                .bytes()
-                .all(|b| b.is_ascii_hexdigit())
-            && path.is_dir();
-        let age = |file: PathBuf| {
-            fs::metadata(file)
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|t| t.elapsed().ok())
-        };
-        let stale = match is_root {
-            // Its build (the stamp) or its last reuse, whichever is newer.
-            true => [age(path.join(STAMP)), age(used_path(&path))]
-                .into_iter()
-                .flatten()
-                .min()
-                .is_none_or(|age| age > keep),
-            // The old single root's files and folders.
-            false => old_layout,
-        };
-        if !stale {
-            continue;
-        }
-        let removed = match path.is_dir() {
-            true => fs::remove_dir_all(&path).inspect(|_| {
-                let _ = fs::remove_file(used_path(&path));
-            }),
-            false => fs::remove_file(&path),
-        };
-        if let Err(e) = removed {
-            log::warn!(
-                "Horizon: an old mod content root stays: {}: {e}",
-                path.display()
-            );
-        }
-    }
 }
 
 /// Whether turning a content mod on or off can apply in a running game

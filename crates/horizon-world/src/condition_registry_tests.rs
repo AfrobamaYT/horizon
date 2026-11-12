@@ -135,3 +135,32 @@ fn concurrent_registered_readers_evaluate_each_entry_once() {
     });
     assert_eq!(count.load(Ordering::SeqCst), 1);
 }
+
+#[test]
+fn inventory_changes_invalidate_condition_answers_and_errors_without_mutating_old_view() {
+    let old = registered(Arc::default());
+    let file = json!({"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"create"}]});
+    assert!(!old.allows_file(&file, "inventory.json"));
+    let new = old.with_mod_inventory(["create"]);
+    assert!(new.allows_file(&file, "inventory.json"));
+    assert!(!old.allows_file(&file, "inventory.json"));
+    assert!(!old.allows_file(
+        &json!({"neoforge:conditions":[{"type":"testmod:nope"}]}),
+        "bad.json"
+    ));
+    let changed = old.with_mod_inventory(["create"]);
+    assert_eq!(changed.check_errors(), Ok(()));
+    assert!(old.check_errors().is_err());
+}
+
+#[test]
+fn inventory_partitions_are_shared_by_readers_of_the_same_candidate() {
+    let count = Arc::new(AtomicUsize::new(0));
+    let original = registered(count.clone());
+    let one = original.with_mod_inventory(["create"]);
+    let two = original.with_mod_inventory(["create"]);
+    let file = json!({"neoforge:conditions":[{"type":"testmod:flag","value":true}]});
+    assert!(one.allows_file(&file, "shared.json"));
+    assert!(two.allows_file(&file, "shared.json"));
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+}

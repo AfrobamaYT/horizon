@@ -488,9 +488,12 @@ impl SyncData {
                     entries.push(((ns.to_owned(), p.to_owned()), v, true));
                 }
             }
-            entries.retain(|((ns, id), value, _)| {
-                overlay.conditions.allows_parts(value, path, ns, id)
-            });
+            condition_filter::filter(
+                &mut entries,
+                damage_entries.is_some(),
+                overlay.conditions,
+                path,
+            );
             // A biome the mods' modifiers changed is not the client's own file any more:
             // its data is sent, as a pack's biome is.
             let modified = match *key == BIOME_REGISTRY {
@@ -1410,3 +1413,6 @@ mod component_tests {
         assert_eq!(read_network(&bytes, Limits::default()).unwrap().0, tag);
     }
 }
+
+#[path = "data_condition_filter.rs"]
+mod condition_filter;

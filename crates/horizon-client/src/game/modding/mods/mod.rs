@@ -72,6 +72,7 @@ pub(super) struct CodeSwitches {
 
 #[derive(Clone, Default)]
 pub(super) struct ModsState {
+    pub(super) active_condition_root: Option<Arc<()>>,
     pub(super) load_condition_candidate: Option<horizon_world::conditions::LoadConditions>,
     pub(super) load_conditions:
         Arc<std::sync::OnceLock<Result<crate::game::load_conditions::ConditionTable, String>>>,
@@ -131,6 +132,15 @@ impl ModsState {
         }
     }
 
+    pub(super) fn code_owner_enabled(&self, owner: &str) -> bool {
+        let initially_disabled = self.code_switches.as_ref().is_some_and(|switches| {
+            !switches.applied.load(std::sync::atomic::Ordering::Acquire)
+                && switches.disabled.contains(owner)
+        });
+        !initially_disabled
+            && mod_api::__private::mod_index(owner).is_some_and(mod_api::__private::mod_index_on)
+    }
+
     /// One admission rule for initial composition and later code-only toggles.
     /// Content acceptance belongs to the generation; code admission belongs to
     /// the installed dispatch entries, including their live enabled switches.
@@ -152,13 +162,7 @@ impl ModsState {
         horizon_mod_package::enabled::EnabledMods::new(native.chain(selected).filter_map(
             |(manifest, code)| {
                 let enabled = if code {
-                    let initially_disabled = self.code_switches.as_ref().is_some_and(|switches| {
-                        !switches.applied.load(std::sync::atomic::Ordering::Acquire)
-                            && switches.disabled.contains(&manifest.id)
-                    });
-                    !initially_disabled
-                        && mod_api::__private::mod_index(&manifest.id)
-                            .is_some_and(mod_api::__private::mod_index_on)
+                    self.code_owner_enabled(&manifest.id)
                 } else {
                     accepted_content(&manifest.id)
                 };
@@ -1384,6 +1388,7 @@ impl Game<'_> {
     }
 
     pub(super) fn install_loop_context(&mut self, context: PreparedLoopContext) {
+        self.protect_condition_root();
         self.loop_context = context.game;
         self.refresh_recipe_property_context();
         self.setting_overrides.borrow_mut().clear();

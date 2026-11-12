@@ -49,6 +49,21 @@ impl LoadConditions {
     pub fn with_mod_inventory<'a>(&self, ids: impl IntoIterator<Item = &'a str>) -> Self {
         let mut view = self.clone();
         view.mods = Self::new(ids).mods;
+        if view.mods != self.mods {
+            view.diagnostics = match &self.registered {
+                Some(registered) => registered
+                    .0
+                    .inventories
+                    .lock()
+                    .unwrap()
+                    .entry(view.mods.clone())
+                    .or_default()
+                    .clone(),
+                // Without handlers there are no cached answers or errors;
+                // keep warning deduplication shared across the candidate.
+                None => self.diagnostics.clone(),
+            };
+        }
         view
     }
 
@@ -72,6 +87,10 @@ impl LoadConditions {
         self.registered = Some(RegisteredLookup(std::sync::Arc::new(LookupState {
             lookup: Box::new(lookup),
             owned,
+            inventories: std::sync::Mutex::new(BTreeMap::from([(
+                self.mods.clone(),
+                self.diagnostics.clone(),
+            )])),
         })));
         self
     }
@@ -261,6 +280,7 @@ impl std::hash::Hash for Diagnostics {
 pub type ConditionLookup<'a> = dyn Fn(&str, &Value) -> Option<Result<bool, String>> + 'a;
 type SharedLookup = dyn Fn(&str, &Value) -> Option<Result<bool, String>> + Send + Sync;
 struct LookupState {
+    inventories: std::sync::Mutex<BTreeMap<Vec<String>, Diagnostics>>,
     lookup: Box<SharedLookup>,
     owned: BTreeMap<String, String>,
 }

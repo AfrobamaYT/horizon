@@ -52,6 +52,12 @@ impl Hooks for Registrant {
             3 => json!({"type":"testmod:flag","value":"panic"}),
             _ => json!({"type":"testmod:flag","value":true}),
         };
+        if self.mode.load(Ordering::SeqCst) == 5 {
+            event.files.push((
+                "advancement/testmod:bad".into(),
+                br#"{"neoforge:conditions":[{"type":"testmod:nope"}]}"#.to_vec(),
+            ));
+        }
         for (name, condition) in [
             ("enabled", yes),
             ("disabled", json!({"type":"testmod:flag","value":false})),
@@ -123,12 +129,29 @@ fn load_conditions_recipe_reload_counts_and_failed_candidates_keep_old_recipes()
                 assert!(game.recipes().recipe("testmod:nested").is_some());
                 for _ in 0..2 {
                     count.store(0, Ordering::SeqCst);
-                    game.reload_datapacks(true, &game.level.enabled_features.clone())
+                    let stack = game
+                        .reload_datapacks(true, &game.level.enabled_features.clone())
                         .unwrap();
                     assert_eq!(count.load(Ordering::SeqCst), 6);
                     assert!(game.recipes().recipe("testmod:not_false").is_some());
                     assert!(game.recipes().recipe("testmod:not_true").is_none());
                     assert!(game.recipes().recipe("testmod:nested").is_some());
+                    let tag =
+                        json!({"neoforge:conditions":[{"type":"testmod:flag","value":"content"}]});
+                    mode.store(4, Ordering::SeqCst);
+                    game.prepare_pack_condition_reload(&stack).unwrap();
+                    let attempt = game.mods.load_condition_candidate.as_ref().unwrap();
+                    assert!(!attempt.allows_file(&tag, "data/testmod/tags/block/flag.json"));
+                    assert!(!attempt.allows_file(
+                        &json!({"neoforge:conditions":[{"type":"testmod:nope"}]}),
+                        "failed-pack.json"
+                    ));
+                    assert!(attempt.check_errors().is_err());
+                    mode.store(0, Ordering::SeqCst);
+                    game.prepare_pack_condition_reload(&stack).unwrap();
+                    let recovered = game.mods.load_condition_candidate.as_ref().unwrap();
+                    assert_eq!(recovered.check_errors(), Ok(()));
+                    assert!(recovered.allows_file(&tag, "data/testmod/tags/block/flag.json"));
                 }
                 mode.store(4, Ordering::SeqCst);
                 count.store(0, Ordering::SeqCst);
@@ -181,6 +204,29 @@ fn load_conditions_recipe_reload_counts_and_failed_candidates_keep_old_recipes()
                     );
                     assert!(game.recipes().recipe("testmod:enabled").is_some());
                 }
+                let host = game.lan.take();
+                crate::game::lan::forget_sync_data();
+                assert!(crate::game::lan::cached_reload_sync().is_none());
+                mode.store(5, Ordering::SeqCst);
+                let error = format!(
+                    "{:?}",
+                    game.reload_datapacks(true, &game.level.enabled_features.clone())
+                        .err()
+                        .unwrap()
+                );
+                assert!(
+                    error.contains("data/testmod/advancement/bad.json"),
+                    "{error}"
+                );
+                assert_eq!(
+                    game.recipes()
+                        .crafting
+                        .iter()
+                        .map(|(id, _)| id.clone())
+                        .collect::<Vec<_>>(),
+                    old
+                );
+                game.lan = host;
                 mode.store(0, Ordering::SeqCst);
                 game.reload_datapacks(true, &game.level.enabled_features.clone())
                     .unwrap();
@@ -223,4 +269,41 @@ fn load_conditions_registration_refuses_duplicates_and_foreign_namespace_even_if
             }
         });
     }
+}
+
+#[test]
+fn load_conditions_disabled_owner_does_not_execute_registered_handler() {
+    let count = Arc::new(AtomicUsize::new(0));
+    mod_api::testing::with_mods(
+        vec![ModEntry::new(
+            "testmod",
+            Box::new(Registrant {
+                count: count.clone(),
+                mode: Arc::default(),
+            }),
+        )]
+        .into(),
+        || {
+            let sources = crate::game::mods::ModsState::default();
+            let inventory = horizon_mod_package::enabled::EnabledMods::default();
+            let file = json!({"neoforge:conditions":[{"type":"testmod:flag","value":true}]});
+            assert!(
+                super::conditions_for_mods(&sources, &inventory)
+                    .unwrap()
+                    .allows_file(&file, "flag.json")
+            );
+            assert!(mod_api::__private::set_mod_enabled("testmod", false));
+            let disabled = super::conditions_for_mods(&sources, &inventory).unwrap();
+            assert!(!disabled.allows_file(&file, "flag.json"));
+            assert_eq!(disabled.check_errors(), Ok(()));
+            assert_eq!(count.load(Ordering::SeqCst), 1);
+            assert!(mod_api::__private::set_mod_enabled("testmod", true));
+            assert!(
+                super::conditions_for_mods(&sources, &inventory)
+                    .unwrap()
+                    .allows_file(&file, "flag.json")
+            );
+            assert_eq!(count.load(Ordering::SeqCst), 2);
+        },
+    );
 }
