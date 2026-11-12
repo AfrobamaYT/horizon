@@ -437,21 +437,18 @@ jobs:
         if: needs.changes.outputs.rust_required != 'false'
         run: |
           cargo +stable test $JOBS --workspace --lib --bins --tests mod_content::tests:: -- --ignored
-      # Derive caller inputs from slot rows on the checked-out PR merge result.
+      # One genuine pinned export also validates source staging and listed slots.
+      # Outside tests/ discovery: the later offline suite must not stage it again.
       # Keep this before doc tests so their failures cannot hide stale slots.
       - name: Validate prebuilt source stage and listed slots
         if: needs.changes.outputs.rust_required != 'false'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: python3 tools/ci/stage_slots.py --base "${BASE_SHA:-HEAD^}"
+        run: python3 tools/ci/test_stage_catalog.py -v
       - name: Test Rust documentation examples
         if: needs.changes.outputs.rust_required != 'false'
         run: cargo +stable test $JOBS --workspace --doc
-      - name: Test listed call production export and real registry
+      - name: Validate replacement-slot source staging
         if: needs.changes.outputs.rust_required != 'false'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: python3 tools/ci/listed_calls.py --base "${BASE_SHA:-HEAD^}"
+        run: python3 tools/ci/stage_replacements.py
       - name: Report test compiler cache
         if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true' }}
         run: sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"

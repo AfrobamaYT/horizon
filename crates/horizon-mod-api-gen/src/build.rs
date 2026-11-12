@@ -20,6 +20,12 @@ pub fn write_if_changed(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> std:
 /// `root` is supplied at run time by the consuming crate's build script.
 pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), String> {
     track(root, !matches!(&target, Target::Vocab))?;
+    if matches!(&target, Target::Client) {
+        println!(
+            "cargo:rerun-if-changed={}",
+            root.join(".horizon-source-staged").display()
+        );
+    }
     let generated = sources(root, super::FillMode::Require)?;
     let outputs = match target {
         Target::Client => vec![
@@ -85,10 +91,67 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
         }
     };
     for (name, code) in outputs {
+        let code = generated_source(root, &target, name, code)?;
         write_if_changed(out_dir.join(name), &code).map_err(|e| e.to_string())?;
         syn::parse_file(&code).map_err(|e| format!("generated Rust: {name}: {e}"))?;
     }
     Ok(())
+}
+
+fn generated_source(
+    root: &Path,
+    target: &Target,
+    name: &str,
+    code: String,
+) -> Result<String, String> {
+    if matches!(target, Target::Client)
+        && matches!(
+            name,
+            "mod_api_fire_generated.rs" | "mod_api_goal_view_generated.rs"
+        )
+        && root.join(".horizon-source-staged").is_file()
+    {
+        super::internals::widen_generated(Path::new(name), code)
+    } else {
+        Ok(code)
+    }
+}
+
+#[cfg(test)]
+mod generated_visibility_tests {
+    use super::*;
+
+    #[test]
+    fn staged_game_helpers_are_widened_but_source_helpers_are_unchanged() {
+        let root =
+            std::env::temp_dir().join(format!("fnr-generated-visibility-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let input = "impl Game<'_> { pub(super) fn fire(&mut self) {} }";
+        for name in [
+            "mod_api_fire_generated.rs",
+            "mod_api_goal_view_generated.rs",
+        ] {
+            assert_eq!(
+                generated_source(&root, &Target::Client, name, input.into()).unwrap(),
+                input
+            );
+        }
+        fs::write(root.join(".horizon-source-staged"), "").unwrap();
+        for name in [
+            "mod_api_fire_generated.rs",
+            "mod_api_goal_view_generated.rs",
+        ] {
+            assert_eq!(
+                generated_source(&root, &Target::Client, name, input.into()).unwrap(),
+                "impl Game<'_> { pub fn fire(&mut self) {} }"
+            );
+            assert_eq!(
+                generated_source(&root, &Target::Vocab, name, input.into()).unwrap(),
+                input
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 pub(crate) fn native_hook_modules(root: &Path) -> Result<String, String> {
@@ -228,10 +291,7 @@ pub(super) fn generate_points_inner(root: &Path, out_dir: &Path) -> Result<(), S
     let src = root.join("crates/horizon-client/src");
     crate::rerun_if_changed(&src.join("game.rs").display());
     crate::rerun_if_changed(&src.join("game").display());
-    for path in super::points::tracked(root)?
-        .into_iter()
-        .chain(super::sites::tracked(root).map_err(|e| e.to_string())?)
-    {
+    for path in super::points::tracked(root)? {
         crate::rerun_if_changed(&path.display());
     }
     println!("cargo:rerun-if-env-changed=HORIZON_POINT_NAMES");
@@ -242,9 +302,17 @@ pub(super) fn generate_points_inner(root: &Path, out_dir: &Path) -> Result<(), S
                 .map_err(|error| format!("HORIZON_POINT_NAMES: {error}"))
         })
         .transpose()?;
-    let code =
-        super::points::records_selected(&super::points::game_points(root)?, selected.as_ref())
-            + &super::sites::ids(root).map_err(|e| e.to_string())?;
+    // Only a staged copy compiles the points' sites into the game; the wasm host's listener
+    // fixture brings its own.
+    let stamp = root.join(".horizon-source-staged");
+    crate::rerun_if_changed(&stamp.display());
+    let staged = stamp.is_file() || cfg!(feature = "listener-fixture");
+    let code = super::points::records_selected(
+        &super::points::game_points(root)?,
+        selected.as_ref(),
+    ) + &format!(
+        "/// Whether this build compiled the points' sites into the game: only the prebuilt game, built from a staged copy of the source, has them. A build without them refuses every listener at load.\npub const STAGED: bool = {staged};\n"
+    );
     let generated = syn::parse_file(&code).map_err(|e| format!("generated Rust: points: {e}"))?;
     // A single multi-megabyte line makes Clippy's source lookups prohibitively slow.
     let mut code = String::new();

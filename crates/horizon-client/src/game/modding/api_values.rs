@@ -1208,6 +1208,21 @@ pub(crate) fn menu_slot_rules(
     mod_api::dispatch_menu_slot_rules(&context, menu, slot, &stack, may_place, max_stack);
 }
 
+/// Adapt a player's block menu `stillValid` check; the game asks only for a menu
+/// whose type has a part answering it (`menu_still_valid_listens`, when it opened).
+pub(crate) fn menu_still_valid(
+    context: &horizon_world::native_load_context::LoopContext,
+    player: u128,
+    menu: &str,
+    pos: [i32; 3],
+    eye: [f64; 3],
+    valid: &mut bool,
+) {
+    let reader = horizon_client_render::api_context::LoopReader(context);
+    let context = reader.context();
+    mod_api::dispatch_menu_still_valid(&context, player, menu, pos, eye, valid);
+}
+
 pub(crate) fn stacked_on_other(
     context: &horizon_world::native_load_context::LoopContext,
     event: &mut crate::menu::StackedOnOther<'_>,
