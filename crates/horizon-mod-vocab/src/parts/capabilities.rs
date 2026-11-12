@@ -173,3 +173,61 @@ impl CapabilitiesCapabilityProviders for InstalledProviders {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::*;
+
+    struct Empty;
+    #[mod_api::__subscriptions]
+    impl Hooks for Empty {}
+
+    #[test]
+    fn merged_cursor_exhausts_both_halves_without_wrapping_past_disabled_entries() {
+        install(
+            vec![
+                ModEntry::new("enabled", Box::new(Empty)),
+                ModEntry::new("disabled", Box::new(Empty)),
+            ]
+            .into(),
+        );
+        assert!(set_mod_enabled("disabled", false));
+        let providers: Vec<_> = (0..65_535)
+            .map(|order| CapabilityPart {
+                mod_id: if order == 65_533 {
+                    "disabled"
+                } else {
+                    "enabled"
+                },
+                mod_index: if order == 65_533 { 1 } else { 0 },
+                type_name: "test:handler".into(),
+                before_game: false,
+                order,
+                provider: order,
+            })
+            .collect();
+        for high_half in [false, true] {
+            let (first, second) = if high_half {
+                (&[][..], providers.as_slice())
+            } else {
+                (providers.as_slice(), &[][..])
+            };
+            let mut cursor = 0;
+            let mut count = 0;
+            let mut last = None;
+            while let Some((provider, owner, before_game)) = next_merged(first, second, &mut cursor)
+            {
+                assert_eq!(owner, "enabled");
+                assert!(!before_game);
+                count += 1;
+                last = Some(provider);
+            }
+            assert_eq!(count, 65_534);
+            assert_eq!(last, Some(65_534));
+            assert_eq!(cursor, if high_half { 0xffff_0000 } else { 0x0000_ffff });
+            assert_eq!(next_merged(first, second, &mut cursor), None);
+            assert_eq!(cursor, if high_half { 0xffff_0000 } else { 0x0000_ffff });
+        }
+    }
+}
