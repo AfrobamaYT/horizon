@@ -2,8 +2,7 @@
 # Installs the pinned Rust (tools/ci/rust-version) with the given `rustup toolchain install` options and makes it
 # this job's toolchain: the rustup default, and RUSTUP_TOOLCHAIN for the job's later steps (a step's own env
 # would override it, so workflows never set it). CI, the launcher's native-mod toolchain and cargo-horizon-mod's
-# wasm toolchain all read that one file: bumping Rust is one edit there plus the new lints, in one PR
-# with its new lints in one PR.
+# wasm toolchain all read that one file. Bumping it: docs/ci-runners.md, "Rust version".
 # rustup gets a bounded retry: a reset connection to static.rust-lang.org is transient and hits boat and GitHub's
 # runners alike. Four attempts, 10, 20 and 40 s apart; the last failure fails the step.
 set -u
