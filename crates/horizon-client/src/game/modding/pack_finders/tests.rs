@@ -556,3 +556,84 @@ fn a_mods_pack_is_on_the_screen_and_applies_through_client_reload() {
     });
     assert!(ran, "the prepared-resource fixture must run this case");
 }
+
+#[test]
+fn hidden_optional_data_pack_is_command_selectable_and_loads_its_function() {
+    let fixture = Fixture::new(false);
+    with_finder_hidden(false, false, true, || {
+        let data = data_packs(&fixture.sources());
+        assert_eq!(data.len(), 1);
+        let mut info = data[0].selection.clone().unwrap();
+        assert!(info.hidden);
+        assert!(!info.required);
+        info.title = Text::literal("Optional data fixture");
+        let atlas = horizon_client::hud::HudAtlas::build(&ResourceSource::directory(
+            "/nonexistent/horizon-test-assets".into(),
+        ))
+        .unwrap();
+        let m = horizon_client::screen_draw::Measure(&atlas.font);
+        let drawn_labels = |info| {
+            let screen = horizon_client::pack_screen::PackScreen::new(
+                &m,
+                Text::literal("Data packs"),
+                480,
+                320,
+                false,
+                vec![info],
+                &[],
+            );
+            screen
+                .draw(&m, (0, 0), 0, 0)
+                .into_iter()
+                .filter_map(|draw| {
+                    if let horizon_client::screen_draw::Draw::Text { text, .. } = draw {
+                        Some(text.plain())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        assert!(
+            !drawn_labels(info.clone())
+                .iter()
+                .any(|s| s == "Optional data fixture")
+        );
+        info.hidden = false;
+        assert!(
+            drawn_labels(info)
+                .iter()
+                .any(|s| s == "Optional data fixture")
+        );
+
+        let world = fixture.root.join("world");
+        fs::create_dir(&world).unwrap();
+        let repository = data_repository(&world, &fixture.root, &data);
+        assert!(
+            repository
+                .iter()
+                .any(|p| p.id == "mod/packmod:data/packmod/datapacks/optional")
+        );
+        assert!(horizon_client::datapack::enabled_ids(&world, &repository, &[]).is_empty());
+        fs::write(
+            world.join("datapacks.json"),
+            r#"{"enabled":["mod/packmod:data/packmod/datapacks/optional"],"disabled":[]}"#,
+        )
+        .unwrap();
+        let stack = crate::game::functions::pack_stack(
+            &world,
+            &fixture.root,
+            &Default::default(),
+            &Default::default(),
+            true,
+            &[],
+            &data,
+        );
+        let enabled = stack.enabled_packs().collect::<Vec<_>>();
+        let store = DataStore::load(&enabled);
+        assert_eq!(
+            store.functions["packmod:probe"].lines,
+            [FunctionLine::Command("say from-optional".into())]
+        );
+    });
+}
