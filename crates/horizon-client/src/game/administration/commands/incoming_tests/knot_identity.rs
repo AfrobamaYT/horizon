@@ -165,7 +165,7 @@ fn host(game: &mut Game<'_>) {
             address: "127.0.0.1:25565".parse().unwrap(),
             expected: false,
         },
-        guest_id,
+        guest_id as i32,
         [12.5, 201.0, 4.5],
         1,
     );
