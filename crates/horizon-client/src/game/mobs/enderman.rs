@@ -10,6 +10,19 @@ use horizon_world::{
     registry::BlockStateId,
 };
 
+/// An entity's box (`EntityDimensions.makeBoundingBox`): `width` wide and
+/// `height` tall, standing on `feet`.
+fn point_box(feet: [f64; 3], width: f64, height: f64) -> Aabb {
+    Aabb::new(
+        Vec3::new(feet[0] - width / 2.0, feet[1], feet[2] - width / 2.0),
+        Vec3::new(
+            feet[0] + width / 2.0,
+            feet[1] + height,
+            feet[2] + width / 2.0,
+        ),
+    )
+}
+
 impl Game<'_> {
     /// `Enderman.hurtServer` teleports inside the hurt (`teleport()`,
     /// `repeatedlyTryToTeleport()`), and so does `Shulker.hurtServer`
@@ -213,7 +226,7 @@ impl Game<'_> {
         };
         let spectator = self.spectator();
         let player = self.player.as_ref().filter(|_| !spectator).map(|p| {
-            super::point_box(
+            point_box(
                 [p.position.x, p.position.y, p.position.z],
                 f64::from(p.dimensions.width),
                 f64::from(p.dimensions.height),

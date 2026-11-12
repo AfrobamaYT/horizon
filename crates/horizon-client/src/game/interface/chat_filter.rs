@@ -4,7 +4,6 @@
 //! players by hand with `/mute`, `/tempmute`, `/mutelist` and `/unmute` (the same words on the console).
 use super::lan::LanHost;
 use super::{Game, dedicated};
-use horizon_chat_filter::Action;
 use horizon_client::lan::hub::{HostEvent, chat_filter::Place};
 use horizon_client::text::Text;
 use horizon_core::nbt::Tag;

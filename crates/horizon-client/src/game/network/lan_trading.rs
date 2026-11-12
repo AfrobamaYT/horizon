@@ -361,6 +361,10 @@ impl Game<'_> {
                 m.species() == horizon_client::mobs::Species::Villager
                     && m.extra.profession.index().is_none()
             });
+        let offers_refreshed = session
+            .events
+            .iter()
+            .any(|event| matches!(event, merchant::Event::OffersRefreshed));
         let (mut session, traded) = if opaque {
             (session, Vec::new())
         } else {

@@ -291,7 +291,7 @@ impl Game<'_> {
             horizon_client::blocks::Fluid::Lava => ParticleType::DrippingDripstoneLava,
             // A mod's fluid drips as no fluid above the dripstone would.
             horizon_client::blocks::Fluid::None | horizon_client::blocks::Fluid::Modded
-                if nether =>
+                if evaporates =>
             {
                 ParticleType::DrippingDripstoneLava
             }

@@ -8,7 +8,7 @@
 //! count, age and pickup delay: such an item moves at its turn instead. With a native mod loaded
 //! (its hooks see every item) or a mod listening to the round, every item moves at its turn.
 use super::*;
-use super::{boats::fall_reset, entity::Entity as _, native_ticks};
+use super::{entity::Entity as _, native_ticks};
 use horizon_client::{
     blocks::BlockFacts,
     entities::{ItemEntity, ItemSplash, ItemStep, ObstacleGrid},
@@ -29,6 +29,7 @@ pub(in crate::game) struct ItemTables<'a> {
     motion: &'a MotionResources,
     registry: &'a BlockRegistry,
     border: &'a BorderGeometry,
+    context: &'a horizon_world::native_load_context::LoopContext,
 }
 
 impl<'w> Game<'w> {
@@ -40,6 +41,7 @@ impl<'w> Game<'w> {
             motion: self.res.motion(),
             registry: self.pack.assets.registry,
             border: self.border.geometry(),
+            context: &self.loop_context,
         }
     }
 }
@@ -72,7 +74,19 @@ impl ItemTables<'_> {
             Some(&self.motion.blocks),
         );
         item.check_fall(&step, |fall, from, moved| {
-            fall_reset(self.world, self.motion, self.facts, fall, from, moved)
+            if fall == 0.0 || moved.length_squared() < 1.0 {
+                return fall;
+            }
+            let reset = &self.motion.fall_reset;
+            let hit = horizon_client::entities::fall_reset_hit(
+                self.context,
+                self.world,
+                &self.motion.fluids,
+                |p| reset.contains(&*self.facts.get(self.world.block(p.x, p.y, p.z)).name),
+                from,
+                moved,
+            );
+            if hit { 0.0 } else { fall }
         });
         step
     }
@@ -181,7 +195,7 @@ impl Moves {
             || items.len() < MIN_ITEMS
             || game.remote.is_some()
             || round.listening()
-            || !horizon_client::mod_api::mods().is_empty()
+            || !mod_api::__private::mods().is_empty()
         {
             return Self(Vec::new());
         }
