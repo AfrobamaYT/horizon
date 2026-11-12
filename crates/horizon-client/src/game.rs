@@ -13338,7 +13338,7 @@ impl Game<'_> {
             Err(_) if self.renderer.as_ref().is_some_and(Renderer::device_lost) => false,
             result => result?,
         };
-        self.native_render_frame_post(elapsed);
+        self.finish_render_frame(elapsed);
         if rendered {
             // The submit thread may still hold the frame: a listener hears it after the
             // present, and with none the next frame keeps overlapping it.
@@ -13511,7 +13511,7 @@ impl Game<'_> {
             return Ok(false);
         };
         pr.lap("pr_setup");
-        let alpha = self.clock.fraction();
+        let alpha = self.frame_world_partial_tick();
         // Camera.getCameraEntityPartialTicks: the view, the hand and the
         // player's own model stay smooth while the level is frozen.
         let camera_alpha = self.clock.camera_fraction();

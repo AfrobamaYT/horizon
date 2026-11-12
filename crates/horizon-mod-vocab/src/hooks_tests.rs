@@ -338,14 +338,25 @@ fn living_death_post_hears_the_entity_the_blow_and_the_attacker() {
 #[test]
 fn render_frame_pre_and_post_hear_their_own_moment_with_the_frames_time() {
     use std::{sync::Mutex, time::Duration};
-    struct Frames(Arc<Mutex<Vec<(&'static str, Duration)>>>);
+    type FrameReading = (&'static str, Duration, f32, f32);
+    struct Frames(Arc<Mutex<Vec<FrameReading>>>);
     #[mod_api::__subscriptions]
     impl Hooks for Frames {
         fn render_frame_pre(&self, _: &mut dyn ClientHost, event: &mut RenderFramePreEvent) {
-            self.0.lock().unwrap().push(("pre", event.elapsed));
+            self.0.lock().unwrap().push((
+                "pre",
+                event.elapsed,
+                event.world_partial_tick,
+                event.partial_tick,
+            ));
         }
         fn render_frame_post(&self, _: &mut dyn ClientHost, event: &mut RenderFramePostEvent) {
-            self.0.lock().unwrap().push(("post", event.elapsed));
+            self.0.lock().unwrap().push((
+                "post",
+                event.elapsed,
+                event.world_partial_tick,
+                event.partial_tick,
+            ));
         }
     }
     let heard = Arc::new(Mutex::new(Vec::new()));
@@ -353,12 +364,15 @@ fn render_frame_pre_and_post_hear_their_own_moment_with_the_frames_time() {
         vec![ModEntry::new("frames", Box::new(Frames(heard.clone())))].into(),
         || {
             let frame = Duration::from_millis(16);
-            dispatch_render_frame_pre(&mut FakeHost::new(), frame);
-            dispatch_render_frame_post(&mut FakeHost::new(), frame);
+            dispatch_render_frame_pre(&mut FakeHost::new(), frame, 0.25, 0.5);
+            dispatch_render_frame_post(&mut FakeHost::new(), frame, 0.25, 0.5);
         },
     );
     let frame = Duration::from_millis(16);
-    assert_eq!(*heard.lock().unwrap(), [("pre", frame), ("post", frame)]);
+    assert_eq!(
+        *heard.lock().unwrap(),
+        [("pre", frame, 0.25, 0.5), ("post", frame, 0.25, 0.5)]
+    );
 }
 
 #[test]
