@@ -561,7 +561,7 @@ jobs:
         if: needs.changes.outputs.rust_required != 'false'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: python3 tools/check_addresses.py ${BASE_SHA:+--base "$BASE_SHA"}
+        run: python3 tools/check_addresses.py ${BASE_SHA:+--base "$BASE_SHA" --pull-request-merge}
       # docs/layers.md#file-size: a Rust file over 3000 lines may not grow (pull requests; main has no base to compare).
       - name: Big files don't grow
         env:
@@ -591,7 +591,7 @@ jobs:
         if: needs.changes.outputs.rust_required != 'false'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: python3 tools/check_layers.py ${BASE_SHA:+--base "$BASE_SHA"}
+        run: python3 tools/check_layers.py ${BASE_SHA:+--base "$BASE_SHA" --pull-request-merge}
       # Independent of the Rust job. Only after earlier static setup/checks succeeded:
       # compiler fixtures after failed setup would add a second, misleading failure.
       - name: Test offline research tooling
