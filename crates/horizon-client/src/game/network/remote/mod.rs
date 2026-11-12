@@ -12447,7 +12447,8 @@ mod tests {
                 if text.contains("drop") {
                     return mod_api::Flow::Cancel;
                 }
-                if event.system {
+                // A system line carries no player message, so only it gets the tag.
+                if event.system && event.player_message.is_none() {
                     *event.message = mod_api::Text::literal(format!("[server] {text}"));
                 }
                 mod_api::Flow::Continue

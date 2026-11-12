@@ -20,22 +20,8 @@ impl Game<'_> {
     /// client adds itself and validation errors are not told. Client-side.
     pub(in crate::game) fn native_client_chat_received(
         &mut self,
-        system: bool,
-        overlay: bool,
-        sender: u128,
-        chat_type: Option<&str>,
-        player_message: Option<&mod_api::PlayerChatInfo>,
-        message: &mut Text,
-        cancel: &mut bool,
+        call: mod_api::__private::ClientChatReceivedCall<'_>,
     ) {
-        self.fire_client_chat_received(
-            system,
-            overlay,
-            sender,
-            chat_type,
-            player_message,
-            message,
-            cancel,
-        );
+        self.fire_client_chat_received(call);
     }
 }

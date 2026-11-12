@@ -6,9 +6,7 @@ use crate::*;
 /// NeoForge's `ClientChatReceivedEvent.Player.getPlayerChatMessage()`: the
 /// message as the player sent it, beside the decorated line the chat shows.
 /// The signature bytes are left out; `signed` says whether one validated.
-#[derive(Clone, Debug, PartialEq)]
-// exhaustive: the game builds it with a literal; mods only read it
-#[derive(horizon_mod_api_macros::Wire)]
+#[derive(Clone, Debug, Default, PartialEq, horizon_mod_api_macros::Wire)]
 pub struct PlayerChatInfo {
     /// `signedBody().content()`: the plain text the player typed.
     pub body: String,
@@ -25,15 +23,17 @@ pub struct PlayerChatInfo {
 }
 
 /// `FilterMask`: which characters of `body` the server's filter hides.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 // exhaustive: vanilla's three filter mask types
 #[derive(horizon_mod_api_macros::Wire)]
 pub enum ChatFilter {
     /// `PASS_THROUGH`: nothing is hidden.
+    #[default]
     PassThrough,
     /// `FULLY_FILTERED`: the whole message is hidden.
     FullyFiltered,
-    /// `PARTIALLY_FILTERED`: the hidden characters, as a `BitSet`'s words
-    /// (bit `i` of word `i / 64` hides character `i`).
+    /// `PARTIALLY_FILTERED`: the hidden characters, as a `BitSet`'s words:
+    /// bit `i % 64` of word `i / 64` (least significant bit first) hides the
+    /// `i`th UTF-16 code unit of `body`.
     Partial(Vec<u64>),
 }

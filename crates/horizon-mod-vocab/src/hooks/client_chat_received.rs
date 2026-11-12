@@ -25,5 +25,13 @@ pub trait Hooks {
         neoforge = "ClientChatReceivedEvent, ClientChatReceivedEvent.Player, ClientChatReceivedEvent.System",
         cancellable = true
     )]
-    fn client_chat_received();
+    fn client_chat_received(
+        system: bool,
+        overlay: bool,
+        sender: u128,
+        chat_type: Option<&str>,
+        player_message: Option<&PlayerChatInfo>,
+        message: &mut Text,
+        cancel: &mut bool,
+    );
 }

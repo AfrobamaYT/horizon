@@ -62,8 +62,23 @@ impl Game<'_> {
         let name = chat_type
             .zip(registries.as_deref())
             .and_then(|(id, registries)| registries.name("minecraft:chat_type", id));
+        // A line the API's text form cannot hold is not told, as before.
+        let Ok(mut message) = horizon_client_lib::api_text::to_api(line) else {
+            return true;
+        };
         let mut cancel = false;
-        self.native_client_chat_received(system, overlay, sender, name, player, line, &mut cancel);
+        self.native_client_chat_received(mod_api::__private::ClientChatReceivedCall {
+            system,
+            overlay,
+            sender,
+            chat_type: name,
+            player_message: player,
+            message: &mut message,
+            cancel: &mut cancel,
+        });
+        if let Ok(text) = horizon_client_lib::api_text::to_engine(&message) {
+            *line = text;
+        }
         !cancel
     }
 }
@@ -72,9 +87,10 @@ impl Game<'_> {
 mod tests {
     use super::*;
 
-    /// A server relaying a signed message it decorated: the body is what the
-    /// player typed, the unsigned content the server's line, and a partial
-    /// filter keeps its bitset words.
+    /// The packet to `PlayerChatInfo` conversion alone (the fake signature is
+    /// never validated; `signed` is passed in): the body is what the player
+    /// typed, the unsigned content the server's line, and a partial filter
+    /// keeps its bitset words.
     #[test]
     fn a_signed_relayed_message_keeps_its_body_and_the_servers_line() {
         let p = play::PlayerChat {
