@@ -763,10 +763,14 @@ pub(crate) fn stage_with_manifest(
         out.push_str(&source[from..]);
         fs::write(&file.path, out).map_err(|e| format!("{}: {e}", file.path.display()))?;
         staged.files += 1;
-        if staged.points != points_before
-            && let Some(package) = &file.package
-        {
-            packages.insert(package.clone());
+        // The game crate names the points' table only in a staged copy, so its normal manifest
+        // carries no dependency on it: the pass adds one, as it does for a marked lower crate.
+        if staged.points != points_before {
+            packages.insert(
+                file.package
+                    .clone()
+                    .unwrap_or_else(|| root.join("crates/horizon-client")),
+            );
         }
     }
     dependencies(root, packages)?;
@@ -1521,7 +1525,7 @@ name = 'horizon-mod-api-gen'
         put(
             "Cargo.lock",
             // CRLF, as a Windows checkout writes it.
-            &"version = 4\n\n[[package]]\nname = \"horizon-client-render\"\nversion = \"0.1.0\"\ndependencies = [\n \"log\",\n]\n\n[[package]]\nname = \"log\"\nversion = \"0.4.0\"\n"
+            &"version = 4\n\n[[package]]\nname = \"horizon-client\"\nversion = \"0.1.0\"\n\n[[package]]\nname = \"horizon-client-render\"\nversion = \"0.1.0\"\ndependencies = [\n \"log\",\n]\n\n[[package]]\nname = \"log\"\nversion = \"0.4.0\"\n"
                 .replace('\n', "\r\n"),
         );
         put(
@@ -1667,6 +1671,15 @@ name = 'horizon-mod-api-gen'
         assert!(!mesher.contains("point("), "{mesher}");
         let manifest = std::fs::read_to_string(render.join("Cargo.toml")).unwrap();
         assert!(!manifest.contains("horizon-mod-points"), "{manifest}");
+        // The game crate's points name the table: the staged copy gives it the dependency.
+        let client =
+            std::fs::read_to_string(root.join("crates/horizon-client/Cargo.toml")).unwrap();
+        assert!(client.contains("horizon-mod-points"), "{client}");
+        let lock = std::fs::read_to_string(root.join("Cargo.lock")).unwrap();
+        assert!(
+            lock.contains("name = \"horizon-client\"\nversion = \"0.1.0\"\ndependencies = [\n \"horizon-mod-api\",\n \"horizon-mod-api-macros\",\n \"horizon-mod-points\",\n]"),
+            "{lock}"
+        );
         // A second pass finds the attribute and refuses: the source tree never carries one.
         assert!(
             stage_with(&root, &WireTypes::new())
