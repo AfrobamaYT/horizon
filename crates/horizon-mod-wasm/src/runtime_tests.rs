@@ -69,6 +69,9 @@ impl<F: FnMut() -> i64> mod_api::StructureRandom for Random<F> {
 }
 
 fn guest(layout: u64, body: &str) -> Vec<u8> {
+    guest_with_exports(layout, body, "")
+}
+fn guest_with_exports(layout: u64, body: &str, exports: &str) -> Vec<u8> {
     wat::parse_str(format!(
         r#"(module
       (@custom "dylink.0" "\01\04\00\00\00\00")
@@ -83,7 +86,8 @@ fn guest(layout: u64, body: &str) -> Vec<u8> {
         else local.get $depth i32.const 1 i32.sub call $recurse i32.const 1 i32.add end)
       (global $in_len (mut i32) (i32.const 0))
       (func (export "horizon_in") (param i32) (result i32) local.get 0 global.set $in_len i32.const 512)
-      (func (export "horizon_hook") (param i32) (result i64) (local i32 i32)
+      {exports}
+      (func $hook (export "horizon_hook") (param i32) (result i64) (local i32 i32)
         i32.const 512 local.set 1 global.get $in_len local.set 2 {body})
     )"#
     ))
@@ -577,7 +581,15 @@ fn linker_heap_symbols_follow_all_members_static_data() {
 #[test]
 fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
     crate::test_stack::on_guest_stack(|| {
-        let bytes = guest(*mod_api::wire::LAYOUT, "i64.const 0");
+        let bytes = guest_with_exports(
+            *mod_api::wire::LAYOUT,
+            "i64.const 0",
+            r#"
+            (func (export "prepare_can_equip") (result i64) i64.const 2199023255560)
+            (func (export "ask_can_equip") (result i64) i64.const 0)
+            (func (export "release_can_equip") (result i64) i64.const 0)
+        "#,
+        );
         let engine = engine().unwrap();
         let modules = WasmMod::instantiate(
             &engine,
@@ -596,6 +608,15 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
         )
         .unwrap();
         assert_eq!(modules.len(), 2);
+        for i in 0..2 {
+            let owner = modules[i].downgrade();
+            let other = modules[1 - i].downgrade();
+            let token = owner.prepare(&[]).unwrap();
+            assert!(owner.check(token.0, token.1));
+            assert!(!other.check(token.0, token.1));
+            owner.release(token.0, token.1);
+        }
+
         let bytes = wat::parse_str(
         r#"(module (@custom "dylink.0" "\01\04\00\00\00\00") (func (export "horizon_shared")))"#,
     )
@@ -1920,4 +1941,67 @@ fn a_guest_call_that_answers_nothing_names_why() {
     );
     // Taken once: a later call that answers nothing without a reason does not reuse it.
     assert_eq!(take_refusal(), "refused");
+}
+
+#[cfg(feature = "test-copy-probe")]
+#[test]
+fn prepared_runtime_writes_payload_once_for_eight_scalar_asks() {
+    crate::test_stack::on_guest_stack(|| {
+        // Protocol-only guest: slice B supplies the owned-stack slot dispatcher.
+        let bytes = guest_with_exports(
+            *mod_api::wire::LAYOUT,
+            "i64.const 0",
+            r#"
+            (func (export "prepare_can_equip") (result i64) i64.const 2199023255560)
+            (func (export "ask_can_equip") (result i64) i64.const 0)
+            (func (export "release_can_equip") (result i64) i64.const 0)
+        "#,
+        );
+        let engine = engine().unwrap();
+        let module = WasmMod::instantiate(
+            &engine,
+            &[],
+            &[Member {
+                name: "test",
+                module: &bytes,
+            }],
+            None,
+        )
+        .unwrap()
+        .remove(0);
+        let weak = module.downgrade();
+        let other_module = self::module("i64.const 0");
+        let other = other_module.downgrade();
+        for size in [16, 4112] {
+            let bytes = vec![42u8; size];
+            let (token, setup) = crate::copy_probe::measure(|| weak.prepare(&bytes).unwrap());
+            assert_eq!(setup.to_guest_bytes, size + 8);
+            assert_eq!(setup.from_guest_bytes, 8);
+            assert!(weak.check(token.0, token.1));
+            assert!(!weak.check(token.0, token.1 + 1));
+            assert!(!other.check(token.0, token.1));
+            let (_, asks) = crate::copy_probe::measure(|| {
+                for _ in 0..8 {
+                    assert_eq!(
+                        module.call(
+                            CallClass::Hook,
+                            Frame::default(),
+                            0,
+                            None,
+                            |w| {
+                                w.put(&token.0);
+                                w.put(&token.1);
+                            },
+                            |r| r.take::<()>()
+                        ),
+                        Some(())
+                    );
+                }
+            });
+            assert_eq!(asks.to_guest_bytes, 8 * 8);
+            assert_eq!(asks.from_guest_bytes, 0);
+            weak.release(token.0, token.1);
+            assert!(!weak.check(token.0, token.1));
+        }
+    });
 }

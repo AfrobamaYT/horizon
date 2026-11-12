@@ -22,6 +22,8 @@ mod loot_tags_wire;
 mod piglin_answers;
 #[path = "wire_loopback/piston_push_reaction.rs"]
 mod piston_push_reaction;
+#[path = "wire_loopback/prepared_equip.rs"]
+mod prepared_equip;
 #[path = "wire_loopback/use_item_hand.rs"]
 mod use_item_hand;
 /// The generated proxies' refusal reason; the loopback refuses only on its own encode errors.
@@ -94,6 +96,16 @@ impl WasmHandler {
         boundary::subscriptions_of(owner, names)
     }
 }
+thread_local! {
+    static LOOPBACK_TRANSPORT: std::cell::RefCell<Option<guest::Transport>> = const { std::cell::RefCell::new(None) };
+}
+struct TransportScope(Option<guest::Transport>);
+impl Drop for TransportScope {
+    fn drop(&mut self) {
+        guest::set_transport(self.0.clone());
+        LOOPBACK_TRANSPORT.with(|transport| *transport.borrow_mut() = self.0.take());
+    }
+}
 impl WasmMod {
     fn same_group(&self, other: &Self) -> bool {
         self.group == other.group
@@ -118,12 +130,20 @@ impl WasmMod {
         let pointer = &mut *cx as *mut boundary::Cx;
         let _resources = unsafe { boundary::resource_scope(pointer, true) };
         // The pointer remains live until this synchronous call finishes; guest callbacks never retain it.
-        guest::set_transport(Some(Rc::new(move |id, bytes| {
+        let transport: guest::Transport = Rc::new(move |id, bytes| {
+            if id == mod_api::wire::HOST_LOG {
+                eprintln!("{}", Reader::new(bytes).take::<String>().unwrap());
+                return Vec::new();
+            }
             let mut out = Writer::new();
             let _resources = unsafe { boundary::resource_scope(pointer, false) };
             unsafe { boundary::serve(id, pointer, bytes, &mut out) }.unwrap();
             out.into_bytes()
-        })));
+        });
+        let previous =
+            LOOPBACK_TRANSPORT.with(|active| active.borrow_mut().replace(transport.clone()));
+        let _transport = TransportScope(previous);
+        guest::set_transport(Some(transport));
         let mut input = Writer::new();
         if let Some(handler) = handler {
             input.put(&handler);
@@ -132,12 +152,12 @@ impl WasmMod {
         if input.error().is_some() {
             return None;
         }
+        prepared_equip::record(id, input.bytes());
         let at = guest::input(input.bytes().len());
         unsafe {
             std::ptr::copy_nonoverlapping(input.bytes().as_ptr(), at, input.bytes().len());
         }
         let (at, len) = guest::run(id);
-        guest::set_transport(None);
         if len == u32::MAX {
             return None;
         }
@@ -244,6 +264,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             arm_pose_registration::check(registrar);
             biome_region_registration::register(registrar);
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
+            prepared_equip::register(registrar);
             use_item_hand::register(registrar);
             piglin_answers::register(registrar);
             block_entity_transform::register(registrar);

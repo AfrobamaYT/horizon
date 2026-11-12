@@ -119,6 +119,8 @@ pub struct Hook {
     /// The parameters of a hook whose game target takes them as one generated `<Name>Call`
     /// (name and type, in order, without a `Ticks` parameter); empty for a flat target.
     pub call: Vec<(String, String)>,
+    /// Parameter retained in a decision-scoped guest slot instead of copied per ask.
+    pub prepared: Option<String>,
 }
 
 /// A drawing surface of the game's that drawing hooks get as a trait object (the catalog's
@@ -241,6 +243,7 @@ struct HookEntry {
     context: Option<PhaseContext>,
     #[serde(default)]
     call: Vec<(String, String)>,
+    prepared: Option<String>,
     neoforge: Option<serde_json::Value>,
     fabric: Option<serde_json::Value>,
     paper: Option<serde_json::Value>,
@@ -338,6 +341,7 @@ impl Hook {
             version: entry.version.unwrap_or(1),
             cancellable: entry.cancellable,
             call: entry.call,
+            prepared: entry.prepared,
         })
     }
 }
@@ -734,6 +738,7 @@ impl Hook {
             version: 1,
             cancellable: None,
             call: Vec::new(),
+            prepared: None,
         }
     }
 }

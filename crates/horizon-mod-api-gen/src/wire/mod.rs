@@ -617,7 +617,12 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
         &surface.parts,
     );
     guest.push_str(&calls::hook_names(&surface.hooks));
-    guest.push_str(&calls::dispatch(&surface.types, &surface.methods).0);
+    let prepared = crate::Catalog::load(root)?
+        .hooks
+        .into_iter()
+        .filter_map(|hook| hook.prepared.map(|field| (hook.name, field)))
+        .collect::<Vec<_>>();
+    guest.push_str(&calls::dispatch(&surface.types, &surface.methods, &prepared).0);
     let _ = writeln!(
         wire,
         "#[doc(hidden)]\npub static WIRE_LAYOUT: ::std::sync::LazyLock<u64> = ::std::sync::LazyLock::new(|| {{ let mut hash = {:#x}; {layouts} hash }});",
