@@ -245,9 +245,15 @@ class DynaRoutingTests(unittest.TestCase):
                          if line.startswith("        ") and ":" in line)
             self.assertEqual(guard["if"].strip(), "needs.changes.result != 'success'")
             self.assertEqual(guard["run"].strip(), "exit 1")
-        for field in ("runs-on", "RUNNER_KIND"):
-            self.assertEqual(runtime.split(f"{field}:", 1)[1].split("\n", 1)[0],
-                             static.split(f"{field}:", 1)[1].split("\n", 1)[0])
+        # verify-static routes as verify does, except that a contributor's pull request stays on GitHub's runners.
+        for field, fork in (("runs-on", "needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' || "),
+                            ("RUNNER_KIND", "needs.changes.outputs.trusted != 'true' && 'github' || ")):
+            shared = runtime.split(f"{field}:", 1)[1].split("\n", 1)[0]
+            if field == "runs-on":
+                shared = shared.replace("'ubuntu-latest' || ", "'ubuntu-latest' || " + fork, 1)
+            else:
+                shared = shared.replace("${{ ", "${{ " + fork, 1)
+            self.assertEqual(static.split(f"{field}:", 1)[1].split("\n", 1)[0], shared)
         self.assertIn("- name: No Rust work selected", runtime)
         self.assertNotIn("--unshallow", runtime)
         self.assertIn("--unshallow", static)

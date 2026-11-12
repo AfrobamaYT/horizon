@@ -104,7 +104,8 @@ class WorkflowTests(unittest.TestCase):
                            "self_hosted": "false", "trusted": "false"}
                 with self.subTest(job=name, outputs=outputs, pool=pool):
                     runner = self.runs_on(name, outputs, pool)
-                    self.assertIn(runner, ("ubuntu-latest", "boat"))
+                    # verify-static, one of a contributor's two checks, never waits on a paid pool either.
+                    self.assertIn(runner, ("ubuntu-latest",) if name == "verify-static" else ("ubuntu-latest", "boat"))
         # The control: the same expressions do reach our runners for a trusted head.
         trusted = {"rust_required": "true", "forced_github": "false", "hosted_label": "",
                    "self_hosted": "true", "trusted": "true"}
@@ -119,6 +120,13 @@ class WorkflowTests(unittest.TestCase):
             result = subprocess.run(["bash", ROOT / "tools/ci/dyna_ci_runner.sh"], env=env, capture_output=True,
                                     text=True, check=True)
             self.assertEqual(result.stdout.strip(), expected, same_repo)
+
+    def test_a_contributors_cheap_checks_run_on_githubs_runners(self):
+        # format and verify-static are all a fork pull request gets; a paid pool's balance must not fail them.
+        self.assertIn("runs-on: ubuntu-latest\n", self.job("format"))
+        static = self.job("verify-static")
+        self.assertIn("needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' ||", static)
+        self.assertIn("RUNNER_KIND: ${{ needs.changes.outputs.trusted != 'true' && 'github' ||", static)
 
     def test_other_pull_request_workflows_skip_what_compiles_for_forks(self):
         for workflow, jobs in (("launcher-windows-check.yml", ("test", "runtime-leases")),
