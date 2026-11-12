@@ -43,6 +43,7 @@ fn record(f: &Fixture, folder: &str, substituted: bool) -> PathBuf {
         &file,
         Tag::compound([
             ("version", Tag::Int(1)),
+            ("reported", Tag::List(Vec::new())),
             (
                 "dimensions",
                 Tag::compound([(
