@@ -115,6 +115,22 @@ fn block_break_speed_factor(value: Option<f64>) -> f32 {
     value.map_or(1.0, |value| value as f32)
 }
 
+/// Says once per item that its parts' `xp_repair_ratio` answered `ratio`,
+/// which isn't finite.
+fn refuse_xp_repair_ratio(item: &str, ratio: f32) {
+    static REFUSED: std::sync::Mutex<std::collections::BTreeSet<String>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    if REFUSED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(item.to_owned())
+    {
+        log::warn!(
+            "Horizon: an xp_repair_ratio part of {item} answered {ratio}, which isn't finite; Mending's own repair is used"
+        );
+    }
+}
+
 impl Game<'_> {
     /// `Attributes.MINING_EFFICIENCY` (efficiency), which `Player.getDestroySpeed`
     /// adds to a tool speed above 1: 0 without a player or attribute.
@@ -983,18 +999,14 @@ impl Game<'_> {
                 items: Some(world_items!(self)),
                 ..Default::default()
             };
-            let mut to_repair_xp = world_stations!(self).enchantments.modify_value(
+            let vanilla_repair = world_stations!(self).enchantments.modify_value(
                 Some(&stack),
                 "minecraft:repair_with_xp",
                 &ctx,
                 &mut self.world.random,
                 amount as f32,
             ) as u32;
-            let vanilla_repair = to_repair_xp;
-            if self.serving.is_some() || self.options.dedicated.is_some() {
-                let player = self.native_acting_id();
-                self.native_mending_repair(player, &stack, amount, &mut to_repair_xp);
-            }
+            let to_repair_xp = self.xp_repair(&stack, amount, vanilla_repair);
             // A hook can re-enter experience granting or replace the slot. Only
             // repair the same eligible stack, using its current damage.
             let eligible = self.player_slot(slot).as_ref().is_some_and(|current| {
@@ -1037,6 +1049,36 @@ impl Game<'_> {
             }
             amount = remaining;
         }
+    }
+    /// The repair Mending gives `stack` for `experience` points: `vanilla`
+    /// (its `minecraft:repair_with_xp` repair) as the item's parts scale it
+    /// (`IItemExtension.getXpRepairRatio`), `floor(experience × ratio)` within
+    /// `0..=i32::MAX`. A ratio left as it arrived keeps `vanilla` exactly, and
+    /// one that isn't finite is refused for it.
+    fn xp_repair(&mut self, stack: &ItemStack, experience: u32, vanilla: u32) -> u32 {
+        // One table lookup tells whether any part of this item listens; with none,
+        // the stack is not converted and no host is made.
+        if experience == 0
+            || (self.serving.is_none() && self.options.dedicated.is_none())
+            || !mod_api::__private::item_listens(mod_api::HookId::XpRepairRatio, &stack.item)
+        {
+            return vanilla;
+        }
+        let arrived = vanilla as f32 / experience as f32;
+        let mut ratio = arrived;
+        let player = self.native_acting_id();
+        self.native_xp_repair_ratio(player, stack, experience, &mut ratio);
+        if ratio.to_bits() == arrived.to_bits() {
+            return vanilla;
+        }
+        if !ratio.is_finite() {
+            refuse_xp_repair_ratio(&stack.item, ratio);
+            return vanilla;
+        }
+        // `as` saturates: a negative product repairs nothing.
+        (f64::from(experience) * f64::from(ratio))
+            .floor()
+            .min(f64::from(i32::MAX)) as u32
     }
     /// `LivingEntity.getItemBySlot` for the player.
     fn player_slot(&self, slot: PlayerSlot) -> &Option<ItemStack> {

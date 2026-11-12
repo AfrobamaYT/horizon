@@ -2651,7 +2651,7 @@ impl<R: RandomSource> LootContext<'_, R> {
                     let cost = Self::int_number(&f["levels"], random);
                     let e = &self.items.enchantments;
                     let pool = Self::enchant_pool(e, &f["options"]);
-                    let chosen = e.select(self.items, random, &stack.item, cost, &pool);
+                    let chosen = e.select(self.items, random, stack, cost, &pool);
                     // EnchantmentHelper.enchantItem: a book becomes one
                     // enchanted book (the fresh stack's count).
                     if &*stack.item == "minecraft:book" {
@@ -3148,6 +3148,9 @@ mod consume_effect_tests {
 
 #[cfg(test)]
 mod tests {
+    mod enchant_select_tests {
+        include!("enchant_select_tests.rs");
+    }
     use super::*;
     use horizon_core::random::LegacyRandom;
     use serde_json::json;

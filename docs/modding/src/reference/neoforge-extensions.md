@@ -33,7 +33,7 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `IBlockExtension` | 60 | 14 | 17 | 29 | 0 |
 | `IBlockStateExtension` | 57 | 13 | 16 | 28 | 0 |
-| `IItemExtension` | 46 | 16 | 12 | 18 | 0 |
+| `IItemExtension` | 46 | 19 | 10 | 17 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
 | `IBlockEntityExtension` | 9 | 2 | 3 | 3 | 1 |
@@ -150,7 +150,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `isPiglinCurrency(stack)` | Covered | `ItemPart::is_piglin_currency` (`hooks/is_piglin_currency.rs`) | Starts from vanilla's answer, which is the item `minecraft:gold_ingot` (`PiglinAi.BARTERING_ITEM`; 26.3 has no currency tag), and is asked where vanilla asks: a piglin wanting a stack on the ground, an adult taking one from the hand (and the client's prediction of that click), and the end of the admiring, where currency is bartered or lost to a hit. A ground stack is admired only when it is also `#piglin_loved`. Both sides. [#3226](https://github.com/arismoko/horizon/issues/3226). |
 | `makesPiglinsNeutral(stack, entity)` | Covered | `ItemPart::makes_piglins_neutral` (`hooks/makes_piglins_neutral.rs`) | Starts from `#minecraft:piglin_safe_armor` (which content mods can already add to) for each stack in a player's armour slots, with the wearer, and may make a piece count or refuse a tagged one. Server-side. [#3226](https://github.com/arismoko/horizon/issues/3226). |
 | `isCombineRepairable(stack)` | Partial | `minecraft:repairable` component via `ItemResource::repairable` | Data answers which material repairs it; the anvil combine predicate is not exposed. |
-| `getXpRepairRatio(stack)` | Partial | `mending_repair` (`hooks/base.rs`, a global hook) | Changes the repair amount for Mending; the per-item ratio is not a separate read, and the hook is not scoped to the item. |
+| `getXpRepairRatio(stack)` | Covered | `ItemPart::xp_repair_ratio` (`hooks/xp_repair_ratio.rs`) | Asked in Mending's repair (`ExperienceOrb.repairPlayerItems`) for the picked item, with the ratio arriving as its `minecraft:repair_with_xp` repair per point. Server-side, read-only `Host`. |
 | `onStopUsing(stack, entity, timeLeft)` | Partial | `ItemPart::release_using` (`hooks/base.rs`) | Runs on an early release only, after the vanilla item's release; finishing the use or switching to another item stops it without asking. Both sides. |
 | `onLeftClickEntity(stack, player, entity)` | Covered | `ItemPart::on_left_click_entity` (`hooks/item_attack.rs`) | Runs where `Player.attack` starts, after `attack_entity` let the blow through; a cancel leaves the target unhurt, with no `hurt_enemy` and no wear. |
 | `getCraftingRemainder(instance)` | Covered | `ItemPart::crafting_remainder`, content `crafting_remainder` | The per-stack Part override replaces the data remainder in crafting, fuel and quick moves. |
@@ -305,7 +305,7 @@ their rows have landed or become partial since and should be narrowed when they 
   `getToolModifiedState` is `tool_modified_state` before `block_tool_modification`; `onDestroyedByPlayer` is
   `on_destroyed_by_player`.
 - **Changed on the item side:** `getEquipmentSlot` is `ItemResource::equippable_slot`; `getCraftingRemainder`
-  has `ItemPart::crafting_remainder` plus content data and `host.item_crafting_remainder`; `canEquip` is `ItemPart::can_equip`; `getXpRepairRatio` has a global `mending_repair` that changes the amount.
+  has `ItemPart::crafting_remainder` plus content data and `host.item_crafting_remainder`; `canEquip` is `ItemPart::can_equip`; `getXpRepairRatio` is `ItemPart::xp_repair_ratio`.
 - **Block group rows that still need their own answer:** `getExpDrop`, `onBlockExploded`,
   `getWeakChanges`, `onNeighborChange`, `getBounceRestitution`, `isSlimeBlock`, `isStickyBlock`,
   `canStickTo` (all Partial or Missing above).
