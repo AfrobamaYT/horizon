@@ -501,7 +501,8 @@ impl RenderAssets {
             connected,
             fusion,
             mod_animations: crate::mod_animations::Animations::load(root.source()),
-            mod_pipelines: crate::mod_pipelines::Pipelines::load(root.source(), generation),
+            // A required pipeline that doesn't build fails the load: nothing of it is published.
+            mod_pipelines: crate::mod_pipelines::Pipelines::load(root.source(), generation)?,
             generation,
         })
     }

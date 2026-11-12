@@ -109,6 +109,8 @@ pub(super) fn build_renderer(
     renderer
         .hud
         .set_cit_glints(&renderer.device, &renderer.queue, cit_glints);
+    // Last, so a renderer that fails before this marks none of the pack's pipelines invalid.
+    renderer.build_mod_pipelines(&pack.render.mod_pipelines)?;
     Ok(renderer)
 }
 
