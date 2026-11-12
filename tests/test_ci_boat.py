@@ -435,19 +435,22 @@ class RustupRetryTests(unittest.TestCase):
             (bin_dir / "sleep").write_text("#!/bin/sh\n")
             for name in ("rustup", "sleep"):
                 (bin_dir / name).chmod(0o755)
+            # Not a kept Dyna slot, whatever runs the test: only the requested install is counted.
+            env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+            env.pop("DYNA_CI_BUILD", None)
             result = subprocess.run(["bash", str(script), "stable", "--profile", "minimal"], capture_output=True, text=True,
-                                    env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"})
+                                    env=env)
             return result.returncode, count.read_text().splitlines()
 
     @unittest.skipIf(os.name == "nt", "a bash script for Linux runners")
     def test_transient_failures_are_retried_then_bounded(self):
         status, calls = self.run_script(failures=2)
-        installs = [call for call in calls if call.startswith("toolchain install")]
+        installs = [call for call in calls if call.startswith("toolchain install stable")]
         self.assertEqual((status, len(installs)), (0, 3))
         self.assertEqual(installs[0], "toolchain install stable --profile minimal")
         status, calls = self.run_script(failures=10)
         self.assertNotEqual(status, 0)
-        self.assertEqual(len(calls), 4)
+        self.assertEqual(calls, ["toolchain install stable --profile minimal"] * 4)
 
 
 class PinnedToolchainComponentsTests(unittest.TestCase):
