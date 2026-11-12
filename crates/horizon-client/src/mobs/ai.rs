@@ -6072,6 +6072,7 @@ mod burn_and_rose_tests {
     /// (not 299) after its first tick, and the hit that tick starts has its
     /// full invulnerable time.
     #[test]
+    #[ignore = "requires prepared vanilla resources in .local/horizon-client"]
     fn lava_ignites_to_the_full_time_and_hits_after_the_timers_count_down() {
         let mut test_level = crate::health::TestLevel::new(0);
         let level = &mut test_level.level();
