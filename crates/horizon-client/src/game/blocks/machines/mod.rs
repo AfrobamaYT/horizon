@@ -3169,5 +3169,5 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "../../machines_chest_cat_tests.rs"]
+#[path = "machines_chest_cat_tests.rs"]
 mod machines_chest_cat_tests;

@@ -12,7 +12,7 @@ use std::{
 };
 
 #[cfg(test)]
-#[path = "../phantom_spawn_tests.rs"]
+#[path = "phantom_spawn_tests.rs"]
 mod phantom_spawn_tests;
 
 /// One player `PhantomSpawner.tick` visits. `identity` is the server player's uuid and

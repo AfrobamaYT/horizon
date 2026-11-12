@@ -6362,5 +6362,5 @@ mod knot_identity_tests;
 mod mob_display_name_tests;
 
 #[cfg(test)]
-#[path = "../../item_count_predicate_tests.rs"]
+#[path = "item_count_predicate_tests.rs"]
 mod item_count_predicate_tests;
