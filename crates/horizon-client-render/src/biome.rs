@@ -448,6 +448,7 @@ impl Biomes {
     /// Biome `id`, or plains (the last entry without one) when the id is past this table:
     /// a placeholder, or a column a server sent under its earlier, longer registry (a
     /// proxy's previous server), which keeps its ids until the next login replaces it.
+    /// An empty table returns the shared default plains biome.
     pub fn get(&self, id: u16) -> &BiomeInfo {
         if self.list.is_empty() {
             static DEFAULT: OnceLock<BiomeInfo> = OnceLock::new();
@@ -941,6 +942,38 @@ mod blend_tests {
             last = v;
         }
         assert!(at(-2.0) > 0.0 && at(-2.0) < 0.5);
+    }
+
+    /// An empty biome table (a resource pack with no biome files) must not
+    /// panic on `get`: before the fix, `list.len() - 1` underflowed.
+    #[test]
+    fn get_on_empty_biome_table_returns_default_instead_of_panicking() {
+        use std::sync::Arc;
+
+        let empty = Biomes {
+            builtin: Arc::new(Vec::new()),
+            files: Arc::default(),
+            index: HashMap::new(),
+            list: Vec::new(),
+            info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
+            colormaps: Arc::new(Colormaps {
+                grass: Vec::new(),
+                foliage: Vec::new(),
+                dry: Vec::new(),
+            }),
+            packs: BTreeMap::new(),
+            placeholders: Default::default(),
+        };
+        // Any id returns the shared default plains biome, no panic.
+        let b = empty.get(0);
+        assert_eq!(b.name, "minecraft:plains");
+        let b = empty.get(65535);
+        assert_eq!(b.name, "minecraft:plains");
+        // Colours and temperature come from the default.
+        assert_eq!(b.temperature, 0.8);
+        assert_eq!(b.grass, 0x7f_c0_55);
+        assert_eq!(b.foliage, 0x6a_ab_37);
+        assert_eq!(b.water, 0x3f_76_e4);
     }
 }
 
