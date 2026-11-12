@@ -72,30 +72,4 @@ impl GameLevel<'_> {
         }
         sticks
     }
-
-    /// `LevelAccess::allow_piston_move`: `PistonEvent.Pre` (`native_piston_pre`) on an
-    /// authoritative server, once the structure these parts answered for resolved.
-    pub(in crate::game) fn allow_piston_pre(
-        &self,
-        piston: BlockPos,
-        direction: horizon_core::geometry::Direction,
-        extending: bool,
-        push: &[BlockPos],
-        destroy: &[BlockPos],
-    ) -> bool {
-        let mut canceled = false;
-        if self.native_authoritative {
-            let step = direction.normal();
-            self.native_piston_pre(mod_api::__private::PistonPreCall {
-                dimension: self.dimension,
-                piston,
-                direction: step,
-                extending,
-                push,
-                destroy,
-                canceled: &mut canceled,
-            });
-        }
-        !canceled
-    }
 }
