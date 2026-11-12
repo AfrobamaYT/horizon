@@ -641,6 +641,8 @@ impl Game<'_> {
             // A general row gets off by its mount link: the row keeps its
             // identity and place, and the level's next walk sees it as a
             // root (`Entity.stopRiding` clears the mount and nothing else).
+            // The mount rewrite also retires the rows' rider index, which
+            // the list's own write stamp does not see.
             Target::General(id) => {
                 let Some(row) = self
                     .resident_entities
@@ -652,6 +654,7 @@ impl Game<'_> {
                     return false;
                 };
                 row.mount = None;
+                self.resident_entities.general.mount_writes += 1;
             }
             _ => return false,
         }

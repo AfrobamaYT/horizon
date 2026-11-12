@@ -55,15 +55,15 @@ impl Game<'_> {
         // lands at or above `born`, ticks from the next pass, and never
         // reaches this loop's rows.
         let total = self.resident_entities.general.rows.len();
-        // Each vehicle's riders by mount link, in join order: a rider's place
-        // in the storage is not its place in its vehicle's subtree. A tree
-        // without riders collects nothing here.
-        let mut riders: Vec<(u32, usize)> = Vec::new();
-        for (index, row) in self.resident_entities.general.rows.iter().enumerate() {
-            if let Some(vehicle) = row.mount {
-                riders.push((vehicle, index));
-            }
-        }
+        // The rider adjacency, resolved once into the reusable first-child
+        // and next-sibling index: a stable world's pass allocates nothing
+        // (the index rebuilds in place only when the rows or a mount
+        // changed), and every edge is visited exactly once, through its
+        // vehicle's chain — no row scans the list.
+        self.resident_entities.general.riders.refresh(
+            &self.resident_entities.general.rows,
+            self.resident_entities.general.mount_writes,
+        );
         for index in 0..total {
             let (id, slot, join, mount, at) = {
                 let row = &self.resident_entities.general.rows[index];
@@ -117,7 +117,7 @@ impl Game<'_> {
             }
             // The vehicle's canceled Pre does not stop its passengers: every
             // rider still takes its own ride tick.
-            self.tick_general_riders(id, born, catalog, &subscribed, epoch, &mut round, &riders);
+            self.tick_general_riders(index, born, catalog, &subscribed, epoch, &mut round);
         }
         Ok(())
     }
@@ -133,28 +133,30 @@ impl Game<'_> {
     /// tick waits for the next pass with its root — a tree joins whole.
     fn tick_general_riders(
         &mut self,
-        vehicle: u32,
+        vehicle: usize,
         born: JoinSeq,
         catalog: &GeneralTypeCatalog,
         subscribed: &[bool],
         epoch: Option<mod_api::WorldEpoch>,
         round: &mut crate::game::native_ticks::TickRound,
-        riders: &[(u32, usize)],
     ) {
-        for &(rider_vehicle, index) in riders {
-            if rider_vehicle != vehicle {
-                continue;
-            }
-            let (id, slot, join) = {
+        // The vehicle's rider chain, each edge once: the index was resolved
+        // before the walk began, so rows joining mid-pass never appear here.
+        let mut child = self.resident_entities.general.riders.first_child[vehicle];
+        while let Some(index) = child {
+            child = self.resident_entities.general.riders.next_sibling[index];
+            let (id, slot, join, mount) = {
                 let row = &self.resident_entities.general.rows[index];
-                (row.id, row.type_slot, row.join)
+                (row.id, row.type_slot, row.join, row.mount)
             };
             if join >= born {
                 continue;
             }
             // `tickPassenger`'s own gate: the rider still rides this
             // vehicle, and no callback has queued its removal.
-            if !general_row_live(self, index, Some(vehicle)) {
+            if mount != Some(self.resident_entities.general.rows[vehicle].id)
+                || !general_row_live(self, index, mount)
+            {
                 continue;
             }
             let kind = catalog.key(slot);
@@ -162,9 +164,9 @@ impl Game<'_> {
             // The bookkeeping runs even for a canceled rider: it still
             // follows its vehicle (the ruling). A removal the Pre queued
             // takes the whole step instead.
-            if ticks && !general_row_live(self, index, Some(vehicle)) {
+            if ticks && !general_row_live(self, index, mount) {
                 round.not_ticked(id);
-                self.tick_general_riders(id, born, catalog, subscribed, epoch, round, riders);
+                self.tick_general_riders(index, born, catalog, subscribed, epoch, round);
                 continue;
             }
             self.resident_entities.general.rows[index].previous =
@@ -179,7 +181,7 @@ impl Game<'_> {
                     self.native_tick_post_one(round, id, kind);
                 }
             }
-            self.tick_general_riders(id, born, catalog, subscribed, epoch, round, riders);
+            self.tick_general_riders(index, born, catalog, subscribed, epoch, round);
         }
     }
 

@@ -584,6 +584,74 @@ pub type GeneralRows = JoinList<GeneralRow, true>;
 pub struct GeneralStore {
     /// The level's general rows, in join order.
     pub rows: GeneralRows,
+    /// The rows' rider adjacency, reused across the level's entity passes
+    /// (`tick.rs` refreshes it).
+    pub riders: RiderIndex,
+    /// How many times a live row's mount was rewritten (`entity_stop_riding`
+    /// is the only path): each change retires the rider adjacency, which the
+    /// rows' own write stamp does not see.
+    pub mount_writes: u64,
+}
+
+/// Root-to-rider adjacency of the general rows, as a first-child and
+/// next-sibling index over the rows' places: rebuilt in place, and only
+/// when the rows' storage changed or a mount was rewritten, so a stable
+/// world's pass allocates nothing and visits each edge once. The sibling
+/// chains keep the storage's own order, which is the join order — a
+/// vehicle's riders ride in the order their tree loaded, as
+/// `addPassenger`'s list does.
+#[derive(Default)]
+pub struct RiderIndex {
+    stamp: Option<horizon_client::join_seq::ListStamp>,
+    length: usize,
+    mounts: u64,
+    /// Each row's first rider's place; `None` carries none.
+    pub(super) first_child: Vec<Option<usize>>,
+    /// Each rider's next sibling's place on the same vehicle.
+    pub(super) next_sibling: Vec<Option<usize>>,
+    /// Each vehicle's latest rider of the ongoing rebuild.
+    last_child: Vec<Option<usize>>,
+    /// Each row's place by id, for the rebuild's edge pass.
+    places: FxHashMap<u32, usize>,
+}
+
+impl RiderIndex {
+    /// Re-derive the adjacency unless nothing changed since the last pass:
+    /// one pass over the rows, each edge written once, no allocation while
+    /// the row count and the mounts hold still.
+    pub fn refresh(&mut self, rows: &GeneralRows, mounts: u64) {
+        let stamp = rows.stamp();
+        if self.stamp == Some(stamp) && self.length == rows.len() && self.mounts == mounts {
+            return;
+        }
+        self.stamp = Some(stamp);
+        self.length = rows.len();
+        self.mounts = mounts;
+        // The buffers are reused: resize keeps their capacity and only
+        // extends or truncates the tail.
+        self.first_child.resize(rows.len(), None);
+        self.next_sibling.resize(rows.len(), None);
+        self.last_child.clear();
+        self.last_child.resize(rows.len(), None);
+        self.places.clear();
+        for (place, row) in rows.iter().enumerate() {
+            self.places.insert(row.id, place);
+        }
+        for (place, row) in rows.iter().enumerate() {
+            let Some(vehicle) = row.mount else {
+                continue;
+            };
+            let Some(&vehicle_place) = self.places.get(&vehicle) else {
+                continue;
+            };
+            match self.last_child[vehicle_place] {
+                // The chain's tail takes the new rider; the head opens it.
+                Some(tail) => self.next_sibling[tail] = Some(place),
+                None => self.first_child[vehicle_place] = Some(place),
+            }
+            self.last_child[vehicle_place] = Some(place);
+        }
+    }
 }
 
 impl Game<'_> {

@@ -687,23 +687,32 @@ fn a_canceled_passenger_still_follows_and_his_passengers_tick() {
     });
 }
 
-/// The zero-callback row: a thousand rows of a type no part subscribes to
-/// cost the pass one walk and no callback — no call, no event, no type
-/// lookup (the slot resolved without subscribers before the walk began).
+/// The zero-callback row, with riders: five hundred two-row trees of a
+/// type no part subscribes to cost the pass one walk and no callback — no
+/// call, no event, no type lookup (the slot resolved without subscribers
+/// before the walk began) — and each tree costs its one edge through the
+/// rider index, not a scan of the rows. A stable pass allocates nothing:
+/// the index's buffers hold their capacity across ticks.
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-fn a_thousand_part_free_rows_call_nothing() {
+fn five_hundred_part_free_trees_walk_each_edge_once_and_allocate_nothing() {
     with_counter(|game, l| {
-        for index in 0..1000 {
+        for index in 0..500u32 {
+            let rider = record_at(
+                "mymod:ghost",
+                [index as i32, 1, 0, 0],
+                [0.5, 64.0, 0.5],
+                Vec::new(),
+            );
             game.load_listed(
                 "mymod:ghost",
                 None,
                 None,
                 record_at(
                     "mymod:ghost",
-                    [index, 0, 0, 0],
+                    [index as i32, 0, 0, 0],
                     [0.5, 64.0, 0.5],
-                    Vec::new(),
+                    vec![rider],
                 ),
             )
             .unwrap();
@@ -711,6 +720,16 @@ fn a_thousand_part_free_rows_call_nothing() {
         assert_eq!(game.resident_entities.general.rows.len(), 1000);
         tick(game);
         assert!(l.trace.lock().unwrap().is_empty());
+        // The second pass over unchanged rows reuses the index buffers:
+        // their capacity does not grow, which is the allocation the walk
+        // itself would have to make.
+        let capacity = game.resident_entities.general.riders.first_child.capacity();
+        tick(game);
+        assert_eq!(
+            game.resident_entities.general.riders.first_child.capacity(),
+            capacity,
+            "a stable pass allocates nothing"
+        );
         assert_eq!(game.resident_entities.general.rows.len(), 1000);
     });
 }
