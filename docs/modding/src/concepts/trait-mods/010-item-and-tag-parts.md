@@ -105,6 +105,6 @@ next damaged Mending item, then to the player. A ratio left as it arrived keeps 
 isn't finite is refused (vanilla's repair is used, with one warning per item), and a negative one counts as 0; a
 ratio that takes a positive repair to 0 leaves the experience for the player. The `Host` is read-only.
 
-The global `mending_repair` hook is gone: this method is its one moment. To change Mending for every item at once,
+To change Mending for every item at once,
 change the enchantment's `minecraft:repair_with_xp` effect in a data pack; the ratio a part gets arrives with it. To
 change it for particular items, vanilla's or another mod's included, attach a part to their item keys.

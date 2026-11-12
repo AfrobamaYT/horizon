@@ -305,7 +305,7 @@ their rows have landed or become partial since and should be narrowed when they 
   `getToolModifiedState` is `tool_modified_state` before `block_tool_modification`; `onDestroyedByPlayer` is
   `on_destroyed_by_player`.
 - **Changed on the item side:** `getEquipmentSlot` is `ItemResource::equippable_slot`; `getCraftingRemainder`
-  has `ItemPart::crafting_remainder` plus content data and `host.item_crafting_remainder`; `canEquip` has the `equippable` component; `getXpRepairRatio` is `ItemPart::xp_repair_ratio`, which replaced the global `mending_repair`.
+  has `ItemPart::crafting_remainder` plus content data and `host.item_crafting_remainder`; `canEquip` has the `equippable` component; `getXpRepairRatio` is `ItemPart::xp_repair_ratio`.
 - **Block group rows that still need their own answer:** `getExpDrop`, `onBlockExploded`,
   `getWeakChanges`, `onNeighborChange`, `getBounceRestitution`, `isSlimeBlock`, `isStickyBlock`,
   `canStickTo` (all Partial or Missing above).
