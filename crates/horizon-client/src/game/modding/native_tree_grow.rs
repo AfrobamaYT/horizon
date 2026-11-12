@@ -92,7 +92,10 @@ mod tests {
         WorldgenHost, testing,
     };
     use std::collections::{BTreeMap, HashMap};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex, PoisonError};
+
+    /// Held by each test that publishes: the published tables are process-wide.
+    static PUBLISHING: Mutex<()> = Mutex::new(());
 
     const GRASS: EngineState = EngineState(1);
     const COARSE_DIRT: EngineState = EngineState(2);
@@ -154,37 +157,107 @@ mod tests {
         }
     }
 
+    /// Publish `parts` resolved against `tags` with `registry`'s index, and an empty worldgen
+    /// context.
+    fn publish(registry: &BlockRegistry, tags: &[(&str, &[&str])]) {
+        let tags = tags
+            .iter()
+            .map(|(tag, members)| {
+                let members = members.iter().map(|member| member.to_string()).collect();
+                (tag.to_string(), members)
+            })
+            .collect::<HashMap<_, _>>();
+        let parts = mod_api::__private::prepare_parts(
+            &tags,
+            &HashMap::new(),
+            mod_api::__private::KnownIds {
+                block: &|id| registry.default_state(id).is_some(),
+                item: &|_| false,
+            },
+        )
+        .unwrap();
+        native_worldgen_parts::publish(parts.as_ref(), &block_state::current().unwrap());
+        let root = std::env::temp_dir().join("horizon-tree-grow-no-settings");
+        let load = LoadContext::new(
+            DataLoadOrigin::ServerDataLoad,
+            Arc::new(LoadInputs::new(BTreeMap::new(), root)),
+            [],
+        );
+        horizon_world::native_worldgen_hooks::publish_context(Arc::new(load.worldgen_context([])));
+    }
+
     #[test]
     fn the_soils_part_answers_from_the_published_tables_and_draws_from_the_tree() {
+        let _publishing = PUBLISHING.lock().unwrap_or_else(PoisonError::into_inner);
         let mods: Mods = vec![ModEntry::new("soil", Box::new(Soil))].into();
         let mut trunk = Trunk::default();
         let answer = testing::with_mods(mods.clone(), || {
             crate::game::api_values::install_parts(&mods).unwrap();
             let registry = BlockRegistry::from_facts_json(FACTS.as_bytes()).unwrap();
             resolve_block_definitions(&registry).unwrap();
-            let parts = mod_api::__private::prepare_parts(
-                &HashMap::new(),
-                &HashMap::new(),
-                mod_api::__private::KnownIds {
-                    block: &|id| registry.default_state(id).is_some(),
-                    item: &|_| false,
-                },
-            )
-            .unwrap();
-            native_worldgen_parts::publish(parts.as_ref(), &block_state::current().unwrap());
-            let root = std::env::temp_dir().join("horizon-tree-grow-no-settings");
-            let load = LoadContext::new(
-                DataLoadOrigin::ServerDataLoad,
-                Arc::new(LoadInputs::new(BTreeMap::new(), root)),
-                [],
-            );
-            horizon_world::native_worldgen_hooks::publish_context(Arc::new(
-                load.worldgen_context([]),
-            ));
+            publish(&registry, &[]);
             mod_api::__private::worldgen_feature(|| on_tree_grow(&mut trunk, [0, 63, 0]))
         });
         assert_eq!(answer, Some(Some(COARSE_DIRT)));
         assert_eq!(trunk.draws, 1);
+    }
+
+    /// The parts that heard `on_tree_grow`, in the order they were asked.
+    static HEARD: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+    fn heard() -> Vec<&'static str> {
+        std::mem::take(&mut *HEARD.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+    /// Answers nothing, recording that it was asked as `self.0`.
+    struct Listening(&'static str);
+    #[mod_api::horizon_part]
+    impl BlockPart for Listening {
+        fn on_tree_grow(
+            &self,
+            _: &dyn WorldgenHost,
+            _: &mut OnTreeGrowEvent<'_>,
+        ) -> Option<Option<BlockState>> {
+            HEARD
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(self.0);
+            None
+        }
+    }
+    struct KeyAndTag;
+    #[mod_api::__subscriptions]
+    impl Hooks for KeyAndTag {
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            let grass = r.block_key("minecraft:grass_block");
+            r.block_part(grass, Listening("key"));
+            r.block_part_tag("minecraft:dirt", Listening("tag"));
+        }
+    }
+
+    #[test]
+    fn the_published_key_and_tag_parts_answer_and_a_feature_keeps_its_tables() {
+        let _publishing = PUBLISHING.lock().unwrap_or_else(PoisonError::into_inner);
+        let mods: Mods = vec![ModEntry::new("soils", Box::new(KeyAndTag))].into();
+        testing::with_mods(mods.clone(), || {
+            crate::game::api_values::install_parts(&mods).unwrap();
+            let registry = BlockRegistry::from_facts_json(FACTS.as_bytes()).unwrap();
+            resolve_block_definitions(&registry).unwrap();
+            let grow = || {
+                let mut trunk = Trunk::default();
+                assert_eq!(on_tree_grow(&mut trunk, [0, 63, 0]), None);
+                assert_eq!(trunk.draws, 0);
+            };
+            publish(&registry, &[("minecraft:dirt", &["minecraft:grass_block"])]);
+            grow();
+            assert_eq!(heard(), ["key", "tag"]);
+            mod_api::__private::worldgen_feature(|| {
+                // A `/reload` drops grass from the tag while the feature runs.
+                publish(&registry, &[("minecraft:dirt", &[])]);
+                grow();
+                assert_eq!(heard(), ["key", "tag"]);
+            });
+            grow();
+            assert_eq!(heard(), ["key"]);
+        });
     }
 
     #[test]
