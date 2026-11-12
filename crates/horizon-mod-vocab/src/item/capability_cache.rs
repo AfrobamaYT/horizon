@@ -3,7 +3,10 @@
 //! polled). Its check is constant time: whether the level is in place, the block entity at the
 //! position, the block state there and the game's count of mod switches, each compared with what
 //! they were at the lookup.
-use crate::{BlockEntityRef, BlockSide, BlockState, Capability, CapabilityKey, Direction, LevelRef, ServerHost};
+use crate::{
+    BlockEntityRef, BlockSide, BlockState, Capability, CapabilityKey, Direction, LevelRef,
+    ServerHost,
+};
 
 /// A block capability looked up once and kept. [`get`](Self::get) gives the kept handler while
 /// the level is as in place as it was ([`LevelRef::in_place`]: a parked level lends nothing, as a
