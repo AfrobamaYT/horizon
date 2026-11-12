@@ -277,7 +277,7 @@ fn refused_adhesion_next_tick_updates_replace_client_replay_before_landing() {
         f.behaviours
             .tick_block_entities(&mut server, &mut server_ticks);
         f.behaviours
-            .tick_block_entities(&mut client, &mut client_ticks);
+            .client_tick_block_entities(&mut client, &mut client_ticks);
         if refuse {
             assert!(server.updates.contains(&BlockPos::new(1, 2, 0)));
             assert!(server.updates.contains(&BlockPos::new(2, 2, 0)));
@@ -310,7 +310,7 @@ fn refused_adhesion_next_tick_updates_replace_client_replay_before_landing() {
             f.behaviours
                 .tick_block_entities(&mut server, &mut server_ticks);
             f.behaviours
-                .tick_block_entities(&mut client, &mut client_ticks);
+                .client_tick_block_entities(&mut client, &mut client_ticks);
         }
         let expected = if refuse { (stone, air) } else { (air, stone) };
         assert_eq!(server.block_state(BlockPos::new(1, 2, 0)), expected.0);
@@ -325,4 +325,123 @@ fn refused_adhesion_next_tick_updates_replace_client_replay_before_landing() {
             assert_eq!(client.block_state(pos), server.block_state(pos), "{pos:?}");
         }
     }
+}
+
+#[test]
+#[ignore = "requires prepared resources"]
+fn failed_part_retraction_corrects_successful_vanilla_replay() {
+    let f = fixture().expect("prepared resources");
+    let stone = state(f, "stone");
+    let air = f.behaviours.air();
+    let make = || StickyLevel {
+        inner: TestLevel::new(&f.behaviours),
+        slime: HashSet::new(),
+        sticky: HashSet::new(),
+        refused: HashSet::new(),
+        updates: Vec::new(),
+    };
+    let mut server = make();
+    let mut client = make();
+    server.sticky.insert(stone);
+    client.inner.client_side = true;
+    let piston = f
+        .registry
+        .resolve(&BlockState {
+            name: "minecraft:sticky_piston".into(),
+            properties: [
+                ("facing".to_owned(), "east".to_owned()),
+                ("extended".to_owned(), "true".to_owned()),
+            ]
+            .into(),
+        })
+        .unwrap();
+    let head = f
+        .registry
+        .resolve(&BlockState {
+            name: "minecraft:piston_head".into(),
+            properties: [
+                ("facing".to_owned(), "east".to_owned()),
+                ("type".to_owned(), "sticky".to_owned()),
+            ]
+            .into(),
+        })
+        .unwrap();
+    // Thirteen stones exceed the server's push limit only when parts make them sticky.
+    // Vanilla pulls just the bottom stone west, from (2, 1, 0) to (1, 1, 0).
+    let stones = [
+        BlockPos::new(2, 1, 0),
+        BlockPos::new(2, 2, 0),
+        BlockPos::new(2, 3, 0),
+        BlockPos::new(2, 4, 0),
+        BlockPos::new(2, 5, 0),
+        BlockPos::new(2, 6, 0),
+        BlockPos::new(2, 7, 0),
+        BlockPos::new(2, 8, 0),
+        BlockPos::new(2, 9, 0),
+        BlockPos::new(2, 10, 0),
+        BlockPos::new(2, 11, 0),
+        BlockPos::new(2, 12, 0),
+        BlockPos::new(2, 13, 0),
+    ];
+    for level in [&mut server, &mut client] {
+        level.inner.blocks.insert(BlockPos::new(0, 1, 0), piston);
+        level.inner.blocks.insert(BlockPos::new(1, 1, 0), head);
+        for pos in stones {
+            level.inner.blocks.insert(pos, stone);
+        }
+    }
+    let mut server_ticks = Ticks::new(0);
+    let mut client_ticks = Ticks::new(0);
+    assert!(f.behaviours.client_block_event(
+        &mut server,
+        &mut server_ticks,
+        BlockPos::new(0, 1, 0),
+        1,
+        Direction::East as i32
+    ));
+    assert!(f.behaviours.client_block_event(
+        &mut client,
+        &mut client_ticks,
+        BlockPos::new(0, 1, 0),
+        1,
+        Direction::East as i32
+    ));
+    assert_eq!(server.block_state(BlockPos::new(2, 1, 0)), stone);
+    assert_eq!(client.block_state(BlockPos::new(2, 1, 0)), air);
+    assert!(
+        client_ticks
+            .moving_pistons
+            .iter()
+            .any(|(p, _)| *p == BlockPos::new(1, 1, 0))
+    );
+    assert!(server.updates.contains(&BlockPos::new(2, 1, 0)));
+    assert!(server.updates.contains(&BlockPos::new(1, 1, 0)));
+    for _ in 0..10 {
+        server.inner.time += 1;
+        client.inner.time += 1;
+        // Apply the preceding tick's ordinary updates before the replay can land.
+        for pos in std::mem::take(&mut server.updates) {
+            f.behaviours.set_block(
+                &mut client,
+                &mut client_ticks,
+                pos,
+                server.block_state(pos),
+                flags::UPDATE_CLIENTS,
+            );
+        }
+        f.behaviours
+            .tick_block_entities(&mut server, &mut server_ticks);
+        f.behaviours
+            .client_tick_block_entities(&mut client, &mut client_ticks);
+    }
+    assert_eq!(server.block_state(BlockPos::new(1, 1, 0)), air);
+    assert_eq!(client.block_state(BlockPos::new(1, 1, 0)), air);
+    for pos in stones {
+        assert_eq!(server.block_state(pos), stone, "server {pos:?}");
+        assert_eq!(client.block_state(pos), stone, "client {pos:?}");
+    }
+    assert_eq!(
+        client.block_state(BlockPos::new(0, 1, 0)),
+        server.block_state(BlockPos::new(0, 1, 0))
+    );
 }

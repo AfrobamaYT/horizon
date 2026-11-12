@@ -423,15 +423,28 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         extending: bool,
     ) -> Option<(Vec<BlockPos>, Vec<BlockPos>, Direction)> {
         self.piston_resolve_stick(piston_pos, direction, extending, false)
+            .ok()
             .map(|r| (r.to_push, r.to_destroy, r.push_direction))
     }
+    /// Mark both ends of replayed moves for the next tick's ordinary block updates.
+    fn correct_piston_replay(
+        &mut self,
+        cells: impl Iterator<Item = BlockPos>,
+        direction: Direction,
+    ) {
+        for pos in cells {
+            self.level.send_block_updated(pos);
+            self.level.send_block_updated(rel(pos, direction));
+        }
+    }
+    /// Failure retains whether a part changed an answer, even when its structure cannot move.
     fn piston_resolve_stick(
         &self,
         piston_pos: BlockPos,
         direction: Direction,
         extending: bool,
         vanilla_parts: bool,
-    ) -> Option<Resolver> {
+    ) -> Result<Resolver, bool> {
         let mut r = Resolver {
             vanilla_parts,
             part_changed: std::cell::Cell::new(false),
@@ -458,24 +471,24 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 && self.is_pushable(next, r.start, r.push_direction, true, r.piston_direction)
             {
                 r.to_destroy.push(r.start);
-                return Some(r);
+                return Ok(r);
             }
-            return None;
+            return Err(r.part_changed.get());
         }
         let start = r.start;
         let push = r.push_direction;
         if !self.add_block_line(&mut r, start, push) {
-            return None;
+            return Err(r.part_changed.get());
         }
         let mut i = 0;
         while i < r.to_push.len() {
             let pos = r.to_push[i];
             if self.is_sticky(&r, self.state(pos)) && !self.add_branching_blocks(&mut r, pos) {
-                return None;
+                return Err(r.part_changed.get());
             }
             i += 1;
         }
-        Some(r)
+        Ok(r)
     }
     fn add_block_line(&self, r: &mut Resolver, start: BlockPos, direction: Direction) -> bool {
         let mut next = self.state(start);
@@ -608,9 +621,21 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if !extending && b.is_block(self.state(arm), b.named.piston_head) {
             self.set_block(arm, b.air(), 276);
         }
-        let Some(resolved) = self.piston_resolve_stick(piston_pos, direction, extending, false)
-        else {
-            return Some(false);
+        let resolved = match self.piston_resolve_stick(piston_pos, direction, extending, false) {
+            Ok(resolved) => resolved,
+            Err(part_changed) => {
+                if part_changed
+                    && !self.level.is_client_side()
+                    && let Ok(replay) =
+                        self.piston_resolve_stick(piston_pos, direction, extending, true)
+                {
+                    self.correct_piston_replay(
+                        replay.to_push.iter().chain(&replay.to_destroy).copied(),
+                        replay.push_direction,
+                    );
+                }
+                return Some(false);
+            }
         };
         // Only a changed sticky, slime, or adhesion answer pays for a second resolution. Include entire
         // structures: a refused neighbour may itself pull a line or sticky branch.
@@ -618,6 +643,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let correct_replay = resolved.part_changed.get() && !self.level.is_client_side();
         let replay = if correct_replay {
             self.piston_resolve_stick(piston_pos, direction, extending, true)
+                .ok()
         } else {
             None
         };
@@ -637,14 +663,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             return None;
         }
         if correct_replay {
-            for pos in to_push.iter().chain(&to_destroy).chain(
-                replay
+            self.correct_piston_replay(
+                to_push
                     .iter()
-                    .flat_map(|r| r.to_push.iter().chain(&r.to_destroy)),
-            ) {
-                self.level.send_block_updated(*pos);
-                self.level.send_block_updated(rel(*pos, push_direction));
-            }
+                    .chain(&to_destroy)
+                    .chain(
+                        replay
+                            .iter()
+                            .flat_map(|r| r.to_push.iter().chain(&r.to_destroy)),
+                    )
+                    .copied(),
+                push_direction,
+            );
         }
         let move_direction = if extending {
             direction
