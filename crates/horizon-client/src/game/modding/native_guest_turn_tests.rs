@@ -1549,3 +1549,44 @@ fn run_command_answers_false_for_a_bad_line_or_a_stale_handle() {
         assert!(!stand.run_command(game, "tick query", Owners));
     });
 }
+
+/// A live player in another dimension is outside the level in place: that level is parked
+/// while the hook runs, so the call answers false and nothing runs, neither the part about
+/// the player (`give @s`) nor the part about the server (`gamerule`). Back in the level in
+/// place, the same player and line run.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn run_command_refuses_a_player_whose_level_is_parked() {
+    use super::native_inventories::NativeInventoryKind::Player;
+    use horizon_client::{gamerules::vanilla::SEND_COMMAND_FEEDBACK, items::ItemStack};
+    use mod_api::PermissionLevel::Owners;
+
+    with_guests(|game| {
+        game.build_registries();
+        let b = game.player(13).unwrap().entity();
+        let move_to = |game: &mut super::Game<'_>, dimension: &str| {
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(13, |guest| guest.dimension = dimension.to_owned())
+                .unwrap();
+        };
+        let has_stick = |game: &super::Game<'_>| {
+            let stick = ItemStack::new("minecraft:stick", 1);
+            let slots = game.native_inventory(13, Player).unwrap().slots;
+            slots.iter().flatten().any(|s| *s == stick)
+        };
+        assert!(game.ui.rules.bool_at(SEND_COMMAND_FEEDBACK));
+
+        move_to(game, "minecraft:the_nether");
+        assert!(!b.run_command(game, "give @s minecraft:stick 1", Owners));
+        assert!(!b.run_command(game, "gamerule send_command_feedback false", Owners));
+        assert!(game.ui.rules.bool_at(SEND_COMMAND_FEEDBACK));
+
+        move_to(game, "minecraft:overworld");
+        assert!(!has_stick(game));
+        assert!(b.run_command(game, "give @s minecraft:stick 1", Owners));
+        assert!(has_stick(game));
+    });
+}

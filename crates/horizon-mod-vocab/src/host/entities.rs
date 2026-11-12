@@ -641,8 +641,9 @@ pub trait EntitiesBackendMut {
     /// `CommandSource::Console`, both at `level`. A teleport to another level
     /// happens at the next tick's start, as `Commands::run_command`'s. Whether
     /// the command ran: false for a line that fails to parse or to run, and,
-    /// with nothing run, for a stale or removed entity, an entity not in the
-    /// level in place (a player in another level included), and on a client.
+    /// with nothing run, for a stale or removed entity, an entity outside the
+    /// level in place (a player in another level included: that level is
+    /// parked while the hook runs), and on a client.
     /// During a guest's turn, live players (the acting one included) can run it
     /// and are reachable; displaced outer players are neither, as on
     /// `Commands::run_command`.
