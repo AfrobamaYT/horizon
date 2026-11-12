@@ -96,5 +96,5 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
-#[path = "extinguish_tests.rs"]
+#[path = "extinguish/extinguish_tests.rs"]
 mod extinguish_tests;

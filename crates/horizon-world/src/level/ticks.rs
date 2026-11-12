@@ -263,6 +263,7 @@ mod block_event_queue_tests {
             block: BlockId((i % 5) as u16),
             param_a: i % 3,
             param_b: 0,
+            note_override: None,
         }
     }
 

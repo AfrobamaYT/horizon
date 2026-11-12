@@ -231,6 +231,7 @@ impl Game<'_> {
         self.maps.slots.forget();
         self.trim_slots.forget();
         self.map_patches.clear();
+        self.text_patches.get_mut().clear();
         self.kept_block_entities.get_mut().clear();
         horizon_client::ui_theme::reset_atlas();
     }

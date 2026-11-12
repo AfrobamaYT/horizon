@@ -11,6 +11,15 @@ pub fn parallel_tick() -> u8 {
     // Typed gameplay dispatch owns mutable residency and damage contexts.
     const FORK_PARALLEL_TICK_ENABLED: bool = false;
     if !FORK_PARALLEL_TICK_ENABLED {
+        static NOTICE: std::sync::Once = std::sync::Once::new();
+        NOTICE.call_once(|| {
+            if matches!(
+                std::env::var("HORIZON_PARALLEL_TICK").as_deref(),
+                Ok("1" | "on" | "true" | "verify")
+            ) {
+                eprintln!("warning: parallel tick is disabled in Horizon Fork while typed hook dispatch is integrated; using serial tick");
+            }
+        });
         return 0;
     }
     static ON: OnceLock<u8> = OnceLock::new();

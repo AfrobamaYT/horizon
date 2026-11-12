@@ -798,12 +798,13 @@ mod save_tests {
     fn both_ways(tag: &Tag) -> (StructureTemplate, StructureTemplate) {
         let registry: &'static BlockRegistry = Box::leak(Box::new(registry()));
         let transforms = transforms();
-        let named = crate::nbt::NamedTag {
+        let named = horizon_core::nbt::NamedTag {
             name: "".into(),
             tag: tag.clone(),
         };
-        let raw = crate::nbt::write_named(&named, crate::nbt::Limits::templates()).unwrap();
-        let limits = crate::nbt::Limits::templates();
+        let raw =
+            horizon_core::nbt::write_named(&named, horizon_core::nbt::Limits::templates()).unwrap();
+        let limits = horizon_core::nbt::Limits::templates();
         let tree = StructureTemplate::from_nbt(tag, registry, &transforms);
         let streamed = StructureTemplate::from_bytes(&raw, limits, registry, &transforms).unwrap();
         assert_eq!(format!("{tree:?}"), format!("{streamed:?}"));
@@ -1001,14 +1002,14 @@ mod save_tests {
                 )])]),
             ),
         ]);
-        let limits = crate::nbt::Limits::templates();
+        let limits = horizon_core::nbt::Limits::templates();
         let mut checked = 0;
         for tag in [tag, hand_built()] {
-            let named = crate::nbt::NamedTag {
+            let named = horizon_core::nbt::NamedTag {
                 name: "".into(),
                 tag,
             };
-            let raw = crate::nbt::write_named(&named, limits).unwrap();
+            let raw = horizon_core::nbt::write_named(&named, limits).unwrap();
             let mut cases: Vec<Vec<u8>> = (0..raw.len()).map(|end| raw[..end].to_vec()).collect();
             for i in 0..raw.len() {
                 let mut altered = raw.clone();
@@ -1016,7 +1017,7 @@ mod save_tests {
                 cases.push(altered);
             }
             for bytes in cases {
-                let tree = crate::nbt::read_named(&bytes, limits);
+                let tree = horizon_core::nbt::read_named(&bytes, limits);
                 let streamed = StructureTemplate::from_bytes(&bytes, limits, registry, &transforms);
                 assert_eq!(tree.is_ok(), streamed.is_ok(), "{} bytes", bytes.len());
                 if let (Ok((tree, _)), Ok(streamed)) = (tree, streamed) {

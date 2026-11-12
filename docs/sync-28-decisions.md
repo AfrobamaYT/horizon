@@ -29,16 +29,15 @@ Audited all 22 assigned paths and the additional random.rs correction. Two reloc
 - The three language files retain fork keys and take upstream added/changed translations, including Horizon UI text.
 - NBT: upstream changed its old horizon-world/src/nbt.rs, now relocated to horizon-core. Ported Cursor/Key and entry/list header primitives there, preserving fork heap quotas, bounded reads, strict duplicate handling, split recursive frames, and list_fits validation. Cursor and Key must be public because structure template decoding is now in a separate crate. No obsolete world NBT file restored.
 - Items retain explicit DAMAGE presence and include_damage gating. Upstream prototype-aware removal of equal DAMAGE 0 is integrated at serialization. Upstream custom durability/mining modules, tag replacement, weapon blocking, and consume parsing integrate with existing fork modules. The duplicate Items attribute_modifiers implementation is not introduced: the fork's ItemStack::default_attribute_modifiers already owns that behavior and incoming tests already call it.
-- Protocol registry.rs remains unchanged from scaffold: fork registry count limits and registry-scoped tag replacement retained; upstream conflicting tag changes are documentation/parameter naming, not a missing behavior.
+- Protocol registry.rs remains unchanged from the fork base: fork registry count limits and registry-scoped tag replacement retained; upstream conflicting tag changes are documentation/parameter naming, not a missing behavior.
 - Server files expose both durable and incoming chat_guard.
 - Server backup security, pruning, rollback on failed restore placement, and upstream tests integrated. Interval UTF-8 and overflow corrections and tests ported to the relocated Backups::interval in server-launch/config.rs, rather than restoring duplicate backup::interval.
-- Server engine retains server-launch command construction; upstream parallel_tick is forwarded by environment without duplicating launcher logic. Control line-break rejection and its incoming regression test integrated. Parallel execution itself remains game-b's single disabled gate responsibility.
+- Server engine retains server-launch command construction; upstream parallel_tick is forwarded by environment without duplicating launcher logic. Control line-break rejection and its incoming regression test integrated. Parallel execution remains disabled at the single fork gate.
 - Server main.rs remains the thin library wrapper. Incoming signals::stopped cleanup is applied in relocated server/lib.rs instead. Supervisor retains launch helpers and takes upstream queued restore/update handling before every start.
 - Piston events keep note_override and take upstream queue/pop deduplication routing. Existing upstream level redstone and brightness tests included.
 - Structure changes take upstream streaming template decoding and saved legacy piece reads/tests. Imports use relocated horizon-core NBT/BoundingBox and retain fork block entity transform module. Saved-template int/flag use the new shared saved_legacy helpers rather than duplicate implementations.
 - LegacyRandom state/gaussian conversion initializes gate to None, matching independent clone/from_state behavior. No Mob RNG API types changed here.
 
-Verification: rustfmt edition 2024 with skip_children=true on touched Rust files; git diff --check passed. No builds, tests, clippy or pushes performed. Patch is binary-capable and based directly on scaffold. Compilation and CI remain coordinator-owned.
 
 ## Clean-merge correction and module placement
 
@@ -46,14 +45,14 @@ The native explosion state merge saved blast ownership twice, then restored empt
 
 ## Parallel mob dispatch: authorized performance divergence
 
-Diverges from upstream (performance only). Root authorizes serial dispatch while preserving upstream parallel implementation behind one fork-owned gate, with minimal typed adapters where required. Exact gate and adapter inventory follows the gameplay resolution. Upstream horizon-rust/horizon#15493 states “Not yet shown to give a CPU gain.” The originating horizon-rust/horizon#15056 states “This draft does not yet establish a worthwhile performance gain or acceptable fallback overhead.” No upstream measured gain is claimed here. Tests and serial behavior remain unverified locally.
+Diverges from upstream (performance only). The fork retains serial dispatch while preserving upstream parallel implementation behind one fork-owned gate, with minimal typed adapters where required. Upstream horizon-rust/horizon#15493 states “Not yet shown to give a CPU gain.” The originating horizon-rust/horizon#15056 states “This draft does not yet establish a worthwhile performance gain or acceptable fallback overhead.” No upstream measured gain is claimed here. Tests and serial behavior remain unverified locally.
 
-## client resolution details
+## Client and rendering decisions
 
 ## Contracts and structural rulings
 
 - Preserve JoinList and its validated mutation boundaries, typed hook contexts, fork Parts vocabulary and Wire API. Do not replace them with upstream MobSlot slices or contextless services.
-- Preserve Mob.random, Mob::with_random, mobs::entity_random and living_random as LegacyRandom. New PlayerMotion.random is EntityRandom, constructed with EntityRandom::own(mobs::entity_random(...)) in the existing player_init destination. World.random stays LevelRandom (engine ownership); no world RNG reversion.
+- Preserve Mob.random, Mob::with_random, mobs::entity_random and living_random as LegacyRandom. New PlayerMotion.random is EntityRandom, constructed with EntityRandom::own(mobs::entity_random(...)) in the existing player_init destination. World.random stays LevelRandom; no world RNG reversion.
 - Projectile owns exactly one random stream in Projectile.random: OwnRandom(LegacyRandom). Constructor consumes UUID's first two draws from that stream; shoot_own advances the same stream used by arrow ticking. ArrowState::new() stays unchanged; do not introduce ArrowState.random. shoot_from_rotation uses upstream's no-RNG-argument signature. with_entity_random still overrides the owned stream for fixtures.
 - Preserve typed blocking damage and shield_damage. Add blocking_item_used through Environment, PausedHurt and BlockOutcome, initialize false, copy across suspended equipment wear and set when blocking processing runs. The removed health/equipment.rs is not restored.
 - Upstream external renderer seam, linear-light constants, dimension-aware rendering, chat guard interface, far-ring fairness, banner tag support, item consumables and NBT narrowing are integrated with fork APIs rather than importing obsolete source layouts.
@@ -86,7 +85,7 @@ Diverges from upstream (performance only). Root authorizes serial dispatch while
 - entity_nbt/hanging.rs: loaded pitch and byte-wrapped facing; retained item-frame implementation in parent uses those helpers.
 - entity_nbt/projectile_fields.rs: projectile-kind codec behavior with fork horizon_core NBT import.
 - entry.rs: install upstream chat filter; retain fork horizon_look path.
-- game.rs: baseline dimension type/environment/render changes and tick spans; preserve typed harvest/critical/sweep/orb hooks. Includes game-a-game-rs.patch layered cleanly over baseline. Coordinator must not double-apply that standalone game.rs delta.
+- game.rs: baseline dimension type/environment/render changes and tick spans; preserve typed harvest/critical/sweep/orb hooks. Includes relocated gameplay behavior without restoring deleted root modules.
 - health.rs and hunger.rs: blocking_item_used propagation, typed damage retained.
 - health/equipment.rs: stays deleted; its field propagation is in active health.rs.
 - item_sync.rs: consumable codecs and imports, retaining fork attribute/kinetic modules and NBT layer.
@@ -122,17 +121,10 @@ Diverges from upstream (performance only). Root authorizes serial dispatch while
 
 ## Verification and remaining gate
 
-Ran rustfmt, edition 2024, skip_children=true, on changed Rust paths; no formatting errors. git diff --check is clean. No builds, tests, clippy, pushes or PR actions were run, as requested. Compilation and behavioral correctness remain for coordinator compile integration and CI; this document does not claim either passed. No known textual conflict markers or design rulings remain.
 
-## game-a resolution details
+## Gameplay action decisions
 
-# Sync 28 game-a integration
 
-All 64 assigned paths audited; final patch changes 56 destination files. Local commits: 2e050d671e5, f700ea8404f and fe14b136bd7. Patch base is scaffold 39a01b166e252ce2f0e8dd34d66c2bfdcede09df. No pushes, builds, tests or clippy were run.
-
-## Verification
-
-All changed Rust destinations were formatted with edition 2024 and skip_children=true. git diff --check against scaffold passes. Working tree is clean. Compilation and tests are NOT checked; coordinator owns the compile-only gate.
 
 ## Integration decisions
 
@@ -151,25 +143,12 @@ All changed Rust destinations were formatted with edition 2024 and skip_children
 - Take upstream Horizon cosmetics settings, PvP helpers, dedicated crash-stop behavior, beacon text, sign edit lifecycle, crack sprites and world-update spans. Existing fork save-before-unload hooks remain in their established order.
 - New position_args validation lands at administration/commands/position_args.rs, cosmetics settings at interface/cosmetics/settings.rs, and renamed upstream extras/pvp.rs merges into entities/pvp.rs. No duplicate extras/pvp.rs is restored.
 - World content access retains server_items precedence while allowing remote.tables.items fallback; item_enchantments reads remote.tables.enchantments.
-- smithing_slot_icons is imported from the logical game::smithing_icons module; coordinator is moving that module into interface.
 
-## Shared-file ordering
-
-The full patch includes game.rs changes from assigned deleted paths. game-a-game-rs.patch isolates that delta. sync28-client owns the baseline game.rs conflict resolution and must layer these changes without losing its baseline resolution. game-b was told to exclude entities/pvp.rs because this patch owns it. game-b was told the three-argument melee admission signature and that nether_lighting, pvp_mutes_sound and stop_after_crash are supplied here.
-
-## Audit artifacts
-
-The JSON and conflict-review text were saved at the initial checkpoint for traceability. Their UNMATCHED and CONFLICT labels describe placement attempts at that checkpoint, NOT the final status: a second function-level and manual semantic pass integrated or retained the fork-equivalent contracts above. They are not a deferred-work inventory.
-
-No design rulings are requested. Remaining integration risk is type checking and overlapping game.rs patch application; neither was locally compiled, as instructed.
-
-Shield-use statistics additionally require the incoming health::BlockOutcome.blocking_item_used field; client worker and coordinator were notified explicitly. Shield wear remains fork-owned damage_stack.
-
-## game-b resolution details
+## Entity, network and world decisions
 
 ## Diverges from upstream (performance only)
 
-Root ruling 2 is applied. Single fork gate: `crates/horizon-client/src/parallel.rs::parallel_tick`, local constant `FORK_PARALLEL_TICK_ENABLED = false`. It disables ALL opt-in parallel server phases, not only mob phases. The upstream pool, par_map and verification machinery otherwise remain in the tree.
+Single fork gate: `crates/horizon-client/src/parallel.rs::parallel_tick`, local constant `FORK_PARALLEL_TICK_ENABLED = false`. It disables ALL opt-in parallel server phases, not only mob phases. The upstream pool, par_map and verification machinery otherwise remain in the tree.
 
 Exact type blockers: `mobs::Mob.extra.live` is `living_attributes::LivingAttributes`, whose map is `std::cell::OnceCell<Box<Live>>`. `Live = LiveAttributes<Box<dyn Identities>>`; `Identities: FnMut() -> i32` lacks Send and Sync bounds. `LiveAttributes::data` owns that allocator callback. OnceCell -> OnceLock alone therefore cannot make Mob Send + Sync; no unsafe shim or cache refactor was taken. The fork tick additionally owns `JoinList<Mob>` and `health::LentLevel` (LegacyRandom, attachments and syncs), not upstream plain Vec tick ownership. Smallest active adapters remain `BorrowedMobTick` and extracted serial `fill_mob_state`, reading the existing authoritative live attribute map.
 
@@ -191,7 +170,7 @@ World swaps use `LevelRandom::for_level(LegacyRandom::new(...))`. Hook-owned Len
 | `crates/horizon-client/src/game/entities/explosion.rs` | Explicit explosion source/credit behavior merged through DamageLevel; upstream regression uses typed LevelRef explosion boundary. |
 | `crates/horizon-client/src/game/entities/frames.rs` | Projectile frame hits, creative-owner drops and dimension lighting; typed hook rotation remains normalized. |
 | `crates/horizon-client/src/game/entities/minecarts.rs` | Freeze state, below-world removal, exact control yaw; moved typed attack into special_attacks; kept live ownership and NBT freeze persistence. |
-| `crates/horizon-client/src/game/entities/pvp.rs` | Audited upstream rename to extras/pvp.rs; final content supplied by game-a by coordinator agreement, excluded from this patch. |
+| `crates/horizon-client/src/game/entities/pvp.rs` | Takes upstream PvP behavior in the existing entities area, not a duplicate extras module. |
 | `crates/horizon-client/src/game/mobs/creatures/mob_group.rs` | Byte-identical upstream source retained at original upstream path behind nondefault source-retention feature; not compiled. |
 | `crates/horizon-client/src/game/mobs/creatures/mob_islands.rs` | Byte-identical upstream source retained at original upstream path behind nondefault source-retention feature; not compiled. |
 | `crates/horizon-client/src/game/mobs/creatures/mod.rs` | Kept JoinList lift/restore + BorrowedMobTick, ported observable event/ignition/projectile/UUID behavior and caller RNG signature. Source-retention declarations isolate incompatible parallel extraction. |
@@ -221,10 +200,6 @@ World swaps use `LevelRandom::for_level(LegacyRandom::new(...))`. Hook-owned Len
 | `crates/horizon-client/src/game/world/packs/mod.rs` | Upstream drop/import UI integrated with mod-discovered additional packs and caller update. |
 | `crates/horizon-client/src/game/world/persist.rs` | Retained fork transferred-object initialization, passenger admission and typed object-tree persistence. Ported crystal fire cleanup, no-save leash knots, portal cooldown saves and camel reload regression; destination object_memory gains own projectile UUID and boat freeze state. |
 
-## Destination ownership
-
-Additional edited/moved destinations: parallel.rs and horizon-client/Cargo.toml (gate/retention feature); items/special_attacks.rs and special_attack_fixture.rs; network/remote/{abilities,item_use,tables}.rs; network/remote_tags.rs (keeps typed notices and refreshes gameplay tags); network/lan_actions/{mod,turns,guest_body}.rs plus guest_body/tests.rs; interface/options.rs import caller; blocks/nether_portal.rs dimension-delay visibility only; world/persist/object_memory.rs; mobs/creatures/frame_projectile_tests.rs; mobs/enderman_occupancy_tests.rs; network/pet_pose_meta_tests.rs; world/gateway_cooldown_tests.rs. Parent was notified of overlap; game-a supplies PvP content. Three game-a overlapping file intents were integrated: freeze NBT + seed reset in minecarts; seed reset + frame regression declaration in creatures; per-ID guest random in extracted initialize.
-
 ## Upstream behavioral tests retained and statically assessed
 
 - `a_vehicle_falls_out_of_the_world_64_blocks_under_the_floor`, `a_tick_discards_the_vehicles_under_the_world`, `saved_deep_end_boat_loads_then_is_discarded_and_extreme_scans_terminate`: serial removal happens before motion, spills container contents without ENTITY_DIE; no cross-thread behavior required.
@@ -239,7 +214,6 @@ Additional edited/moved destinations: parallel.rs and horizon-client/Cargo.toml 
 - `explicit_sources_keep_names_without_inventing_kill_credit`: preserved through typed LevelRef explosion call, no contextless service added.
 - Frame projectile regression module and existing camel reload assertions retained. Parallel-only structural tests inside the retained upstream sources are not compiled/tested, as stated above.
 
-These are STATIC assessments, not pass claims. Coordinator compile and CI remain required. No unresolved design ruling remains after root ruling 2; excluded parallel execution is an explicitly tracked divergence, not claimed shipped capability.
 
 ## Rollup 46 main integration
 
