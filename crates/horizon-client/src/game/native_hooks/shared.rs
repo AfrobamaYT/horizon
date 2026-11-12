@@ -2726,7 +2726,7 @@ impl Game<'_> {
         }
         let dimension = self.dim.id();
         for chunk in unloaded {
-            self.native_chunk_unload(dimension, [chunk.x, chunk.z]);
+            self.native_chunk_and_block_entities_unload(dimension, [chunk.x, chunk.z]);
         }
     }
     /// The players still here leave with the server (`PlayerList.removeAll`):

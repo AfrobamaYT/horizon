@@ -48,7 +48,26 @@ pub fn prepare() -> Startup {
 /// A native function slot, checked against its place's exact type before erasure.
 pub use mod_points::__private::SlotListener as NativeSlot;
 
-/// The places raw listeners register at, named by the generated `main`.
+/// Refuse startup if any merged copy could not be installed, before loading any mod.
+/// Cells cannot roll back: each copy merges all requesting rows, so stopping the whole
+/// start is how we ensure none of a refused mod's rows run.
+pub fn installed(patched: &[(&str, &[&str], bool)]) {
+    let refusals = installation_refusals(patched);
+    for line in &refusals {
+        eprintln!("{line}");
+    }
+    if !refusals.is_empty() {
+        std::process::exit(game::exit_code::ERROR);
+    }
+}
+
+fn installation_refusals(patched: &[(&str, &[&str], bool)]) -> Vec<String> {
+    patched.iter().filter(|(_, _, installed)| !installed).map(|(target, mods, _)| {
+        format!("Horizon: {}: {target}: a patched copy was already installed; the game was not started", mods.join(", "))
+    }).collect()
+}
+
+/// The places listeners register at, named by the generated `main`.
 #[doc(hidden)]
 pub use mod_points::PointId;
 
@@ -231,6 +250,10 @@ pub(crate) fn install_client_hooks() {
     game::api_values::install_stack_hooks();
     if !crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
         menu_slot_rules: game::api_values::menu_slot_rules,
+        menu_still_valid: game::api_values::menu_still_valid,
+        menu_still_valid_listens: |menu| {
+            mod_api::__private::menu_listens(mod_api::HookId::MenuStillValid, menu)
+        },
         item_stacked_on_other: |context, event, canceled| {
             game::api_values::stacked_on_other(context, event, canceled);
         },
@@ -409,5 +432,22 @@ fn raise_open_file_limit() {
                 Err(e) => log::warn!("Open file limit stays at {:?}: {e}", limit.current),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod installation_tests {
+    #[test]
+    fn refused_install_names_all_mods_and_only_failed_targets() {
+        assert_eq!(
+            super::installation_refusals(&[
+                ("game::tick", &["first", "second"], false),
+                ("game::other", &["third"], true)
+            ]),
+            vec![
+                "Horizon: first, second: game::tick: a patched copy was already installed; the game was not started"
+            ]
+        );
+        assert!(super::installation_refusals(&[]).is_empty());
     }
 }

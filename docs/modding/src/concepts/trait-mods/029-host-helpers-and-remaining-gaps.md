@@ -19,6 +19,10 @@ Both reads are available on either side.
 entities and the window's own non-spectator player are returned as readable handles.
 Other players are omitted (arismoko/horizon#3033);
 a level the client does not show, or a read before login, returns `None`.
+A bound that is NaN or infinite returns `None` on either side, before any entity is walked;
+a minimum above its maximum is the same box with the two swapped, as vanilla's `AABB`.
+`host.experience_orbs(dimension, min, max)` takes its box the same way, with an empty list
+for a bound that is not finite.
 Every entity list is walked once per call, O(entities) regardless of the box;
 each overlapping mob resolves through a mob-list scan, O(K*N) for K overlaps and N mobs.
 
@@ -98,7 +102,10 @@ The client `render_tooltip_texture` hook (NeoForge's `RenderTooltipEvent.Texture
 ### Tooltip component geometry
 
 `render_tooltip_gather_components` preserves the mixed text/image list, including
-an image inserted immediately after the name. Wrapping splits text in place.
+the built-in bundle image inserted immediately after the name (index 0 when
+there is no text). `TooltipImage.source` selects `TooltipImageSource::Bundle`
+or `ItemPart`, each carrying its stack. Gather listeners can move or remove
+either source; pre sees the resulting list. Wrapping splits text in place.
 The text pass visits the entire list before the image pass starts; both passes
 advance through the same component heights, with 2 extra pixels after the first
 component of an item tooltip. Each image callback receives the box's left edge

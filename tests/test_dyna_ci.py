@@ -104,26 +104,48 @@ class DynaRoutingTests(unittest.TestCase):
     @unittest.skipUnless(POSIX_BASH and os.name != "nt", "needs the runner's bash")
     def test_baked_packages_skip_the_download_and_a_partial_image_falls_back(self):
         script = ROOT / "tools/ci/dyna_ci_deps.sh"
-        for missing in (False, True):
-            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
+        for missing, extraction_error in ((False, False), (True, False), (True, True)):
+            with self.subTest(missing=missing, extraction_error=extraction_error), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 stubs = root / "stubs"
                 stubs.mkdir()
                 (stubs / "dpkg-query").write_text(
                     '#!/bin/bash\nif [ "$MISSING" = 1 ] && [ "${!#}" = libudev-dev ]; then exit 1; fi\nprintf installed\n')
-                (stubs / "apt-get").write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$APT_CALLS"\n')
-                (stubs / "dpkg-deb").write_text("#!/bin/bash\n")
+                (stubs / "apt-get").write_text(
+                    '#!/bin/bash\nprintf "%s\\n" "$*" >> "$APT_CALLS"\n'
+                    'for arg in "$@"; do\n'
+                    '  case "$arg" in Dir::Cache::archives=*) archives=${arg#*=} ;; esac\n'
+                    'done\n'
+                    'if [[ " $* " == *" install "* ]]; then touch "$archives/headers.deb"; fi\n')
+                (stubs / "dpkg-deb").write_text(
+                    '#!/bin/bash\nset -eu\n'
+                    'test -f "$2"\n'
+                    '[ "$EXTRACTION_ERROR" = 0 ] || exit 42\n'
+                    'mkdir -p "$3/usr/include"\n'
+                    'printf "fixture header\\n" > "$3/usr/include/fixture.h"\n'
+                    'echo extracted >> "$EXTRACTION_RECEIPT"\n')
                 for stub in stubs.iterdir():
                     stub.chmod(0o755)
                 (root / "build").mkdir()
                 env = dict(os.environ, PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}", HOME=str(root / "home"),
                            DYNA_CI_BUILD=str(root / "build"), CARGO_HOME=str(root / "cargo"),
                            GITHUB_ENV=str(root / "env"), GITHUB_PATH=str(root / "path"),
-                           MISSING=str(int(missing)), APT_CALLS=str(root / "apt-calls"), DYNA_CI_APT_TRIES="1")
+                           MISSING=str(int(missing)), APT_CALLS=str(root / "apt-calls"), DYNA_CI_APT_TRIES="1",
+                           EXTRACTION_ERROR=str(int(extraction_error)), EXTRACTION_RECEIPT=str(root / "extracted"))
                 result = subprocess.run(["bash", script], env=env, capture_output=True, text=True)
                 calls = (root / "apt-calls").read_text() if (root / "apt-calls").exists() else ""
                 if missing:
                     self.assertTrue(calls, "a missing package must run the download fallback")
+                    if extraction_error:
+                        self.assertEqual(result.returncode, 42, result.stderr)
+                        self.assertFalse((root / "env").exists())
+                        self.assertFalse((root / "build/apt-prefix/.dyna-hash").exists())
+                    else:
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual((root / "extracted").read_text(), "extracted\n")
+                        exports = dict(line.split("=", 1) for line in (root / "env").read_text().splitlines())
+                        prefix = Path(exports["PKG_CONFIG_SYSROOT_DIR"])
+                        self.assertEqual((prefix / "usr/include/fixture.h").read_text(), "fixture header\n")
                 else:
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(calls, "")
@@ -170,7 +192,7 @@ class DynaRoutingTests(unittest.TestCase):
         self.assertEqual(result.returncode, 100)
         self.assertEqual(count, 3)
         self.assertEqual(result.stderr.count("E: File has unexpected size"), 3)
-        self.assertIn("apt-get failed after 3 tries (exit 100)", result.stderr)
+        self.assertIn("timeout failed after 3 tries (exit 100)", result.stderr)
 
     def test_lint_enforces_api_boundary_under_central_selection(self):
         from test_ci_runners import jobs
@@ -227,6 +249,40 @@ class DynaRoutingTests(unittest.TestCase):
                     self.assertIn("live=unreadable", summary.read_text())
                     self.assertIn(f"Shard result: {result}", summary.read_text())
                     summary.unlink()
+
+    def assert_positive_stage_export(self, verify):
+        command = "python3 tools/ci/test_stage_catalog.py -v"
+        name = "- name: Validate prebuilt source stage and listed slots\n"
+        step = verify.split(name, 1)[1].split("\n      - ", 1)[0]
+        # Inspect active scalar values in this named step, not command text in
+        # comments or another step. Require the exact executable invocation.
+        fields = dict(line.strip().split(":", 1) for line in step.splitlines()
+                      if line.startswith("        ") and ":" in line and not line.lstrip().startswith("#"))
+        self.assertEqual(fields.get("run", "").strip(), command)
+        self.assertEqual(fields.get("if", "").strip(), "needs.changes.outputs.rust_required != 'false'")
+        self.assertEqual(fields.get("continue-on-error", "false").strip(), "false")
+        self.assertEqual(verify.count(command), 1)
+        self.assertLess(verify.index(name), verify.index("- name: Test Rust documentation examples"))
+        self.assertNotIn("python3 tools/ci/stage_slots.py", verify)
+        self.assertLess(verify.index("- name: Install Rust toolchain and the runner image's packages"), verify.index(name))
+        self.assertLess(verify.index("uses: actions/setup-python@v5"), verify.index(name))
+
+    def test_positive_stage_export_runs_once_before_docs_outside_offline_discovery(self):
+        from test_ci_runners import jobs
+        verify = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["verify"]
+        self.assert_positive_stage_export(verify)
+
+    def test_positive_stage_guard_rejects_commented_command_noop_and_ignored_failure(self):
+        from test_ci_runners import jobs
+        verify = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["verify"]
+        command = "        run: python3 tools/ci/test_stage_catalog.py -v"
+        for replacement in (
+            "        # run: python3 tools/ci/test_stage_catalog.py -v\n        run: true",
+            "        run: '# python3 tools/ci/test_stage_catalog.py -v'",
+            command + "\n        continue-on-error: true",
+        ):
+            with self.subTest(replacement=replacement), self.assertRaises(AssertionError):
+                self.assert_positive_stage_export(verify.replace(command, replacement, 1))
 
     def test_tooling_tests_run_only_after_every_earlier_verify_step_succeeded(self):
         # After a failed step the Rust install is skipped, so the Python tests that launch rustc can't run (#2920).

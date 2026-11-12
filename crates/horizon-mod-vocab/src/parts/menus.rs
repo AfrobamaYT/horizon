@@ -19,6 +19,17 @@ impl HookParts {
     }
 }
 
+/// Whether the Parts attached to the menu type `menu` subscribe to `hook`; the game
+/// asks once when a menu opens, so a menu with none skips the hook while it is open.
+pub fn menu_listens(hook: HookId, menu: &str) -> bool {
+    if !has_part_hook(hook) {
+        return false;
+    }
+    parts(hook, "menu routing")
+        .for_hook(hook)
+        .is_some_and(|table| !table.menu(|| Some(menu)).is_empty())
+}
+
 impl dyn Registrar + '_ {
     /// Attach `part` to the mod menu type `menu`.
     pub fn menu_part<P: MenuPart>(&mut self, menu: &str, part: P) {

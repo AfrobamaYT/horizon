@@ -36,7 +36,7 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 | `IItemExtension` | 46 | 9 | 15 | 22 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
-| `IBlockEntityExtension` | 9 | 1 | 3 | 4 | 1 |
+| `IBlockEntityExtension` | 9 | 2 | 3 | 3 | 1 |
 | `IFluidExtension` | 9 | 0 | 6 | 3 | 0 |
 | `IMenuTypeExtension` | 2 | 0 | 2 | 0 | 0 |
 
@@ -253,7 +253,7 @@ are reachable through `BlockEntityRef`.
 | `onDataPacket(connection, input)` | Partial | `BlockEntityPart::block_entity_update_tag` (`hooks/base.rs`) | The server half (`getUpdateTag`) is settable; the client's merge of the received tag is engine-side. |
 | `handleUpdateTag(input)` | Partial | `BlockEntityPart::block_entity_update_tag` (`hooks/base.rs`) | Same: the data is covered, the client callback is not. |
 | `getPersistentData()` | Covered | `AttachmentStore`, `AttachmentHolder::BlockEntity` | Typed saved/synced attachments replace the writable compound. |
-| `onChunkUnloaded()` | Missing | — | `chunk_unload` is the chunk event; there is no per-block-entity callback. |
+| `onChunkUnloaded()` | Covered | `BlockEntityPart::on_chunk_unloaded` (`hooks/on_chunk_unloaded.rs`) | Once per mod block entity of an unloading chunk, on each side holding it, before it is dropped; not when the world closes. |
 | `onLoad()` | Partial | `BlockEntityPart::block_entity` (`hooks/base.rs`) | Initial saved data is set at creation, before the saved NBT is applied; no after-load notice. |
 | `requestModelDataUpdate()` | Missing | — | No model-data invalidation API. |
 | `getModelData()` | Missing | — | No `ModelData`; drawing uses `block_entity_submit` and the model path. |
@@ -284,7 +284,8 @@ not its type properties, so "partial" below means the vanilla answer is readable
 
 Menu types are content data (`MenuType` in `crates/horizon-mod-package/src/content.rs`, files under
 `data/<id>/horizon/menu/`), and the game's own menu engine opens them (`menu::Kind::Mod`). A `MenuPart` can answer
-slot rules, not construct a menu.
+slot rules and whether a player's block menu stays open (`menu_still_valid`, vanilla's `stillValid`), not
+construct a menu.
 
 | Method | Verdict | Horizon | Notes |
 | --- | --- | --- | --- |
