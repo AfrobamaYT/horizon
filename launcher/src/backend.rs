@@ -505,23 +505,7 @@ pub(crate) fn get_unless_missing(url: &str) -> Result<Option<ureq::Response>, St
             request = request.set("Authorization", &format!("Bearer {token}"));
         }
     }
-    // A dropped connection or a server error is often gone a moment later (a CI runner's
-    // proxy, GitHub's release storage): try twice more before reporting it.
-    let mut answer = request.clone().call();
-    for wait in [2, 5] {
-        match &answer {
-            Err(ureq::Error::Transport(_)) => {}
-            Err(ureq::Error::Status(code, _)) if *code >= 500 => {}
-            _ => break,
-        }
-        std::thread::sleep(std::time::Duration::from_secs(if cfg!(test) {
-            0
-        } else {
-            wait
-        }));
-        answer = request.clone().call();
-    }
-    match answer {
+    match crate::download_retry::call(&crate::download_retry::WAITS, || request.clone().call()) {
         Ok(response) => Ok(Some(response)),
         Err(ureq::Error::Status(404, _)) => Ok(None),
         Err(e) => Err(match e {
@@ -4452,37 +4436,6 @@ mod tests {
     use super::*;
     use std::cmp::Ordering::*;
     use std::ffi::OsStr;
-
-    /// A dropped connection, then a server error, then the file: the download still succeeds.
-    #[test]
-    fn a_download_survives_a_dropped_connection_and_a_server_error() {
-        use std::io::{Read, Write};
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}/tool.tar.gz", listener.local_addr().unwrap());
-        let server = std::thread::spawn(move || {
-            for answer in [None, Some("503 Service Unavailable"), Some("200 OK")] {
-                let (mut stream, _) = listener.accept().unwrap();
-                let mut request = [0; 4096];
-                let _ = stream.read(&mut request);
-                if let Some(status) = answer {
-                    write!(
-                        stream,
-                        "HTTP/1.1 {status}\r\nContent-Length: 4\r\nConnection: close\r\n\r\nbody"
-                    )
-                    .unwrap();
-                }
-            }
-        });
-        let mut body = String::new();
-        get_unless_missing(&url)
-            .unwrap()
-            .expect("the file exists")
-            .into_reader()
-            .read_to_string(&mut body)
-            .unwrap();
-        assert_eq!(body, "body");
-        server.join().unwrap();
-    }
 
     fn pe_architecture(bytes: &[u8]) -> Option<GameArchitecture> {
         if bytes.get(..2)? != b"MZ" {
