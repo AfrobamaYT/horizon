@@ -1207,6 +1207,9 @@ pub(super) mod tests {
     fn typed_uuid_and_nbt_reads_follow_the_entity_level() {
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
+            // with_game prepares lifecycle, not world-open command registries.
+            // execute in and summon must resolve real dimension and entity keys.
+            game.build_registries();
             let words = [7, 0, 0, 3];
             let uuid = (7u128 << 96) | 3;
             // Harness commands use the console boundary; setting dedicated
