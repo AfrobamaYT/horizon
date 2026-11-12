@@ -53,7 +53,18 @@ impl Game<'_> {
             items.set_tags(registry, tags.collect());
         }
         super::class_tags::install(&mut items, self.res.facts());
-        super::native_world_read::install_block_tags(self.block_tag_sets(&items));
+        // Rebuild scoped parts against the received tags before refreshing state-only facts.
+        let mut part_items = self.items().clone();
+        part_items.block_tags = items.block_tags.clone();
+        part_items.item_tags = items.item_tags.clone();
+        let parts = match self.prepare_parts(&part_items) {
+            Ok(parts) => parts,
+            Err(error) => {
+                log::warn!("Horizon: client tag parts refused: {error}");
+                return;
+            }
+        };
+        self.install_parts(parts);
         if let Some(r) = self.remote.as_mut() {
             r.tags = Some(items);
         }
