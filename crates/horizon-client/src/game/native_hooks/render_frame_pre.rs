@@ -127,7 +127,11 @@ mod tests {
                 assert_eq!(frozen.0, 1.0);
                 assert_eq!(frozen_next.0, 1.0);
                 assert_ne!(frozen.1, frozen_next.1);
-                game.title = Some(Title::new(game.save.root.clone(), &game.options.resources));
+                game.title = Some(Title::new(
+                    game.save.root.clone(),
+                    &game.options.resources,
+                    "",
+                ));
                 frame(game, false);
             });
         });
