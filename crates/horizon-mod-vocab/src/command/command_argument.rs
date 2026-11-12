@@ -183,8 +183,8 @@ mod tests {
     fn a_choice_refuses_other_words_and_completes_by_prefix() {
         let mode = ChoiceArgument::new(["low", "high"]);
         assert_eq!(mode.parse("high"), Ok("high".into()));
-        let crate::text::TextContent::Translatable { arguments, .. } =
-            &mode.parse("med").unwrap_err().message().content
+        let refusal = mode.parse("med").unwrap_err();
+        let crate::text::TextContent::Translatable { arguments, .. } = &refusal.message().content
         else {
             panic!("a translatable refusal");
         };

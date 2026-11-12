@@ -3013,8 +3013,10 @@ mod tests {
 
         let mut dispatcher = Dispatcher::new();
         register_dispatcher(&mut dispatcher, &tree, "native_mod_command", &arguments);
-        let mut registries = horizon_client::command::Registries::default();
-        registries.entity_types = vec!["minecraft:zombie".into()];
+        let registries = horizon_client::command::Registries {
+            entity_types: vec!["minecraft:zombie".into()],
+            ..Default::default()
+        };
         let parsed = dispatcher.parse("spawnof minecraft:zombie", &registries);
         let (context, _) = parsed.executable().unwrap();
         assert_eq!(
