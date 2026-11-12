@@ -106,17 +106,19 @@ impl ItemEntity {
                 wanted,
             );
             let mut wanted = gate.delta();
-            // Entity.move: a block the item sits in (cobweb, powder snow)
-            // scales this move once and stops it.
-            if self.stuck.length_squared() > 1.0e-7 {
-                wanted = wanted.multiply(self.stuck);
-                self.stuck = Vec3::ZERO;
-                self.velocity = Vec3::ZERO;
-            }
-            // Entity.move with noPhysics: straight through, the ground as it was.
+            // Entity.move with noPhysics: straight through, the ground as it
+            // was — and vanilla returns before the stuck multiplier, which
+            // stays pending for the next move with physics.
             let moved = if no_physics {
                 wanted
             } else {
+                // Entity.move: a block the item sits in (cobweb, powder snow)
+                // scales this move once and stops it.
+                if self.stuck.length_squared() > 1.0e-7 {
+                    wanted = wanted.multiply(self.stuck);
+                    self.stuck = Vec3::ZERO;
+                    self.velocity = Vec3::ZERO;
+                }
                 // `Entity.collide`: the entities that `canBeCollidedWith` the item stop it
                 // too (a boat, a shulker, a happy ghast held still; not a minecart), and
                 // so does the world border (`Entity.collectColliders`).
