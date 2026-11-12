@@ -304,6 +304,9 @@ pub(super) fn emit<'a>(
                     "& ItemStack" => {
                         format!("{table}(|| super::content::registry_keys::item_id({key}.item()))")
                     }
+                    "BlockEntityTypeKey" if table == "block_entity" => format!(
+                        "block_entity_kind(|| super::content::registry_keys::block_entity_type_name({key}))"
+                    ),
                     "& str" => format!("{table}(|| Some({key}))"),
                     "BlockEntityRef" if table == "block_entity" => {
                         let host = &host.as_ref().ok_or("block entity handle needs a Host")?.0;

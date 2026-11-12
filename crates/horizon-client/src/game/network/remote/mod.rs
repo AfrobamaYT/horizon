@@ -40,7 +40,6 @@ use horizon_client::{
     sprint::Keys,
     streaming::{ChunkGenerator, Proto, Streaming},
     tab_list::SPECTATOR,
-    world::World,
 };
 use horizon_core::{geometry::Vec3, random::RandomSource};
 use horizon_protocol::{
@@ -1068,7 +1067,7 @@ impl Game<'_> {
         streaming.remote = true;
         streaming.radius = self.settings.render_distance;
         self.streaming = streaming;
-        self.world = World::new(self.res.facts().air, 0);
+        self.world = Game::world_for_mods(self.res.facts().air, 0);
         self.save = Arc::new(SaveDir::new(
             std::env::temp_dir().join("horizon-remote-unused"),
             horizon_client::save::LevelShape::OVERWORLD,
@@ -1331,7 +1330,7 @@ impl Game<'_> {
         streaming.remote = true;
         streaming.radius = self.settings.render_distance;
         self.streaming = streaming;
-        self.world = World::new(self.res.facts().air, 0);
+        self.world = Game::world_for_mods(self.res.facts().air, 0);
         self.save = Arc::new(SaveDir::new(
             std::env::temp_dir().join("horizon-replay-unused"),
             horizon_client::save::LevelShape::OVERWORLD,
@@ -3012,7 +3011,7 @@ impl Game<'_> {
                     if previous.is_some() {
                         self.forget_block_entity_attachments(pos);
                     }
-                    self.world.block_entities.insert(pos, entity);
+                    self.world.block_entities.replace(pos, entity);
                 }
             }
             None => {

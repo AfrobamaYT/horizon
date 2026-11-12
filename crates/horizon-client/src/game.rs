@@ -11986,7 +11986,7 @@ impl Game<'_> {
         self.mod_view_distances.take();
         self.bosses = Default::default();
         self.streaming.paused = true;
-        self.world = World::new(self.res.facts().air, 0);
+        self.world = Game::world_for_mods(self.res.facts().air, 0);
         self.player = None;
         // `LocalPlayer`'s constructor: `KeyMapping.resetToggleKeys`, so a sneak or sprint toggled
         // in this world is not still on in the next one.
@@ -16110,7 +16110,7 @@ impl<'a> Game<'a> {
                 None,
             )
         })?;
-        let world = World::new(res.facts().air, 0);
+        let world = Game::world_for_mods(res.facts().air, 0);
         let tutorial = tutorial::Tutorial::new(tutorial::Step::from_option(
             settings.file.int("tutorialStep"),
         ));

@@ -3132,7 +3132,7 @@ impl Game<'_> {
         true
     }
     /// The tick of the mod block entity at `pos`.
-    pub(super) fn tick_mod_block_entity(&mut self, pos: Pos) {
+    pub(super) fn tick_mod_block_entity_loaded(&mut self, pos: Pos) {
         let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&pos) else {
             return;
         };
