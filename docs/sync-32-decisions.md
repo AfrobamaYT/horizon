@@ -2,7 +2,7 @@
 
 ## Pin and scope
 
-- Fork base: `396e1d85add` (main after the formatting-only #3545).
+- Initial fork base: `396e1d85add` (main after the formatting-only #3545). Fresh main rollup 49 at `03d2abebc27ae496e833992841fd8fe9de47416c` was merged before the first push; its paths do not overlap the seven sync code/tool paths.
 - Upstream pin: `ba91f75cb21a74026319d1393c17fc5061dbd725`.
 - Pin evidence: upstream `ci.yml` push-to-main run `43197652294` completed successfully, updated 2026-11-12 10:25:09 UTC. The newer upstream head `f24ee1accf1` still had its own run in progress when this sync began; it is not stacked onto this sync.
 - Seven incoming paths. The work is chest-boat pending loot, slot access and destroying removals, plus its command corpus. No launcher, CI-policy, mod-point machinery or slow-shard repair changes are included.
@@ -29,7 +29,7 @@ Both new test declarations are retained, with all upstream assertions and numeri
 | `chest_boat_automation_does_not_award_player_loot` | `game/blocks/machines/mod.rs::hopper_cart_transfer_tests` | Existing ignored `HORIZON_TEST_RESOURCES` gate; use the fork's real `native_entity_refs::tests::with_game` fixture instead of the absent upstream `native_machines::tests::server_game`. |
 | `chest_boat_slot_access_fills_only_empty_slots_once` | Same module | Same prepared-resource gate and real fixture; retains authoritative open-menu, exact seed-73 loot, occupied-slot, spent-table and no-reroll assertions. |
 
-The fixture opens the actual typed world lifecycle and uses real resource loading and container paths. No stub inventory, fabricated production result or extra skip is introduced. These ignored assertions have not been run locally; compile-only checking and a green ordinary PR gate do not prove them.
+The incoming advancement overlay fixture uses the existing `PackOverlay::NONE` remainder pattern to supply typed vanilla load conditions for its unconditional overlay files. The fixture opens the actual typed world lifecycle and uses real resource loading and container paths. No stub inventory, fabricated production result or extra skip is introduced. These ignored assertions have not been run locally; compile-only checking and a green ordinary PR gate do not prove them.
 
 ## Tools and other areas
 
