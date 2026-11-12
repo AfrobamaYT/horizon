@@ -4497,7 +4497,7 @@ impl Game<'_> {
         }
     }
 
-    pub(super) fn tick_projectiles(&mut self) -> Result<()> {
+    pub(super) fn tick_projectiles_now(&mut self) -> Result<()> {
         if self.creatures.projectiles.is_empty() {
             self.flush_lan_explosions();
             return self.flush_wind_bursts();
@@ -4776,6 +4776,7 @@ impl Game<'_> {
         for (block, position, movement) in snow_contacts {
             self.powder_snow_particle(block, position, movement);
         }
+        let last_ticked_join = projectiles.iter().map(|p| p.join).max();
         let listed = keep_flags.clone();
         let mut idx = 0;
         if impacts.is_empty() {
@@ -4822,12 +4823,11 @@ impl Game<'_> {
         for (at, event) in arrow_events {
             self.arrow_event(at, event);
         }
-        // `Entity.applyEffectsFromBlocks`' checkInsideBlocks for every
-        // projectile that ticked, at the batch: the borrow block above held the
-        // world read-only, and a part's contact needs the lent level, so the
-        // sweeps run here, each still inside this batch and its own tick.
+        // `Entity.applyEffectsFromBlocks` sweeps the original cohort by join identity:
+        // settlement can remove rows or append hook spawns. Contacts need the lent
+        // level here, after the read-only borrow, each still in this batch's tick.
         for i in 0..projectiles.len() {
-            if !keep_flags[i] {
+            if last_ticked_join.is_none_or(|last| projectiles[i].join > last) {
                 continue;
             }
             let mut swept = None;
@@ -5343,7 +5343,7 @@ impl Game<'_> {
             if !super::native_entity_moves::in_bounds(target) {
                 return Ok(());
             }
-            let _ = game.place_teleport_in_level(
+            let _ = game.place_teleport_filed(
                 super::commands::Target::Mob(id),
                 target,
                 None,
@@ -6676,8 +6676,8 @@ impl Game<'_> {
             self.swing_arm();
             return Ok(true);
         }
-        // PiglinAi.mobInteract: hand over something gold to admire.
-        if self.mobs[index].alive() && self.give_piglin(index, &item) {
+        // PiglinAi.mobInteract: hand over barter currency to admire.
+        if self.mobs[index].alive() && held.as_ref().is_some_and(|h| self.give_piglin(index, h)) {
             self.swing_arm();
             if !creative && let Some(stack) = self.stack_in_mut(selected).as_mut() {
                 stack.count -= 1;
@@ -9066,9 +9066,8 @@ mod enchanted_entity_loot_tests {
                 // kill, and the flesh is still asked, from a level of 0.
                 seen.lock().unwrap().clear();
                 let skeleton = zombie(game, Damage::mob(0, [0.0; 3]));
-                let mut alive = skeleton.clone();
-                alive.health = 20.0;
-                *game.mobs.last_mut().unwrap() = alive;
+                // Keep the admitted row's residency and attachment lifetime.
+                game.mobs.last_mut().unwrap().health = 20.0;
                 let victim = zombie(game, Damage::mob(skeleton.id, [0.0; 3]));
                 game.mob_died(&victim);
                 assert_eq!(
@@ -9100,6 +9099,7 @@ mod enchanted_entity_loot_tests {
                 game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
                 game.player.as_mut().unwrap().entity_id = 9000;
                 // The host's own turn: the uuid is acting, no guest connection.
+                crate::game::native_entity_refs::tests::bind_local_player(game, 9000, 99);
                 game.lan_acting_uuid = Some(99);
                 game.lan_acting_entity = Some(9000);
                 let by_player = Damage {
@@ -11499,7 +11499,11 @@ mod armor_destroy_tests {
             game.hurt_mob_armor(21, 4.0, DamageKind::Generic);
             assert_eq!(game.mobs[0].item_by_slot(EquipmentSlot::Body), Some(sword));
             let resistant = ItemStack::new("minecraft:netherite_chestplate", 1);
-            assert!(game.items().resists_fire(&resistant, "minecraft:lava"));
+            assert!(
+                !game
+                    .stack_can_be_hurt_by(&resistant, "minecraft:lava")
+                    .unwrap()
+            );
             game.mobs[0].set_equipment_stack(EquipmentSlot::Body as usize, Some(resistant.clone()));
             game.hurt_mob_armor(21, 4.0, DamageKind::Lava);
             assert_eq!(
@@ -12025,9 +12029,11 @@ mod mob_pearl_hook_tests {
                 game.player = Some(PlayerMotion::new(game.motion, from).unwrap());
                 game.lan_acting = Some(12);
                 game.lan_acting_uuid = Some(7);
+                crate::game::native_entity_refs::tests::bind_local_player(game, 2, 7);
                 game.lan_acting_name = Some("PearlTest".into());
                 game.lan_acting_permission = Some(4);
                 game.lan_acting_entity = Some(2);
+                crate::game::native_entity_refs::tests::bind_acting_guest(game);
                 game.ui.difficulty = 0;
                 let pearl = Projectile::new(
                     ProjectileKind::EnderPearl,

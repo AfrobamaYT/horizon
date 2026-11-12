@@ -1043,9 +1043,6 @@ impl Game<'_> {
         } else if tnt_after_move {
             self.restitute_piston(target, limited, resolved);
         }
-        // Restitution reads the block below the final position, as Entity.move
-        // does. Run it even when the collision prevented any position update.
-        self.restitute_piston(target, limited, resolved);
         if let Some((i, from, ..)) = tnt {
             self.finish_tnt_piston_move(i, from, resolved);
         }
@@ -1143,30 +1140,39 @@ impl Game<'_> {
     }
 
     fn apply_push(&mut self, target: Target, movement: Vec3) {
-        match target {
+        let id = match target {
             Target::Player => {
                 if let Some(p) = self.player.as_mut() {
                     p.position = p.position.add_vector(movement);
                 }
+                u32::try_from(self.own_entity_id()).ok()
             }
-            Target::Guest(conn) => {
-                if let Some(host) = self.lan.as_mut() {
-                    let _ = host.hub.update_guest(conn, |g| {
-                        // The body and the hub's copy of its position move together:
-                        // `leave_guest` writes the body back over the hub's.
-                        for (slot, delta) in g.position.iter_mut().zip(movement.components()) {
-                            *slot += delta;
-                        }
-                        if let Some(m) = g.motion.as_deref_mut() {
-                            m.position = m.position.add_vector(movement);
-                        }
-                    });
-                }
-            }
+            Target::Guest(conn) => self.lan.as_mut().and_then(|host| {
+                host.hub.update_guest(conn, |g| {
+                    // The body and the hub's copy of its position move together:
+                    // `leave_guest` writes the body back over the hub's.
+                    for (slot, delta) in g.position.iter_mut().zip(movement.components()) {
+                        *slot += delta;
+                    }
+                    if let Some(m) = g.motion.as_deref_mut() {
+                        m.position = m.position.add_vector(movement);
+                    }
+                    g.entity_id as u32
+                })
+            }),
             Target::Entity(handle) => {
-                with_entity_mut!(self, handle, entity => entity.move_by_piston(movement));
+                let id = with_entity_mut!(self, handle, entity => {
+                    entity.move_by_piston(movement);
+                    entity.id()
+                });
                 self.release_after_block_move(target);
+                Some(id)
             }
+        };
+        // `Entity.move` by the piston is one `setPos`.
+        if let Some(id) = id {
+            self.entity_section_moved_id(id);
+            self.tell_entity_sections();
         }
     }
 
@@ -1683,6 +1689,8 @@ mod h255_mob_piston_ground_tests {
                 None,
             )
             .unwrap();
+            game.native_lifecycle
+                .begin_open(mod_api::Authority::IntegratedServer);
             game.build_registries();
             game.set_allow_commands(true);
 

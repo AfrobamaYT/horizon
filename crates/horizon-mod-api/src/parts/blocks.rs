@@ -695,6 +695,53 @@ pub mod tests {
         mark_game_thread();
     }
 
+    pub fn friction_game_thread() -> Arc<std::sync::atomic::AtomicUsize> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = Arc::new(AtomicUsize::new(0));
+        struct Answer(f32, Option<&'static str>, Arc<AtomicUsize>);
+        #[mod_api::horizon_part]
+        impl BlockPart for Answer {
+            fn friction(&self, _: &dyn LoopContext, event: &mut FrictionEvent<'_>) {
+                self.2.fetch_add(1, Ordering::SeqCst);
+                if self.1.is_none_or(|kind| kind == event.kind) {
+                    event.friction = self.0;
+                }
+            }
+        }
+        struct FrictionMod(Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
+        impl Hooks for FrictionMod {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                for (block, answer) in [
+                    (
+                        "minecraft:glass",
+                        Answer(0.98, Some("minecraft:player"), self.0.clone()),
+                    ),
+                    ("minecraft:white_wool", Answer(0.98, None, self.0.clone())),
+                    ("minecraft:red_wool", Answer(f32::NAN, None, self.0.clone())),
+                    ("minecraft:blue_wool", Answer(3.0, None, self.0.clone())),
+                    (
+                        "minecraft:green_wool",
+                        Answer(f32::INFINITY, None, self.0.clone()),
+                    ),
+                    ("minecraft:black_wool", Answer(-0.5, None, self.0.clone())),
+                ] {
+                    let key = r.block_key(block);
+                    r.block_part(key, answer);
+                }
+            }
+        }
+        let mods: crate::Mods = vec![ModEntry::new(
+            "friction_test",
+            Box::new(FrictionMod(calls.clone())),
+        )]
+        .into();
+        crate::__private::install(mods.clone());
+        install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+        mark_game_thread();
+        calls
+    }
+
     /// Install soil parts: glass sustains any plant, and grass sustains none.
     pub fn sustain_plant_game_thread() {
         struct Soil(bool);
@@ -905,6 +952,8 @@ pub mod tests {
                 "test:other",
                 "test:connector",
                 "test:press",
+                "test:void_bin",
+                "test:ordered",
             ],
             |_| {
                 horizon_mod_runtime::block_definitions::BlockDefinition::new(
@@ -940,6 +989,8 @@ pub mod tests {
                 "test:connector",
                 "test:press",
                 "minecraft:granite",
+                "test:void_bin",
+                "test:ordered",
             ],
             |_| {
                 horizon_mod_runtime::block_definitions::BlockDefinition::new(
@@ -1287,5 +1338,40 @@ impl BlocksRegistrar for PartRegistrar {
     fn attach_block_part_tag(&mut self, tag: &str, kind: &'static str, part: Arc<dyn BlockPart>) {
         let part = self.tagged(kind, tag, part);
         self.tags.blocks.extend(part);
+    }
+
+    fn provide_block_capability(
+        &mut self,
+        name: &'static str,
+        block: &crate::BlockKey,
+        before_game: bool,
+        provider: BlockProviderOf,
+    ) {
+        let slot = mod_vocab::__private::parts_installation::block_key_slot(*block);
+        let id = self
+            .registry_keys
+            .borrow()
+            .blocks
+            .id(slot)
+            .map(str::to_owned);
+        let Some(id) = id else {
+            self.refused.push(format!(
+                "mod {}: invalid block key slot {slot}",
+                self.mod_id
+            ));
+            return;
+        };
+        self.capability(
+            |p| &mut p.block_capabilities,
+            Some(|p| &p.capabilities),
+            name,
+            ProviderTarget::Id(&id),
+            before_game,
+            {
+                let handler =
+                    mod_vocab::__private::parts_installation::block_provider_handler(&provider);
+                (provider, handler)
+            },
+        );
     }
 }

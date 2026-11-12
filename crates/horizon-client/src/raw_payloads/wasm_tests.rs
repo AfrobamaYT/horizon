@@ -22,6 +22,13 @@ use crate::lan::{NetEvent, PlayerSender};
 #[test]
 #[ignore = "requires compiled HORIZON_WASM_FIXTURE and HORIZON_WASM_STD"]
 fn compiled_guest_observes_physical_provider_pressure() {
+    // Enters the guest: libtest's thread is smaller than the guest stack policy requires.
+    horizon_guest_stack::run_on_guest_stack(
+        compiled_guest_observes_physical_provider_pressure_on_guest_stack,
+    );
+}
+
+fn compiled_guest_observes_physical_provider_pressure_on_guest_stack() {
     // Only this test initializes points in this process. Run explicitly by exact name.
     use horizon_mod_package::manifest::Package;
     let path = std::env::var("HORIZON_WASM_FIXTURE").unwrap();
@@ -94,26 +101,30 @@ fn compiled_guest_observes_physical_provider_pressure() {
         let endpoint = Endpoint::server(sender);
         let body: Vec<u8> = (0..1 << 20).map(|i| (i % 251) as u8).collect();
         let expected = body.clone();
-        let ((_, copies), counts) = horizon_threads::allocation_probe::measure(|| {
-            horizon_mod_wasm::copy_probe::measure(|| {
-                let incoming = Incoming::new(
-                    &transport,
-                    negotiation::Phase::Play,
-                    horizon_protocol::packets::custom_payload::CustomPayload {
-                        channel: "wasm_fixture:measure".into(),
-                        data: body,
-                    },
-                )
-                .unwrap();
-                dispatch(
-                    incoming,
-                    endpoint.clone(),
-                    MainQueue::Server {
-                        events,
-                        endpoint,
-                        conn: Some(1),
-                    },
-                );
+        // Measures copies and allocations, not time: the probes slow the guest call past a hook's
+        // 100 ms budget on a loaded runner, so the call gets the load budget.
+        let ((_, copies), counts) = horizon_mod_wasm::copy_probe::with_load_budget(|| {
+            horizon_threads::allocation_probe::measure(|| {
+                horizon_mod_wasm::copy_probe::measure(|| {
+                    let incoming = Incoming::new(
+                        &transport,
+                        negotiation::Phase::Play,
+                        horizon_protocol::packets::custom_payload::CustomPayload {
+                            channel: "wasm_fixture:measure".into(),
+                            data: body,
+                        },
+                    )
+                    .unwrap();
+                    dispatch(
+                        incoming,
+                        endpoint.clone(),
+                        MainQueue::Server {
+                            events,
+                            endpoint,
+                            conn: Some(1),
+                        },
+                    );
+                })
             })
         });
         // Independent vanilla packet reference: never call the encoder under test.

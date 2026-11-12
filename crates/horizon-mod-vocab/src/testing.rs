@@ -297,6 +297,11 @@ impl crate::prelude::LevelsBackend for FakeHost {
             .block_at(level, pos)
             .and_then(crate::__private::block_key)
     }
+    /// The named block's first state: the fake keeps no properties.
+    fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<crate::BlockState> {
+        let block = crate::prelude::LevelsBackend::level_block(self, level, pos)?;
+        Some(crate::BlockStateRecord::new(block, 0).into())
+    }
 }
 impl crate::prelude::BlockEntitiesBackend for FakeHost {
     fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<BlockEntityTypeKey> {

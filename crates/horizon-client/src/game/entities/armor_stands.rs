@@ -982,6 +982,7 @@ impl Game<'_> {
             self.spawn_item(stack, center, v, 10);
         }
         self.show_breaking_particles(at, f64::from(width), f64::from(height));
+        self.stand_game_event("minecraft:entity_die", at, by);
         true
     }
     /// `Entity.gameEvent(event, attributedTo)` for a stand at `at`: the
@@ -1077,6 +1078,7 @@ impl Game<'_> {
                 in_water,
                 Some(self.border.geometry()),
                 &nearby,
+                &self.loop_context,
             ) {
                 // LivingEntity.aiStep: `travel` first, then the blocks' push.
                 a.tick_settle(medium, step);
@@ -1164,9 +1166,16 @@ impl Game<'_> {
                 dead.push((i, damage_type));
             }
         }
+        // A stand that breaks has its move this tick filed before it goes.
+        for &(i, _) in &dead {
+            let s = &self.armor_stands[i];
+            let (id, from, to) = (s.id, s.previous, s.position);
+            self.entity_section_step(id, [from.x, from.y, from.z], [to.x, to.y, to.z]);
+        }
         for (i, damage_type) in dead.into_iter().rev() {
             self.break_armor_stand_by_anything(i, damage_type, 0);
         }
+        self.entity_sections_stepped(super::entity_sections::Family::ArmorStands);
         Ok(())
     }
     /// A lid's `Entity.move` for armor stand `i`, one with physics (vanilla's

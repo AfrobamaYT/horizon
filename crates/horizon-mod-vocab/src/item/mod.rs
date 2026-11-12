@@ -1,6 +1,7 @@
 //! Items, stacks, enchantments, recipes, menus and what a use of an item answers.
 
 pub(crate) mod capability;
+pub(crate) mod capability_cache;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod containers;
