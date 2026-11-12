@@ -1785,7 +1785,10 @@ impl Game<'_> {
     }
     /// A mob's damage source as advancement predicates see it: its type, the
     /// causing entity, and the projectile when one dealt it.
-    pub(super) fn damage_view(&self, d: Damage) -> horizon_client::advancements::DamageView {
+    pub(in crate::game) fn damage_view(
+        &self,
+        d: Damage,
+    ) -> horizon_client::advancements::DamageView {
         let source = match d.attacker {
             // Its callers are KilledTrigger's: the source as their killing_blow sees it.
             Some(Who::Player) => Some(self.player_entity_for_any(&[
@@ -1996,7 +1999,12 @@ impl Game<'_> {
         hurt
     }
     /// Melee or ranged damage to another mob; whether the hit landed.
-    pub(super) fn mob_hits_mob(&mut self, target: u32, amount: f32, mut source: Damage) -> bool {
+    pub(in crate::game) fn mob_hits_mob(
+        &mut self,
+        target: u32,
+        amount: f32,
+        mut source: Damage,
+    ) -> bool {
         if source.attacker_species.is_none()
             && let Some(Who::Mob(id)) = source.attacker
         {
@@ -2164,7 +2172,10 @@ impl Game<'_> {
     }
     /// Adds a projectile, giving it an id from the entity counter
     /// (`Entity.id`, the same counter as the rest) when it has none. Its id.
-    pub(super) fn add_projectile(&mut self, mut p: horizon_client::projectiles::Projectile) -> u32 {
+    pub(in crate::game) fn add_projectile(
+        &mut self,
+        mut p: horizon_client::projectiles::Projectile,
+    ) -> u32 {
         if p.id == 0 {
             self.next_entity += 1;
             p.id = self.next_entity;
@@ -2272,7 +2283,10 @@ impl Game<'_> {
         self.handle_mob_events_reusable(&mut events)
     }
 
-    pub(super) fn handle_mob_events_reusable(&mut self, events: &mut Vec<MobEvent>) -> Result<()> {
+    pub(in crate::game) fn handle_mob_events_reusable(
+        &mut self,
+        events: &mut Vec<MobEvent>,
+    ) -> Result<()> {
         let mut actions = NormalMobActions::new(std::mem::take(events));
         let result = self.handle_mob_events_pending(&mut actions);
         *events = actions.root.events.into();
@@ -3794,7 +3808,11 @@ impl Game<'_> {
     /// it is bound to in `bindings` (game/network/lan_mobs.rs), else the host's
     /// player, so only the mobs whose binding is `conn` (`None` for the
     /// host's player) hear it.
-    pub(super) fn tell_neutral_mobs_player_died(&mut self, feet: [f64; 3], conn: Option<u32>) {
+    pub(in crate::game) fn tell_neutral_mobs_player_died(
+        &mut self,
+        feet: [f64; 3],
+        conn: Option<u32>,
+    ) {
         // A client of someone else's world has the server's mobs only to show.
         if self.remote.is_some()
             || !self
@@ -4393,7 +4411,12 @@ impl Game<'_> {
         outcome.hurt
     }
     /// A status effect from a mob, arrow or splash potion (`addEffect`).
-    pub(super) fn give_player_effect(&mut self, effect: &'static str, ticks: i32, amplifier: i32) {
+    pub(in crate::game) fn give_player_effect(
+        &mut self,
+        effect: &'static str,
+        ticks: i32,
+        amplifier: i32,
+    ) {
         self.give_mob_effect(effect, ticks, amplifier, false);
     }
     /// A mob's effect on the player. Creative and spectator players shrug off
@@ -5108,7 +5131,11 @@ impl Game<'_> {
         let _ = self.destroy_block_by(pos, entity);
     }
     /// What an arrow's tick asked for: its particles and sounds.
-    pub(super) fn arrow_event(&mut self, at: Vec3, event: horizon_client::arrows::ArrowEvent) {
+    pub(in crate::game) fn arrow_event(
+        &mut self,
+        at: Vec3,
+        event: horizon_client::arrows::ArrowEvent,
+    ) {
         use horizon_client::arrows::{ArrowEvent, ArrowParticle, ArrowSound, BlockReaction};
         use horizon_client::particles::{ParticleOptions, ParticleType};
         let kind = |k| match k {
@@ -6429,7 +6456,10 @@ impl Game<'_> {
     }
     /// The mob a normal interaction can reach: a packet's exact validated ID,
     /// or the crosshair's mob before its blocking shape.
-    pub(super) fn mob_interaction_target(&self, target: Option<InteractTarget>) -> Option<usize> {
+    pub(in crate::game) fn mob_interaction_target(
+        &self,
+        target: Option<InteractTarget>,
+    ) -> Option<usize> {
         let (index, distance, _) = (match target {
             // The id the packet named, under the filters the crosshair pick
             // applies (`mob_hit`): a mob in its death animation is not clicked
@@ -7911,7 +7941,12 @@ impl Game<'_> {
         }
     }
 
-    pub(super) fn mob_geometry(&self, camera: glam::DVec3, alpha: f64, out: &mut Vec<Vertex>) {
+    pub(in crate::game) fn mob_geometry(
+        &self,
+        camera: glam::DVec3,
+        alpha: f64,
+        out: &mut Vec<Vertex>,
+    ) {
         // The coarse mob bounds pay off only in dense async scenes; otherwise,
         // keep the existing exact mesh-culling path.
         if self.settings.horizon.entity_culling == EntityCullingMode::Asynchronous
@@ -8625,7 +8660,10 @@ pub(super) fn melee(kind: horizon_client::mobs::DamageKind) -> bool {
 }
 /// The damage type id of a Horizon damage kind. `caused`: the source has a
 /// causing entity (only a blast asks).
-pub(super) fn damage_type(kind: horizon_client::mobs::DamageKind, caused: bool) -> &'static str {
+pub(in crate::game) fn damage_type(
+    kind: horizon_client::mobs::DamageKind,
+    caused: bool,
+) -> &'static str {
     use horizon_client::mobs::DamageKind as K;
     match kind {
         K::Named(named) => named.name,
@@ -8871,7 +8909,11 @@ impl Game<'_> {
     /// [`Self::can_entity_grief`] for its owner, as `getOwner()` gives it. That
     /// is the mob that shot it, or the player who owns it (the guest on `guest`,
     /// else the player in place). An owner that is gone, or none, reads the rule.
-    pub(super) fn large_fireball_fire(&self, owner: Option<Who>, guest: Option<u32>) -> bool {
+    pub(in crate::game) fn large_fireball_fire(
+        &self,
+        owner: Option<Who>,
+        guest: Option<u32>,
+    ) -> bool {
         self.can_entity_grief(match owner {
             Some(Who::Mob(id)) => Some(id),
             Some(Who::Player) => self
@@ -13495,3 +13537,38 @@ mod knockback;
 
 #[cfg(test)]
 mod death_loot_context_tests;
+
+#[cfg(test)]
+mod breeding_heart_tests {
+    use super::*;
+    /// `Turtle.TurtleBreedGoal.breed` overrides `Animal.breed`, so a bred turtle
+    /// never runs `finalizeSpawnChildFromBreeding`'s heart burst (entity event
+    /// 18); `Frog.spawnChildFromBreeding` still does.
+    #[test]
+    #[ignore = "needs prepared resources (HORIZON_TEST_RESOURCES)"]
+    fn a_bred_turtle_posts_no_heart_burst_but_a_bred_frog_does() {
+        let mut game = crate::game::native_machines::tests::server_game();
+        game.audio.capture = Some(Vec::new());
+        for (kind_id, hearts) in [("minecraft:turtle", 0), ("minecraft:frog", 1)] {
+            let kind = game.res.mob_types().get(kind_id).unwrap().clone();
+            game.mobs
+                .push(Mob::new(1, kind.clone(), Vec3::new(8.5, 64.0, 8.5), 0.0));
+            game.mobs
+                .push(Mob::new(2, kind, Vec3::new(9.5, 64.0, 8.5), 0.0));
+            game.lan_entity_events.clear();
+            game.breed(1, 2, None);
+            let burst = game
+                .lan_entity_events
+                .iter()
+                .filter(|(id, event, _)| *id == 1 && *event == 18)
+                .count();
+            assert_eq!(
+                burst, hearts,
+                "{kind_id} heartbeat events: {:?}",
+                game.lan_entity_events
+            );
+            game.mobs.clear();
+            game.orbs.clear();
+        }
+    }
+}
