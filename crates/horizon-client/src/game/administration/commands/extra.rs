@@ -1310,11 +1310,7 @@ impl Game<'_> {
         }
     }
 }
-impl Game<'_> {}
-
 impl Game<'_> {
-    /// `Waypoint.Icon.hasData`.
-
     /// `LivingEntity.readAdditionalSaveData`'s `locator_bar_icon`
     /// (`Waypoint.Icon.CODEC`: a required `style` and an optional int `color`).
     /// None when the key is missing or does not decode, which is the default icon.
@@ -1349,5 +1345,86 @@ impl Game<'_> {
         {
             map.insert("locator_bar_icon".into(), Tag::compound(fields));
         }
+    }
+}
+
+#[cfg(test)]
+mod waypoint_icon_save_tests {
+    use super::*;
+    use crate::save::Level;
+
+    fn icon(style: &str, color: Option<i32>) -> Icon {
+        Icon {
+            style: style.into(),
+            color,
+        }
+    }
+
+    #[test]
+    fn an_icon_set_by_waypoint_modify_survives_a_save_and_a_load() {
+        let mut level = Level::default();
+        Game::save_waypoint_icon(
+            &icon("minecraft:bowtie", Some(0x00FF_0000)),
+            &mut level.player_extra,
+        );
+        // The player's file: `locator_bar_icon` is `{style, color}`.
+        let saved = level.player_tag();
+        assert_eq!(
+            saved.get("locator_bar_icon"),
+            Some(&Tag::compound([
+                ("style", Tag::String("minecraft:bowtie".into())),
+                ("color", Tag::Int(0x00FF_0000)),
+            ]))
+        );
+        // Loaded again: the same icon.
+        assert_eq!(
+            Game::waypoint_icon_from_saved(Some(&saved)),
+            Some(icon("minecraft:bowtie", Some(0x00FF_0000)))
+        );
+    }
+
+    #[test]
+    fn a_style_alone_or_a_colour_alone_is_data_and_is_saved() {
+        let mut only_style = None;
+        Game::save_waypoint_icon(&icon("minecraft:bowtie", None), &mut only_style);
+        let tag = only_style.unwrap();
+        assert_eq!(
+            tag.get("locator_bar_icon"),
+            Some(&Tag::compound([(
+                "style",
+                Tag::String("minecraft:bowtie".into())
+            )]))
+        );
+        let mut only_color = None;
+        Game::save_waypoint_icon(&icon("minecraft:default", Some(7)), &mut only_color);
+        assert_eq!(
+            Game::waypoint_icon_from_saved(only_color.as_ref()),
+            Some(icon("minecraft:default", Some(7)))
+        );
+    }
+
+    #[test]
+    fn a_player_with_no_icon_saves_no_key_and_a_reset_takes_it_out() {
+        let mut level = Level::default();
+        assert!(level.player_tag().get("locator_bar_icon").is_none());
+        // The default icon on a player with no file writes nothing, not even a file.
+        Game::save_waypoint_icon(&Icon::default(), &mut level.player_extra);
+        assert!(level.player_extra.is_none());
+        Game::save_waypoint_icon(&icon("minecraft:default", Some(1)), &mut level.player_extra);
+        assert!(level.player_tag().get("locator_bar_icon").is_some());
+        // `/waypoint modify ... reset` leaves the default icon: the key goes.
+        Game::save_waypoint_icon(&Icon::default(), &mut level.player_extra);
+        assert!(level.player_tag().get("locator_bar_icon").is_none());
+    }
+
+    #[test]
+    fn a_save_without_the_key_or_with_a_broken_one_loads_the_default_icon() {
+        assert_eq!(Game::waypoint_icon_from_saved(None), None);
+        let none = Tag::compound([("Health", Tag::Float(20f32.to_bits()))]);
+        assert_eq!(Game::waypoint_icon_from_saved(Some(&none)), None);
+        // `style` is required by the codec.
+        let no_style =
+            Tag::compound([("locator_bar_icon", Tag::compound([("color", Tag::Int(5))]))]);
+        assert_eq!(Game::waypoint_icon_from_saved(Some(&no_style)), None);
     }
 }

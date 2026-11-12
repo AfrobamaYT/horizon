@@ -20,7 +20,6 @@ Combine upstream's optional `--harnesses` self-check flag with the fork's exact 
 
 Merge port-ledger rows by Java method key: unchanged upstream rows retain the fork's relocated paths; changed upstream contracts replace the matching row, with unambiguous source paths relocated to the fork's game-area layout. Merge Thai launcher translations by key, taking upstream changes while retaining fork-only keys. Gameplay and rendering translations are resolved in their owning areas.
 
-
 ## Engine, item and server integration
 
 Audited all 22 assigned paths and the additional random.rs correction. Two relocated destinations are also changed: crates/horizon-server/src/lib.rs and crates/horizon-server-launch/src/config.rs. Total: 25 paths audited, 23 changed, 2 deliberately unchanged. No unresolved textual cases or requested rulings.
@@ -38,7 +37,6 @@ Audited all 22 assigned paths and the additional random.rs correction. Two reloc
 - Structure changes take upstream streaming template decoding and saved legacy piece reads/tests. Imports use relocated horizon-core NBT/BoundingBox and retain fork block entity transform module. Saved-template int/flag use the new shared saved_legacy helpers rather than duplicate implementations.
 - LegacyRandom state/gaussian conversion initializes gate to None, matching independent clone/from_state behavior. No Mob RNG API types changed here.
 
-
 ## Clean-merge correction and module placement
 
 The native explosion state merge saved blast ownership twice, then restored empty duplicate values over the outer blast attribution. Remove the duplicate saves and restores, retaining the incoming player-owner flag and the fork nested-blast contract. New extinguish, frame autotuning and smithing icon modules move into their existing entities, runtime and interface areas through the committed relocation script.
@@ -46,8 +44,6 @@ The native explosion state merge saved blast ownership twice, then restored empt
 ## Parallel mob dispatch: authorized performance divergence
 
 Diverges from upstream (performance only). The fork retains serial dispatch while preserving upstream parallel implementation behind one fork-owned gate, with minimal typed adapters where required. Upstream horizon-rust/horizon#15493 states “Not yet shown to give a CPU gain.” The originating horizon-rust/horizon#15056 states “This draft does not yet establish a worthwhile performance gain or acceptable fallback overhead.” No upstream measured gain is claimed here. Tests and serial behavior remain unverified locally.
-
-## Client and rendering decisions
 
 ## Contracts and structural rulings
 
@@ -114,52 +110,7 @@ Diverges from upstream (performance only). The fork retains serial dispatch whil
 - save.rs: upstream save backpressure plus fork ticket serialization/fluid interning.
 - vanillagen/structure_mobs.rs: background load owns Arc<ItemData> and uses its defaults; retain contextual fork cache initialization.
 
-## Destinations outside original list
-
-- crates/horizon-client/src/motion/player_init.rs: initialize new entity-owned player RNG without duplicating initializer.
-- crates/horizon-client/src/game/runtime/window_handler.rs: upstream frame_autotune invocation at fork relocated frame completion point.
-
-## Verification and remaining gate
-
-
-## Gameplay action decisions
-
-
-
-## Integration decisions
-
-- Deleted root gameplay paths stay deleted. Their changes land in game.rs, blocks, items, mobs, network, runtime, world, entities and modding destinations, not restored obsolete modules.
-- Retain JoinList update closures, residency extraction, validated guest turns, scoped invulnerability checks, typed damage/attack/victim identity, typed spawning, Parts layout and Wire contracts.
-- Incoming projectile own-RNG shooting retains spawn_projectile rather than restoring add_projectile. Incoming parallel item moves are wired through game.rs's ahead module, with per-turn saved invulnerability ticking retained and the existing native-hook refusal in ahead preserved.
-- Random tick chunks are sorted deterministically, with masks prepared before ticking; tests are explicitly wired from game/block_ticks/random_order_tests.rs.
-- Item void bounds use the live level minimum. Existing fork escape tests retain independent seeded expected values and ticking-neighborhood preparation rather than replacing them with implementation-derived expectations.
-- Guest body initialization remains inline in the validated JoinList turn, not upstream's unchecked mutable-Guest extraction. Its own entity RNG is initialized before saved data is applied. Drop resynchronization runs through self.as_guest and updates the guest's told-selected state afterward.
-- Merchant refresh signaling and OffersRefreshed detection retain fork-owned LAN borrowing signatures. Reputation changes refresh prices; ordinary takes no longer resend offers unnecessarily.
-- Keep fork damage_stack, harvest/break-speed hook, tooltip hooks and native ram combat adaptations instead of restoring upstream's obsolete implementations. The existing fork helper already covers mob_pushes_player with explicit attack context.
-- melee_damage_with_admission keeps victim: Option<u32> as a third argument, alongside the old typed melee_damage wrapper, so damage RNG is evaluated once while exposing admission.
-- Preserve ItemConsumable's synchronized prototype/data/wire lookup through Game::consumable while keeping typed can_eat and hook calls. Borrow the returned owned consumable for completion.
-- Keep sync 27's refusal to restore entity_portal_delay and contextless native RNG/entity services. Take live portal cooldown serialization; dimension scaling now uses DimensionFacts.
-- Keep the existing waypoint Icon vocabulary; persistence is implemented around it, without introducing a duplicate WaypointIcon type.
-- Take upstream Horizon cosmetics settings, PvP helpers, dedicated crash-stop behavior, beacon text, sign edit lifecycle, crack sprites and world-update spans. Existing fork save-before-unload hooks remain in their established order.
-- New position_args validation lands at administration/commands/position_args.rs, cosmetics settings at interface/cosmetics/settings.rs, and renamed upstream extras/pvp.rs merges into entities/pvp.rs. No duplicate extras/pvp.rs is restored.
-- World content access uses the existing Game.server_items cache before local resource items. Enchantment readers use Remote.enchantments. The upstream ServerTables aggregate is not duplicated: synced tag/item/enchantment updates already populate these flat fields, and typed mod tag notices remain separate.
-
-## Entity, network and world decisions
-
-## Diverges from upstream (performance only)
-
-Single fork gate: `crates/horizon-client/src/parallel.rs::parallel_tick`, local constant `FORK_PARALLEL_TICK_ENABLED = false`. It disables ALL opt-in parallel server phases, not only mob phases. The upstream pool, par_map and verification machinery otherwise remain in the tree.
-
-Exact type blockers: `mobs::Mob.extra.live` is `living_attributes::LivingAttributes`, whose map is `std::cell::OnceCell<Box<Live>>`. `Live = LiveAttributes<Box<dyn Identities>>`; `Identities: FnMut() -> i32` lacks Send and Sync bounds. `LiveAttributes::data` owns that allocator callback. OnceCell -> OnceLock alone therefore cannot make Mob Send + Sync; no unsafe shim or cache refactor was taken. The fork tick additionally owns `JoinList<Mob>` and `health::LentLevel` (LegacyRandom, attachments and syncs), not upstream plain Vec tick ownership. Smallest active adapters remain `BorrowedMobTick` and extracted serial `fill_mob_state`, reading the existing authoritative live attribute map.
-
-Upstream `game/creatures/{mob_group,mob_islands,prep}.rs` are retained BYTE-IDENTICAL at upstream paths. Only their module declarations are behind nondefault Cargo feature `upstream-parallel-mobs`; no default enables it. **This code is not compiled or tested on the fork.** Do not turn that source-retention feature on to claim working parallel dispatch. No currently compiled fork code calls those modules. Their eventual typed adaptation is fork #3491.
-
-
-## RNG adapters
-
-World swaps use `LevelRandom::for_level(LegacyRandom::new(...))`. Hook-owned LentLevel continues to expose LegacyRandom via the world owner's deref adapter, coordinated by parent/client. Mob.random and mobs::entity_random remain LegacyRandom by client ruling. Projectile shoot_from_rotation uses upstream no-caller-RNG signature; own_uuid/uuid are upstream projectile contracts expected from engine/client integration. No RNG draws added by wrappers.
-
-## Path audit
+### Entities, network and world
 
 | Assigned path | Resolution |
 | --- | --- |
@@ -171,10 +122,10 @@ World swaps use `LevelRandom::for_level(LegacyRandom::new(...))`. Hook-owned Len
 | `crates/horizon-client/src/game/entities/frames.rs` | Projectile frame hits, creative-owner drops and dimension lighting; typed hook rotation remains normalized. |
 | `crates/horizon-client/src/game/entities/minecarts.rs` | Freeze state, below-world removal, exact control yaw; moved typed attack into special_attacks; kept live ownership and NBT freeze persistence. |
 | `crates/horizon-client/src/game/entities/pvp.rs` | Takes upstream PvP behavior in the existing entities area, not a duplicate extras module. |
-| `crates/horizon-client/src/game/mobs/creatures/mob_group.rs` | Byte-identical upstream source retained at original upstream path behind nondefault source-retention feature; not compiled. |
-| `crates/horizon-client/src/game/mobs/creatures/mob_islands.rs` | Byte-identical upstream source retained at original upstream path behind nondefault source-retention feature; not compiled. |
+| `crates/horizon-client/src/game/creatures/mob_group.rs` | Byte-identical upstream source retained at original upstream path behind nondefault source-retention feature; not compiled. |
+| `crates/horizon-client/src/game/creatures/mob_islands.rs` | Byte-identical upstream source retained at original upstream path behind nondefault source-retention feature; not compiled. |
 | `crates/horizon-client/src/game/mobs/creatures/mod.rs` | Kept JoinList lift/restore + BorrowedMobTick, ported observable event/ignition/projectile/UUID behavior and caller RNG signature. Source-retention declarations isolate incompatible parallel extraction. |
-| `crates/horizon-client/src/game/mobs/creatures/prep.rs` | Byte-identical upstream source retained at original upstream path behind nondefault source-retention feature; not compiled. |
+| `crates/horizon-client/src/game/creatures/prep.rs` | Byte-identical upstream source retained at original upstream path behind nondefault source-retention feature; not compiled. |
 | `crates/horizon-client/src/game/mobs/creatures/projectile_targets.rs` | Created relocated active pickable/projectile-target implementation, including primed TNT and item frames; retained separate fork vehicle targets for typed callers. |
 | `crates/horizon-client/src/game/mobs/creatures/projectile_world.rs` | Kept fork context-owned block-contact path; ported projectile world floor query. |
 | `crates/horizon-client/src/game/mobs/dragon.rs` | Cloud velocity and target computation updated; moved typed special attack to items/special_attacks. |
@@ -200,6 +151,41 @@ World swaps use `LevelRandom::for_level(LegacyRandom::new(...))`. Hook-owned Len
 | `crates/horizon-client/src/game/world/packs/mod.rs` | Upstream drop/import UI integrated with mod-discovered additional packs and caller update. |
 | `crates/horizon-client/src/game/world/persist.rs` | Retained fork transferred-object initialization, passenger admission and typed object-tree persistence. Ported crystal fire cleanup, no-save leash knots, portal cooldown saves and camel reload regression; destination object_memory gains own projectile UUID and boat freeze state. |
 
+## Destinations outside original list
+
+- crates/horizon-client/src/motion/player_init.rs: initialize new entity-owned player RNG without duplicating initializer.
+- crates/horizon-client/src/game/runtime/window_handler.rs: upstream frame_autotune invocation at fork relocated frame completion point.
+
+## Integration decisions
+
+- Deleted root gameplay paths stay deleted. Their changes land in game.rs, blocks, items, mobs, network, runtime, world, entities and modding destinations, not restored obsolete modules.
+- Retain JoinList update closures, residency extraction, validated guest turns, scoped invulnerability checks, typed damage/attack/victim identity, typed spawning, Parts layout and Wire contracts.
+- Incoming projectile own-RNG shooting retains spawn_projectile rather than restoring add_projectile. Incoming parallel item moves are wired through game.rs's ahead module, with per-turn saved invulnerability ticking retained and the existing native-hook refusal in ahead preserved.
+- Random tick chunks are sorted deterministically, with masks prepared before ticking; tests are explicitly wired from game/block_ticks/random_order_tests.rs.
+- Item void bounds use the live level minimum. Existing fork escape tests retain independent seeded expected values and ticking-neighborhood preparation rather than replacing them with implementation-derived expectations.
+- Guest body initialization remains inline in the validated JoinList turn, not upstream's unchecked mutable-Guest extraction. Its own entity RNG is initialized before saved data is applied. Drop resynchronization runs through self.as_guest and updates the guest's told-selected state afterward.
+- Merchant refresh signaling and OffersRefreshed detection retain fork-owned LAN borrowing signatures. Reputation changes refresh prices; ordinary takes no longer resend offers unnecessarily.
+- Keep fork damage_stack, harvest/break-speed hook, tooltip hooks and native ram combat adaptations instead of restoring upstream's obsolete implementations. The existing fork helper already covers mob_pushes_player with explicit attack context.
+- melee_damage_with_admission keeps victim: Option<u32> as a third argument, alongside the old typed melee_damage wrapper, so damage RNG is evaluated once while exposing admission.
+- Preserve ItemConsumable's synchronized prototype/data/wire lookup through Game::consumable while keeping typed can_eat and hook calls. Borrow the returned owned consumable for completion.
+- Keep sync 27's refusal to restore entity_portal_delay and contextless native RNG/entity services. Take live portal cooldown serialization; dimension scaling now uses DimensionFacts.
+- Keep the existing waypoint Icon vocabulary; persistence is implemented around it, without introducing a duplicate WaypointIcon type.
+- Take upstream Horizon cosmetics settings, PvP helpers, dedicated crash-stop behavior, beacon text, sign edit lifecycle, crack sprites and world-update spans. Existing fork save-before-unload hooks remain in their established order.
+- New position_args validation lands at administration/commands/position_args.rs, cosmetics settings at interface/cosmetics/settings.rs, and renamed upstream extras/pvp.rs merges into entities/pvp.rs. No duplicate extras/pvp.rs is restored.
+- World content access uses the existing Game.server_items cache before local resource items. Enchantment readers use Remote.enchantments. The upstream ServerTables aggregate is not duplicated: synced tag/item/enchantment updates already populate these flat fields, and typed mod tag notices remain separate.
+
+## Diverges from upstream (performance only)
+
+Single fork gate: `crates/horizon-client/src/parallel.rs::parallel_tick`, local constant `FORK_PARALLEL_TICK_ENABLED = false`. It disables ALL opt-in parallel server phases, not only mob phases. The upstream pool, par_map and verification machinery otherwise remain in the tree.
+
+Exact type blockers: `mobs::Mob.extra.live` is `living_attributes::LivingAttributes`, whose map is `std::cell::OnceCell<Box<Live>>`. `Live = LiveAttributes<Box<dyn Identities>>`; `Identities: FnMut() -> i32` lacks Send and Sync bounds. `LiveAttributes::data` owns that allocator callback. OnceCell -> OnceLock alone therefore cannot make Mob Send + Sync; no unsafe shim or cache refactor was taken. The fork tick additionally owns `JoinList<Mob>` and `health::LentLevel` (LegacyRandom, attachments and syncs), not upstream plain Vec tick ownership. Smallest active adapters remain `BorrowedMobTick` and extracted serial `fill_mob_state`, reading the existing authoritative live attribute map.
+
+Upstream `game/creatures/{mob_group,mob_islands,prep}.rs` are retained BYTE-IDENTICAL at upstream paths. Only their module declarations are behind nondefault Cargo feature `upstream-parallel-mobs`; no default enables it. **This code is not compiled or tested on the fork.** Do not turn that source-retention feature on to claim working parallel dispatch. No currently compiled fork code calls those modules. Their eventual typed adaptation is fork #3491.
+
+## RNG adapters
+
+World swaps use `LevelRandom::for_level(LegacyRandom::new(...))`. Hook-owned LentLevel continues to expose LegacyRandom via the world owner's deref adapter, coordinated by parent/client. Mob.random and mobs::entity_random remain LegacyRandom by client ruling. Projectile shoot_from_rotation uses upstream no-caller-RNG signature; own_uuid/uuid are upstream projectile contracts expected from engine/client integration. No RNG draws added by wrappers.
+
 ## Upstream behavioral tests retained and statically assessed
 
 - `a_vehicle_falls_out_of_the_world_64_blocks_under_the_floor`, `a_tick_discards_the_vehicles_under_the_world`, `saved_deep_end_boat_loads_then_is_discarded_and_extreme_scans_terminate`: serial removal happens before motion, spills container contents without ENTITY_DIE; no cross-thread behavior required.
@@ -213,7 +199,6 @@ World swaps use `LevelRandom::for_level(LegacyRandom::new(...))`. Hook-owned Len
 - `integrated_tick_panic_saves_changed_world`: catch-and-save loop preserves shutdown error and typed session teardown.
 - `explicit_sources_keep_names_without_inventing_kill_credit`: preserved through typed LevelRef explosion call, no contextless service added.
 - Frame projectile regression module and existing camel reload assertions retained. Parallel-only structural tests inside the retained upstream sources are not compiled/tested, as stated above.
-
 
 ## Rollup 46 main integration
 
@@ -247,3 +232,13 @@ Source discovery explicitly excludes the retained upstream `game/creatures` fold
 ## Verification scope
 
 Only compile-time workspace checks and scoped Rust formatting run locally for this sync. Tests, clippy, parity harnesses and game behavior are not run locally. The retained upstream parallel sources are excluded from compilation and testing. PR readiness uses verify, verify-static, lint, launcher and Windows test; wasm fixture and fn-replace-check are main-only, not PR gates.
+
+## Review carry: duplicate source and regression coverage
+
+Nine undeclared upstream extraction files are removed after checking explicit module declarations, path attributes and discovery ownership: options_ui_preset; lan/hub/accept_teleport and chunk_batch; mobs/ai/air and walk_target; mobs/mob_slot, pending_pushes and seen; motion/body. The active options layout, inline validated hub code, typed mob AI pipeline, inline mob state and motion/player_init remain authoritative. The three explicitly retained parallel mob sources are unaffected.
+
+The upstream first-tick armor-stand movement-speed persistence correction is present in the inline serializer, before fork live-attribute packing. Saved attribute order is preserved.
+
+Twelve of the thirteen requested upstream regressions are carried: shield use statistics, client-copy fall immunity, lectern removal events, four waypoint icon persistence cases, armor-stand pitch, wrapped hanging facing, cloned held attack items, merchant packet snapshots and resource-pack drops. Test bodies are copied from the pinned upstream head with typed names and scoped resource fixtures adapted. Their upstream resource-dependent ignore annotations remain.
+
+Not carried: `parallel_tick_reaches_the_game_only_when_it_is_on`. Upstream's test reads the environment from its command-construction seam, which accepts a parallel flag. The fork's `horizon_server_launch::command` has no parallel flag; `engine::spawn` adds the environment and immediately spawns the process. Adapting the test would require a new production seam or subprocess fixture rather than typed-name substitutions. Environment forwarding remains present. The two incompatible parallel-mob state-path tests remain intentionally uncompiled as already recorded.

@@ -6425,6 +6425,45 @@ mod armor_hurt_tests {
         assert_eq!(horse.saddle_item(), Some(stack));
     }
 
+    /// `Entity.hurt` on a client level does nothing: the horse a rider's
+    /// client drives takes no fall of its own, and the server's health stays
+    /// (#15294: the client's copy died and lay on the ground, still ridable).
+    #[test]
+    fn a_client_copy_takes_no_fall_damage() {
+        let context = crate::test_resources::server_loop_context();
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        let mut m = horse();
+        m.extra.client_side = true;
+        let health = m.health;
+        let mut events = Vec::new();
+        assert!(!m.damage(level, 20.0, Damage::of(DamageKind::Fall)));
+        m.cause_fall_damage_at(
+            context,
+            level,
+            30.0,
+            1.0,
+            &mut events,
+            None,
+            DamageKind::Fall,
+        );
+        assert_eq!(m.health, health);
+        assert_eq!(m.hurt_time, 0);
+        assert!(m.alive());
+        // The server's copy of the same fall is hurt.
+        let mut server = horse();
+        server.cause_fall_damage_at(
+            context,
+            level,
+            30.0,
+            1.0,
+            &mut events,
+            None,
+            DamageKind::Fall,
+        );
+        assert!(server.health < health);
+    }
+
     /// `LivingEntity.hurtArmor` (`doHurtEquipment`): a hit that lands on a mob
     /// wearing body armour leaves the piece owing a wear, which the host
     /// applies with the item's own maximum and fire rules.

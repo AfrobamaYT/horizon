@@ -5954,6 +5954,98 @@ mod tests {
         assert_eq!(number(tag.get("Health")), Some(5));
     }
     #[test]
+    fn armor_stand_loads_and_saves_pitch() {
+        let tag = Tag::compound([
+            ("id", string("minecraft:armor_stand")),
+            (
+                "Pos",
+                Tag::List(vec![
+                    Tag::Double(4103.5f64.to_bits()),
+                    Tag::Double(300.0f64.to_bits()),
+                    Tag::Double(4103.5f64.to_bits()),
+                ]),
+            ),
+            (
+                "Rotation",
+                Tag::List(vec![
+                    Tag::Float((-170.5f32).to_bits()),
+                    Tag::Float((-90.0f32).to_bits()),
+                ]),
+            ),
+        ]);
+        let stand = armor_stand_from_nbt(&tag, 1).unwrap();
+        assert_eq!(stand.yaw, -170.5);
+        assert_eq!(stand.pitch, -90.0);
+
+        let saved = armor_stand_to_nbt(&stand, [1, 2, 3, 4], None);
+        let rot = rotation(&saved);
+        assert_eq!(rot[0], -170.5);
+        assert_eq!(rot[1], -90.0);
+
+        // Out-of-range pitch (e.g. 450.0f) normalizes to 90.0f matching Entity.setXRot.
+        let out_of_range = Tag::compound([
+            ("id", string("minecraft:armor_stand")),
+            (
+                "Pos",
+                Tag::List(vec![
+                    Tag::Double(0.0f64.to_bits()),
+                    Tag::Double(0.0f64.to_bits()),
+                    Tag::Double(0.0f64.to_bits()),
+                ]),
+            ),
+            (
+                "Rotation",
+                Tag::List(vec![
+                    Tag::Float(0.0f32.to_bits()),
+                    Tag::Float(450.0f32.to_bits()),
+                ]),
+            ),
+        ]);
+        let normalized = armor_stand_from_nbt(&out_of_range, 2).unwrap();
+        assert_eq!(normalized.pitch, 90.0);
+
+        // Nonfinite pitch resets to 0.0f.
+        let nonfinite = Tag::compound([
+            ("id", string("minecraft:armor_stand")),
+            (
+                "Pos",
+                Tag::List(vec![
+                    Tag::Double(0.0f64.to_bits()),
+                    Tag::Double(0.0f64.to_bits()),
+                    Tag::Double(0.0f64.to_bits()),
+                ]),
+            ),
+            (
+                "Rotation",
+                Tag::List(vec![
+                    Tag::Float(0.0f32.to_bits()),
+                    Tag::Float(f32::NAN.to_bits()),
+                ]),
+            ),
+        ]);
+        let nan_stand = armor_stand_from_nbt(&nonfinite, 3).unwrap();
+        assert_eq!(nan_stand.pitch, 0.0);
+    }
+
+    #[test]
+    fn negative_facing_wraps_like_vanilla_direction_codecs() {
+        // from3DDataValue: abs(-1 % 6) = 1 (UP); 7 -> 1; -6 -> 0.
+        for (raw, want) in [(-1i8, 1u8), (7, 1), (-6, 0), (5, 5), (0, 0)] {
+            let tag = Tag::compound([
+                ("Facing", Tag::Byte(raw)),
+                ("block_pos", Tag::IntArray(vec![0, 0, 0])),
+            ]);
+            assert_eq!(item_frame_from_nbt(&tag, 1).unwrap().facing, want);
+        }
+        // from2DDataValue: abs(-1 % 4) = 1.
+        let tag = Tag::compound([
+            ("facing", Tag::Byte(-1)),
+            ("block_pos", Tag::IntArray(vec![0, 0, 0])),
+        ]);
+        assert_eq!(painting_from_nbt(&tag).unwrap().1, 1);
+    }
+
+    #[test]
     fn saved_rotation_is_the_entitys_own() {
         // `/tp <entity> x y z 90 10` sets the entity's yaw and pitch; the save
         // (`/data get ... Rotation`) writes them, not [0, 0].

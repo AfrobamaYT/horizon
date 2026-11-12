@@ -429,5 +429,66 @@ mod durability_tests {
 }
 
 #[cfg(test)]
+mod blocked_hit_use_tests {
+    use super::*;
+    use crate::game::game_tests::tests::server_game;
+    use horizon_client::items::ItemStack;
+
+    /// `BlocksAttacks.hurtBlockingItem`: a hit taken while using a shield
+    /// counts it as used, even when the shield blocks none of the damage.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    fn a_blocked_hit_counts_the_shield_as_used() {
+        let mut game_resources = None;
+        let mut game = server_game(&mut game_resources);
+        game.build_registries();
+        game.offhand = Some(ItemStack::new("minecraft:shield", 1));
+        game.using = Some((OFFHAND_SLOT, 0));
+        let source = HurtSource {
+            damage_type: "minecraft:mob_attack",
+            causing: 1,
+            direct: 1,
+            position: None,
+        };
+        let outcome = BlockOutcome {
+            blocking_item_used: true,
+            hurt: true,
+            blocked: 5.0,
+            shield_damage: 0,
+            fully_blocked: true,
+            sound: false,
+            knockback: false,
+            canceled: false,
+            dealt: 0.0,
+        };
+        assert_eq!(game.stats.get("used", "minecraft:shield"), 0);
+        game.after_block(
+            outcome,
+            (None, false),
+            source,
+            &horizon_client::health::NO_ATTACK,
+        );
+        assert_eq!(
+            game.stats.get("used", "minecraft:shield"),
+            1,
+            "a hit the shield takes whole counts it"
+        );
+        // The gate below the award: a hit the shield blocks nothing of still
+        // counts it (hurtBlockingItem runs before the `blocked > 0` branch).
+        let outcome = BlockOutcome {
+            blocked: 0.0,
+            ..outcome
+        };
+        game.after_block(
+            outcome,
+            (None, false),
+            source,
+            &horizon_client::health::NO_ATTACK,
+        );
+        assert_eq!(game.stats.get("used", "minecraft:shield"), 2);
+    }
+}
+
+#[cfg(test)]
 #[path = "tests/shield_ram_tests.rs"]
 mod ram_tests;

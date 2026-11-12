@@ -1982,6 +1982,63 @@ mod pause_tests {
 }
 
 #[cfg(test)]
+mod lectern_book_removal_tests {
+    use super::*;
+    use crate::game::game_tests::tests::server_game;
+
+    /// `LecternBlock.resetBookState`: the book coming off a lectern clears
+    /// `has_book` and posts `block_change` at it.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_lectern_book_removal_posts_block_change() {
+        let mut game_resources = None;
+        let mut game = server_game(&mut game_resources);
+        let key = (2, 4, 3);
+        let state = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:lectern")
+            .unwrap();
+        game.world.set(key.0, key.1, key.2, state).unwrap();
+        game.world.block_entities.insert(
+            key,
+            BlockEntity::Lectern(Lectern {
+                book: Some(ItemStack::new("minecraft:written_book", 1)),
+                page: 0,
+            }),
+        );
+        game.set_lectern_property(key, "has_book", true);
+        crate::game::sculk::TEST_POSTED_EVENTS.with(|e| *e.borrow_mut() = Some(Vec::new()));
+
+        game.set_lectern_has_book(key, false, None);
+
+        let has_book = game
+            .pack
+            .assets
+            .registry
+            .state(game.world.block(key.0, key.1, key.2))
+            .and_then(|s| s.properties.get("has_book").cloned());
+        assert_eq!(
+            has_book.as_deref(),
+            Some("false"),
+            "the lectern has no book"
+        );
+        crate::game::sculk::TEST_POSTED_EVENTS.with(|e| {
+            assert!(
+                e.borrow().as_ref().unwrap().contains(&(
+                    "minecraft:block_change",
+                    [2.5, 4.5, 3.5],
+                    None
+                )),
+                "{:?}",
+                e.borrow()
+            );
+        });
+    }
+}
+
+#[cfg(test)]
 mod lectern_reach_tests {
     use crate::game::game_tests::tests::server_game;
     use horizon_client::{

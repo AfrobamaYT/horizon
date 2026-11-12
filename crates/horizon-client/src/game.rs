@@ -18047,8 +18047,6 @@ impl Game<'_> {
     }
 }
 
-impl Game<'_> {}
-
 impl Game<'_> {
     pub(super) fn apply_crafter_slot_states(&mut self, menu: &horizon_client::menu::Menu) {
         let Some(key) = self.container else {
