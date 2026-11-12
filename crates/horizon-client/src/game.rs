@@ -2017,7 +2017,7 @@ struct Game<'a> {
     tnts: horizon_client::join_seq::JoinList<tnt::PrimedTnt>,
     hoppers: HashMap<(i32, i32, i32), machines::HopperState>,
     /// The open `host.transaction`s, innermost last (`transactions.rs`).
-    transactions: Vec<transactions::Level>,
+    transactions: transactions::OpenTransactions,
     /// Backing blocks whose contents notice is on the call stack, innermost last.
     contents_changing: Vec<(mod_api::LevelRef, BlockPos)>,
     /// The screen of a mod block's menu open on this client (`native_screen`).
@@ -15197,7 +15197,7 @@ impl<'a> Game<'a> {
             bee_stinger_model: prepared.bee_stinger_model,
             tnts: Default::default(),
             hoppers: HashMap::new(),
-            transactions: Vec::new(),
+            transactions: Default::default(),
             block_entity_tick_key: None,
             block_entity_tick_items: None,
             wasm_dispatch_failures:
