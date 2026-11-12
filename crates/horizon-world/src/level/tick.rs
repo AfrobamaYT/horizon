@@ -654,7 +654,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             "#minecraft:infiniburn_end" => &b.tags.infiniburn_end,
             _ => &b.tags.infiniburn_overworld,
         };
-        let infini = b.in_set(below_state, infiniburn);
+        let mut infini = None;
+        self.level
+            .before_is_fire_source(below_state, below(pos), &mut infini);
+        let infini = infini.unwrap_or_else(|| b.in_set(below_state, infiniburn));
         let age = b.table.int(state, p.age);
         let raining = self.level.is_raining();
         if !infini
@@ -678,7 +681,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
                 return;
             }
-            if age == 15 && self.rand_int(4) == 0 && !self.can_burn(self.below_state(pos)) {
+            if age == 15
+                && self.rand_int(4) == 0
+                && !self.can_burn(self.below_state(pos), below(pos), Direction::Up)
+            {
                 self.remove_block(pos, false);
                 return;
             }
@@ -694,7 +700,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             (Direction::North, 300),
             (Direction::South, 300),
         ] {
-            self.fire_check_burn_out(pos, rel(pos, direction), chance + extra, age);
+            self.fire_check_burn_out(pos, direction, chance + extra, age);
         }
         for xx in -1..=1 {
             for zz in -1..=1 {
@@ -709,7 +715,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     let test = pos.offset(xx, yy, zz);
                     let ignite = self.fire_ignite_odds_at(test);
                     if ignite > 0 {
-                        let mut odds = (ignite + 40 + self.level.difficulty() * 7) / (age + 30);
+                        let mut odds = (ignite
+                            .saturating_add(40)
+                            .saturating_add(self.level.difficulty() * 7))
+                            / (age + 30);
                         if burnout {
                             odds /= 2;
                         }
@@ -737,7 +746,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
         Direction::ALL
             .into_iter()
-            .map(|d| self.ignite_odds(self.rel_state(pos, d)))
+            .map(|d| {
+                let at = rel(pos, d);
+                self.ignite_odds(self.state(at), at, d.opposite())
+            })
             .max()
             .unwrap_or(0)
     }
@@ -748,12 +760,14 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             || self.level.is_raining_at(rel(pos, Direction::North))
             || self.level.is_raining_at(rel(pos, Direction::South))
     }
-    /// `FireBlock.checkBurnOut` of the block at `pos` by the fire at `fire`.
-    fn fire_check_burn_out(&mut self, fire: BlockPos, pos: BlockPos, chance: i32, age: i32) {
+    /// `FireBlock.checkBurnOut` of the block beside the fire at `fire` in
+    /// `direction`: notify after the cancel gates, before replacing the block.
+    fn fire_check_burn_out(&mut self, fire: BlockPos, direction: Direction, chance: i32, age: i32) {
         let b = self.b;
-        let odds = self.burn_odds(self.state(pos));
+        let (pos, face) = (rel(fire, direction), direction.opposite());
+        let old = self.state(pos);
+        let odds = self.burn_odds(old, pos, face);
         if self.rand_int(chance) < odds {
-            let old = self.state(pos);
             let allowed = self.level.allow_spread(Spread::Fire, fire, pos);
             let mut burned = false;
             if self.rand_int(age + 10) < 5 && !self.level.is_raining_at(pos) {
@@ -763,10 +777,12 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     && self.level.allow_block_ignite(pos, "spread")
                 {
                     let next = self.fire_state_with_age(pos, new_age);
+                    self.level.on_caught_fire(self.ticks, old, pos, face);
                     self.set_block_and_update(pos, next);
                     burned = true;
                 }
             } else if allowed && self.level.allow_block_burn(pos) {
+                self.level.on_caught_fire(self.ticks, old, pos, face);
                 self.remove_block(pos, false);
                 burned = true;
             }
@@ -1711,14 +1727,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 })
         };
         let start: &str = &b.table.info(b.block(state)).name;
-        let mut name = previous(start)?;
-        // A pack's chain may loop: vanilla's has four stages.
-        for _ in 0..16 {
-            match previous(name.as_str()) {
-                Some(earlier) if all_the_way => name = earlier,
-                _ => break,
-            }
-        }
+        let name = if all_the_way {
+            first_stage(start, previous)?
+        } else {
+            previous(start)?
+        };
         let block = b.table.block_by_name(&name)?;
         Some(b.table.with_properties_of(block, state))
     }
@@ -1732,7 +1745,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let weathering = b
             .data(state)
             .implements(super::classes::Interface::WeatheringCopper);
-        let waxed = b.is_waxed(state);
+        let waxed = b.table.name(state).starts_with("minecraft:waxed_");
         if !(weathering || waxed) {
             return;
         }
@@ -1769,6 +1782,22 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
         }
     }
+}
+
+/// The first oxidation stage before `start`: `previous` stepped back until it gives nothing
+/// (`LightningBolt.clearCopperOnLightningStrike`'s walk to the unoxidized block), none when
+/// `start` has no earlier stage. A pack's chain that comes back to a block it already passed
+/// stops there, so mod data can't hang the walk; vanilla's chain has four stages.
+fn first_stage(start: &str, previous: impl Fn(&str) -> Option<String>) -> Option<String> {
+    let mut name = previous(start)?;
+    let mut passed = vec![start.to_owned()];
+    while let Some(earlier) = previous(&name) {
+        if passed.contains(&earlier) || earlier == name {
+            break;
+        }
+        passed.push(std::mem::replace(&mut name, earlier));
+    }
+    Some(name)
 }
 
 /// `Biome.Precipitation` at a position.
@@ -2067,5 +2096,42 @@ impl RandomTickMask {
     pub fn may_tick(&self, pos: BlockPos) -> bool {
         let i = ((pos.y & 15) << 8 | (pos.z & 15) << 4 | (pos.x & 15)) as usize;
         self.0[i >> 6] >> (i & 63) & 1 != 0
+    }
+}
+
+#[cfg(test)]
+#[path = "fire_tick_tests.rs"]
+mod fire_tick_tests;
+
+#[cfg(test)]
+mod first_stage_tests {
+    use super::first_stage;
+
+    fn chain<'a>(steps: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            steps
+                .iter()
+                .find(|(from, _)| *from == name)
+                .map(|(_, to)| (*to).to_owned())
+        }
+    }
+
+    #[test]
+    fn the_lightning_walk_reaches_the_first_stage_and_stops_where_a_chain_loops() {
+        let vanilla = [
+            ("oxidized", "weathered"),
+            ("weathered", "exposed"),
+            ("exposed", "copper"),
+        ];
+        assert_eq!(
+            first_stage("oxidized", chain(&vanilla)).as_deref(),
+            Some("copper")
+        );
+        assert_eq!(first_stage("copper", chain(&vanilla)), None);
+        // b -> c -> d -> b: the walk from a stops at d, the last block before it repeats.
+        let looped = [("a", "b"), ("b", "c"), ("c", "d"), ("d", "b")];
+        assert_eq!(first_stage("a", chain(&looped)).as_deref(), Some("d"));
+        // A block that is its own previous stage stays as it is.
+        assert_eq!(first_stage("x", chain(&[("x", "x")])).as_deref(), Some("x"));
     }
 }

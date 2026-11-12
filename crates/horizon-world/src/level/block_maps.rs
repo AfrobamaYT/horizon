@@ -29,14 +29,58 @@ fn full(id: &str) -> String {
     }
 }
 
+/// Record that `from` comes back to `to` in an inverse map, keeping the lowest
+/// `rank` where several blocks share `from`.
+fn inverse(map: &mut HashMap<String, String>, from: String, to: &str, rank: &impl Fn(&str) -> u32) {
+    match map.get(&from) {
+        Some(kept) if (rank(kept), kept.as_str()) <= (rank(to), to) => {}
+        _ => {
+            map.insert(from, to.to_owned());
+        }
+    }
+}
+
+/// The loops of a map from each block to one other, each listed once in walk
+/// order, sorted for a stable error.
+fn cycles(map: &HashMap<String, String>) -> Vec<Vec<String>> {
+    let mut starts: Vec<&String> = map.keys().collect();
+    starts.sort();
+    let mut done = std::collections::HashSet::new();
+    let mut found = Vec::new();
+    for start in starts {
+        let mut path: Vec<&String> = Vec::new();
+        let mut at = start;
+        while !done.contains(at) {
+            if let Some(i) = path.iter().position(|p| *p == at) {
+                found.push(path[i..].iter().map(|p| (*p).clone()).collect());
+                break;
+            }
+            path.push(at);
+            match map.get(at) {
+                Some(next) => at = next,
+                None => break,
+            }
+        }
+        done.extend(path);
+    }
+    found
+}
+
 impl BlockMaps {
     /// The maps from their merged values (block id to the value a file gave
     /// it). A value of another shape is skipped with a warning, as a codec
-    /// error leaves the entry out.
+    /// error leaves the entry out. The inverse maps are derived here, never
+    /// declared: where several blocks share a next stage or a waxed twin, the
+    /// one with the lowest `rank` (its block registry id) is the one scraping
+    /// or unwaxing gives back, a Horizon choice where NeoForge keeps whichever
+    /// its map iteration met last. An oxidation chain that loops (a block its
+    /// own next stage included) is refused with an error naming the map and the
+    /// blocks: its scraping steps are left out, so no walk back can hang.
     pub fn from_values<'a>(
         flammable: impl IntoIterator<Item = (&'a str, &'a Value)>,
         oxidizables: impl IntoIterator<Item = (&'a str, &'a Value)>,
         waxables: impl IntoIterator<Item = (&'a str, &'a Value)>,
+        rank: impl Fn(&str) -> u32,
     ) -> Self {
         let mut maps = Self::default();
         let int = |v: &Value| v.as_i64().and_then(|n| i32::try_from(n).ok());
@@ -51,7 +95,7 @@ impl BlockMaps {
         for (block, value) in oxidizables {
             match value["next_oxidation_stage"].as_str() {
                 Some(next) => {
-                    maps.scrapes_to.insert(full(next), block.to_owned());
+                    inverse(&mut maps.scrapes_to, full(next), block, &rank);
                     maps.oxidizes_to.insert(block.to_owned(), full(next));
                 }
                 None => {
@@ -62,10 +106,19 @@ impl BlockMaps {
         for (block, value) in waxables {
             match value["waxed"].as_str() {
                 Some(waxed) => {
-                    maps.unwaxes_to.insert(full(waxed), block.to_owned());
+                    inverse(&mut maps.unwaxes_to, full(waxed), block, &rank);
                     maps.waxes_to.insert(block.to_owned(), full(waxed));
                 }
                 None => log::warn!("Horizon: neoforge:waxables {block}: not a Waxable, skipped"),
+            }
+        }
+        for cycle in cycles(&maps.scrapes_to) {
+            log::error!(
+                "Horizon: neoforge:oxidizables: the oxidation chain loops through {};                  scraping is left out for those blocks",
+                cycle.join(" -> ")
+            );
+            for block in &cycle {
+                maps.scrapes_to.remove(block);
             }
         }
         maps
@@ -135,11 +188,30 @@ impl Behaviours {
     /// `neoforge:waxables` twin of `state`'s block, its properties kept; none
     /// where the installed maps give the block none.
     pub fn mapped_waxed(&self, state: BlockStateId) -> Option<BlockStateId> {
+        self.mapped(state, BlockMaps::waxed)
+    }
+    /// The axe's scrape through `DataMapHooks.getPreviousOxidizedStage`: the
+    /// stage before `state`'s block in the derived `neoforge:oxidizables`
+    /// inverse, its properties kept.
+    pub fn mapped_scraped(&self, state: BlockStateId) -> Option<BlockStateId> {
+        self.mapped(state, BlockMaps::previous_oxidation)
+    }
+    /// The axe's wax-off through `DataMapHooks.getBlockUnwaxed`: the block the
+    /// derived `neoforge:waxables` inverse unwaxes `state`'s block to, its
+    /// properties kept.
+    pub fn mapped_unwaxed(&self, state: BlockStateId) -> Option<BlockStateId> {
+        self.mapped(state, BlockMaps::unwaxed)
+    }
+    fn mapped(
+        &self,
+        state: BlockStateId,
+        to: impl for<'m> Fn(&'m BlockMaps, &str) -> Option<&'m str>,
+    ) -> Option<BlockStateId> {
         self.read_block_maps(|maps| {
-            let twin = self
+            let block = self
                 .table
-                .block_by_name(maps.waxed(self.table.name(state))?)?;
-            Some(self.table.with_properties_of(twin, state))
+                .block_by_name(to(maps, self.table.name(state))?)?;
+            Some(self.table.with_properties_of(block, state))
         })
     }
     /// Whether `state` is a waxed block: vanilla's `waxed_` blocks, and every
@@ -168,6 +240,7 @@ mod tests {
             [("minecraft:stone", &flammable), ("minecraft:dirt", &bad)],
             [("test:tin", &oxidizes)],
             [("test:tin", &waxes)],
+            |_| 0,
         );
         assert_eq!(maps.flammable("minecraft:stone"), Some((5, 20)));
         assert_eq!(maps.flammable("minecraft:dirt"), None);
@@ -176,5 +249,61 @@ mod tests {
         assert_eq!(maps.waxed("test:tin"), Some("test:waxed_tin"));
         assert_eq!(maps.unwaxed("test:waxed_tin"), Some("test:tin"));
         assert!(!maps.is_empty() && BlockMaps::default().is_empty());
+    }
+
+    #[test]
+    fn a_shared_stage_scrapes_back_to_the_lowest_registry_id() {
+        let to_dull = json!({"next_oxidation_stage": "test:dull"});
+        let to_waxed = json!({"waxed": "test:waxed"});
+        let rank = |block: &str| match block {
+            "test:tin" => 7,
+            "test:zinc" => 3,
+            _ => 100,
+        };
+        // Whichever order the files list them, zinc (id 3) wins over tin (id 7).
+        for (first, second) in [("test:tin", "test:zinc"), ("test:zinc", "test:tin")] {
+            let maps = BlockMaps::from_values(
+                [],
+                [(first, &to_dull), (second, &to_dull)],
+                [(first, &to_waxed), (second, &to_waxed)],
+                rank,
+            );
+            assert_eq!(maps.previous_oxidation("test:dull"), Some("test:zinc"));
+            assert_eq!(maps.unwaxed("test:waxed"), Some("test:zinc"));
+            assert_eq!(maps.next_oxidation("test:tin"), Some("test:dull"));
+        }
+    }
+
+    #[test]
+    fn a_looping_oxidation_chain_loses_its_scraping_steps_at_load() {
+        let next = |to: &str| json!({ "next_oxidation_stage": to });
+        let (b, c, a, s) = (
+            next("test:b"),
+            next("test:c"),
+            next("test:a"),
+            next("test:self"),
+        );
+        // test:a -> b -> c -> a loops, test:self is its own next stage, test:d -> a does not.
+        let maps = BlockMaps::from_values(
+            [],
+            [
+                ("test:a", &b),
+                ("test:b", &c),
+                ("test:c", &a),
+                ("test:self", &s),
+                ("test:d", &a),
+            ],
+            [],
+            |_| 0,
+        );
+        for block in ["test:a", "test:b", "test:c", "test:self"] {
+            assert_eq!(maps.previous_oxidation(block), None, "{block}");
+        }
+        // Oxidizing still moves one step, so the loop only alternates.
+        assert_eq!(maps.next_oxidation("test:c"), Some("test:a"));
+        assert_eq!(maps.next_oxidation("test:self"), Some("test:self"));
+        let (a, b) = ("test:a".to_owned(), "test:b".to_owned());
+        let loops = cycles(&HashMap::from([(a.clone(), b.clone()), (b, a)]));
+        assert_eq!(loops, [["test:a", "test:b"]]);
     }
 }

@@ -9,6 +9,7 @@ fixtures checked; the modifier gaps are tracked separately.
 | Convention item tags | Loaded for content roots: `mod_content::build` in `crates/horizon-client/src/mod_content.rs` merges tag files; `content_namespaces::tag_namespaces` in `crates/horizon-items/src/content_namespaces.rs` includes `c` for content roots, and `items::load_tag_lists` in `crates/horizon-items/src/items.rs` reads and resolves them. Unknown item entries are filtered by `Known::keeps` in `mod_content.rs`. | `data/c/tags/item/gems/glint.json`: `{"values":["minecraft:diamond"]}`. The `glint_mod` fixture and `a_data_mod_loads_unloads_and_loads_again` test in `crates/horizon-client/src/mod_content_tests.rs` check the resulting `c:gems/glint` membership. |
 | Structure modifiers | Not loaded by any reader found today. `mod_content::build` copies ordinary files to its overlay; `worldgen_entry` in that file recognizes worldgen bundles, not structure modifiers. A workspace search for `structure_modifier` found no reader. Copying is not applying. | No verified in-tree example. [#1269](https://github.com/arismoko/horizon/issues/1269) tracks loading and applying them. |
 | Global loot modifiers | Not loaded by any reader found today. `mod_content::build` copies ordinary files to its overlay, but a workspace search for `loot_modifiers` found no loader. The `native_loot_drops` code hook in `crates/horizon-mod-vocab/src/hooks/base.rs` is not a data-file reader. | No verified current-format in-tree example. [#1270](https://github.com/arismoko/horizon/issues/1270) tracks loading and applying them. The old `global.json` in `carry::tests::claims_the_namespaces_its_files_name` is a carry classification fixture, not proof of current-format loading. |
+| Title screen splashes | Loaded from the resource stack: `splashes::pool` in `crates/horizon-client/src/splashes.rs` reads every namespace's top `texts/splashes.txt` (vanilla, content mods and enabled resource packs), joined in namespace order with duplicates kept, as NeoForge's `NeoForgeSplashHooks.loadSplashes`, on each resource reload. Lines are trimmed plain text, empty lines are kept and the hidden line is dropped. When a resource pack or a mod provides `minecraft:texts/splashes.txt`, only that file is read while `skipModdedSplashesIfVanillaModified` (in `horizon-extras.txt`, on by default) is on. | `assets/<modid>/texts/splashes.txt`, one splash per line. `a_content_mods_lines_follow_vanillas` and `a_packs_own_minecraft_splashes_replace_the_pool` in `splashes.rs`. |
 
 The shared load-condition evaluator in `crates/horizon-world/src/conditions.rs`
 applies to recipes, loot tables, item modifiers, predicates, enchantments,
@@ -47,10 +48,25 @@ This shared contract does not add readers for the two modifier kinds above.
 NeoForge's `neoforge:flammable`, `neoforge:oxidizables` and `neoforge:waxables`
 (`data/neoforge/data_maps/block/<name>.json`) load from the world's data packs
 and mods' files on every server data load, merged as a mod's own data maps are.
-Fire reads a block's `ignite_odds` and `burn_odds` before vanilla's table.
-Weathering takes `next_oxidation_stage`, and scraping and lightning walk its
-inverse. Honeycomb waxing (player and dispenser) takes `waxed`, and a block a map waxes to
-counts as waxed. A block the maps don't name keeps vanilla's behaviour.
+Fire reads a block's `ignite_odds` and `burn_odds` after a mod's fire hook and
+before vanilla's table. Weathering takes `next_oxidation_stage`; a mapped block
+weathers only where the existing weathering dispatch already ticks it, so naming
+an arbitrary block does not make it age by itself. Honeycomb waxing (player and
+dispenser) takes `waxed`.
+
+The inverse maps are derived from the forward ones on every load, never
+declared. The axe reads them before its transform table: the oxidation inverse
+scrapes one stage back, the waxing inverse takes the wax off. Where several
+blocks share a next stage or a waxed twin, the one with the lowest block
+registry id is the one given back (a Horizon choice). Random-tick oxidation,
+honeycomb, dispenser waxing and the axe each move exactly one step, so a chain
+that loops only alternates there. Lightning resets a struck block along the
+whole oxidation inverse: an oxidation chain that loops, a block that is its own
+next stage included, is refused at load with an error naming
+`neoforge:oxidizables` and the blocks (its scraping steps are left out), and the
+lightning walk also stops where it would come back to a block it passed.
+Lightning's waxed check, the carved pumpkin and the copper chest keep vanilla's
+own lists. A block the maps don't name keeps vanilla's behaviour.
 `generate_block_transform`, `neoforge:transformables` and
 `block_transform_appenders` are not read yet
 ([#3359](https://github.com/arismoko/horizon/issues/3359)).

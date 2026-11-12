@@ -15,11 +15,13 @@ const MAPS: [&str; 3] = [
     "neoforge:waxables",
 ];
 
-/// The maps of a world's tables' files; none where no pack gives a value.
+/// The maps of a world's tables' files; none where no pack gives a value. `rank` is a block's
+/// registry id, which picks the block an inverse map gives back.
 fn load(
     overlay: &horizon_world::loot::PackOverlay<'_>,
     item_tags: &HashMap<String, HashSet<String>>,
     block_tags: &HashMap<String, HashSet<String>>,
+    rank: impl Fn(&str) -> u32,
 ) -> Option<Arc<BlockMaps>> {
     let types = MAPS.map(|id| DataMapType {
         id: id.to_owned(),
@@ -27,7 +29,8 @@ fn load(
     });
     let maps = DataMaps::load(&types, overlay, item_tags, block_tags);
     let values = |id| maps.values("minecraft:block", id);
-    let block_maps = BlockMaps::from_values(values(MAPS[0]), values(MAPS[1]), values(MAPS[2]));
+    let block_maps =
+        BlockMaps::from_values(values(MAPS[0]), values(MAPS[1]), values(MAPS[2]), rank);
     (!block_maps.is_empty()).then(|| Arc::new(block_maps))
 }
 
@@ -40,7 +43,18 @@ impl Game<'_> {
                 conditions: &tables.conditions,
                 files: &tables.files,
             };
-            load(&overlay, &tables.items.item_tags, &tables.items.block_tags)
+            let table = &self.res.behaviours().table;
+            let rank = |block: &str| {
+                table
+                    .block_by_name(block)
+                    .map_or(u32::MAX, |b| u32::from(b.0))
+            };
+            load(
+                &overlay,
+                &tables.items.item_tags,
+                &tables.items.block_tags,
+                rank,
+            )
         });
         self.res.behaviours().set_block_maps(maps);
     }
@@ -68,7 +82,7 @@ mod tests {
             files: &files,
             ..horizon_world::loot::PackOverlay::NONE
         };
-        let block_maps = load(&overlay, &HashMap::new(), &HashMap::new()).unwrap();
+        let block_maps = load(&overlay, &HashMap::new(), &HashMap::new(), |_| 0).unwrap();
         assert_eq!(block_maps.flammable("minecraft:stone"), Some((5, 20)));
         assert_eq!(block_maps.waxed("test:tin"), Some("test:waxed_tin"));
         assert_eq!(block_maps.next_oxidation("test:tin"), None);
@@ -76,6 +90,7 @@ mod tests {
             &horizon_world::loot::PackOverlay::NONE,
             &HashMap::new(),
             &HashMap::new(),
+            |_| 0,
         );
         assert!(none.is_none());
     }

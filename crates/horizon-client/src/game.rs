@@ -1176,15 +1176,7 @@ pub(super) fn armor_slot(index: usize) -> horizon_core::equipment_slot::Equipmen
     }
 }
 
-/// Everything the title and menus draw: the GUI atlas with its font and the
-/// title panorama. Kept apart from the world bundle so the title can appear
-/// before the block sprites, models and gameplay tables are ready.
-pub struct UiResources {
-    /// The GUI, font, particle, map and skin atlas.
-    pub atlas: HudAtlas,
-    /// The title screen's panorama faces.
-    pub panorama: Arc<horizon_client::gfx::panorama::Faces>,
-}
+pub use resource_tables::UiResources;
 
 /// What a resource pack reload replaces (`Minecraft.reloadResourcePacks`):
 /// block models and sprites with their meshing tables, item models,
@@ -10880,11 +10872,9 @@ impl Game<'_> {
         // between worlds.
         lan::forget_sync_data();
         lan::forget_server_sources();
-        let mut title = Title::new(
-            std::env::current_dir()?.join("saves"),
-            &self.options.resources,
-        )
-        .with_user(|| self.options.player_name());
+        let mut title = self
+            .new_title(std::env::current_dir()?.join("saves"))
+            .with_user(|| self.options.player_name());
         title.last_server = self.settings.file.string("lastServer");
         title.skip_multiplayer_warning = self.settings.file.bool("skipMultiplayerWarning");
         self.show_title(title);
@@ -11300,7 +11290,11 @@ impl Game<'_> {
                 t.transform_type.clone(),
             )
         };
+        let mapped = self.axe_mapped(&id, block);
         if mod_api::__private::mods().is_empty() {
+            if let Some((new, ability)) = mapped {
+                return Some(Self::tool_ability_result(new, ability));
+            }
             let (new, t) = vanilla?;
             return Some(result(new, t));
         }
@@ -11312,10 +11306,13 @@ impl Game<'_> {
             _ => return vanilla.map(|(new, t)| result(new, t)),
         };
         for &ability in actions {
-            let mut state = vanilla
-                .as_ref()
-                .and_then(|(state, t)| vanilla_tool_state(&id, &t.particle, ability, *state));
-            let matches_vanilla = state.is_some();
+            let mut state = match mapped {
+                Some((new, from)) => (from == ability).then_some(new),
+                None => vanilla
+                    .as_ref()
+                    .and_then(|(state, t)| vanilla_tool_state(&id, &t.particle, ability, *state)),
+            };
+            let matches_vanilla = state.is_some() && mapped.is_none();
             let mut cancel = false;
             let tool = mod_api::ToolUse::from(mod_api::__private::built::ToolUse {
                 player,
@@ -11335,23 +11332,7 @@ impl Game<'_> {
                     let (_, t) = vanilla?;
                     return Some(result(new, t));
                 }
-                let (sound, particle) = match ability {
-                    AxeStrip => ("minecraft:item.axe.strip", "none"),
-                    AxeScrape => ("minecraft:item.axe.scrape", "scrape"),
-                    AxeWaxOff => ("minecraft:item.axe.wax_off", "wax_off"),
-                    ShovelFlatten => ("minecraft:item.shovel.flatten", "none"),
-                    HoeTill => ("minecraft:item.hoe.till", "none"),
-                    ShovelDouse => unreachable!(),
-                    _ => unreachable!("ToolAbility: unhandled variant"),
-                };
-                return Some((
-                    new,
-                    sound.to_owned(),
-                    None,
-                    1,
-                    particle.to_owned(),
-                    String::new(),
-                ));
+                return Some(Self::tool_ability_result(new, ability));
             }
         }
         None
