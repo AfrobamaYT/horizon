@@ -122,7 +122,6 @@ pub fn start<G>(
     // The text crates ship (`horizon_hooks::lang`), loaded with the game's own languages.
     horizon_client::lang::install_crate_files(horizon_hooks::lang::engine::all());
     horizon_client::spans::startup::init(std::time::Instant::now());
-    horizon_client::spans::trace::start_from_env();
     logging::set_game_home(launch.context.home.clone());
     // The dedicated server logs in its own folder, as vanilla's does; the game in its home.
     let (home, side, thread) = if launch
