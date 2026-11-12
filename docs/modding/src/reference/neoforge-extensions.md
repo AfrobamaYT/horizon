@@ -31,8 +31,8 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 
 | Interface | Public methods | Covered | Partial | Missing | n/a |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `IBlockExtension` | 60 | 20 | 13 | 27 | 0 |
-| `IBlockStateExtension` | 57 | 19 | 12 | 26 | 0 |
+| `IBlockExtension` | 60 | 21 | 13 | 26 | 0 |
+| `IBlockStateExtension` | 57 | 20 | 12 | 25 | 0 |
 | `IItemExtension` | 46 | 19 | 10 | 17 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
@@ -76,7 +76,7 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `playFallSound(state, level, pos, entity)` | Partial | `BlockPart::sound_type` (`hooks/sound_type.rs`, `cause` `Fall`) | Picks the event, volume and pitch of the one fall sound the game plays; the part can't play or suppress its own. Asked for mobs; a player's block fall sound is not played yet ([#3178](https://github.com/arismoko/horizon/issues/3178)). |
 | `playStepSound(state, level, pos, entity, volume, pitch)` | Partial | `BlockPart::sound_type` (`hooks/sound_type.rs`, `cause` `Step`) | Picks the event, volume and pitch of the one step sound the game plays; the part can't play or suppress its own. |
 | `canSustainPlant(state, level, pos, direction, plantState)` | Covered | `BlockPart::can_sustain_plant` (`hooks/can_sustain_plant.rs`) | The soil's answer for the plant above it (allow, deny or none), asked before the plant's `may_place_on`, which still answers for your plant. The direction is always up. |
-| `onTreeGrow(state, level, posConsumer, random, pos, feature)` | Missing | — | `block_grow_feature` observes or edits the feature a sapling grows into; it does not let a block run its own tree growth. |
+| `onTreeGrow(state, level, posConsumer, random, pos, feature)` | Covered | `BlockPart::on_tree_grow` (`hooks/on_tree_grow.rs`) | Asked of the soil under each trunk column a trunk placer starts, in worldgen and when a sapling grows, with the tree's random: answer a state, none, or leave it to the tree's provider. The first worldgen Part method: no `Host`, a `WorldgenHost`. `feature` is left out: an inline tree feature has no key. |
 | `isFertile(state, level, pos)` | Missing | — | No fertile-block query; bonemeal hooks fire later. |
 | `getExpDrop(state, level, pos, blockEntity, breaker, tool)` | Partial | `break_block.exp_to_drop` (`hooks/base.rs`) | Replaces the XP sample for a player break; global, not per-block, and the block entity/tool/breaker are not arguments. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `rotate(state, level, pos, rotation)` | Missing | — | Structure rotation is engine behaviour; no callback. |
@@ -131,7 +131,7 @@ the parameters shifted by one. Three block methods have no state-receiver form:
 | `getMapColor(state, level, pos, defaultColor)` | Partial (content `map_color`) |
 | `makesOpenTrapdoorAboveClimbable(state, level, pos, stateAbove)` | Missing |
 
-Counts: 19 covered, 12 partial, 26 missing among the 57. The handful of signature differences (`canStickTo` takes
+Counts: 20 covered, 12 partial, 25 missing among the 57. The handful of signature differences (`canStickTo` takes
 the neighbour state; `getCloneItemStack` reorders its arguments; `getEnchantPowerBonus` takes a `LevelReader`)
 do not change any verdict.
 
@@ -302,8 +302,8 @@ their rows have landed or become partial since and should be narrowed when they 
   reuse them) are Parts; `getFlammability` / `getFireSpreadSpeed` are now `fire_odds` (with position and face), with `is_fire_source`, `ignited_by_lava` and
   `on_caught_fire` for the other fire questions; `canSustainPlant` is `can_sustain_plant` (the soil) before `may_place_on` (the
   plant); `canHarvestBlock` is `can_harvest_block` before `player_harvest_check`; `isLadder` is `is_ladder`;
-  `getToolModifiedState` is `tool_modified_state` before `block_tool_modification`; `onDestroyedByPlayer` is
-  `on_destroyed_by_player`.
+  `onTreeGrow` is `on_tree_grow`; `getToolModifiedState` is `tool_modified_state` before
+  `block_tool_modification`; `onDestroyedByPlayer` is `on_destroyed_by_player`.
 - **Changed on the item side:** `getEquipmentSlot` is `ItemResource::equippable_slot`; `getCraftingRemainder`
   has `ItemPart::crafting_remainder` plus content data and `host.item_crafting_remainder`; `canEquip` is `ItemPart::can_equip`; `getXpRepairRatio` is `ItemPart::xp_repair_ratio`.
 - **Block group rows that still need their own answer:** `getExpDrop`, `onBlockExploded`,
