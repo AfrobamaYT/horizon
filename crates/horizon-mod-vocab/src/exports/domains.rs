@@ -67,6 +67,6 @@ pub use world::types::{
 #[doc(hidden)]
 pub(crate) mod built;
 
-pub use entity::types::Sentiment;
+pub use entity::types::{AttributeDisplay, AttributeTooltip, Sentiment};
 pub(crate) use runtime::{listening, receives_cancelled};
 pub use world::types::{StructureSearch, StructureSearchResult};

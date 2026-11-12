@@ -1241,3 +1241,33 @@ pub enum Sentiment {
     /// Changes are neutral.
     Neutral,
 }
+
+/// How a declared attribute's modifier lines read on item tooltips: NeoForge's
+/// `RangedAttribute`, `PercentageAttribute` and `BooleanAttribute`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+// exhaustive: NeoForge's three display kinds, and the tooltip matches them all
+#[derive(horizon_mod_api_macros::Wire)]
+pub enum AttributeDisplay {
+    /// Added values as numbers, multiplied ones as percentages: vanilla's.
+    #[default]
+    Ranged,
+    /// Added values as percentages too: `+0.05` reads `+5%`.
+    Percentage,
+    /// On or off: an added value above zero reads enabled, below zero disabled.
+    Boolean,
+}
+
+/// How a declared attribute's tooltip lines read beyond their colour (NeoForge's
+/// `IAttributeExtension`). The default reads as vanilla's attributes do.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+// exhaustive: mods build it with `..Default::default()`, and the game reads every field
+#[derive(horizon_mod_api_macros::Wire)]
+pub struct AttributeTooltip {
+    /// How its modifier amounts read.
+    pub display: AttributeDisplay,
+    /// The namespaced id of the attribute's base modifier (`getBaseId`): a modifier with this
+    /// id reads as the green total of the player's base value and its amount, as
+    /// `minecraft:base_attack_damage` does for attack damage. Without a player (recipe search)
+    /// it reads as a plain line.
+    pub base_modifier: Option<String>,
+}

@@ -347,6 +347,8 @@
   "horizon.agent.session_opened": "Opened for this session by the program that started the game.",
   "horizon.agent.socket": "Socket: %s (copy the details for its full path)",
   "horizon.agent.waiting": "Waiting for an agent.",
+  "horizon.attribute.modifier.disabled": "%s: Disabled",
+  "horizon.attribute.modifier.enabled": "%s: Enabled",
   "horizon.chat.copied": "Message copied",
   "horizon.chat.repeats": " (x%s)",
   "horizon.chat.search": "Search chat:",
