@@ -33,6 +33,17 @@ static COUNTER: AttachmentType<i32> = AttachmentType {
 /// What the part saw, in call order: each row's id.
 type Trace = Arc<Mutex<Vec<u32>>>;
 
+/// What a listener does from inside one row's callback: the liveness tests'
+/// mid-pass removals and dismounts, armed by the test before the tick.
+enum OnTick {
+    Nothing,
+    /// From this row's callback, queue the named row's removal
+    /// (`entity_remove`: it stays in the list until the sweep).
+    Remove(u32),
+    /// From this row's callback, take the named row off its vehicle.
+    Dismount(u32),
+}
+
 /// The fixture part: `test:counter` of the acceptance matrix. It carries no
 /// per-instance state — two rows of one type share this one part, and their
 /// counters live apart in their attachments.
@@ -42,6 +53,8 @@ struct Counter {
     /// containment row's failing subscriber (0 arms nothing — a test sets
     /// its target once its rows have ids).
     panic_on: Arc<std::sync::atomic::AtomicU32>,
+    /// What the row's callback does to another row before it records itself.
+    action: Arc<Mutex<OnTick>>,
     fired: std::sync::atomic::AtomicBool,
 }
 
@@ -60,6 +73,17 @@ impl EntityPart for Counter {
         {
             panic!("general entity tick boom");
         }
+        let action = std::mem::replace(&mut *self.action.lock().unwrap(), OnTick::Nothing);
+        let other = |id: u32| mod_api::EntityRef::new(event.entity.epoch(), id);
+        match action {
+            OnTick::Nothing => {}
+            OnTick::Remove(id) => {
+                assert!(other(id).discard(host));
+            }
+            OnTick::Dismount(id) => {
+                assert!(other(id).stop_riding(host));
+            }
+        }
         self.trace.lock().unwrap().push(event.entity.id());
     }
 }
@@ -73,12 +97,16 @@ impl Counter {
 
 /// Declares the two fixture types and attaches the counter part to
 /// `mymod:robot`; `ghost` stays part-free for the zero-callback rows. The
-/// same mod listens to the entity tick gates, and cancels the row named by
-/// `cancel` when armed (the Pre row of the matrix).
+/// same mod listens to the entity tick gates, cancels the row named by
+/// `cancel` when armed (the Pre row of the matrix), and queues the removal
+/// of `pre_victim` from `pre_on`'s own Pre.
 struct Declare {
     trace: Trace,
     panic_on: Arc<std::sync::atomic::AtomicU32>,
+    action: Arc<Mutex<OnTick>>,
     cancel: Arc<std::sync::atomic::AtomicBool>,
+    pre_on: Arc<std::sync::atomic::AtomicU32>,
+    pre_victim: Arc<std::sync::atomic::AtomicU32>,
 }
 
 #[mod_api::__subscriptions]
@@ -108,6 +136,7 @@ impl Hooks for Declare {
             Counter {
                 trace: self.trace.clone(),
                 panic_on: self.panic_on.clone(),
+                action: self.action.clone(),
                 fired: std::sync::atomic::AtomicBool::new(false),
             },
         );
@@ -115,7 +144,18 @@ impl Hooks for Declare {
     fn entity_tick_listened(&self, _: &mut dyn ServerHost, event: &mut EntityTickListenedEvent) {
         event.listened = true;
     }
-    fn entity_tick_pre(&self, _: &mut dyn ServerHost, event: &mut EntityTickPreEvent<'_>) -> Flow {
+    fn entity_tick_pre(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut EntityTickPreEvent<'_>,
+    ) -> Flow {
+        if self.pre_on.load(std::sync::atomic::Ordering::Relaxed) == event.entity {
+            let victim = self.pre_victim.load(std::sync::atomic::Ordering::Relaxed);
+            let victim = host
+                .entity(victim)
+                .expect("the victim is a live row at the remover's Pre");
+            assert!(victim.discard(host));
+        }
         if self.cancel.load(std::sync::atomic::Ordering::Relaxed) && event.kind == "mymod:robot" {
             return Flow::Cancel;
         }
@@ -129,21 +169,22 @@ impl Hooks for Declare {
 /// runtime initializes before the scope: a scope entered before the platform
 /// installs its instrumentation writes a fallback nobody reads, and the
 /// declaration then refuses as frozen.
-fn with_counter(
-    test: impl FnOnce(
-        &mut Game<'_>,
-        Trace,
-        Arc<std::sync::atomic::AtomicBool>,
-        Arc<std::sync::atomic::AtomicU32>,
-    ),
-) {
-    let trace: Trace = Arc::default();
-    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let panic_on = Arc::new(std::sync::atomic::AtomicU32::new(0));
+fn with_counter(test: impl FnOnce(&mut Game<'_>, Levers)) {
     let declare = Declare {
-        trace: trace.clone(),
-        panic_on: panic_on.clone(),
-        cancel: cancel.clone(),
+        trace: Arc::default(),
+        panic_on: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        action: Arc::new(Mutex::new(OnTick::Nothing)),
+        cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        pre_on: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        pre_victim: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+    };
+    let levers = Levers {
+        trace: declare.trace.clone(),
+        panic_on: declare.panic_on.clone(),
+        action: declare.action.clone(),
+        cancel: declare.cancel.clone(),
+        pre_on: declare.pre_on.clone(),
+        pre_victim: declare.pre_victim.clone(),
     };
     mod_platform::__private::initialize().expect("test registration requires the mod API runtime");
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Registration);
@@ -161,9 +202,19 @@ fn with_counter(
             // part's writes are storage writes, which only a world's phases
             // take, as the server's own tick runs in World.
             let _world = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
-            test(game, trace, cancel, panic_on)
+            test(game, levers)
         })
     });
+}
+
+/// The test's handles into the fixture's listeners.
+struct Levers {
+    trace: Trace,
+    panic_on: Arc<std::sync::atomic::AtomicU32>,
+    action: Arc<Mutex<OnTick>>,
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+    pre_on: Arc<std::sync::atomic::AtomicU32>,
+    pre_victim: Arc<std::sync::atomic::AtomicU32>,
 }
 
 /// One record's save tag at `at`, the format `to_tag` writes.
@@ -240,12 +291,12 @@ fn seeded_row(game: &mut Game<'_>, uuid: [i32; 4], value: i32) -> u32 {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn counter_advances_one_per_tick() {
-    with_counter(|game, trace, _, _| {
+    with_counter(|game, l| {
         let id = seeded_row(game, [1, 2, 3, 4], 40);
         assert_eq!(counter(game, id), 40);
         tick(game);
         assert_eq!(counter(game, id), 41);
-        assert_eq!(*trace.lock().unwrap(), [id]);
+        assert_eq!(*l.trace.lock().unwrap(), [id]);
     });
 }
 
@@ -253,12 +304,12 @@ fn counter_advances_one_per_tick() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn two_rows_share_the_part_but_not_their_counters() {
-    with_counter(|game, trace, _, _| {
+    with_counter(|game, l| {
         let first = seeded_row(game, [1, 2, 3, 4], 40);
         let second = seeded_row(game, [5, 6, 7, 8], 7);
         tick(game);
         assert_eq!((counter(game, first), counter(game, second)), (41, 8));
-        assert_eq!(*trace.lock().unwrap(), [first, second]);
+        assert_eq!(*l.trace.lock().unwrap(), [first, second]);
     });
 }
 
@@ -269,7 +320,7 @@ fn two_rows_share_the_part_but_not_their_counters() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn parent_ticks_before_its_depth_first_rider_subtree() {
-    with_counter(|game, trace, _, _| {
+    with_counter(|game, l| {
         let grandchild = record_at("mymod:robot", [8, 8, 8, 8], [0.5, 64.0, 0.5], Vec::new());
         let rider = record_at(
             "mymod:robot",
@@ -283,7 +334,7 @@ fn parent_ticks_before_its_depth_first_rider_subtree() {
         let (rider_id, grandchild_id, sibling_id) = (ids[1], ids[2], ids[3]);
         tick(game);
         assert_eq!(
-            *trace.lock().unwrap(),
+            *l.trace.lock().unwrap(),
             [root, rider_id, grandchild_id, sibling_id]
         );
         for id in ids {
@@ -299,18 +350,103 @@ fn parent_ticks_before_its_depth_first_rider_subtree() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_row_joined_during_the_tick_span_ticks_the_next_phase() {
-    with_counter(|game, trace, _, _| {
+    with_counter(|game, l| {
         let first = seeded_row(game, [1, 2, 3, 4], 40);
         game.tickets.update(None);
         game.begin_ordered_ticks();
         let late = spawn_tree(game, [5, 6, 7, 8], [0.5, 64.0, 0.5], Vec::new());
         game.tick_general().unwrap();
-        assert_eq!(*trace.lock().unwrap(), [first]);
+        assert_eq!(*l.trace.lock().unwrap(), [first]);
         assert_eq!(counter(game, late), 0);
-        trace.lock().unwrap().clear();
+        l.trace.lock().unwrap().clear();
         tick(game);
-        assert_eq!(*trace.lock().unwrap(), [first, late]);
+        assert_eq!(*l.trace.lock().unwrap(), [first, late]);
         assert_eq!(counter(game, late), 1);
+    });
+}
+
+/// A row a listener discarded from an earlier row's callback gets no
+/// callback of its own: `entity_remove` queues the removal and invalidates
+/// the handle, and the row stays in the list until the sweep — the walk
+/// re-checks liveness at every step, so it ticks nothing more.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_listener_discarded_row_gets_no_callback() {
+    with_counter(|game, l| {
+        let first = seeded_row(game, [1, 2, 3, 4], 0);
+        let second = seeded_row(game, [5, 6, 7, 8], 0);
+        *l.action.lock().unwrap() = OnTick::Remove(second);
+        tick(game);
+        assert_eq!(*l.trace.lock().unwrap(), [first]);
+        // Still in the list — no sweep has run — but its removal is queued.
+        assert_eq!(game.resident_entities.general.rows.len(), 2);
+        assert!(
+            game.persist
+                .removals
+                .contains(&crate::game::commands::Target::General(second))
+        );
+        assert_eq!(counter(game, second), 0, "no callback ran for it");
+    });
+}
+
+/// A rider a listener discarded from its vehicle's callback does not tick,
+/// and neither does the rider's own subtree: the edge is re-checked at the
+/// parent's callback (`tickPassenger`'s `getVehicle` gate).
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_listener_discarded_rider_stops_its_subtree() {
+    with_counter(|game, l| {
+        let grandchild = record_at("mymod:robot", [8, 8, 8, 8], [0.5, 64.0, 0.5], Vec::new());
+        let rider = record_at(
+            "mymod:robot",
+            [9, 9, 9, 9],
+            [0.5, 64.0, 0.5],
+            vec![grandchild],
+        );
+        let sibling = record_at("mymod:robot", [7, 7, 7, 7], [0.5, 64.0, 0.5], Vec::new());
+        let root = spawn_tree(game, [1, 2, 3, 4], [0.5, 64.0, 0.5], vec![rider, sibling]);
+        let ids = row_ids(game);
+        *l.action.lock().unwrap() = OnTick::Remove(ids[1]);
+        tick(game);
+        assert_eq!(*l.trace.lock().unwrap(), [root, ids[3]]);
+    });
+}
+
+/// A rider a listener took off its vehicle mid-pass walks as a root from
+/// this same pass: the vehicle's subtree no longer holds it (the edge's
+/// mount check), and the root walk reaches its place after the vehicle.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_listener_dismounted_rider_walks_as_a_root_after() {
+    with_counter(|game, l| {
+        let first = record_at("mymod:robot", [9, 9, 9, 9], [0.5, 64.0, 0.5], Vec::new());
+        let second = record_at("mymod:robot", [7, 7, 7, 7], [0.5, 64.0, 0.5], Vec::new());
+        let root = spawn_tree(game, [1, 2, 3, 4], [0.5, 64.0, 0.5], vec![first, second]);
+        let ids = row_ids(game);
+        *l.action.lock().unwrap() = OnTick::Dismount(ids[1]);
+        tick(game);
+        assert_eq!(*l.trace.lock().unwrap(), [root, ids[2], ids[1]]);
+        assert_eq!(
+            game.resident_entities.general.rows[1].mount, None,
+            "the rider got off"
+        );
+    });
+}
+
+/// A row discarded from another row's Pre never reaches its own: no
+/// bookkeeping, no Pre of its own, no callback.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_row_discarded_from_an_earlier_pre_ticks_nothing() {
+    with_counter(|game, l| {
+        let first = seeded_row(game, [1, 2, 3, 4], 0);
+        let second = seeded_row(game, [5, 6, 7, 8], 0);
+        l.pre_on.store(first, std::sync::atomic::Ordering::Relaxed);
+        l.pre_victim
+            .store(second, std::sync::atomic::Ordering::Relaxed);
+        tick(game);
+        assert_eq!(*l.trace.lock().unwrap(), [first]);
+        assert_eq!(counter(game, second), 0);
     });
 }
 
@@ -323,16 +459,16 @@ fn a_row_joined_during_the_tick_span_ticks_the_next_phase() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_reloaded_row_reenters_ticking_behind_later_joins() {
-    with_counter(|game, trace, _, _| {
+    with_counter(|game, l| {
         let early = spawn_tree(game, [1, 2, 3, 4], [0.5, 64.0, 0.5], Vec::new());
         let late = spawn_tree(game, [5, 6, 7, 8], [1024.5, 64.0, 0.5], Vec::new());
         tick(game);
-        assert_eq!(*trace.lock().unwrap(), [early, late]);
+        assert_eq!(*l.trace.lock().unwrap(), [early, late]);
         // The early row's chunk unloads (the later row's stays loaded).
         let mut chunks = game.entity_chunks(&HashSet::from([(0, 0)]), true);
         let (_, mut records) = chunks.remove(0);
         assert_eq!(records.len(), 1);
-        trace.lock().unwrap().clear();
+        l.trace.lock().unwrap().clear();
         // It loads back into a fresh join, behind the row that never left.
         game.load_listed("mymod:robot", None, None, records.remove(0))
             .unwrap();
@@ -349,7 +485,7 @@ fn a_reloaded_row_reenters_ticking_behind_later_joins() {
             "the reloaded row rejoined at the end"
         );
         tick(game);
-        assert_eq!(*trace.lock().unwrap(), [late, early_id]);
+        assert_eq!(*l.trace.lock().unwrap(), [late, early_id]);
     });
 }
 
@@ -359,7 +495,7 @@ fn a_reloaded_row_reenters_ticking_behind_later_joins() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_reloaded_row_resumes_the_counter_and_refuses_its_old_handle() {
-    with_counter(|game, _, _, _| {
+    with_counter(|game, _| {
         let old = seeded_row(game, [1, 2, 3, 4], 41);
         let mut chunks = game.entity_chunks(&HashSet::from([(0, 0)]), true);
         let (_, mut records) = chunks.remove(0);
@@ -381,13 +517,13 @@ fn a_reloaded_row_resumes_the_counter_and_refuses_its_old_handle() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_parked_level_holds_the_counter_until_it_returns() {
-    with_counter(|game, trace, _, _| {
+    with_counter(|game, l| {
         let id = seeded_row(game, [1, 2, 3, 4], 41);
         game.enter_level(crate::game::Dim::Nether).unwrap();
         for _ in 0..10 {
             tick(game);
         }
-        assert!(trace.lock().unwrap().is_empty(), "nothing ticked");
+        assert!(l.trace.lock().unwrap().is_empty(), "nothing ticked");
         // The row's counter reads through its own level's routing, so read it
         // once its level is back in place: ten parked ticks left it, and the
         // first tick after the return takes it.
@@ -405,20 +541,21 @@ fn a_parked_level_holds_the_counter_until_it_returns() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_panicking_row_rolls_back_and_the_next_tick_proceeds() {
-    with_counter(|game, trace, _, panic_on| {
+    with_counter(|game, l| {
         let first = seeded_row(game, [1, 2, 3, 4], 41);
         let second = seeded_row(game, [5, 6, 7, 8], 7);
-        panic_on.store(first, std::sync::atomic::Ordering::Relaxed);
+        l.panic_on
+            .store(first, std::sync::atomic::Ordering::Relaxed);
         tick(game);
         assert_eq!(
-            *trace.lock().unwrap(),
+            *l.trace.lock().unwrap(),
             [second],
             "only the later row ticked"
         );
         assert_eq!(counter(game, first), 41, "the panic rolled the write back");
         assert_eq!(counter(game, second), 8);
         tick(game);
-        assert_eq!(*trace.lock().unwrap(), [second, first, second]);
+        assert_eq!(*l.trace.lock().unwrap(), [second, first, second]);
         assert_eq!(counter(game, first), 42);
     });
 }
@@ -429,19 +566,19 @@ fn a_panicking_row_rolls_back_and_the_next_tick_proceeds() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_canceled_pre_skips_the_row_and_its_subtree() {
-    with_counter(|game, trace, cancel, _| {
+    with_counter(|game, l| {
         let rider = record_at("mymod:robot", [9, 9, 9, 9], [0.5, 64.0, 0.5], Vec::new());
         let root = spawn_tree(game, [1, 2, 3, 4], [0.5, 64.0, 0.5], vec![rider]);
         tick(game);
-        assert_eq!(trace.lock().unwrap().len(), 2);
-        trace.lock().unwrap().clear();
-        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(l.trace.lock().unwrap().len(), 2);
+        l.trace.lock().unwrap().clear();
+        l.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
         tick(game);
-        assert!(trace.lock().unwrap().is_empty());
+        assert!(l.trace.lock().unwrap().is_empty());
         assert_eq!(counter(game, root), 1);
-        cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+        l.cancel.store(false, std::sync::atomic::Ordering::Relaxed);
         tick(game);
-        assert_eq!(trace.lock().unwrap().len(), 2);
+        assert_eq!(l.trace.lock().unwrap().len(), 2);
     });
 }
 
@@ -451,7 +588,7 @@ fn a_canceled_pre_skips_the_row_and_its_subtree() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_thousand_part_free_rows_call_nothing() {
-    with_counter(|game, trace, _, _| {
+    with_counter(|game, l| {
         for index in 0..1000 {
             game.load_listed(
                 "mymod:ghost",
@@ -468,7 +605,7 @@ fn a_thousand_part_free_rows_call_nothing() {
         }
         assert_eq!(game.resident_entities.general.rows.len(), 1000);
         tick(game);
-        assert!(trace.lock().unwrap().is_empty());
+        assert!(l.trace.lock().unwrap().is_empty());
         assert_eq!(game.resident_entities.general.rows.len(), 1000);
     });
 }
@@ -482,7 +619,7 @@ fn a_thousand_part_free_rows_call_nothing() {
 fn quarantine_then_reinstall_restores_the_counter() {
     // With the mod: spawn at 41 and save the record out.
     let mut saved = None;
-    with_counter(|game, _, _, _| {
+    with_counter(|game, _| {
         let id = seeded_row(game, [1, 2, 3, 4], 41);
         tick(game);
         assert_eq!(counter(game, id), 42);
@@ -503,14 +640,14 @@ fn quarantine_then_reinstall_restores_the_counter() {
         assert_eq!(records.remove(0), saved, "the second save keeps the bytes");
     });
     // With the mod again: the row returns as itself, counter and all.
-    with_counter(|game, trace, _, _| {
+    with_counter(|game, l| {
         game.load_listed("mymod:robot", None, None, saved).unwrap();
         let rows = &game.resident_entities.general.rows;
         let id = rows[0].id;
         assert_eq!(rows[0].uuid, [1, 2, 3, 4]);
         assert_eq!(counter(game, id), 42);
         tick(game);
-        assert_eq!(*trace.lock().unwrap(), [id]);
+        assert_eq!(*l.trace.lock().unwrap(), [id]);
         assert_eq!(counter(game, id), 43);
     });
 }
@@ -524,7 +661,7 @@ fn quarantine_then_reinstall_restores_the_counter() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn summon_answers_a_target_with_a_network_id() {
-    with_counter(|game, _, _, _| {
+    with_counter(|game, _| {
         let mut tag = record_at("mymod:robot", [1, 2, 3, 4], [0.5, 64.0, 0.5], Vec::new());
         if let Tag::Compound(map) = &mut tag {
             map.insert("id".into(), Tag::String("mymod:robot".into()));

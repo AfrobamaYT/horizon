@@ -16,6 +16,7 @@
 //! from the join-order walk.
 
 use super::super::Game;
+use super::super::commands::Target;
 use super::{GeneralTypeCatalog, general_type_catalog};
 use horizon_client::join_seq::JoinSeq;
 use mod_api::EntityRef;
@@ -73,6 +74,15 @@ impl Game<'_> {
             if !entity_ticking(at.x.floor() as i32, at.z.floor() as i32) {
                 continue;
             }
+            // Live before the bookkeeping: an earlier row's callback can
+            // have queued this row's removal — `entity_remove` leaves it in
+            // the list until the sweep — or rewritten its mount. The ordered
+            // run re-resolves its join before each entity
+            // (`run_ordered_ticks`' `locate`), and the mob tick checks
+            // `removed`; this walk re-reads the row by its index.
+            if !general_row_live(self, index, mount) {
+                continue;
+            }
             // `Entity.commonTick`'s setOldPosAndRot: the row's previous
             // position is its current one. The rest of the common tick
             // (tick counting, invulnerable time) has no row field yet.
@@ -80,6 +90,13 @@ impl Game<'_> {
                 self.resident_entities.general.rows[index].position;
             let kind = catalog.key(slot);
             let ticks = !round.listening() || self.native_tick_pre_one(&mut round, id, kind);
+            // The Pre's listeners may have removed or remounted the row: a
+            // row that no longer ticks hears no Post, as a merged item's
+            // does not (the round's own `not_ticked`).
+            if ticks && !general_row_live(self, index, mount) {
+                round.not_ticked(id);
+                continue;
+            }
             if ticks {
                 if subscribed.get(slot).copied().unwrap_or(false)
                     && let Some(epoch) = epoch
@@ -100,7 +117,9 @@ impl Game<'_> {
     /// the rider's riders. A rider rides its vehicle's tick: no Pre of its
     /// own, and it ticks wherever its vehicle does (the root already passed
     /// the chunk gate). A rider that joined this tick waits for the next
-    /// pass with its root — a tree joins whole.
+    /// pass with its root — a tree joins whole. The parent's callback is
+    /// re-checked at every edge (`tickPassenger`'s `getVehicle` check): a
+    /// rider the callback removed or dismounted does not tick in this pass.
     fn tick_general_riders(
         &mut self,
         vehicle: u32,
@@ -119,6 +138,11 @@ impl Game<'_> {
                 (row.id, row.type_slot, row.join)
             };
             if join >= born {
+                continue;
+            }
+            // `tickPassenger`'s own gate: the rider still rides this
+            // vehicle, and no callback has queued its removal.
+            if !general_row_live(self, index, Some(vehicle)) {
                 continue;
             }
             self.resident_entities.general.rows[index].previous =
@@ -190,4 +214,19 @@ fn general_tick_subscribed(catalog: &GeneralTypeCatalog) -> Vec<bool> {
             )
         })
         .collect()
+}
+
+/// Whether the row at `index` is a live row still riding `mount`: re-read at
+/// every step of the walk, because a listener's callback can queue the row's
+/// removal — `entity_remove` leaves it in the list until the sweep — or
+/// rewrite its mount. The row's identity is its place: nothing in the pass
+/// reorders the storage, so an index read now is the row it names.
+fn general_row_live(game: &Game<'_>, index: usize, mount: Option<u32>) -> bool {
+    game.resident_entities
+        .general
+        .rows
+        .get(index)
+        .is_some_and(|row| {
+            row.mount == mount && !game.persist.removals.contains(&Target::General(row.id))
+        })
 }
