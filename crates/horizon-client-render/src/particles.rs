@@ -5111,7 +5111,7 @@ mod tests {
                         life: 1,
                         lifetime: 100,
                         twinkle_delay: false,
-                        far: false,
+                        sound: Some(false),
                     })
                     .collect();
                 for group in order {
