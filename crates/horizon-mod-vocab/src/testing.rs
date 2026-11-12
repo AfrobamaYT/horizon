@@ -40,7 +40,10 @@ mod services;
 /// An item forward reference missing from a fake's load-owned catalog.
 pub use crate::parts::ItemKeyError;
 pub use journal::FakeJournal;
-pub use level::{FakeBattery, FakeBlockEntity, FakeContainer, FakeEntity, FakeLevel, FakeTank};
+pub use level::{
+    FakeBattery, FakeBlockEntity, FakeContainer, FakeEntity, FakeGameEvent, FakeLevel, FakeSound,
+    FakeTank,
+};
 pub use players::{FakePlayer, FakePlayers};
 pub use registries::FakeRegistries;
 pub use services::{FakeCommands, FakeMessages};
@@ -137,6 +140,11 @@ pub struct FakeHost {
     pub messages: FakeMessages,
     /// The transaction journal over the players and the level.
     pub journal: FakeJournal<(FakePlayers, FakeLevel)>,
+    /// The sounds played in the level, in order. Like the game's, they are sent as they are
+    /// played: an aborted transaction does not take them back.
+    pub sounds: Vec<FakeSound>,
+    /// The game events sent in the level, in order, kept as the sounds are.
+    pub game_events: Vec<FakeGameEvent>,
 }
 
 impl FakeHost {
@@ -218,6 +226,17 @@ impl crate::prelude::TagsHost for FakeHost {
     fn tags(&self) -> &dyn crate::Tags {
         &self.registries
     }
+    fn fluid_pickup_sound(&self, fluid: &str) -> Option<&'static str> {
+        self.registries.fluid_sound(fluid, true)
+    }
+    fn fluid_empty_sound(&self, fluid: &str) -> Option<&'static str> {
+        self.registries.fluid_sound(fluid, false)
+    }
+}
+impl crate::prelude::BlockStatesHost for FakeHost {
+    fn fluid_key(&self, id: &str) -> Option<crate::FluidKey> {
+        crate::content::registry_keys::fluid_key(id)
+    }
 }
 impl crate::prelude::LevelsHost for FakeHost {
     fn is_loaded(&self, id: &str) -> bool {
@@ -226,7 +245,15 @@ impl crate::prelude::LevelsHost for FakeHost {
 }
 crate::impl_host_areas!(
     FakeHost,
-    except(block_entities, entities, items, levels, players, tags)
+    except(
+        block_entities,
+        block_states,
+        entities,
+        items,
+        levels,
+        players,
+        tags
+    )
 );
 
 impl ServerHost for FakeHost {
@@ -506,7 +533,50 @@ impl crate::prelude::PlayersBackendMut for FakeHost {
         Ok(true)
     }
 }
-crate::impl_backend_mut_areas!(FakeHost, except(entities, fluids_energy, items, players));
+impl crate::prelude::LevelsBackendMut for FakeHost {
+    fn level_play_sound(
+        &mut self,
+        level: LevelRef,
+        sound: &str,
+        at: [f64; 3],
+        source: crate::SoundSource,
+        volume: f32,
+        pitch: f32,
+    ) -> bool {
+        if level != self.level.level() {
+            return false;
+        }
+        self.sounds.push(FakeSound {
+            sound: sound.to_owned(),
+            at,
+            source,
+            volume,
+            pitch,
+        });
+        true
+    }
+    fn level_game_event(
+        &mut self,
+        level: LevelRef,
+        event: &str,
+        at: [f64; 3],
+        context: crate::GameEventContext,
+    ) -> bool {
+        if level != self.level.level() {
+            return false;
+        }
+        self.game_events.push(FakeGameEvent {
+            event: event.to_owned(),
+            at,
+            context,
+        });
+        true
+    }
+}
+crate::impl_backend_mut_areas!(
+    FakeHost,
+    except(entities, fluids_energy, items, levels, players)
+);
 
 impl crate::prelude::PlayersClientBackend for FakeHost {}
 

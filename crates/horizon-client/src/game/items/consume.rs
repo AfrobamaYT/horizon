@@ -72,7 +72,7 @@ impl Game<'_> {
         self.award_stat("used", &stack.item, 1);
         self.trigger_item("minecraft:consume_item", stack);
         // FoodProperties.onConsume, the player's one ConsumableListener.
-        if let Some((nutrition, saturation)) = info.food {
+        if let Some((nutrition, saturation)) = horizon_client::item_sync::food(stack, info.food) {
             let at = self.feet();
             let pitch = self.world.random.triangle_float(1.0, 0.4);
             self.audio.play(&consumable.sound, at, 1.0, pitch);
@@ -115,7 +115,8 @@ impl Game<'_> {
         // with infinite materials, the hand when emptied, else the inventory
         // (ServerPlayer.handleExtraItemsCreatedOnUse) or a drop.
         self.consume_held();
-        self.apply_use_remainder(info.use_remainder.as_deref(), stack.count);
+        let remainder = horizon_client::item_sync::use_remainder(stack, info.use_remainder.clone());
+        self.apply_use_remainder(remainder.as_deref(), stack.count);
     }
     /// `ItemStack.applyAfterUseComponentSideEffects` uses the stack captured
     /// before the item handler, even when that handler changes the hand.
@@ -124,6 +125,7 @@ impl Game<'_> {
             .items()
             .get(&stack.item)
             .and_then(|info| info.use_remainder.clone());
+        let remainder = horizon_client::item_sync::use_remainder(stack, remainder);
         self.apply_use_remainder(remainder.as_deref(), stack.count);
         self.apply_use_cooldown(stack);
     }
@@ -171,22 +173,53 @@ impl Game<'_> {
         let Some(consumer) = self.entity(decision.mob).and_then(|e| self.living(e)) else {
             return false;
         };
-        let consumable = self
-            .items()
-            .get(&decision.stack.item)
-            .and_then(|info| decision.stack.consumable(Some(info)))
-            .cloned();
+        let Some(consumable) = self.consumable(&decision.stack) else {
+            return false;
+        };
         let remainder = self
             .items()
             .get(&decision.stack.item)
             .and_then(|info| info.use_remainder.as_deref())
             .map(std::sync::Arc::<str>::from);
+        let remainder = horizon_client::item_sync::use_remainder(
+            &decision.stack,
+            remainder.map(|value| value.to_string()),
+        )
+        .map(std::sync::Arc::<str>::from);
         let dim = self.dim;
         let consumed = std::cell::OnceCell::new();
         let result: Result<bool, ()> = mod_api::run_transaction(self, |game, _| {
-            if let Some(consumable) = &consumable {
+            {
+                let mut mobs = game.mobs.lift();
+                if let Some(mob) = mobs.iter_mut().find(|m| m.id == decision.mob) {
+                    let mut events = Vec::new();
+                    horizon_client::mobs::fox::consumed_before_effects(
+                        &game.mob_world_base(&[]),
+                        mob,
+                        &mut events,
+                        &decision.stack,
+                    );
+                    game.mobs
+                        .restore(mobs, horizon_client::join_seq::RestoreOrder::SpawnsFirst);
+                    if game.handle_mob_events(events).is_err() {
+                        return Ok(false);
+                    }
+                } else {
+                    game.mobs
+                        .restore(mobs, horizon_client::join_seq::RestoreOrder::SpawnsFirst);
+                    return Ok(false);
+                }
                 for effect in &consumable.effects {
-                    if let ConsumeEffect::TeleportRandomly(teleport) = effect {
+                    if let ConsumeEffect::PlaySound(_) = effect {
+                        // The level-style sound uses the user's block center and
+                        // category, not Entity.playSound's silent guard or RNG.
+                        if game
+                            .apply_consume_effect(&decision.stack, effect, Some(consumer))
+                            .is_none()
+                        {
+                            return Ok(false);
+                        }
+                    } else if let ConsumeEffect::TeleportRandomly(teleport) = effect {
                         let consumed = consumed.get_or_init(|| consumed_snapshot(&decision.stack));
                         let mut actor = FoxTeleporter {
                             game,
@@ -198,6 +231,26 @@ impl Game<'_> {
                         if teleport.apply(&mut actor, dim).is_err() {
                             return Ok(false);
                         }
+                    } else if let Some(mob) = game.mobs.iter_mut().find(|m| m.id == decision.mob) {
+                        mob.apply_consume_effect(
+                            crate::game::entity::damage_level_of!(game),
+                            effect,
+                        );
+                    }
+                }
+                if let Some(mob) = game.mobs.iter().find(|m| m.id == decision.mob) {
+                    let event = horizon_client::mobs::MobEvent::GameEvent {
+                        event: if consumable.animation == UseAnimation::Drink {
+                            "minecraft:drink"
+                        } else {
+                            "minecraft:eat"
+                        },
+                        at: [mob.position.x, mob.position.y, mob.position.z],
+                        source: mob.id,
+                        state: horizon_world::registry::BlockStateId(0),
+                    };
+                    if game.handle_mob_events(vec![event]).is_err() {
+                        return Ok(false);
                     }
                 }
             }

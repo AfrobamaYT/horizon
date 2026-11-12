@@ -356,6 +356,9 @@ pub struct Projectile {
     /// charge until [`Projectile::set_item`] gives it another. None for the
     /// kinds that are no `Fireball` (a wither skull, a wind charge).
     pub item: Option<crate::items::ItemStack>,
+    /// `ThrownEgg`'s item `CHICKEN_VARIANT` component, as the chicken variant
+    /// index its hatchlings get; None when no item was recorded.
+    pub egg_variant: Option<u8>,
     /// The UUID its own random made (`Mth.createInsecureUUID`), for the server
     /// to keep unless a save gives one: an arrow's at construction, another
     /// kind's when it is shot (`shoot_own`), which is the same stream since
@@ -527,6 +530,35 @@ pub fn water_bubble_at(position: [f64; 3], movement: [f64; 3]) -> ([f64; 3], [f6
         movement,
     )
 }
+/// The chicken variant a thrown egg stack carries: its explicit
+/// `minecraft:chicken/variant` component, else its item's default (egg
+/// temperate, blue egg cold, brown egg warm). An explicit removal
+/// (`!minecraft:chicken/variant`) leaves the hatchling its temperate default.
+pub fn egg_chicken_variant(stack: &crate::items::ItemStack) -> u8 {
+    let named = stack
+        .extra
+        .as_ref()
+        .and_then(|d| d.other("minecraft:chicken/variant"))
+        .and_then(|t| match t {
+            horizon_core::nbt::Tag::String(s) => s.to_string().ok(),
+            _ => None,
+        });
+    // A removed component resolves to absent, not to the item default.
+    let removed = stack
+        .extra
+        .as_ref()
+        .is_some_and(|d| d.other("!minecraft:chicken/variant").is_some());
+    let name = named.as_deref().unwrap_or(if removed {
+        "temperate"
+    } else {
+        match &*stack.item {
+            "minecraft:blue_egg" => "cold",
+            "minecraft:brown_egg" => "warm",
+            _ => "temperate",
+        }
+    });
+    crate::mobs::finalize::variant_index(crate::mobs::Species::Chicken, name)
+}
 impl Projectile {
     /// `Entity.getBoundingBox`: its type's square box standing on its position,
     /// a wind charge's 0.15 lower (`AbstractWindCharge.makeBoundingBox`).
@@ -574,6 +606,7 @@ impl Projectile {
             attachment_lifetime: Default::default(),
             join: Default::default(),
             id: 0,
+            egg_variant: None,
             kind,
             owner,
             owner_vehicle: None,
@@ -1023,6 +1056,12 @@ impl Projectile {
         p.velocity = Vec3::new(dir[0] / len * 0.1, dir[1] / len * 0.1, dir[2] / len * 0.1);
         p.update_rotation();
         p
+    }
+    /// `ThrownEgg`'s item: what its hatchlings' variant comes from.
+    pub fn set_egg_item(&mut self, stack: &crate::items::ItemStack) {
+        if self.kind == ProjectileKind::Egg {
+            self.egg_variant = Some(egg_chicken_variant(stack));
+        }
     }
     /// `Fireball.setItem`: the item a fireball is drawn as. An empty stack
     /// puts the default fire charge back, anything else is kept as a single
@@ -1858,6 +1897,27 @@ impl Projectile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn egg_variant_honors_explicit_removal() {
+        use crate::mobs::{Species, finalize::variant_index};
+        let mut blue = crate::items::ItemStack::new("minecraft:blue_egg", 1);
+        assert_eq!(
+            egg_chicken_variant(&blue),
+            variant_index(Species::Chicken, "cold")
+        );
+        let mut data = horizon_items::item_data::StackData::default();
+        data.set_other(
+            "!minecraft:chicken/variant",
+            Some(horizon_core::nbt::Tag::Compound(Default::default())),
+        );
+        blue.extra = Some(Box::new(data));
+        assert_eq!(
+            egg_chicken_variant(&blue),
+            variant_index(Species::Chicken, "temperate")
+        );
+    }
+
     struct Empty(Vec<(Who, Aabb)>);
     impl ProjectileWorld for Empty {
         fn clip(&self, _: Vec3, _: Vec3) -> Option<(Vec3, [i32; 3], [i32; 3])> {
@@ -3140,6 +3200,23 @@ mod render_light_tests {
             shot(ProjectileKind::SmallFireball).entity_type(),
             "minecraft:small_fireball"
         );
+    }
+    /// `ThrownEgg.onHit`: the hatchlings take the variant of the item's
+    /// `CHICKEN_VARIANT` component (egg temperate, blue cold, brown warm).
+    #[test]
+    fn thrown_egg_carries_its_chickens_variant() {
+        use crate::items::ItemStack;
+        let variant = |item: &str| {
+            let mut egg = Projectile::new(ProjectileKind::Egg, Vec3::ZERO, None);
+            egg.set_egg_item(&ItemStack::new(item, 1));
+            egg.egg_variant
+        };
+        assert_eq!(variant("minecraft:egg"), Some(0));
+        assert_eq!(variant("minecraft:brown_egg"), Some(1));
+        assert_eq!(variant("minecraft:blue_egg"), Some(2));
+        let mut snowball = Projectile::new(ProjectileKind::Snowball, Vec3::ZERO, None);
+        snowball.set_egg_item(&ItemStack::new("minecraft:blue_egg", 1));
+        assert_eq!(snowball.egg_variant, None);
     }
 }
 crate::impl_joined!(Projectile);
