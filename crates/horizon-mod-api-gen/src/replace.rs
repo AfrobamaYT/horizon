@@ -101,13 +101,14 @@ pub fn installer(trait_name: Option<&syn::Ident>, name: &syn::Ident) -> syn::Ide
 /// The trait of `block` when its methods can be replaced: a trait one of the game's own crates
 /// declares (`traits`, by name), written without generic arguments, implemented safely for a
 /// type its own crate declares: the installer is an inherent function of the type. The type is
-/// written as one name, which the crate declares (`types`) and the file does not import from
-/// another crate (`foreign`). Another crate's trait (`Ord`, `Iterator`, `Drop`) is the caller's
-/// contract with that crate, and often a hot path.
+/// written as one name, which exactly one module of the crate declares (`types`), in the impl's
+/// file or any other, and the file does not import from another crate (`foreign`). Another
+/// crate's trait (`Ord`, `Iterator`, `Drop`) is the caller's contract with that crate, and often
+/// a hot path.
 pub fn replaceable_trait<'a>(
     block: &'a syn::ItemImpl,
     traits: &BTreeSet<String>,
-    types: &BTreeSet<String>,
+    types: &OwnerTypes,
     foreign: &BTreeSet<String>,
 ) -> Option<&'a syn::Ident> {
     let (_, path, _) = block.trait_.as_ref()?;
@@ -119,7 +120,7 @@ pub fn replaceable_trait<'a>(
 fn trait_exclusion(
     block: &syn::ItemImpl,
     traits: &BTreeSet<String>,
-    types: &BTreeSet<String>,
+    types: &OwnerTypes,
     foreign: &BTreeSet<String>,
 ) -> Option<&'static str> {
     let (negative, path, _) = block.trait_.as_ref()?;
@@ -131,16 +132,77 @@ fn trait_exclusion(
         return Some("path-written trait owner");
     };
     let owner = owner.ident.to_string();
+    let undeclared = types.exclusion(&owner);
     [
         (negative.is_some(), "negative trait impl"),
         (block.unsafety.is_some(), "unsafe trait impl"),
         (!last.arguments.is_none(), "trait generic arguments"),
         (!traits.contains(&last.ident.to_string()), "foreign trait"),
-        (!types.contains(&owner), "foreign trait owner"),
+        (undeclared.is_some(), undeclared.unwrap_or_default()),
         (foreign.contains(&owner), "imported trait owner"),
     ]
     .into_iter()
     .find_map(|(applies, name)| applies.then_some(name))
+}
+
+/// Why a mixin's target in the trait implementation `block` has no installer, for the refusal;
+/// `None` when it has one.
+pub(crate) fn trait_refusal(
+    block: &syn::ItemImpl,
+    traits: &BTreeSet<String>,
+    types: &OwnerTypes,
+    foreign: &BTreeSet<String>,
+) -> Option<String> {
+    let reason = trait_exclusion(block, traits, types, foreign)?;
+    Some(if reason == AMBIGUOUS_OWNER {
+        format!(
+            "its trait implementation has no replacement installer: owner type name `{}` is ambiguous in the crate, which declares it in more than one module",
+            quote::ToTokens::to_token_stream(&block.self_ty)
+        )
+    } else {
+        format!("its trait implementation has no replacement installer ({reason})")
+    })
+}
+
+const AMBIGUOUS_OWNER: &str = "ambiguous trait owner";
+
+/// The types a crate declares, each with the modules that declare it: a trait implementation's
+/// owner is one of them, in whatever file the `impl` is.
+#[derive(Default)]
+pub struct OwnerTypes(BTreeMap<String, BTreeSet<String>>);
+
+impl OwnerTypes {
+    /// Adds the structs, enums and unions `items` declare in `module`, inline modules included.
+    pub fn declare(&mut self, module: &str, items: &[Item]) {
+        for item in items {
+            let name = match item {
+                Item::Struct(item) => &item.ident,
+                Item::Enum(item) => &item.ident,
+                Item::Union(item) => &item.ident,
+                Item::Mod(item) => {
+                    if let Some((_, inner)) = &item.content {
+                        self.declare(&format!("{module}::{}", item.ident), inner);
+                    }
+                    continue;
+                }
+                _ => continue,
+            };
+            self.0
+                .entry(name.to_string())
+                .or_default()
+                .insert(module.to_owned());
+        }
+    }
+
+    /// Why `owner` can't carry an installer: no module declares it, or more than one does, and
+    /// a bare name does not say which.
+    fn exclusion(&self, owner: &str) -> Option<&'static str> {
+        match self.0.get(owner).map_or(0, BTreeSet::len) {
+            0 => Some("foreign trait owner"),
+            1 => None,
+            _ => Some(AMBIGUOUS_OWNER),
+        }
+    }
 }
 
 /// The names `items`' `use`s bring in from other crates: paths that don't start at `crate`,
@@ -164,23 +226,6 @@ pub fn foreign_imports(items: &[Item]) -> BTreeSet<String> {
         }
     }
     out
-}
-
-/// The names of the types `items` declare, inline modules included.
-pub fn declared_types(items: &[Item], out: &mut BTreeSet<String>) {
-    for item in items {
-        match item {
-            Item::Struct(item) => drop(out.insert(item.ident.to_string())),
-            Item::Enum(item) => drop(out.insert(item.ident.to_string())),
-            Item::Union(item) => drop(out.insert(item.ident.to_string())),
-            Item::Mod(item) => {
-                if let Some((_, inner)) = &item.content {
-                    declared_types(inner, out);
-                }
-            }
-            _ => {}
-        }
-    }
 }
 
 /// `sig` with each type it names through `Self::` (an associated type of the trait) written
@@ -408,7 +453,7 @@ fn functions<'a>(
     module: &str,
     items: &'a [Item],
     traits: &BTreeSet<String>,
-    types: &BTreeSet<String>,
+    types: &OwnerTypes,
     out: &mut Vec<Found<'a>>,
 ) {
     let foreign = foreign_imports(items);
@@ -478,7 +523,7 @@ fn functions<'a>(
 fn inventory(
     items: &[Item],
     traits: &BTreeSet<String>,
-    types: &BTreeSet<String>,
+    types: &OwnerTypes,
     inherited: Option<&'static str>,
     counts: &mut BTreeMap<&'static str, usize>,
 ) {
@@ -766,14 +811,14 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
         // Each file's text as the pass leaves it, the crate root's included.
         let mut texts: BTreeMap<&Path, String> = BTreeMap::new();
         let mut parsed = Vec::new();
-        let mut types = BTreeSet::new();
+        let mut types = OwnerTypes::default();
         for file in &krate.files {
             let text = fs::read_to_string(&file.path)
                 .map_err(|e| format!("{}: {e}", file.path.display()))?;
             let items = syn::parse_file(&text)
                 .map_err(|e| format!("{}: {e}", file.path.display()))?
                 .items;
-            declared_types(&items, &mut types);
+            types.declare(&file.module, &items);
             parsed.push((file, text, items));
         }
         for (file, text, items) in &parsed {
@@ -1245,7 +1290,7 @@ pub fn targets(
     module: &str,
     file: &syn::File,
     traits: &BTreeSet<String>,
-    types: &BTreeSet<String>,
+    types: &OwnerTypes,
 ) -> Vec<String> {
     let mut found = Vec::new();
     functions(module, &file.items, traits, types, &mut found);
@@ -1360,7 +1405,8 @@ mod tests {
     fn inventory_partitions_definitions_by_the_actual_eligibility_rules() {
         let file = syn::parse_file("fn free() {} const fn constant() {} fn generic<T>() {} struct T; trait Owned { fn required(&self); fn default(&self) {} } impl Owned for T { fn required(&self) {} } #[cfg(test)] mod tests { fn helper() {} } impl T { fn consume(self) {} }").unwrap();
         let traits = BTreeSet::from(["Owned".to_owned()]);
-        let types = BTreeSet::from(["T".to_owned()]);
+        let mut types = OwnerTypes::default();
+        types.declare("k", &file.items);
         let mut counts = BTreeMap::new();
         inventory(&file.items, &traits, &types, None, &mut counts);
         assert_eq!(counts.values().sum::<usize>(), 7);
@@ -1389,7 +1435,11 @@ mod tests {
             "k",
             &file.items,
             &BTreeSet::from(["GameTrait".to_owned()]),
-            &BTreeSet::from(["Example".to_owned()]),
+            &{
+                let mut types = OwnerTypes::default();
+                types.declare("k", &file.items);
+                types
+            },
             &mut found,
         );
         let mut count = 0;
@@ -1535,7 +1585,7 @@ mod tests {
                 "k",
                 &file,
                 &BTreeSet::from(["Goal".to_owned()]),
-                &BTreeSet::new()
+                &OwnerTypes::default()
             ),
             ["k::inner::kept", "k::free"]
         );
@@ -1546,8 +1596,8 @@ mod tests {
         let source = "use engine::Style; struct Wander; struct Raw; mod other { struct Style; }\nimpl Goal for Style { fn start(&mut self) {} } impl Goal for engine::Raw { fn start(&mut self) {} } impl Goal for Wander { fn start(&mut self, mob: &Mob) -> bool { true } fn kind(&self) -> Self::Kind { Kind } fn sized(&self) -> [u8; Self::N] { [0; Self::N] } }\nimpl Goal<u8> for Wander { fn start(&mut self) {} }\nunsafe impl Goal for Raw { fn start(&mut self) {} }\nimpl Goal for Vec3 { fn start(&mut self) {} }\n";
         let traits = BTreeSet::from(["Goal".to_owned()]);
         let file = syn::parse_file(source).unwrap();
-        let mut types = BTreeSet::new();
-        declared_types(&file.items, &mut types);
+        let mut types = OwnerTypes::default();
+        types.declare("k", &file.items);
         // A signature naming the trait's associated constant, a trait written with arguments, an
         // unsafe impl and another crate's type (imported under a name the crate also declares,
         // written by path, or not declared here at all) are left as the game wrote them.
@@ -1572,6 +1622,40 @@ mod tests {
         assert!(out.contains("pub fn __fnr_as_Goal_start"), "{out}");
         // The trait's associated type is named through the trait outside its `impl`.
         assert!(out.contains("-> < Self as Goal > :: Kind"), "{out}");
+    }
+
+    #[test]
+    fn a_trait_impl_in_another_file_from_its_type_gets_its_slot() {
+        let traits = BTreeSet::from(["LevelAccess".to_owned()]);
+        let declares = syn::parse_file("pub struct GameLevel;").unwrap();
+        let implements = syn::parse_file(
+            "use super::GameLevel; impl LevelAccess for GameLevel { fn block_state(&self) -> u32 { 0 } }",
+        )
+        .unwrap();
+        let mut types = OwnerTypes::default();
+        types.declare("k::levels", &declares.items);
+        types.declare("k::level_access", &implements.items);
+        assert_eq!(
+            targets("k::level_access", &implements, &traits, &types),
+            ["k::level_access::<GameLevel as LevelAccess>::block_state"]
+        );
+        let Item::Impl(block) = &implements.items[1] else {
+            panic!("an impl")
+        };
+        let foreign = foreign_imports(&implements.items);
+        assert_eq!(trait_refusal(block, &traits, &types, &foreign), None);
+        // A second module declaring the name: a bare `GameLevel` no longer says which type.
+        types.declare("k::other", &declares.items);
+        assert!(targets("k::level_access", &implements, &traits, &types).is_empty());
+        assert_eq!(
+            trait_refusal(block, &traits, &types, &foreign).unwrap(),
+            "its trait implementation has no replacement installer: owner type name `GameLevel` is ambiguous in the crate, which declares it in more than one module"
+        );
+        // Declared twice in one module (one per `cfg`) is one declaration.
+        let mut types = OwnerTypes::default();
+        types.declare("k::levels", &declares.items);
+        types.declare("k::levels", &declares.items);
+        assert_eq!(trait_refusal(block, &traits, &types, &foreign), None);
     }
 
     #[test]

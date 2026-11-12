@@ -138,6 +138,8 @@ struct Source {
     local_macros: BTreeSet<String>,
     /// Each loaded lower crate's library name (`[lib] name`), by its folder's crate name.
     libraries: BTreeMap<String, String>,
+    /// Each crate's declared types, read when a row first targets a trait method of the crate.
+    owners: BTreeMap<String, crate::replace::OwnerTypes>,
 }
 
 impl Source {
@@ -166,6 +168,7 @@ impl Source {
             parsed: BTreeMap::new(),
             local_macros,
             libraries: BTreeMap::new(),
+            owners: BTreeMap::new(),
         })
     }
 
@@ -197,6 +200,28 @@ impl Source {
         self.libraries.insert(krate.to_owned(), library);
         self.loaded.insert(krate.to_owned());
         true
+    }
+
+    /// The types `krate` declares, from the files the staging pass reads: the installer a
+    /// trait method has in the prebuilt game was decided on the same set.
+    fn owner_types(&mut self, krate: &str) -> Result<&crate::replace::OwnerTypes, String> {
+        if !self.owners.contains_key(krate) {
+            let files = if krate == "horizon_client" {
+                crate::source::game_files(&self.root.join("crates/horizon-client/src"), true)?
+            } else {
+                crate::source::crate_files(&self.root, krate)?
+            };
+            let mut types = crate::replace::OwnerTypes::default();
+            for file in files {
+                let text = std::fs::read_to_string(&file.path)
+                    .map_err(|e| format!("{}: {e}", file.path.display()))?;
+                let parsed =
+                    syn::parse_file(&text).map_err(|e| format!("{}: {e}", file.path.display()))?;
+                types.declare(&file.module, &parsed.items);
+            }
+            self.owners.insert(krate.to_owned(), types);
+        }
+        Ok(&self.owners[krate])
     }
 
     /// Module `path`'s items: its file's, or an inline module's inside its parent's.
@@ -530,17 +555,18 @@ fn replaceable(found: &Found, source: &mut Source, loop_generic: bool) -> Result
             return Err("its signature names a trait-associated constant through Self".into());
         }
         let items = source.module(&found.module)?.items.clone();
-        let mut types = BTreeSet::new();
-        crate::replace::declared_types(&items, &mut types);
-        if crate::replace::replaceable_trait(
-            block,
-            &crate::replace::declared_traits(&source.root)?,
-            &types,
-            &crate::replace::foreign_imports(&items),
-        )
-        .is_none()
+        let krate = found
+            .module
+            .split("::")
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        let traits = crate::replace::declared_traits(&source.root)?;
+        let foreign = crate::replace::foreign_imports(&items);
+        if let Some(why) =
+            crate::replace::trait_refusal(block, &traits, source.owner_types(&krate)?, &foreign)
         {
-            return Err("its trait implementation has no replacement installer".into());
+            return Err(why);
         }
     }
     if let Some(block) = &found.owner
@@ -1586,6 +1612,7 @@ mod tests {
             parsed: BTreeMap::new(),
             local_macros: BTreeSet::new(),
             libraries: BTreeMap::new(),
+            owners: BTreeMap::new(),
         };
         assert!(source.load("horizon_mod_render"));
         assert_eq!(
@@ -1681,6 +1708,7 @@ mod tests {
             )]),
             local_macros: BTreeSet::new(),
             libraries: BTreeMap::new(),
+            owners: BTreeMap::new(),
         };
         let ancestor = mirror(
             &mut source,
@@ -1738,6 +1766,7 @@ mod tests {
             parsed: BTreeMap::new(),
             local_macros: BTreeSet::new(),
             libraries: BTreeMap::new(),
+            owners: BTreeMap::new(),
         };
         let used = BTreeSet::from(["Arc".to_owned()]);
         let out = mirror(&mut source, "fixture", &Tree::default(), false, Some(&used)).unwrap();
@@ -1765,6 +1794,7 @@ mod tests {
             parsed: BTreeMap::new(),
             local_macros: BTreeSet::new(),
             libraries: BTreeMap::new(),
+            owners: BTreeMap::new(),
         };
         let out = mirror(&mut source, "fixture", &Tree::default(), false, None).unwrap();
         let parsed: syn::File = syn::parse2(out).unwrap();
