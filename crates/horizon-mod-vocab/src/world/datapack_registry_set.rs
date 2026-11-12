@@ -680,16 +680,10 @@ mod tests {
     /// stays at its generation and the next valid reload still publishes.
     #[test]
     fn an_entry_over_one_mib_refuses_the_candidate() {
-        let at = [file(
-            &entry_path("fire"),
-            &[padded(MAX_DATAPACK_ENTRY_BYTES).as_str()],
-        )];
+        let at = [file(&entry_path("fire"), &[padded(1_048_576).as_str()])];
         let old = DatapackRegistrySet::first(candidate(&at), 1);
         assert_eq!(power(&old, "example:fire"), DatapackValue::Int(7));
-        let over = [file(
-            &entry_path("fire"),
-            &[padded(MAX_DATAPACK_ENTRY_BYTES + 1).as_str()],
-        )];
+        let over = [file(&entry_path("fire"), &[padded(1_048_577).as_str()])];
         assert_eq!(refusal(&over, "fire"), DatapackLoadReason::EntryTooLarge);
         assert_eq!(old.generation(), 1);
         assert_eq!(power(&old, "example:fire"), DatapackValue::Int(7));
@@ -699,41 +693,42 @@ mod tests {
     /// 65,536 entries in a registry are accepted; one more refuses the candidate.
     #[test]
     fn a_registry_over_65536_entries_refuses_the_candidate() {
-        let mut files: Vec<_> = (0..MAX_SNAPSHOT_ENTRIES)
+        let mut files: Vec<_> = (0..65_536)
             .map(|n| match n {
                 0 => file(&entry_path("fire"), &[r#"{"power": 1}"#]),
                 n => file(&entry_path(&format!("e{n}")), &[r#"{"power": 1}"#]),
             })
             .collect();
         let old = DatapackRegistrySet::first(candidate(&files), 1);
-        assert_eq!(
-            old.entries("example:spell").unwrap().len(),
-            MAX_SNAPSHOT_ENTRIES
-        );
-        let over = format!("e{MAX_SNAPSHOT_ENTRIES}");
+        assert_eq!(old.entries("example:spell").unwrap().len(), 65_536);
+        let over = "e65536".to_owned();
         files.push(file(&entry_path(&over), &[r#"{"power": 1}"#]));
         assert_eq!(refusal(&files, &over), DatapackLoadReason::TooManyEntries);
         files.pop();
         assert_eq!(old.reload(candidate(&files)).unwrap().generation(), 2);
     }
 
-    /// 64 MiB of winning files in all are accepted; one more entry refuses the candidate.
+    /// Exactly 67,108,864 source bytes fit; one extra byte refuses the candidate.
     #[test]
     fn a_candidate_over_64_mib_refuses_the_candidate() {
-        let full = padded(MAX_DATAPACK_ENTRY_BYTES);
-        let mut files: Vec<_> = (0..MAX_SNAPSHOT_BYTES / MAX_DATAPACK_ENTRY_BYTES)
+        let full = padded(1_048_576);
+        let mut files: Vec<_> = (0..63)
             .map(|n| match n {
                 0 => file(&entry_path("fire"), &[full.as_str()]),
                 n => file(&entry_path(&format!("e{n}")), &[full.as_str()]),
             })
             .collect();
+        files.push(file(&entry_path("half"), &[padded(524_288).as_str()]));
+        files.push(file(&entry_path("last"), &[padded(524_288).as_str()]));
         let old = DatapackRegistrySet::first(candidate(&files), 1);
-        files.push(file(&entry_path("last"), &[r#"{"power": 1}"#]));
+        files.last_mut().unwrap().1[0].1.push(b' ');
         assert_eq!(
             refusal(&files, "last"),
             DatapackLoadReason::CandidateTooLarge
         );
-        files.pop();
+        files.last_mut().unwrap().1[0].1.pop();
+        assert_eq!(old.generation(), 1);
+        assert_eq!(power(&old, "example:fire"), DatapackValue::Int(7));
         assert_eq!(old.reload(candidate(&files)).unwrap().generation(), 2);
     }
 
@@ -804,7 +799,7 @@ mod tests {
     /// 256 declared registries are accepted; the 257th refuses every candidate, naming it.
     #[test]
     fn more_than_256_registries_refuse_the_candidate() {
-        let mut declarations: Vec<_> = (0..MAX_SNAPSHOT_REGISTRIES)
+        let mut declarations: Vec<_> = (0..256)
             .map(|n| DatapackRegistryDeclaration {
                 key: format!("example:spell_{n}"),
                 ..spell()
