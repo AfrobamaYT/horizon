@@ -43,6 +43,8 @@ POINTS = "points.json"
 CATALOG = "mod-catalog.json"
 # The staged internals signatures, checked against a mod's declared access list.
 INTERNALS = "internals.json"
+# The published loops (`#[horizon_loop]`), which a mod's `[[native.loop]]` rows name.
+LOOPS = "loops.json"
 
 
 def run(command: list[str], **kwargs) -> str:
@@ -237,7 +239,7 @@ def build(out: Path, server: bool) -> None:
             shutil.copy2(source, out / name)
     patches = carry_patches(staged, out)
     game = next(script for script in scripts if script["package_id"].split("#")[0].endswith("/horizon-client"))
-    for manifest in (POINTS, INTERNALS, CATALOG):
+    for manifest in (POINTS, INTERNALS, CATALOG, LOOPS):
         shutil.copy2(staged / manifest, out / manifest)
     output = Path(game["out_dir"]).parent / "output"
     link_args = executable_link_args(output)
@@ -252,6 +254,14 @@ def build(out: Path, server: bool) -> None:
         "rustflags": rustflags,
         "link_args": link_args,
         "facade_crates": eligible,
+        # The game crate's features: a `[[native.mixin]]` build compiles functions copied out of its source
+        # under the same cfgs (function replacement).
+        "game_features": sorted(next(
+            message["features"] for message in artifacts
+            if message["reason"] == "compiler-artifact"
+            and message["package_id"].split("#")[0].endswith("/horizon-client")
+            and "lib" in message["target"]["kind"]
+        )),
         "registry_patches": patches,
         "patch_files": {name: digest for name, digest in files.items() if name.startswith("patches/")},
         "registry_lock": (staged / "Cargo.lock").read_text(),
@@ -323,7 +333,7 @@ def check(out: Path) -> None:
             sys.exit(f"prebuilt patch inventory mismatch: {name}")
     stray = [
         path for path in out.rglob("*")
-        if path.is_file() and not (path.parent == out and (path.name in CARRIED or path.name in (POINTS, INTERNALS, CATALOG)))
+        if path.is_file() and not (path.parent == out and (path.name in CARRIED or path.name in (POINTS, INTERNALS, CATALOG, LOOPS)))
         and str(path.relative_to(out).as_posix()) not in patch_files
         and not (path.parent == out / "deps" and path.name.endswith(SUFFIXES))
         and not (path.parent == out / "host" and path.name.endswith((".so", ".dll", ".dylib", ".dll.a")))

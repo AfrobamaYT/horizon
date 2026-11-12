@@ -18,7 +18,9 @@ fn real_wasm_command_listener_receives_ordered_selector_handles() {
     use horizon_mod_wasm::{WasmPackage, load};
 
     let path = std::env::var("HORIZON_WASM_FIXTURE").unwrap();
-    let manifest = Package::read(std::path::Path::new(&path)).unwrap().manifest;
+    let mut manifest = Package::read(std::path::Path::new(&path)).unwrap().manifest;
+    // This fixture variant exercises ordinary hooks and Parts, not game points.
+    manifest.inject.clear();
     let info = PackageInfo::new(
         manifest.id.clone(),
         manifest.version.clone(),

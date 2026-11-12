@@ -125,7 +125,9 @@ fn block_entity_ticks() {
     let path = std::env::var("HORIZON_WASM_FIXTURE").unwrap();
     let path = std::path::Path::new(&path);
     let std = std::fs::read(std::env::var("HORIZON_WASM_STD").unwrap()).unwrap();
-    let manifest = Package::read(path).unwrap().manifest;
+    let mut manifest = Package::read(path).unwrap().manifest;
+    // This fixture variant exercises ordinary hooks and Parts, not game points.
+    manifest.inject.clear();
     let info = mod_api::PackageInfo::new(
         manifest.id.clone(),
         manifest.version.clone(),
@@ -196,7 +198,9 @@ fn empty_subscribed_listener() {
     let path = std::env::var("HORIZON_WASM_FIXTURE").unwrap();
     let path = std::path::Path::new(&path);
     let std = std::fs::read(std::env::var("HORIZON_WASM_STD").unwrap()).unwrap();
-    let manifest = Package::read(path).unwrap().manifest;
+    let mut manifest = Package::read(path).unwrap().manifest;
+    // This fixture variant exercises ordinary hooks and Parts, not game points.
+    manifest.inject.clear();
     let info = mod_api::PackageInfo::new(
         manifest.id.clone(),
         manifest.version.clone(),

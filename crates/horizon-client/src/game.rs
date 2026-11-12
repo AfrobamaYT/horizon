@@ -60,6 +60,13 @@ fn pack_files(world_tables: &Option<WorldTables>) -> horizon_world::loot::PackOv
     }
 }
 include!(concat!(env!("OUT_DIR"), "/game_modules.rs"));
+/// Installs the dispatcher of each injection point a mod listens at as its function's entry,
+/// once the points are sealed. The prebuilt game's staging pass writes the call; a build without
+/// points has none to arm.
+macro_rules! arm_points {
+    () => {};
+}
+
 /// The game's side of the injection points (#589), whose slots and listeners live in `mod_points`.
 #[doc(hidden)]
 pub mod points {
@@ -3079,6 +3086,8 @@ struct Game<'a> {
     /// Block-entity positions retained between ticks for client effects.
     spawner_tick_positions: Vec<horizon_client::block_entities::Pos>,
     trial_spawner_tick_positions: Vec<horizon_client::block_entities::Pos>,
+    /// The `[[native.loop]]` slots' state, per published loop (`published_loops.rs`).
+    loop_states: published_loops::LoopStates,
     creative_screen: Creative,
     /// `CreativeModeInventoryScreen.ignoreTextInput`: the chat key opened the
     /// search tab, so the letter it carries is not typed into the box.
@@ -3670,20 +3679,6 @@ fn pick_view_vector(yaw: f32, pitch: f32) -> [f64; 3] {
 fn view_vector(yaw: f32, pitch: f32) -> [f64; 3] {
     let (y, p) = (f64::from(yaw).to_radians(), f64::from(pitch).to_radians());
     [-y.sin() * p.cos(), -p.sin(), y.cos() * p.cos()]
-}
-/// `LivingEntity.canGlideUsing`: for each worn piece (head, chest, legs,
-/// feet), whether it is a glider (its own component, or one the server
-/// patched onto the stack) in the slot its `equippable` names, and will not
-/// break with its next point of wear (`ItemStack.nextDamageWillBreak`).
-fn gliding_pieces(items: &Items, armor: &[Option<ItemStack>; 4]) -> [bool; 4] {
-    const SLOTS: [&str; 4] = ["head", "chest", "legs", "feet"];
-    // `canGlideUsing`: the stack's own `glider` and `equippable` (its
-    // components, a server's patch), else its item's.
-    std::array::from_fn(|i| {
-        armor[i]
-            .as_ref()
-            .is_some_and(|s| horizon_client::item_sync::can_glide_using(s, SLOTS[i], items))
-    })
 }
 /// `Level.canHaveWeather`: sky light, no ceiling, and not the End (the one
 /// level the rule names by id).
@@ -16537,6 +16532,7 @@ impl<'a> Game<'a> {
             pass_mobs: None,
             spawner_tick_positions: Vec::new(),
             trial_spawner_tick_positions: Vec::new(),
+            loop_states: Default::default(),
             creative_screen: prepared.creative_screen,
             creative_ignore_text: false,
             control: None,
@@ -17482,6 +17478,7 @@ pub(crate) fn run_with(
         crate::entry::initialize_code(&inventory);
     }
     mod_points::__private::seal();
+    arm_points!();
     mod_phase.advance(mod_api::__private::ModPhase::Registration)?;
     crate::game::part_admission::admit_parts(mod_api::__private::mods())?;
     // The structure types those mods registered, handed to the engine before
@@ -17792,6 +17789,7 @@ pub(crate) fn closest_space_nudge(
 
 #[cfg(test)]
 use inventory_input::drop_whole_stack;
+use prediction::gliding_pieces;
 use subtitles::{Subtitles, in_game_ui, subtitles};
 
 use hud_render::{block_outline_drawn, debug_crosshair_drawn, is_game_master_block};
