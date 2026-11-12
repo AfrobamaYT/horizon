@@ -2167,11 +2167,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
             S::Zombie | S::ZombifiedPiglin => self.zombie(m, g, reason),
             S::ZombieVillager => {
                 self.villager_type(m);
-                if m.extra.profession.index().is_some() {
-                    m.extra.profession = super::villager::ProfessionState::from_index(
-                        super::zombie_villager::constructor_profession(m),
-                    );
-                }
+                // The profession is drawn at construction, not finalizeSpawn.
                 self.zombie(m, g, reason)
             }
             S::Husk => self.husk(m, g, reason),
