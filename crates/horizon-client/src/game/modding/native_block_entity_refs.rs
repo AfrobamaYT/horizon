@@ -274,6 +274,16 @@ impl Game<'_> {
         edit: impl FnOnce(&mut ModBlockEntity),
     ) {
         self.journal_block_entity(key);
+        self.edit_mod_block_entity(key, edit);
+    }
+
+    /// `edit` on the resolved mod holder at `key`, told at the root commit; the caller has
+    /// journaled what it changes.
+    fn edit_mod_block_entity(
+        &mut self,
+        key: (i32, i32, i32),
+        edit: impl FnOnce(&mut ModBlockEntity),
+    ) {
         let BlockEntity::Mod(block_entity) = self.world.block_entities.get_mut(&key).unwrap()
         else {
             unreachable!("resolved mod holder replaced before its write")
@@ -335,6 +345,13 @@ impl Game<'_> {
         let index = slot as usize;
         if block_entity.items.get(index).and_then(Option::as_ref) == stack.as_ref() {
             return Ok(false);
+        }
+        // A slot of a list already its full length: the journal keeps that slot, not the
+        // entity's whole saved data. A list still to grow is kept whole, length and all.
+        if index < block_entity.items.len() {
+            self.journal_block_entity_slot(key, index);
+            self.edit_mod_block_entity(key, |block_entity| block_entity.items[index] = stack);
+            return Ok(true);
         }
         self.write_mod_block_entity(key, |block_entity| {
             let items = &mut block_entity.items;
