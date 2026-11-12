@@ -175,7 +175,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `shouldCauseReequipAnimation(stack, oldStack, equipped)` | Missing | — | Client animation rule; no hook. |
 | `shouldCauseBlockBreakReset(oldStack, newStack)` | Missing | — | Client mining-reset rule; no hook. |
 | `canContinueUsing(stack, otherStack)` | Missing | — | No continue-use query. |
-| `getCreatorModId(registries, stack)` | Missing | — | Diagnostic ownership string; Horizon keeps the item's namespace in its key. |
+| `getCreatorModId(registries, stack)` | Covered | `ItemPart::creator_mod_id` (`hooks/creator_mod_id.rs`), read by `ItemResource::creator_mod_id` | Both sides, from the stack alone. The answer arrives as the item id's namespace; a part sets another mod or none. An item without a part costs one table lookup. |
 | `onAnimalArmorTick(stack, level, mob)` | Missing | — | No per-item animal-armour tick. |
 | `damageItem(stack, amount, entity, onBreak)` | Covered | `ItemPart::damage_item` (`hooks/damage_item.rs`) | Runs on the server for the parts of the worn item, after Unbreaking, on every wear path (a player's tools, armour and shield, a dispenser's tool, a mob's armour). The part gets the stack and the amount about to be lost, and changes it (0 or less leaves the item whole) or cancels the wear. It is not given the wearing entity (`host.players().acting_player()` names the player on a player's paths) and has no `onBreak` consumer: the break is `player_destroy_item`. |
 | `onDestroyed(itemEntity, source)` | Missing | — | `item_despawn` is lifetime removal, not damage destruction. |
