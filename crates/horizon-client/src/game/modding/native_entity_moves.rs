@@ -7,6 +7,7 @@ use super::entity::{Entity as _, EntityHandle, with_entity_mut};
 use super::{
     Dim, Game,
     commands::{Target, entity_pitch},
+    vehicle_teleport::TeleportMotion,
 };
 use horizon_core::geometry::Vec3;
 use mod_api::EntityRef;
@@ -65,6 +66,31 @@ impl Game<'_> {
             return false;
         }
         self.teleport_to_level(t, Dim::from_id(dimension), pos, rotation)
+    }
+    /// A mod sends `t` to `pos` in `level` (`Entity.teleport` with a
+    /// `TeleportTransition` that keeps the motion, `TeleportMotion::Keep`): in
+    /// its own level when that is `level`, else as `/tp` into another level
+    /// does. False for a kind that only moves within its level (armor stands,
+    /// falling blocks, ...; `teleport_target_across`), a player who is not a
+    /// server guest, or a transfer the game could not make. A fake player
+    /// stays, and the call is true.
+    pub(in crate::game) fn teleport_to_level(
+        &mut self,
+        t: Target,
+        level: Dim,
+        pos: [f64; 3],
+        rotation: Option<[f32; 2]>,
+    ) -> bool {
+        if self.target_level(t) == level {
+            let motion = self.transition_motion(t);
+            self.teleport_to(t, pos, rotation, true);
+            if let Some(motion) = motion {
+                self.restore_transition_motion(t, motion);
+            }
+            return true;
+        }
+        self.teleport_across(t, level, pos, rotation, true, TeleportMotion::Keep)
+            .unwrap_or(false)
     }
     /// What a teleport of `entity` to `pos` moves, when `/tp` could place it there.
     fn teleport_target(

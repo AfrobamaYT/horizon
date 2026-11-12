@@ -195,16 +195,6 @@ pub(super) struct Minecart {
 /// `EntityType.MINECART`'s `sized(0.98F, 0.7F)`: float dimensions, widened.
 pub(super) const WIDTH: f64 = 0.98_f32 as f64;
 pub(super) const HEIGHT: f64 = 0.7_f32 as f64;
-/// `AbstractMinecart.getKnownMovement` with `OldMinecartBehavior`: the cart's
-/// motion clamped to 0.4 either way along x and z, what a teleport's
-/// `PositionMoveRotation.of(this)` carries over.
-pub(super) fn known_movement(velocity: Vec3) -> Vec3 {
-    Vec3::new(
-        velocity.x.clamp(-0.4, 0.4),
-        velocity.y,
-        velocity.z.clamp(-0.4, 0.4),
-    )
-}
 /// `EntityEvent.TNT_PRIME`. `MinecartTNT.primeFuse` broadcasts it;
 /// `MinecartTNT.handleEntityEvent` answers by calling `primeFuse`.
 pub(super) const TNT_PRIME_EVENT: i8 = 70;
