@@ -31,6 +31,8 @@ pub use runtime::{CallClass, WasmHandler, WasmMod};
 
 #[cfg(test)]
 mod test_log;
+#[cfg(test)]
+mod test_stack;
 
 pub(crate) trait NoAnswer {
     fn no_answer() -> Self;

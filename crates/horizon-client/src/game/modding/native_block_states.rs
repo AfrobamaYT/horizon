@@ -525,11 +525,9 @@ mod tests {
                 _context: &mod_api::RegistrationContext,
                 event: &mut mod_api::BlocksEvent<'_>,
             ) {
-                event.blocks.push({
-                    let mut draft = mod_api::Block::new(CRATE, "minecraft:stone");
-                    draft.item = true;
-                    draft
-                });
+                event
+                    .blocks
+                    .push(mod_api::Block::new(CRATE, "minecraft:stone"));
             }
         }
         let mods: mod_api::Mods =
