@@ -256,3 +256,11 @@ Merge main through `66a48904198` once after the C1–C4 carry. The sole textual 
 ## CI repair: lint and static tool contracts
 
 Read current-head lint and verify-static logs before repair. Remove the redundant i8 item-frame rotation cast, apply current rustfmt to remote projectile dispatch, and remove the repeated telemetry edge from the layer allowlist. The entity-lift source check excludes exactly `game/creatures/mob_islands.rs`: it is byte-identical retained upstream source behind the unsupported nondefault feature, excluded from active module discovery. Its raw take is not changed, and no active entity-list mutation is exempted. Python tool tests follow the actual retained tool contracts rather than obsolete fixture argument shapes. No local tests or clippy run for the repair; CI is the check.
+
+## Frozen-main payload and platform integration
+
+Merge frozen main `a51728c35f8` once, retaining #3087 raw custom play-payload transport, #3038's registrar/tables vocabulary placement under mod-api/src/parts, and #3504's engine-owned platform socket filled by horizon-mod-host. The four conflicts are narrow: retain both LAN module declarations and both hub test groups; decode inbound play through the negotiated payload codecs; keep upstream's single frame-header parse while delegating that parse to main's memory-aware `header` implementation. No raw payload or socket implementation is removed.
+
+## CI verify and remaining gameplay lint repairs
+
+Read verify's five named failures and lint's three gameplay errors on `c14c002fb04`. Correct item-frame rotation decoding to narrow to signed byte before remainder; refuse client-copy mob damage before typed invulnerability observation; pass furnace output's remaining stack to the subsequent onTake notice without changing crafting result behavior. Align the orb fixture's Air with the existing 32767 assertion and initialize saved consumable components through StackData's typed setter. Assertions and expected values remain unchanged. Remove the orphan minecart doc line, collapse the cart attack condition without changing short-circuit order, and move the dedicated crash-stop implementation before its test module.

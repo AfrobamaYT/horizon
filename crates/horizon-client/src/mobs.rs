@@ -4159,6 +4159,11 @@ impl Mob {
             // about, so `Player.attack` goes on with its extra knockback and its aftermath.
             return sulfur_cube::immune_to(&source);
         }
+        // `Entity.hurt` on a client level does nothing: a client copy refuses before
+        // any invulnerability observation or hook, as `refuses_damage` does for the rest.
+        if self.extra.client_side {
+            return false;
+        }
         let reflected = self.reflected_fireball(&source);
         if self.invulnerable_to_attempt(level, &source) {
             return reflected;

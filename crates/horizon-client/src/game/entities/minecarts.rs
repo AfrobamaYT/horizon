@@ -2627,8 +2627,6 @@ impl Game<'_> {
                     .then_some(CartKind::Chest)
             })
     }
-    /// `VehicleEntity.hurtServer` from the player's attack.
-
     /// An arrow hit cart `i` (`MinecartTNT.hurtServer`, then
     /// `VehicleEntity.hurtServer`): a burning arrow sets off a TNT minecart.
     pub(super) fn arrow_hits_cart(

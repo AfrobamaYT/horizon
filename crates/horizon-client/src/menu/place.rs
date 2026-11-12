@@ -178,7 +178,8 @@ struct Grid {
 }
 
 impl Menu {
-    /// `on_take` for a quick-moved slot. A merchant result reports the stack it moved. A
+    /// `on_take` for a quick-moved slot. Merchant and furnace results report the stack
+    /// left in the slot after the move (their `onQuickCraft` already saw the original). A
     /// crafting result reports the copy it takes (which Item.onCraftedBy may still change)
     /// minus what stayed behind: `ResultSlot.onQuickCraft` counts only the items that moved.
     pub(super) fn take_after_quick_move(
@@ -188,7 +189,10 @@ impl Menu {
         clicked: &mut ItemStack,
         stack: &mut ItemStack,
     ) {
-        if self.slots[index].role == super::Role::MerchantResult {
+        if matches!(
+            self.slots[index].role,
+            super::Role::MerchantResult | super::Role::Output
+        ) {
             return self.on_take(env, index, stack);
         }
         let left = if self.slots[index].role == super::Role::CraftResult {

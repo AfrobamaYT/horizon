@@ -2455,6 +2455,49 @@ fn console_level(active: super::Dim) -> Option<super::Dim> {
     (active != super::Dim::Overworld).then_some(super::Dim::Overworld)
 }
 
+impl Game<'_> {
+    pub(super) fn stop_after_crash(&mut self, message: &str) -> Result<()> {
+        // Single player's server thread (`integrated.rs`) has no console: it logs to the game's log.
+        let integrated = self.serving.is_some();
+        let warn = |message: &str| {
+            if integrated {
+                log::warn!("Horizon: {message}");
+            } else {
+                log("WARN", message);
+            }
+        };
+        if integrated {
+            // `message` already says whether the tick panicked or failed.
+            log::error!("Horizon: {message}");
+        } else {
+            log("ERROR", &format!("The server thread panicked: {message}"));
+        }
+        let acting = self.lan_acting;
+        let hub_lost = self.lan.is_none();
+        if let (Some(conn), Some(host)) = (acting, self.lan.as_mut()) {
+            host.hub
+                .guests
+                .update_connection(conn, |guest| guest.placed = false);
+        }
+        if hub_lost {
+            warn("The panic interrupted the network tick: players are not saved, only the world");
+        } else if acting.is_some() {
+            warn("The panic interrupted a player's turn: that player keeps the last saved file");
+        }
+        if integrated {
+            // `IntegratedServer.stopServer`'s steps; `save_guest` skips the guest unplaced above.
+            return self.stop_integrated(true);
+        }
+        self.native_lifecycle.begin_close();
+        log("INFO", "Saving worlds");
+        self.save_game()?;
+        self.log_saved_levels();
+        self.native_lifecycle_world_closed();
+        self.lan_close(false);
+        Err(format!("the server thread panicked: {message}").into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -2788,48 +2831,5 @@ mod tests {
         assert!(lists.bans.remove(&steve));
         assert!(lists.can_login(address, &steve).is_none());
         fs::remove_dir_all(dir).unwrap();
-    }
-}
-
-impl Game<'_> {
-    pub(super) fn stop_after_crash(&mut self, message: &str) -> Result<()> {
-        // Single player's server thread (`integrated.rs`) has no console: it logs to the game's log.
-        let integrated = self.serving.is_some();
-        let warn = |message: &str| {
-            if integrated {
-                log::warn!("Horizon: {message}");
-            } else {
-                log("WARN", message);
-            }
-        };
-        if integrated {
-            // `message` already says whether the tick panicked or failed.
-            log::error!("Horizon: {message}");
-        } else {
-            log("ERROR", &format!("The server thread panicked: {message}"));
-        }
-        let acting = self.lan_acting;
-        let hub_lost = self.lan.is_none();
-        if let (Some(conn), Some(host)) = (acting, self.lan.as_mut()) {
-            host.hub
-                .guests
-                .update_connection(conn, |guest| guest.placed = false);
-        }
-        if hub_lost {
-            warn("The panic interrupted the network tick: players are not saved, only the world");
-        } else if acting.is_some() {
-            warn("The panic interrupted a player's turn: that player keeps the last saved file");
-        }
-        if integrated {
-            // `IntegratedServer.stopServer`'s steps; `save_guest` skips the guest unplaced above.
-            return self.stop_integrated(true);
-        }
-        self.native_lifecycle.begin_close();
-        log("INFO", "Saving worlds");
-        self.save_game()?;
-        self.log_saved_levels();
-        self.native_lifecycle_world_closed();
-        self.lan_close(false);
-        Err(format!("the server thread panicked: {message}").into())
     }
 }

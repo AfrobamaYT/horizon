@@ -3729,7 +3729,8 @@ pub fn item_frame_from_nbt(tag: &Tag, id: u32) -> Option<ItemFrame> {
         facing: hanging::wrap_data_value(number(tag.get("Facing")).unwrap_or(0), 6),
         glow: kind(tag).as_deref() == Some("minecraft:glow_item_frame"),
         item: tag.get("Item").and_then(item_from_nbt),
-        rotation: (number(tag.get("ItemRotation")).unwrap_or(0) & 7) as i8,
+        // `TagValueInput.getByteOr` narrows before `ItemFrame.setRotation`'s remainder.
+        rotation: (tag.get("ItemRotation").and_then(int_value).unwrap_or(0) as i8) % 8,
         drop_chance: float(tag.get("ItemDropChance")).map_or(1.0, |v| v as f32),
         fixed: flag(tag, "Fixed"),
         invisible: flag(tag, "Invisible"),
@@ -6207,7 +6208,7 @@ mod tests {
             attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
-            air: 300,
+            air: 32767,
             no_gravity: false,
             id: 0,
             position: Vec3::new(1.0, 2.0, 3.0),

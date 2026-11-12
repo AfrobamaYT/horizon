@@ -83,12 +83,12 @@ impl Game<'_> {
         if !crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
             horizon_client::health::Hurting::Entity(id, kind, source),
             vanilla,
-        ) {
-            if self.hurt_cart_result(i, damage, self.creative, burning) && damage > 0.0 {
-                let (knockback, _) = self.extra_knockback(kind, scale);
-                self.special_attack_slowdown(knockback);
-                self.special_attack_exhaustion();
-            }
+        ) && self.hurt_cart_result(i, damage, self.creative, burning)
+            && damage > 0.0
+        {
+            let (knockback, _) = self.extra_knockback(kind, scale);
+            self.special_attack_slowdown(knockback);
+            self.special_attack_exhaustion();
         }
         self.vehicle_attack_sounds(area, sweep, magic.then_some(id));
         // Player.onAttack: the hit starts the attack strength again.

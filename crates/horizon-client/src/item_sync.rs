@@ -1326,10 +1326,10 @@ mod tests {
         assert!(consumable(&stack, &items).is_none());
 
         // /give @s stick[consumable={}]
-        stack.data_mut().other = vec![(
-            "minecraft:consumable".into(),
-            Tag::Compound(Default::default()),
-        )];
+        stack.data_mut().set_other(
+            "minecraft:consumable",
+            Some(Tag::Compound(Default::default())),
+        );
         let c = consumable(&stack, &items).expect("stick has consumable component");
         assert_eq!(c.seconds, 1.6);
         assert_eq!(c.ticks(), 32);
@@ -1338,9 +1338,9 @@ mod tests {
         assert!(c.particles);
 
         // /give @s stick[consumable={consume_seconds:3.0f,animation:"drink",sound:"minecraft:entity.generic.drink"}]
-        stack.data_mut().other = vec![(
-            "minecraft:consumable".into(),
-            Tag::compound([
+        stack.data_mut().set_other(
+            "minecraft:consumable",
+            Some(Tag::compound([
                 ("consume_seconds", Tag::Float(3.0f32.to_bits())),
                 ("animation", Tag::String("drink".into())),
                 (
@@ -1348,8 +1348,8 @@ mod tests {
                     Tag::String("minecraft:entity.generic.drink".into()),
                 ),
                 ("has_consume_particles", Tag::Byte(0)),
-            ]),
-        )];
+            ])),
+        );
         let c = consumable(&stack, &items).expect("custom drink stick");
         assert_eq!(c.seconds, 3.0);
         assert_eq!(c.ticks(), 60);
