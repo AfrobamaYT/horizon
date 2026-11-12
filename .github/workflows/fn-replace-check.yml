@@ -4,30 +4,18 @@ name: fn-replace-check
 # (tools/ci/fn_replace_check.sh): function replacement, bridges, support modules, a published loop,
 # a mod with registry dependencies, and the refusals by name. So a change that breaks native mods
 # fails here and not on a player's machine (#1102). Build and link only: no game runs and no vanilla
-# data is read. Checked on main pushes, dispatches, and pull requests that touch what it builds.
+# data is read. Checked on main pushes and by dispatch, never on pull requests.
 on:
   push:
     branches: [main]
-  pull_request:
-    paths:
-      - launcher/**
-      - crates/horizon-mod-api-gen/**
-      - crates/horizon-mod-api-macros/**
-      - crates/horizon-mod-points/**
-      - crates/horizon-mod-point-emit/**
-      - tools/ci/fn_replace_check.sh
-      - tools/ci/fn-replace-check/**
-      - tools/prebuilt_game.py
-      - .github/workflows/fn-replace-check.yml
   workflow_dispatch:
 permissions:
   contents: read
+# One run per commit, never cancelled: a newer main push must not replace a queued run, or the earlier
+# head is never proven.
 concurrency:
-  # A new push to a pull request replaces its running check, so the new head starts at once instead of
-  # queuing behind a stale one. Main is never cancelled: a started run finishes, and a newer main push
-  # replaces only the waiting one.
-  group: fn-replace-check-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: fn-replace-check-${{ github.sha }}
+  cancel-in-progress: false
 env:
   # sccache (shared per Dyna host) cannot cache incremental compiles, so every Rust job builds non-incremental.
   CARGO_INCREMENTAL: 0
@@ -105,15 +93,7 @@ jobs:
           echo "FNR_SCRATCH=$scratch" >> "$GITHUB_ENV"
       # The SDK is built with the launcher's Rust: a mod's code is compiled against its metadata.
       - name: Server SDK, warnings denied
-        run: |
-          # PRs prove staged exports and native linking, not shipped optimization settings.
-          # Keep these overrides step-local: main/dispatch SDKs and optimized mod builds
-          # retain the shipped release profile (ThinLTO and one codegen unit).
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            export CARGO_PROFILE_RELEASE_LTO=off
-            export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
-          fi
-          python3 tools/prebuilt_game.py build "$FNR_SCRATCH/prebuilt" --server
+        run: python3 tools/prebuilt_game.py build "$FNR_SCRATCH/prebuilt" --server
       - name: Build the launcher
         run: cargo build --release --locked --manifest-path launcher/Cargo.toml
       - name: Function replacement check (build and link)

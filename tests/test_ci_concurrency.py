@@ -10,7 +10,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools/ci/vendor/pyyaml-6.0.3.zip"))
 import yaml
 
-WORKFLOWS = [ROOT / ".github/workflows" / name for name in ("dyna-ci.yml", "fn-replace-check.yml")]
+WORKFLOWS = [ROOT / ".github/workflows/dyna-ci.yml"]
+# Main pushes and dispatch only, one run per commit (owner, 2026-11-12).
+MAIN_ONLY = [ROOT / ".github/workflows" / name for name in ("wasm-mods.yml", "fn-replace-check.yml")]
 
 
 def expression_value(expression, github):
@@ -84,6 +86,26 @@ class ConcurrencyTests(unittest.TestCase):
                 self.assertNotEqual(first[0], main[0], "a PR must not cancel main")
                 for _, cancel in (first, update, other_pr):
                     self.assertIs(cancel, True, "PR events must still cancel their previous checks")
+
+
+    def test_main_only_checks_never_run_on_pull_requests(self):
+        for path in MAIN_ONLY:
+            with self.subTest(workflow=path.name):
+                triggers = yaml.load(path.read_text(), Loader=yaml.BaseLoader)["on"]
+                self.assertEqual(set(triggers), {"push", "workflow_dispatch"})
+                self.assertEqual(triggers["push"], {"branches": ["main"]})
+
+    def test_main_only_checks_run_once_per_commit(self):
+        for path in MAIN_ONLY:
+            with self.subTest(workflow=path.name):
+                first = concurrency_for(path, "push", "a" * 40)
+                next_push = concurrency_for(path, "push", "b" * 40)
+                dispatch = concurrency_for(path, "workflow_dispatch", "c" * 40)
+                self.assertNotEqual(first[0], next_push[0], "a newer main push must not replace a queued run")
+                self.assertEqual(first[0], concurrency_for(path, "workflow_dispatch", "a" * 40)[0],
+                                 "a dispatch of the same commit queues behind its run")
+                for _, cancel in (first, next_push, dispatch):
+                    self.assertIs(cancel, False, "no run of these checks is cancelled")
 
 
 if __name__ == "__main__":
