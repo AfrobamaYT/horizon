@@ -34,7 +34,7 @@ impl GeneralTypesRegistrar for PartRegistrar {
         };
         let id_for_log = id.clone();
         let result = (|| {
-            if crate::LoadedMods::new()
+            if mod_vocab::__private::parts_installation::loaded_mods()
                 .get(self.mod_id)
                 .is_some_and(|package| package.side() != crate::Side::Both)
             {
@@ -51,7 +51,10 @@ impl GeneralTypesRegistrar for PartRegistrar {
                 return Err(Error::NotFinite);
             }
             for feature in required_features {
-                if crate::LoadedMods::new().get(feature).is_none() {
+                if mod_vocab::__private::parts_installation::loaded_mods()
+                    .get(feature)
+                    .is_none()
+                {
                     return Err(Error::UnknownDependency);
                 }
             }
