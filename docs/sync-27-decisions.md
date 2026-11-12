@@ -24,6 +24,8 @@ slice exposed through the API. This sync does not add that new capability.
 Existing engine firework rendering already passes the audible flag based on
 rocket silence in `game/entities/fireworks.rs`; that path is retained.
 
+Refs #3474 for an API-owned typed fireworks request and its audible flag.
+
 ## UUID and NBT lookup: typed coverage, no legacy services
 
 The upstream shared UUID lookup and dimension-plus-numeric-ID NBT helpers are
@@ -34,3 +36,18 @@ entity tests now cover UUID word ordering, NBT without `id`, refusal outside
 the entity's level, and successful reads after returning to its level. This
 ports the data contract, not the removed contextless service surface. A new
 cross-level UUID query API is outside this sync and is not claimed available.
+
+Refs #3473 for typed cross-level UUID lookup.
+
+## Registry image build context: carried
+
+Refs #3472. Vocabulary generation tracks the engine's native hook declarations.
+The registry image now copies `crates/horizon-client/src/game/native_hooks`, and
+Railway watches that directory. This addresses the missing build-context input;
+a registry image build was not run locally.
+
+## Server settings fragment: helper-only
+
+The upstream fragment names a helper, not a new hook moment. The sync does not
+restore a contextless helper or add a duplicate hook; no new capability issue is
+needed for this fragment.
