@@ -1654,8 +1654,8 @@ impl LevelAccess for GameLevel<'_> {
                 signal
             };
         }
-        if let Some(signal) = books::lectern_signal(self.world, pos) {
-            return signal * i32::from(books::has_book_state(self.registry, state));
+        if let Some(signal) = books::lectern_signal(self.world, self.registry, state, pos) {
+            return signal;
         }
         if let Some(signal) =
             machines::shelf_signal(self.world, self.registry, state, pos, direction)
@@ -4223,11 +4223,10 @@ impl Game<'_> {
     fn aim(&self) -> Option<([f64; 3], [f64; 3])> {
         // Minecraft.pick: from the camera entity's eyes along its view
         // (LivingEntity.getViewYRot: the head's yaw).
-        if let Some(m) = self.camera_mob() {
-            return Some((
-                [m.position.x, m.eye_y(), m.position.z],
-                pick_view_vector(m.head_yaw, m.head_pitch),
-            ));
+        if let Some(e) = self.spectated_camera_snapshot() {
+            let [x, y, z] = e.position;
+            let eye = [x, y + f64::from(e.eye_height), z];
+            return Some((eye, pick_view_vector(e.y_rot, e.x_rot)));
         }
         Some((self.eye_position()?, pick_view_vector(self.yaw, self.pitch)))
     }
@@ -4274,7 +4273,7 @@ impl Game<'_> {
         Some(b)
     }
     fn outline_context_kind(&self) -> horizon_world::collision_context::EntityContextKind {
-        if self.camera_mob().is_some() {
+        if self.spectated_camera_snapshot().is_some() {
             horizon_world::collision_context::EntityContextKind::Living
         } else {
             horizon_world::collision_context::EntityContextKind::Player
@@ -7274,6 +7273,7 @@ impl Game<'_> {
                     .with_level(|b, _, _| b.cake_candle_state(state, item.as_deref()).is_some());
                 let pots_flower = self
                     .with_level(|b, _, _| b.potted_flower_state(state, item.as_deref()).is_some());
+                let sign_consumes = self.sign_consumes_click(hit.pos);
                 use horizon_world::level::{InteractionResult, UseBranch};
                 let item_result = match block_answer {
                     Some(answer) => native_hooks::block_use_result(answer),
@@ -7377,7 +7377,11 @@ impl Game<'_> {
                         _ => {}
                     }
                 }
-                if result.consumes_action() {
+                let sign_passes = empty_template_ran
+                    && branch == UseBranch::WithoutItem
+                    && self.res.facts().get(state).sign_form().is_some()
+                    && !sign_consumes;
+                if result.consumes_action() && !sign_passes {
                     // ServerPlayerGameMode.useItemOn: ITEM_USED_ON_BLOCK with the stack before the use, or DEFAULT_BLOCK_USE.
                     match branch {
                         horizon_world::level::UseBranch::ItemOn => {
@@ -7720,6 +7724,8 @@ impl Game<'_> {
             return Ok(true);
         };
         let target = [pos.x, pos.y, pos.z];
+        let game_master = self.can_use_game_master_blocks();
+        let state = self.lectern_placed(target, state, &stack, game_master)?;
         let state = self.apply_item_block_state(target, state, &stack)?;
         let key = (target[0], target[1], target[2]);
         if !self.world.block_entities.stateful_entity(state.0)
@@ -7728,7 +7734,6 @@ impl Game<'_> {
             self.world.block_entities.insert(key, entity);
         }
         if self.world.block_entities.get(&key).is_some() {
-            let game_master = self.can_use_game_master_blocks();
             self.apply_placed_item(target, &stack, game_master);
             // Block.setPlacedBy.
             match self.world.block_entities.get(&key) {
@@ -12984,6 +12989,7 @@ impl Game<'_> {
         self.next_entity += 1;
         self.orbs.push(ExperienceOrb {
             attachment_lifetime: Default::default(),
+            fall_distance: 0.0,
             rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,
@@ -14587,7 +14593,7 @@ impl Game<'_> {
         // What faces the camera (particles, item sprites, block entity text) faces a mod's.
         // A spectated entity's view is not the local player's yaw and pitch
         // (`Camera.setup` reads the camera entity), so it is kept too.
-        let spectating = self.camera_mob().is_some();
+        let spectating = self.spectated_camera_snapshot().is_some();
         self.posed_rotation = view
             .filter(|posed| spectating || Some(*posed) != vanilla)
             .map(|(_, yaw, pitch)| (yaw, pitch));
@@ -18106,3 +18112,7 @@ mod crumbling_sprite_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "game/interface/tests/sign_use_tests.rs"]
+mod sign_use_tests;

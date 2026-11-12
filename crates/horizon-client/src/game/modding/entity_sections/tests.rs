@@ -31,7 +31,7 @@ fn observe(test: impl FnOnce(Calls)) {
         Box::new(Listener(calls.clone())),
     )]
     .into();
-    mod_api::testing::with_mods(mods, || test(calls));
+    mod_platform::testing::with_mods(mods, || test(calls));
 }
 
 fn scope(level: crate::game::Dim) -> Scope {

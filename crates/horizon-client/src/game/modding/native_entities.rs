@@ -706,7 +706,7 @@ mod tests {
             }),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.native_joins_skip();
                 let base = game.next_entity;

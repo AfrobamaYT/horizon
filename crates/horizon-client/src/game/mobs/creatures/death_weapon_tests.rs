@@ -137,7 +137,7 @@ fn weapon_case(item: &str, enchantment: &str, level: u32, projectile: bool, swap
             }),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             let attacker_kind = match item {
                 "minecraft:bow" => "minecraft:skeleton",
                 "minecraft:crossbow" => "minecraft:pillager",
@@ -252,7 +252,7 @@ fn death_weapon_e_fall_has_no_weapon() {
             }),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             let ty = game
                 .res
                 .mob_types()

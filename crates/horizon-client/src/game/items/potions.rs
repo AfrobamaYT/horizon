@@ -2952,7 +2952,7 @@ mod tests {
                 }
             }
         }
-        mod_api::__private::install(std::sync::Arc::from([mod_api::ModEntry::new(
+        mod_platform::__private::install(std::sync::Arc::from([mod_api::ModEntry::new(
             "test-potions",
             Box::new(TestMod),
         )]));
@@ -3530,7 +3530,7 @@ mod tests {
                 self.calls.fetch_add(1, Ordering::Relaxed);
                 assert_eq!(
                     event.effect.id,
-                    mod_api::__private::part_tests::effect_key(self.case.id)
+                    mod_platform::__private::part_tests::effect_key(self.case.id)
                 );
                 assert_eq!((event.effect.duration, event.effect.amplifier), (450, 1));
                 assert_eq!(event.screen.id, self.screen);
@@ -3637,7 +3637,7 @@ mod tests {
                         };
                         let mods: Mods =
                             vec![ModEntry::new("effect-tips", Box::new(listener.clone()))].into();
-                        mod_api::testing::with_mods(mods, || {
+                        mod_platform::testing::with_mods(mods, || {
                             let lines = game
                                 .draw_inventory_effects(&mut batch, origin, image_width)
                                 .unwrap();
@@ -3675,7 +3675,7 @@ mod tests {
                                 ModEntry::new("hide-panels", Box::new(HidePanels)),
                             ]
                             .into();
-                            mod_api::testing::with_mods(hidden, || {
+                            mod_platform::testing::with_mods(hidden, || {
                                 assert!(
                                     game.draw_inventory_effects(&mut batch, origin, image_width)
                                         .is_none()

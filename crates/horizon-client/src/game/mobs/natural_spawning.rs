@@ -1855,7 +1855,7 @@ mod tests {
                 };
                 match answer {
                     None => go(),
-                    Some(a) => mod_api::testing::with_mods(
+                    Some(a) => mod_platform::testing::with_mods(
                         vec![mod_api::ModEntry::new(
                             "spawn-checks",
                             Box::new(ChecksMod(a)),
@@ -2006,7 +2006,7 @@ mod tests {
         let out = if mods.is_empty() {
             go()
         } else {
-            mod_api::testing::with_mods(mods.into(), go)
+            mod_platform::testing::with_mods(mods.into(), go)
         };
         let heard = log.lock().unwrap().clone();
         (out, heard)
@@ -2333,7 +2333,7 @@ mod tests {
                 };
                 let outcome = match answer {
                     None => go(game, &mut mob),
-                    Some(a) => mod_api::testing::with_mods(
+                    Some(a) => mod_platform::testing::with_mods(
                         vec![mod_api::ModEntry::new("finalize", Box::new(FinalizeMod(a)))].into(),
                         || go(game, &mut mob),
                     ),
@@ -2388,7 +2388,7 @@ mod tests {
             "count-finalize",
             Box::new(CountFinalize(heard.clone())),
         )];
-        mod_api::testing::with_mods(mods.into(), || {
+        mod_platform::testing::with_mods(mods.into(), || {
             with_game(|game| {
                 let at = [8.5, 64.0, 8.5];
                 let count = || heard.load(std::sync::atomic::Ordering::Relaxed);
@@ -2440,7 +2440,7 @@ mod tests {
             "record-finalize",
             Box::new(RecordFinalize(heard.clone())),
         )];
-        mod_api::testing::with_mods(mods.into(), || {
+        mod_platform::testing::with_mods(mods.into(), || {
             with_game(|game| {
                 game.ui.difficulty = 2;
                 let at = [8.5, 64.0, 8.5];
@@ -2495,7 +2495,7 @@ mod tests {
             "despawns",
             Box::new(Despawns(answer.clone(), asked.clone())),
         )];
-        mod_api::testing::with_mods(mods.into(), || {
+        mod_platform::testing::with_mods(mods.into(), || {
             with_game(|game| {
                 let id = game
                     .spawn_mob(
@@ -2657,7 +2657,7 @@ mod tests {
             return;
         }
         let entries = vec![mod_api::ModEntry::new("clusters", Box::new(ClusterMod))];
-        mod_api::__private::install(entries.into());
+        mod_platform::__private::install(entries.into());
         crate::game::api_values::install_parts(&[mod_api::ModEntry::new(
             "clusters",
             Box::new(ClusterMod),

@@ -1178,7 +1178,7 @@ mod tests {
             assert_eq!(plain_dirt.items.len(), 1);
             let mods: mod_api::Mods =
                 vec![mod_api::ModEntry::new("block-drops", Box::new(DropsMod))].into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 let (heard, after) = break_of(game, ore, "minecraft:diamond", None);
                 assert_eq!(after, ore_after);
                 assert_eq!(heard.items.len(), 1);
@@ -1203,8 +1203,8 @@ mod tests {
     fn a_block_entity_part_gives_back_what_it_held_when_removed() {
         use horizon_client::chunk::Chunk;
         use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields};
-        use mod_api::__private::part_tests::{HOARD, HOARD_ASKED, game_thread};
         use mod_api::Holder;
+        use mod_platform::__private::part_tests::{HOARD, HOARD_ASKED, game_thread};
         use std::sync::Arc;
         use std::sync::atomic::Ordering;
         crate::game::native_entity_refs::tests::with_game(|game| {
@@ -1280,8 +1280,8 @@ mod tests {
     fn a_block_entity_removing_itself_in_its_tick_is_not_asked() {
         use horizon_client::chunk::Chunk;
         use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields, ModContainer};
-        use mod_api::__private::part_tests::{HOARD, HOARD_ASKED};
         use mod_api::Holder;
+        use mod_platform::__private::part_tests::{HOARD, HOARD_ASKED};
         use std::sync::Arc;
         use std::sync::atomic::Ordering;
         let Some(root) = crate::game::native_entity_refs::tests::declared_part_root(

@@ -46,10 +46,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
         std::collections::BTreeSet::new()
     };
     if matches!(&target, Target::Client) {
-        println!(
-            "cargo:rerun-if-changed={}",
-            root.join(".horizon-source-staged").display()
-        );
+        crate::rerun_if_staged(root);
     }
     let generated = sources(root, super::FillMode::Require)?;
     let outputs = match target {
@@ -351,9 +348,9 @@ pub(super) fn generate_points_inner(root: &Path, out_dir: &Path) -> Result<(), S
         .transpose()?;
     // Only a staged copy compiles the points' sites into the game; the wasm host's listener
     // fixture brings its own.
-    let stamp = root.join(".horizon-source-staged");
-    crate::rerun_if_changed(&stamp.display());
-    let staged = stamp.is_file() || cfg!(feature = "listener-fixture");
+    crate::rerun_if_staged(root);
+    let staged =
+        root.join(".horizon-source-staged").is_file() || cfg!(feature = "listener-fixture");
     let code = super::points::records_selected(
         &super::points::game_points(root)?,
         selected.as_ref(),

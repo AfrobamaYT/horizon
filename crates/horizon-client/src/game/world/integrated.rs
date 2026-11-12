@@ -43,10 +43,10 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 pub(super) const NO_ANSWER: &str =
     "the integrated server stopped or did not answer within 10 s (the game log says which)";
 
-/// The server thread's stack: the 8 MB the main thread has (`build.rs`), not a spawned thread's
-/// 2 MB default. It holds the server's `Game` by value (~67 KB, `serve`) and runs every tick on it,
-/// as deep as the main thread's game goes (#2430).
-const SERVER_THREAD_STACK: usize = 8 * 1024 * 1024;
+/// The server thread holds its `Game` by value and runs every tick on it.
+/// It reserves the same guest limit and host headroom as the main thread.
+const SERVER_THREAD_STACK: usize =
+    horizon_guest_stack::GUEST_STACK_BYTES + horizon_guest_stack::HOST_HEADROOM;
 
 /// The server thread's stack size: [`SERVER_THREAD_STACK`], or what `RUST_MIN_STACK` asks for
 /// when that is larger. std reads the variable only for a thread spawned without a size, and
@@ -1433,22 +1433,22 @@ pub(super) mod tests {
     use super::*;
     use mod_api::prelude::*;
 
-    /// The server thread keeps the main thread's 8 MB, and a larger `RUST_MIN_STACK` still
+    /// The server thread keeps guest headroom, and a larger `RUST_MIN_STACK` still
     /// reaches it (#2430).
     #[test]
-    fn the_server_thread_stack_is_the_larger_of_8_mb_and_rust_min_stack() {
-        let eight = 8 * 1024 * 1024;
-        assert_eq!(super::stack_for(None), eight);
+    fn the_server_thread_stack_keeps_guest_headroom_and_larger_overrides() {
+        let minimum = 136 * 1024 * 1024;
+        assert_eq!(super::stack_for(None), minimum);
         assert_eq!(
             super::stack_for(Some("1048576")),
-            eight,
-            "smaller asks keep 8 MB"
+            minimum,
+            "smaller asks keep guest headroom"
         );
-        assert_eq!(super::stack_for(Some("67108864")), 64 * 1024 * 1024);
-        assert_eq!(super::stack_for(Some("16777216")), 16 * 1024 * 1024);
+        assert_eq!(super::stack_for(Some("268435456")), 256 * 1024 * 1024);
+        assert_eq!(super::stack_for(Some("16777216")), minimum);
         assert_eq!(
             super::stack_for(Some("lots")),
-            eight,
+            minimum,
             "an unparsed value is ignored"
         );
     }
@@ -1564,6 +1564,9 @@ pub(super) mod tests {
                 root.clone(),
                 horizon_client::save::LevelShape::OVERWORLD,
             ));
+            // Crash shutdown only saves an adopted world whose storage is owned.
+            game.session_lock = Some(horizon_client::save::SessionLock::acquire(&root).unwrap());
+            game.world_adopted = true;
             game.player = Some(
                 horizon_client::motion::PlayerMotion::new(
                     game.motion,

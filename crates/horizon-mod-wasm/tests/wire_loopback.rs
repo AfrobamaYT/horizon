@@ -2247,3 +2247,8 @@ fn datapack_sync_recipient_and_answer_cross_the_wire() {
 }
 #[path = "wire_loopback/chunk_queries.rs"]
 mod chunk_queries;
+
+#[path = "wire_loopback/client_fireworks.rs"]
+mod client_fireworks;
+#[path = "wire_loopback/play_hit_sound.rs"]
+mod play_hit_sound;

@@ -868,7 +868,7 @@ mod tests {
             let area = Aabb::new(Vec3::new(0.3, 0.0, 0.0), Vec3::new(0.4, 1.0, 0.1));
             assert!(!game.mobs[0].bounds().intersects(area));
             let mods = vec![mod_api::ModEntry::new("resize-test", Box::new(Resize))].into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 game.vehicles_ticking(true);
                 assert!(mob.set_baby(game, false));
                 let cow = &game.mobs[0];
@@ -1096,7 +1096,7 @@ mod boat_callback_review_tests {
             }),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
                 game.boats.push(super::super::boats::Boat::new(
@@ -1138,7 +1138,7 @@ mod boat_callback_review_tests {
             }),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
                 game.boats.push(super::super::boats::Boat::new(

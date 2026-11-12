@@ -3742,7 +3742,7 @@ pub(crate) mod tests {
             })
         };
         check(false);
-        mod_api::testing::with_mods(
+        mod_platform::testing::with_mods(
             vec![mod_api::ModEntry::new("apples", Box::new(AppleSets))].into(),
             || check(true),
         );

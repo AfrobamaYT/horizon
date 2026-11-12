@@ -104,7 +104,9 @@ impl WorldRequest {
         // The loot data does not need the world: it loads beside it (the generator's decoration
         // keeps one core busy) and is done before it opens.
         std::thread::scope(|scope| {
-            let loot = scope.spawn(loot);
+            let loot = horizon_guest_stack::builder()
+                .spawn_scoped(scope, loot)
+                .expect("loot loader thread");
             let prepared = self.prepare_world(res, pack, options, settings, upgrade);
             loot.join()
                 .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
@@ -377,7 +379,7 @@ impl WorldLoader {
         settings: Settings,
         upgrade: Arc<horizon_world::datafix::progress::UpgradeProgress>,
     ) -> Result<Self> {
-        let handle = std::thread::Builder::new()
+        let handle = horizon_guest_stack::builder()
             .name("World initialization".into())
             .spawn(move || {
                 request
@@ -437,7 +439,7 @@ pub(super) fn preload_world_data(
             let resources = resources.to_owned();
             let data_source = data_source.clone();
             let item_data = Arc::clone(item_data);
-            let spawned = std::thread::Builder::new()
+            let spawned = horizon_guest_stack::builder()
                 .name("World data preload".into())
                 .spawn(move || {
                     horizon_threads::behind_server();
@@ -512,7 +514,7 @@ pub(super) fn preload_launch_world(
     let resources = resources.to_owned();
     let data_source = data_source.clone();
     let additional = additional.to_vec();
-    let spawned = std::thread::Builder::new()
+    let spawned = horizon_guest_stack::builder()
         .name("World data preload".into())
         .spawn(move || {
             // Not behind the server: the world's opening waits for it.
@@ -575,7 +577,7 @@ pub(super) fn preload_server_loot(resources: &std::path::Path, item_data: &Arc<I
     }
     let resources = resources.to_owned();
     let item_data = Arc::clone(item_data);
-    let spawned = std::thread::Builder::new()
+    let spawned = horizon_guest_stack::builder()
         .name("Loot preload".into())
         .spawn(move || {
             horizon_threads::behind_server();
@@ -1481,7 +1483,7 @@ mod tests {
         ]));
         level().write(&changed).unwrap();
         set_loaded(Some(vec![record("mismatch_test", "2.0.0")]));
-        mod_api::testing::with_mods(
+        mod_platform::testing::with_mods(
             vec![
                 ModEntry::new("mismatch_test", Box::new(Migrating(heard.clone()))),
                 ModEntry::new("erasing", Box::new(Erasing)),

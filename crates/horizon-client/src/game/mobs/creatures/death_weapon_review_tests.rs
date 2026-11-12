@@ -29,7 +29,7 @@ fn fixture(expected: Option<ItemStack>, run: impl FnOnce(&mut Game<'_>)) {
             }),
         )]
         .into();
-        mod_api::testing::with_mods(mods, || run(game));
+        mod_platform::testing::with_mods(mods, || run(game));
         assert_eq!(*seen.lock().unwrap(), 1);
     });
 }
@@ -233,7 +233,7 @@ fn death_weapon_without_subscriber_does_not_capture() {
         return;
     }
     crate::game::native_entity_refs::tests::with_game(|game| {
-        mod_api::testing::with_mods(Vec::<mod_api::ModEntry>::new().into(), || {
+        mod_platform::testing::with_mods(Vec::<mod_api::ModEntry>::new().into(), || {
             game.mobs.push(victim(game));
             assert!(hit(
                 game,
