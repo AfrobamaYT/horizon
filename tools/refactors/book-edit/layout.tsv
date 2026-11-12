@@ -35,8 +35,8 @@ loops.md	concepts/native-route/3-loops.md
 bridges.md	concepts/native-route/4-bridges.md
 support-modules.md	concepts/native-route/5-support-modules.md
 native-state.md	concepts/native-route/6-native-state.md
-concepts/trait-mods/005-the-typed-api-from-mixin-code.md	concepts/native-route/7-typed-api-from-mixin-code.md
-native-how-it-works.md	concepts/native-route/8-how-it-works.md
+concepts/trait-mods/005-the-typed-api-from-mixin-code.md	concepts/injections/typed-api.md
+native-how-it-works.md	concepts/native-route/7-how-it-works.md
 concepts/trait-mods/026-testing-a-trait-mod.md	concepts/testing.md
 # Getting started
 concepts/trait-mods/000-writing-a-trait-mod.md	start/writing-hooks.md

@@ -18,7 +18,7 @@ cd greeter
 # edit horizon-mod.toml: delete the [native] table and its keys
 ```
 
-`src/lib.rs` stays exactly as it is:
+Keep the code in `src/lib.rs` as it is:
 
 ```rust,ignore
 {{#include ../../examples/src/greeter.rs:mod}}

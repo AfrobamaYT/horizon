@@ -3,7 +3,7 @@
 A content mod adds blocks, items, recipes, loot, models and textures with data files alone. In this page you
 make one block, see it in the game, and pack it as a `.hmod`.
 
-You need Rust's `cargo` and the Horizon launcher with an instance to play in.
+You need Rust 1.95 or newer (`cargo`) and the Horizon launcher with an instance to play in.
 
 ## 1. Install the mod tool
 
