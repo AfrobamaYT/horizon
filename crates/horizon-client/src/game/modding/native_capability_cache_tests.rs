@@ -72,7 +72,9 @@ impl Hooks for CacheBench {
         let lodestone = r.block_key("minecraft:lodestone");
         r.block_capability(&COUNTED, &lodestone, |_, _, _, entity| {
             ASKED.fetch_add(1, Ordering::Relaxed);
-            entity.is_none().then(|| Box::new(Empty(SLOTS.load(Ordering::Relaxed))) as _)
+            entity
+                .is_none()
+                .then(|| Box::new(Empty(SLOTS.load(Ordering::Relaxed))) as _)
         });
     }
 }
@@ -441,21 +443,41 @@ fn a_providers_invalidation_counts_once_after_its_commit_and_not_when_aborted() 
             SLOTS.store(2, Ordering::Relaxed);
             let aborted = (game as &mut dyn ServerHost).transaction(|host, _| {
                 assert!(level.invalidate_capabilities(host, pos));
-                assert_eq!(cache.get(host).map(|h| h.size(host)), Some(1), "not before the commit");
+                assert_eq!(
+                    cache.get(host).map(|h| h.size(host)),
+                    Some(1),
+                    "not before the commit"
+                );
                 Err::<(), ()>(())
             });
             assert!(aborted.is_err());
-            assert_eq!(slots(game, &mut cache), Some(1), "an aborted invalidation changes nothing");
+            assert_eq!(
+                slots(game, &mut cache),
+                Some(1),
+                "an aborted invalidation changes nothing"
+            );
             assert_eq!(ask(game, &mut cache), (true, start));
             let committed = (game as &mut dyn ServerHost).transaction(|host, _| {
                 assert!(level.invalidate_capabilities(host, pos));
                 assert!(level.invalidate_capabilities(host, pos));
-                assert_eq!(cache.get(host).map(|h| h.size(host)), Some(1), "not before the commit");
+                assert_eq!(
+                    cache.get(host).map(|h| h.size(host)),
+                    Some(1),
+                    "not before the commit"
+                );
                 Ok::<(), ()>(())
             });
             assert!(committed.is_ok());
-            assert_eq!(slots(game, &mut cache), Some(2), "the provider's new answer");
-            assert_eq!(ask(game, &mut cache), (true, start + 1), "asked once for both");
+            assert_eq!(
+                slots(game, &mut cache),
+                Some(2),
+                "the provider's new answer"
+            );
+            assert_eq!(
+                ask(game, &mut cache),
+                (true, start + 1),
+                "asked once for both"
+            );
             assert_eq!(ask(game, &mut cache), (true, start + 1));
         },
     );
@@ -468,19 +490,40 @@ fn a_block_invalidated_before_its_chunk_unloads_is_asked_again_after_it_reloads(
         "game::native_capability_cache_tests::a_block_invalidated_before_its_chunk_unloads_is_asked_again_after_it_reloads",
         |game, level| {
             let pos = [8, 64, 8];
-            let lodestone = game.pack.assets.registry.default_state("minecraft:lodestone").unwrap();
+            let lodestone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:lodestone")
+                .unwrap();
             game.world.set(pos[0], pos[1], pos[2], lodestone).unwrap();
             let mut cache = BlockCapabilityCache::new(&COUNTED, level, pos, None);
             let start = ASKED.load(Ordering::Relaxed);
-            assert_eq!(ask(game, &mut cache), (true, start + 1), "a block-only answer");
+            assert_eq!(
+                ask(game, &mut cache),
+                (true, start + 1),
+                "a block-only answer"
+            );
             assert!(level.invalidate_capabilities(game, pos));
             // The chunk leaves before the cache is asked again, taking the invalidation with it.
             game.world.unload_chunk((0, 0));
-            assert!(!level.invalidate_capabilities(game, pos), "an unloaded position refuses");
-            game.world.chunks.insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            assert!(
+                !level.invalidate_capabilities(game, pos),
+                "an unloaded position refuses"
+            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             game.world.set(pos[0], pos[1], pos[2], lodestone).unwrap();
-            assert!(game.block_entity(level, pos).is_none(), "nothing but the block to compare");
-            assert_eq!(ask(game, &mut cache), (true, start + 2), "asked again, not a stale hit");
+            assert!(
+                game.block_entity(level, pos).is_none(),
+                "nothing but the block to compare"
+            );
+            assert_eq!(
+                ask(game, &mut cache),
+                (true, start + 2),
+                "asked again, not a stale hit"
+            );
             assert_eq!(ask(game, &mut cache), (true, start + 2));
         },
     );
