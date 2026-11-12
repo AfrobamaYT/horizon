@@ -149,12 +149,22 @@ impl Game<'_> {
                 super::entity::taken_pass_tests::after_take(self);
                 let w = self.mob_world_base(&[]);
                 let mut events = Vec::new();
+                let mut teleports = Vec::new();
                 let moved = mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
-                    horizon_client::mobs::living::random_teleport(m, &w, at, avoid, &mut events)
+                    let moved = horizon_client::mobs::living::random_teleport(
+                        m,
+                        &w,
+                        at,
+                        avoid,
+                        &mut events,
+                    );
+                    teleports = std::mem::take(&mut m.teleports);
+                    moved
                 });
                 self.mobs
                     .restore(mobs, horizon_client::join_seq::RestoreOrder::SurvivorsFirst);
                 let _ = self.handle_mob_events(events);
+                self.entity_sections_teleported(id, &teleports);
                 moved
             }
             _ => false,

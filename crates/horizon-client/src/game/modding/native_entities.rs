@@ -359,6 +359,7 @@ impl Game<'_> {
     /// An entity taken out of the level without leaving it (an item through
     /// an End gateway): forgotten, not told of.
     pub(super) fn native_leave_skip(&mut self, id: u32) {
+        self.entity_section_forget(id);
         if let Ok(i) = self.persist.live.binary_search_by_key(&id, |l| l.0) {
             self.persist.live.remove(i);
         }
@@ -368,6 +369,7 @@ impl Game<'_> {
         if self.remote.is_some() {
             return;
         }
+        self.entity_section_forget(id);
         if let Ok(i) = self.persist.live.binary_search_by_key(&id, |l| l.0) {
             let (id, kind, _) = self.persist.live.remove(i);
             let dimension = self.dim.id();
@@ -406,6 +408,7 @@ impl Game<'_> {
         }
         while let Some(i) = self.persist.live.iter().position(|l| !l.2) {
             let (id, kind, _) = self.persist.live.remove(i);
+            self.entity_section_forget(id);
             let dimension = self.dim.id();
             self.native_entity_leave_level(dimension, id, &kind);
         }

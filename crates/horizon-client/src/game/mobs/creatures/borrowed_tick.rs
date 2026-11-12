@@ -110,6 +110,8 @@ impl Game<'_> {
         let uuid = state.uuid;
         let level_id = state.level_id;
         let round = state.round;
+        // Each mob's position updates in its tick, in order, filed once the game is free.
+        let mut section_moves = std::mem::take(&mut self.native_lifecycle.entity_sections.ticked);
         let mut dispatch_panic = None;
         let mut pushes = std::mem::take(state.pushes);
         let original_len = snapshot.len();
@@ -496,6 +498,13 @@ impl Game<'_> {
                         super::super::tick_profile::add(level_id, &kind, started);
                     }
                     let m = &mut mobs[i];
+                    // Each teleport in its tick (`snapTo`) is a position update of its own,
+                    // then where the tick left it (`EntityInLevelCallback.onMove` for each).
+                    if round.sections() {
+                        section_moves.extend(m.teleports.iter().map(|&at| (m.id, at)));
+                        section_moves.push((m.id, m.position));
+                    }
+                    m.teleports.clear();
                     if let Some(selection) = &selection
                         && selection.has_switched()
                         && let Some(player) = selection.selected()
@@ -577,6 +586,7 @@ impl Game<'_> {
             // The callback sees the real owning rows and level RNG/attachments,
             // and its writes are the state the continuation will resume from.
             lent.give_back(&mut self.world);
+            self.entity_sections_ticked(&mut section_moves);
             // Earlier mobs' pushes become visible before the listener can read
             // or replace another actor's velocity. Departed rows must no longer
             // resolve as live handles while the batch is temporarily installed.
@@ -710,6 +720,8 @@ impl Game<'_> {
                 horizon_client::mobs::apply_mob_pushes(m, &mut pushes);
             }
         }
+        self.entity_sections_ticked(&mut section_moves);
+        self.native_lifecycle.entity_sections.ticked = section_moves;
         *state.pushes = pushes;
         *state.mobs = mobs;
         *state.snapshot = snapshot;

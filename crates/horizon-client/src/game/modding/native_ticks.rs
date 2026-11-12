@@ -56,6 +56,10 @@ impl TickRound {
     pub(super) fn halt(&mut self, id: u32) {
         self.halted.push(id);
     }
+    /// Whether `entity_entering_section` is listened to: each entity's position updates are filed.
+    pub(super) fn sections(&self) -> bool {
+        self.sections
+    }
     /// Whether the round keeps the entities that tick: a mod hears their ticks or their moves.
     pub(super) fn listening(&self) -> bool {
         self.listening || self.sections

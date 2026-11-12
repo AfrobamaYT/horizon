@@ -233,6 +233,124 @@ fn a_server_mob_moved_twice_in_one_tick_is_told_each_move() {
     });
 }
 
+/// A cow joined at `at` in a loaded, empty chunk (0, 0), floating (`NoGravity`): filed by its
+/// join, as `addEntity` files it.
+fn floating_cow(game: &mut crate::game::Game<'_>, at: [f64; 3]) -> u32 {
+    if !game.world.chunks.contains_key(&(0, 0)) {
+        game.world.chunks.insert(
+            (0, 0),
+            std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+        );
+    }
+    let id = game
+        .spawn_mob_spawned("cow", at, crate::game::creatures::SpawnSite::Plain)
+        .unwrap();
+    assert!(game.native_joins_flush(false, 0));
+    let i = game.mobs.iter().position(|m| m.id == id).unwrap();
+    game.mobs.update(i, |m| m.no_gravity = true);
+    id
+}
+
+/// One mob tick of the cow `id`: it teleports to `to` (`snapTo`, as an enderman's, a pet's or a
+/// shulker's teleport does in its tick), then walks on at `velocity`.
+fn teleport_then_walk(game: &mut crate::game::Game<'_>, id: u32, to: [f64; 3], velocity: [f64; 3]) {
+    use horizon_core::geometry::Vec3;
+    let i = game.mobs.iter().position(|m| m.id == id).unwrap();
+    game.mobs.update(i, |m| {
+        m.snap_to(Vec3::new(to[0], to[1], to[2]));
+        m.velocity = Vec3::new(velocity[0], velocity[1], velocity[2]);
+    });
+    game.tick_creature_entities().unwrap();
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_mobs_teleport_and_its_walk_in_one_tick_are_two_crossings() {
+    observe(|calls| {
+        with_game(|game| {
+            // Section y 6 (blocks 96 to 111), teleported near the top of y 7, then 0.6 up into y 8.
+            let id = floating_cow(game, [8.5, 100.0, 8.5]);
+            teleport_then_walk(game, id, [8.5, 127.75, 8.5], [0.0, 0.6, 0.0]);
+            let at = game.mobs.iter().find(|m| m.id == id).unwrap().position;
+            assert!(at.y >= 128.0, "the walk took it into y 8: {at:?}");
+            assert_eq!(
+                calls.lock().unwrap().as_slice(),
+                &[
+                    (false, id, [0, 6, 0], [0, 7, 0], false),
+                    (false, id, [0, 7, 0], [0, 8, 0], false),
+                ]
+            );
+        })
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_mobs_teleport_out_and_its_walk_back_in_one_tick_are_two_crossings() {
+    observe(|calls| {
+        with_game(|game| {
+            // Teleported just over y = 112 into section y 7, then 0.6 down, back into y 6.
+            let id = floating_cow(game, [8.5, 100.0, 8.5]);
+            teleport_then_walk(game, id, [8.5, 112.25, 8.5], [0.0, -0.6, 0.0]);
+            let at = game.mobs.iter().find(|m| m.id == id).unwrap().position;
+            assert!(at.y < 112.0, "the walk took it back into y 6: {at:?}");
+            assert_eq!(
+                calls.lock().unwrap().as_slice(),
+                &[
+                    (false, id, [0, 6, 0], [0, 7, 0], false),
+                    (false, id, [0, 7, 0], [0, 6, 0], false),
+                ]
+            );
+        })
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_mods_random_teleport_of_a_mob_is_told_at_once() {
+    observe(|calls| {
+        with_game(|game| {
+            crate::game::native_living_position::tests::floor_and_zombies(game);
+            // The zombie at (0.5, 64, 0.5) is filed where it stands, then sent to land on the
+            // floor at (-3.5, 64, -3.5): one section west and one north.
+            game.teleport_to(Target::Mob(12), [0.5, 64.0, 0.5], None, true);
+            assert!(calls.lock().unwrap().is_empty());
+            let zombie = game.living(game.entity(12).unwrap()).unwrap();
+            assert!(game.living_random_teleport(zombie, [-3.5, 66.0, -3.5], None));
+            assert_eq!(
+                calls.lock().unwrap().as_slice(),
+                &[(false, 12, [0, 4, 0], [-1, 4, -1], true)]
+            );
+        })
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_server_entity_that_leaves_is_forgotten() {
+    observe(|_| {
+        with_game(|game| {
+            let id = floating_cow(game, [8.5, 100.0, 8.5]);
+            assert!(
+                game.native_lifecycle
+                    .entity_sections
+                    .filed
+                    .contains_key(&id)
+            );
+            // Despawned or unloaded: no longer in any list, so it leaves the level.
+            game.mobs.clear();
+            game.native_leaves_flush();
+            assert!(
+                !game
+                    .native_lifecycle
+                    .entity_sections
+                    .filed
+                    .contains_key(&id)
+            );
+        })
+    });
+}
+
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_server_mobs_own_move_is_told_at_the_end_of_its_tick() {
