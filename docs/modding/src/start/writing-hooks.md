@@ -8,7 +8,7 @@ This page gives the rules that shape follows.
 - `horizon-mod.toml` is the only source of the mod's id and version. Cargo's package name and version are not
   the mod's identity.
 - `Cargo.toml` depends on `horizon-mod-api` (lib name `mod_api`), never on the game's own crates. Other
-  dependencies follow [The mod's crate](../how-to/native-mods/01-the-mod-s-crate.md).
+  dependencies follow [The mod's crate](../how-to/native-mods/01-the-mods-crate.md).
 - `src/lib.rs` holds the one marked `impl Hooks`, at the crate root.
 
 ## The mod type and its hooks
