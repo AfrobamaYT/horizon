@@ -80,7 +80,7 @@ pub struct BlockEntities {
     generations: FxHashMap<Pos, u64>,
     on_load: std::collections::VecDeque<(Pos, u64)>,
     on_load_enabled: bool,
-    attachments: HashMap<Pos, Attachments>,
+    attachments: FxHashMap<Pos, Attachments>,
     attachment_observer: Option<Arc<dyn AttachmentObserver<BlockEntityIdentity>>>,
     /// `Level.blockEntityTickers`: positions and the slot each was given.
     tickers: Arc<Vec<(Pos, u32)>>,
@@ -152,7 +152,7 @@ fn identity(pos: Pos, generations: &FxHashMap<Pos, u64>) -> BlockEntityIdentity 
 }
 
 fn retire_attachments(
-    maps: &mut HashMap<Pos, Attachments>,
+    maps: &mut FxHashMap<Pos, Attachments>,
     observer: Option<&Arc<dyn AttachmentObserver<BlockEntityIdentity>>>,
     generations: &FxHashMap<Pos, u64>,
     pos: &Pos,
