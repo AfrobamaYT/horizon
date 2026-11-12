@@ -731,7 +731,7 @@ impl Game<'_> {
                 });
             }
         }
-        level.actions.rollback();
+        level.actions.rollback_in(self);
         for (uuid, kept) in level.players {
             self.native_as_player(uuid, |g| {
                 g.inventory = kept.inventory;
