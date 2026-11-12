@@ -55,8 +55,8 @@ refuse the manifest. Native mods may declare top-level `internals`, an array of 
 
 API points use top-level declarations.
 API function listeners use top-level `[[inject]]`: `id`, `at`, lowercase `kind`, `with`, and optional `hash`,
-with optional `access` (default `api`) and `priority` (default 0). `head`, `return` and `replace` are supported
-for API points; `access = "internals"` is refused by name. Use `[[native.mixin]]` for game internals.
+with optional `priority` (default 0). `head`, `return` and `replace` are supported.
+The removed `access` key is refused by name. Use `[[native.mixin]]` for game internals.
 Unknown fields are refused by the schema. API function declarations use only `[[inject]]`.
 See [Injections](../injections.md) for the fields and point injections, and
 [Native mods](../how-to/native-mods.md#named-hook-points) for the named hook contracts.
