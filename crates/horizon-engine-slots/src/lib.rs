@@ -73,6 +73,8 @@ pub struct Slots {
     flags: OnceLock<Box<[bool]>>,
 }
 impl Slots {
+    // Only tests build a table: no engine-owned activity table is published yet (#2697 omits it).
+    #[cfg(test)]
     const fn new() -> Self {
         Self {
             flags: OnceLock::new(),
