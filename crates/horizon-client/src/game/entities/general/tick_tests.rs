@@ -145,10 +145,10 @@ fn with_counter(
         panic_on: panic_on.clone(),
         cancel: cancel.clone(),
     };
-    mod_api::__private::initialize().expect("test registration requires the mod API runtime");
+    mod_platform::__private::initialize().expect("test registration requires the mod API runtime");
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Registration);
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new("mymod", Box::new(declare))].into();
-    mod_api::testing::with_mods(mods, || {
+    mod_platform::testing::with_mods(mods, || {
         with_game(|game| {
             // The fixture speaks as a server, as the vehicle boundary tests
             // make theirs: attachment writes and the entity tick gates answer

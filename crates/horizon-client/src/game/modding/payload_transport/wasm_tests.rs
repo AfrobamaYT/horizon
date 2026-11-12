@@ -73,6 +73,13 @@ impl Hooks for Native {
 #[test]
 #[ignore = "requires prepared resources and compiled HORIZON_WASM_FIXTURE/HORIZON_WASM_STD"]
 fn compiled_guest_runs_in_actual_game_roots() {
+    // Enters the guest: libtest's thread is smaller than the guest stack policy requires.
+    horizon_guest_stack::run_on_guest_stack(
+        compiled_guest_runs_in_actual_game_roots_on_guest_stack,
+    );
+}
+
+fn compiled_guest_runs_in_actual_game_roots_on_guest_stack() {
     super::tests::require_resources();
     if super::super::native_entity_refs::tests::run_fresh_cases(
         TEST,
@@ -121,7 +128,7 @@ fn compiled_guest_runs_in_actual_game_roots() {
     loaded.initialize(&[info]).unwrap();
     let mut mods = loaded.mods;
     mods.push(ModEntry::new("raw_probe", Box::new(Native)));
-    mod_api::testing::with_mods(mods.into(), || {
+    mod_platform::testing::with_mods(mods.into(), || {
         super::super::native_entity_refs::tests::with_client_game(|game| {
             game.settings.render_distance = 2;
             game.settings.simulation_distance = 2;

@@ -363,6 +363,34 @@ jobs:
         if: needs.changes.outputs.tooling_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         with:
           python-version: '3.12'
+      # What the slot's build folder holds before this job writes anything: Dyna mounts /build per slot for
+      # reuse across jobs, and an empty one means a cold build (no target, no registry, no toolchain).
+      - name: Report what the build folder holds at job start
+        if: needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true'
+        # A report only: an unreadable folder or a failed du/find/findmnt never fails the job.
+        continue-on-error: true
+        run: |
+          # RUSTUP_HOME is set by a later step (tools/ci/dyna_ci_deps.sh): read its folder directly.
+          for dir in "${DYNA_CI_BUILD:-/build}" "${CARGO_TARGET_DIR:-}" "${CARGO_HOME:-}/registry" "${DYNA_CI_BUILD:-/build}/rustup/toolchains"; do
+            if [ ! -d "$dir" ]; then echo "build-folder $dir: absent"; continue; fi
+            files=$(du -s --inodes "$dir" 2>/dev/null | cut -f1)
+            size=$(du -sh "$dir" 2>/dev/null | cut -f1)
+            oldest=$(find "$dir" -maxdepth 2 -printf '%TY-%Tm-%TdT%TH:%TM\n' 2>/dev/null | sort | head -1)
+            mount=$(findmnt -n -o SOURCE,TARGET -T "$dir" 2>/dev/null | head -1)
+            echo "build-folder $dir: entries=${files:-?} size=${size:-?} oldest=${oldest:-none} mount=${mount:-?}"
+          done | tee -a "$GITHUB_STEP_SUMMARY"
+          # Size against this host's cap (tools/ci/dyna-slot-caps.txt): over it, Dyna empties target/ before the next job.
+          host=$(sed -n 's/^dyna-ci-\(.*\)-[0-9a-f]\{8\}$/\1/p' <<< "${RUNNER_NAME:-}")
+          cap=$(awk -v h="$host" '$1 == h {print $2}' tools/ci/dyna-slot-caps.txt 2>/dev/null)
+          used=$(du -s --block-size=1G "${DYNA_CI_BUILD:-/build}" 2>/dev/null | cut -f1)
+          echo "build-folder cap: host=${host:-?} size=${used:-?} GiB cap=${cap:-80} GiB" | tee -a "$GITHUB_STEP_SUMMARY"
+          # What takes the room, toward that cap.
+          du -sh "${DYNA_CI_BUILD:-/build}"/* "${CARGO_TARGET_DIR:-/nonexistent}"/* 2>/dev/null | sort -rh | head -12 | sed 's/^/build-folder part /' | tee -a "$GITHUB_STEP_SUMMARY"
+          # Each kept toolchain and its components: a test runs rustfmt under whichever toolchain it selects.
+          for toolchain in "${DYNA_CI_BUILD:-/build}"/rustup/toolchains/*/; do
+            [ -f "$toolchain/lib/rustlib/components" ] || continue
+            echo "build-folder toolchain $(basename "$toolchain"): $(sed 's/-x86_64.*//;s/-aarch64.*//' "$toolchain/lib/rustlib/components" | sort -u | tr '\n' ' ')"
+          done | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Check Dyna dependencies (install fallback without root)
         if: needs.changes.outputs.rust_required != 'false' && needs.changes.outputs.self_hosted == 'true'
         run: bash tools/ci/dyna_ci_deps.sh
@@ -425,9 +453,34 @@ jobs:
       - name: Build the runtime holder test actor
         if: needs.changes.outputs.rust_required != 'false'
         run: cargo +stable build $JOBS --profile test -p horizon-mod-package --features runtime-process --example holder_actor
+      # Compile first, apart from running: the build's time and its slowest units show on their own.
+      - name: Build Rust core test binaries
+        if: needs.changes.outputs.rust_required != 'false'
+        run: cargo +stable test $JOBS --profile test --workspace --lib --bins --tests --no-run --timings
+      # What bounds the build: the slowest compile units, from the report --timings writes.
+      - name: Slowest compile units
+        if: ${{ !cancelled() && needs.changes.outputs.rust_required != 'false' }}
+        continue-on-error: true
+        run: |
+          python3 tools/ci/cargo_timings.py target/cargo-timings/cargo-timing.html | tee -a "$GITHUB_STEP_SUMMARY"
+          # The points build script's phases (seconds since it started), from the file it writes beside its output.
+          for timing in target/debug/build/horizon-mod-points-*/out/points-timing.txt; do
+            [ -f "$timing" ] && { echo "points build script phases:"; cat "$timing"; } | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+      # Measurement: the test step below recompiled horizon-mod-points and every crate after it, minutes after
+      # the build above. Cargo's verbose output says which tracked file or variable made each unit dirty.
+      - name: Why the core build is not fresh
+        if: needs.changes.outputs.rust_required != 'false'
+        run: cargo +stable test $JOBS --profile test --workspace --lib --bins --tests --no-run -v 2>&1 | grep -E '^ +(Dirty|Compiling) ' || true
+      # The binaries built above, three at a time: Cargo runs them one by one, and a few large ones (the API
+      # generator's, the client library's, no_wire_registration) took most of this step while the runner idled.
+      # Three, not more: the job's memory.peak counts the build and page cache, so it says nothing about this
+      # step; the runner prints each binary's max RSS and the largest five, which sizes any later change.
+      # Every binary still runs every test, from its package directory; any failure fails the step, and the
+      # step ends with the failing binaries and test names.
       - name: Test Rust core and voxel kernel correctness
         if: needs.changes.outputs.rust_required != 'false'
-        run: cargo +stable test $JOBS --profile test --workspace --lib --bins --tests
+        run: python3 tools/ci/run_test_binaries.py --jobs 3 -- cargo +stable test $JOBS --profile test --workspace --lib --bins --tests
       # Prepared-data content-root tests stay in the existing client-lib data leg.
       # Running them again here without the data only rebuilds targets before they return early.
       # One genuine pinned export also validates source staging and listed slots.
@@ -463,7 +516,7 @@ jobs:
         run: python3 tools/ci/test_stage_catalog.py -v
       - name: Test Rust documentation examples
         if: needs.changes.outputs.rust_required != 'false'
-        run: cargo +stable test $JOBS --profile test --workspace --doc
+        run: cargo +stable test $JOBS --no-fail-fast --profile test --workspace --doc
       - name: No Rust work selected
         if: needs.changes.outputs.rust_required == 'false'
         run: echo 'No Rust work selected; static checks report independently.'
@@ -526,12 +579,14 @@ jobs:
         if: needs.changes.outputs.rust_required != 'false'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: python3 tools/check_addresses.py ${BASE_SHA:+--base "$BASE_SHA"}
+        run: python3 tools/check_addresses.py ${BASE_SHA:+--base "$BASE_SHA" --pull-request-merge}
       # docs/layers.md#file-size: a Rust file over 3000 lines may not grow (pull requests; main has no base to compare).
       - name: Big files don't grow
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: python3 tools/check_file_size.py ${BASE_SHA:+--base "$BASE_SHA"}
+        # The checkout is the pull request merged into main as it is now: measure the merge against that main, so
+        # main's own growth since the branch's base (a sync's) is never charged to the pull request.
+        run: python3 tools/check_file_size.py ${BASE_SHA:+--base "$BASE_SHA" --pull-request-merge}
       # Offline tooling compiles tiny standalone fixtures even when no game Rust changed.
       # Install their tools explicitly rather than making missing compilers turn cases into skips.
       - name: Install Rust tools for isolated tooling fixtures
@@ -554,7 +609,7 @@ jobs:
         if: needs.changes.outputs.rust_required != 'false'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: python3 tools/check_layers.py ${BASE_SHA:+--base "$BASE_SHA"}
+        run: python3 tools/check_layers.py ${BASE_SHA:+--base "$BASE_SHA" --pull-request-merge}
       # Independent of the Rust job. Only after earlier static setup/checks succeeded:
       # compiler fixtures after failed setup would add a second, misleading failure.
       - name: Test offline research tooling
@@ -753,10 +808,10 @@ jobs:
         run: |
           cargo +stable fmt --check
           cargo +stable clippy $JOBS --all-targets --locked -- -D warnings
-          cargo +stable test $JOBS --locked --lib --bins
-          cargo +stable test $JOBS --locked --test storage
+          cargo +stable test $JOBS --no-fail-fast --locked --lib --bins
+          cargo +stable test $JOBS --no-fail-fast --locked --test storage
           cargo +stable build $JOBS --manifest-path ../Cargo.toml --locked -p horizon-mod-package --features runtime-process --example holder_actor
-          cargo +stable test $JOBS --manifest-path ../Cargo.toml --locked -p horizon-mod-package --features runtime-process --lib
+          cargo +stable test $JOBS --no-fail-fast --manifest-path ../Cargo.toml --locked -p horizon-mod-package --features runtime-process --lib
   # The fork's Dyna runners have the owner's prepared vanilla data in a read-only cache.
   prepared-output-check:
     if: github.event_name == 'workflow_dispatch' && inputs.prepare-output-check && github.repository == 'arismoko/horizon'

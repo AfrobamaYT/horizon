@@ -294,6 +294,7 @@ pub(super) struct BlockDrops {
 
 #[derive(Default)]
 pub(super) struct Spill {
+    pub(super) piston_positions: Vec<super::piston_carry_state::PositionChange>,
     pub(super) spawns: Vec<Spawn>,
     /// Experience orbs (`ExperienceOrb.award`): where and how much, each
     /// and the merge id it drew from the level random.
@@ -317,7 +318,8 @@ pub(super) struct UsedDrops {
 
 impl Spill {
     pub(super) fn is_empty(&self) -> bool {
-        self.spawns.is_empty()
+        self.piston_positions.is_empty()
+            && self.spawns.is_empty()
             && self.orbs.is_empty()
             && self.removed.is_empty()
             && self.used.is_empty()
@@ -770,9 +772,10 @@ impl GameLevel<'_> {
         // A replacement is a new block entity, even at the same position.
         // Headless servers cannot rely on renderer visibility to discard this state.
         if &*self.facts.get(old).name == "minecraft:end_gateway" {
-            self.gateway_servers.remove(&[pos.x, pos.y, pos.z]);
+            self.positions.gateways.remove(&[pos.x, pos.y, pos.z]);
         }
         if self.remove_saved_entity(pos, old, side_effects) {
+            self.positions.hoppers.remove(&key);
             return 0;
         }
         // Sculk blocks and creaking hearts notice their removal on their own tick.
@@ -800,6 +803,7 @@ impl GameLevel<'_> {
                 .put(lease, BlockEntity::Mod(entity));
         }
         let entity = self.world.block_entities.remove(&key);
+        self.positions.hoppers.remove(&key);
         self.world.block_names.remove(&key);
         self.world.forget_block_entity_source(key);
         let name = self.facts.get(old).name.clone();
@@ -1080,6 +1084,7 @@ impl Game<'_> {
         }
         let _save_lease = horizon_client::join_seq::visibility::PassLease::enter();
         let mut spill = std::mem::take(&mut self.spill);
+        self.finish_piston_position_changes(std::mem::take(&mut spill.piston_positions));
         let used = std::mem::take(&mut spill.used);
         let tool = self.held().cloned();
         let player = Some(self.native_acting_id());
@@ -1157,7 +1162,8 @@ mod tests {
             let ore = registry.default_state("minecraft:diamond_ore").unwrap();
             let pos = BlockPos::new(1, 64, 2);
             let break_of = |game: &mut Game<'_>, state, item, exp_to_drop| {
-                game.world.random = LegacyRandom::new(7);
+                game.world.random =
+                    horizon_core::random::LevelRandom::for_level(LegacyRandom::new(7));
                 let dropped = game.with_level(|_, level, _| {
                     level.block_dropped(
                         pos,
@@ -1177,7 +1183,7 @@ mod tests {
             assert_eq!(plain_dirt.items.len(), 1);
             let mods: mod_api::Mods =
                 vec![mod_api::ModEntry::new("block-drops", Box::new(DropsMod))].into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 let (heard, after) = break_of(game, ore, "minecraft:diamond", None);
                 assert_eq!(after, ore_after);
                 assert_eq!(heard.items.len(), 1);
@@ -1202,8 +1208,8 @@ mod tests {
     fn a_block_entity_part_gives_back_what_it_held_when_removed() {
         use horizon_client::chunk::Chunk;
         use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields};
-        use mod_api::__private::part_tests::{HOARD, HOARD_ASKED, game_thread};
         use mod_api::Holder;
+        use mod_platform::__private::part_tests::{HOARD, HOARD_ASKED, game_thread};
         use std::sync::Arc;
         use std::sync::atomic::Ordering;
         crate::game::native_entity_refs::tests::with_game(|game| {
@@ -1279,8 +1285,8 @@ mod tests {
     fn a_block_entity_removing_itself_in_its_tick_is_not_asked() {
         use horizon_client::chunk::Chunk;
         use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields, ModContainer};
-        use mod_api::__private::part_tests::{HOARD, HOARD_ASKED};
         use mod_api::Holder;
+        use mod_platform::__private::part_tests::{HOARD, HOARD_ASKED};
         use std::sync::Arc;
         use std::sync::atomic::Ordering;
         let Some(root) = crate::game::native_entity_refs::tests::declared_part_root(

@@ -16,6 +16,10 @@ mod block_entity_transform;
 mod load_conditions;
 #[path = "wire_loopback/loot_tags.rs"]
 mod loot_tags_wire;
+#[path = "wire_loopback/piglin_answers.rs"]
+mod piglin_answers;
+#[path = "wire_loopback/piston_push_reaction.rs"]
+mod piston_push_reaction;
 #[path = "wire_loopback/use_item_hand.rs"]
 mod use_item_hand;
 thread_local! {
@@ -155,6 +159,17 @@ impl WasmMod {
         } else {
             bytes
         };
+        let invalid;
+        let bytes = if piston_push_reaction::UNKNOWN_REACTION.get() {
+            // A replacement response is Option<PushReaction>: Some followed by its enum tag.
+            let mut out = Writer::new();
+            out.put(&true);
+            out.put(&u32::MAX);
+            invalid = out.into_bytes();
+            invalid.as_slice()
+        } else {
+            bytes
+        };
         decode(&mut Reader::new(bytes)).ok()
     }
 }
@@ -223,6 +238,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             arm_pose_registration::check(registrar);
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
             use_item_hand::register(registrar);
+            piglin_answers::register(registrar);
             block_entity_transform::register(registrar);
             REGISTERED_BLOCK.set(Some(registrar.block_key("minecraft:stone")));
             REGISTERED_EFFECT.set(Some(registrar.effect_key("minecraft:poison")));
@@ -1417,21 +1433,40 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
     use mod_api::*;
     struct Table;
     impl CapabilityProviders for Table {}
-    impl BlockEntitiesCapabilityProviders for Table {
-        fn block_entity_provider(
+    impl BlocksCapabilityProviders for Table {
+        fn block_provider(
             &self,
             _: &str,
-            _: BlockEntityTypeKey,
+            kind: Option<BlockEntityTypeKey>,
+            block: Option<BlockKey>,
             index: &mut u32,
         ) -> Option<(BlockProviderOf, &'static str, bool)> {
-            *index += 1;
-            Some((
-                BlockProviderOf::EnergyHandler(Arc::new(|_: &mut dyn ServerHost, _: BlockSide| {
-                    None::<Box<dyn EnergyHandler>>
-                })),
-                "test:block",
-                true,
-            ))
+            // Which of the position's two keys crossed picks the answer.
+            match (kind, block) {
+                (Some(_), None) => {
+                    *index += 1;
+                    Some((
+                        BlockProviderOf::EnergyHandler(Arc::new(
+                            |_: &mut dyn ServerHost, _: BlockSide| None::<Box<dyn EnergyHandler>>,
+                        )),
+                        "test:block",
+                        true,
+                    ))
+                }
+                (None, Some(_)) => {
+                    *index += 4;
+                    Some((
+                        BlockProviderOf::ResourceHandlerItemResource(Arc::new(
+                            |_: &mut dyn ServerHost, _: BlockSide| {
+                                None::<Box<dyn ResourceHandler<ItemResource>>>
+                            },
+                        )),
+                        "test:plain_block",
+                        false,
+                    ))
+                }
+                _ => None,
+            }
         }
     }
     impl EntitiesCapabilityProviders for Table {
@@ -1530,7 +1565,12 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
     let _reset = Reset;
     let mut index = 5;
     let (block, owner, before) = guest::Guest
-        .block_entity_provider("test:energy", REGISTERED_KIND.get().unwrap(), &mut index)
+        .block_provider(
+            "test:energy",
+            Some(REGISTERED_KIND.get().unwrap()),
+            None,
+            &mut index,
+        )
         .unwrap();
     assert!(matches!(block, BlockProviderOf::EnergyHandler(_)));
     assert_eq!((index, owner, before), (6, "test:block", true));
@@ -1547,6 +1587,19 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
         .unwrap();
     assert!(matches!(item, ItemProviderOf::EnergyHandler(_)));
     assert_eq!((index, owner, before), (11, "test:item", true));
+    let (block, owner, before) = guest::Guest
+        .block_provider(
+            "test:items",
+            None,
+            Some(REGISTERED_BLOCK.get().unwrap()),
+            &mut index,
+        )
+        .unwrap();
+    assert!(matches!(
+        block,
+        BlockProviderOf::ResourceHandlerItemResource(_)
+    ));
+    assert_eq!((index, owner, before), (15, "test:plain_block", false));
     corrupt.set(true);
     index = 42;
     let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -2066,6 +2119,47 @@ fn wrong_phase_fallible_call_returns_unavailable_to_guest() {
 }
 
 #[test]
+fn wire_loopback_entity_by_uuid_returns_a_handle_or_absence() {
+    use mod_api::{EntityRef, EntityUuid, ServerHost, WorldEpoch};
+
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+
+    struct World;
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World);
+    impl ServerHost for World {}
+    mod_api::impl_server_host_areas!(World, except(entities));
+    impl mod_api::prelude::EntitiesServerHost for World {
+        fn entity_by_uuid(&self, uuid: EntityUuid) -> Option<EntityRef> {
+            (uuid.0 == 0xfedc_ba98_7654_3210_0123_4567_89ab_cdef)
+                .then(|| EntityRef::new(WorldEpoch::new(4), 19))
+        }
+    }
+
+    let mut frame = boundary::Frame::default();
+    frame.set_server_host(&World);
+    let mut cx = boundary::Cx::default();
+    cx.frames.push(frame);
+    let cx = std::cell::RefCell::new(cx);
+    guest::set_transport(Some(Rc::new(move |id, bytes| {
+        let mut out = Writer::new();
+        unsafe { boundary::serve(id, &mut *cx.borrow_mut(), bytes, &mut out) }.unwrap();
+        out.into_bytes()
+    })));
+
+    let host: &dyn ServerHost = &guest::Guest;
+    let found = host.entity_by_uuid(EntityUuid(0xfedc_ba98_7654_3210_0123_4567_89ab_cdef));
+    let missing = host.entity_by_uuid(EntityUuid(u128::MAX));
+    guest::set_transport(None);
+    assert_eq!(
+        found.map(|entity| (entity.epoch().get(), entity.id())),
+        Some((4, 19))
+    );
+    assert_eq!(missing, None);
+}
+
+#[test]
 fn world_phase_messages_round_trip_returns_filter_decision() {
     mod_api::__private::initialize().unwrap();
     struct World;
@@ -2142,6 +2236,8 @@ fn wire_loopback_block_entity_data_received_preserves_tag_and_handle() {
     mod_api::impl_host_areas!(Client);
     impl mod_api::ClientHost for Client {}
     mod_api::impl_client_host_areas!(Client);
+    // The platform phase this scope sets is process-wide state another test may not have installed yet.
+    mod_api::__private::initialize().unwrap();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     let index = guest::add_handler(vec![guest::view::<dyn BlockEntityPart>(Arc::new(Notice))]);
     let proxy = WasmHandler {
@@ -2206,3 +2302,8 @@ fn datapack_sync_recipient_and_answer_cross_the_wire() {
 }
 #[path = "wire_loopback/chunk_queries.rs"]
 mod chunk_queries;
+
+#[path = "wire_loopback/client_fireworks.rs"]
+mod client_fireworks;
+#[path = "wire_loopback/play_hit_sound.rs"]
+mod play_hit_sound;

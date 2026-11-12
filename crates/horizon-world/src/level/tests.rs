@@ -45,6 +45,8 @@ pub(crate) struct TestLevel {
     pub day_time: i64,
     pub events: Vec<LevelEvent>,
     pub block_light: HashMap<BlockPos, i32>,
+    /// `getBrightness(SKY, pos)` everywhere; `None` is 15, full daylight.
+    pub sky_light: Option<i32>,
     /// `Level.isClientSide`.
     pub client_side: bool,
     pub cake_answer: Option<bool>,
@@ -113,6 +115,7 @@ impl TestLevel {
             day_time: 0,
             events: Vec::new(),
             block_light: HashMap::new(),
+            sky_light: None,
             client_side: false,
             tick_ready: true,
             block_events_ready: true,
@@ -250,6 +253,9 @@ impl LevelAccess for TestLevel {
     }
     fn block_light(&self, pos: BlockPos) -> i32 {
         self.block_light.get(&pos).copied().unwrap_or(0)
+    }
+    fn sky_light(&self, _pos: BlockPos) -> i32 {
+        self.sky_light.unwrap_or(15)
     }
     fn emit(&mut self, event: LevelEvent) {
         self.events.push(event);
@@ -498,6 +504,28 @@ fn block_observation_follows_successful_commits_only() {
         Observation::Block(pos, stone, b.air())
     );
 }
+
+/// `LevelReader.getMaxLocalRawBrightness`: 15 outside the +-30,000,000 gate,
+/// where no chunk is there to answer, and the raw brightness inside it. With
+/// the sky light at 0 the two answers differ, so the gate is what is measured.
+#[test]
+fn max_local_raw_brightness_is_full_outside_the_gate() {
+    let Some(f) = fixture() else {
+        return;
+    };
+    let b = &f.behaviours;
+    let mut level = TestLevel::new(b);
+    level.sky_light = Some(0);
+    let mut ticks = Ticks::new(0);
+    let sim = b.sim(&mut level, &mut ticks);
+    let at = |x: i32, z: i32| sim.max_local_raw_brightness(BlockPos::new(x, 64, z));
+    // `x >= -30000000 && z >= -30000000 && x < 30000000 && z < 30000000`.
+    assert_eq!((at(-30_000_000, 0), at(29_999_999, 0)), (0, 0));
+    assert_eq!((at(-30_000_001, 0), at(30_000_000, 0)), (15, 15));
+    assert_eq!((at(0, -30_000_000), at(0, 29_999_999)), (0, 0));
+    assert_eq!((at(0, -30_000_001), at(0, 30_000_000)), (15, 15));
+}
+
 #[test]
 fn neighbor_observation_follows_dispatch_order() {
     use std::cell::RefCell;
@@ -4722,4 +4750,8 @@ fn a_shulker_lid_updates_the_shapes_and_redstone_of_its_neighbours() {
             (BlockPos::new(x, y, z), state, b.block(state), false)
         );
     }
+}
+#[cfg(test)]
+mod sticky {
+    include!("tests/sticky.rs");
 }

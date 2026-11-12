@@ -639,6 +639,18 @@ thread_local! {
     static CAPTURED_RERUNS: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
 }
 
+/// Tracks the stager's stamp, `.horizon-source-staged`, only in a staged copy. Cargo reruns a build
+/// script on every build while a tracked path is missing, so tracking an absent stamp rebuilt
+/// horizon-mod-points, horizon-client and every crate above them on each `cargo` invocation of an
+/// ordinary checkout. A stamp never appears in a tree that was already built: staging writes it
+/// first, into a fresh copy, and refuses a tree that already has one.
+pub(crate) fn rerun_if_staged(root: &std::path::Path) {
+    let stamp = root.join(".horizon-source-staged");
+    if stamp.is_file() {
+        rerun_if_changed(&stamp.display());
+    }
+}
+
 /// Tells the build script's Cargo to rerun it when `path` changes.
 pub(crate) fn rerun_if_changed(path: &impl std::fmt::Display) {
     #[cfg(test)]
@@ -836,6 +848,20 @@ mod tests {
             param("&mut dyn LevelRandomHost", "self")
         );
         super::host_param::validate(&hit, "test", true, Some(true), false).unwrap();
+        // On both sides a hit's level reads, and its host says which side it is.
+        let hit_both = Hook {
+            side: Side::Both,
+            ..hit.clone()
+        };
+        super::host_param::validate(&hit_both, "test", true, Some(false), false).unwrap();
+        assert_eq!(
+            host_param(&hit_both, Some(false), false),
+            param("LevelSide", "super::mod_api_host::level_side(self)")
+        );
+        assert_eq!(
+            super::host_param::validate(&hit_both, "test", true, Some(false), true).unwrap_err(),
+            "test: this entry takes no host marker"
+        );
         for (hook, mutable) in [
             (hit.clone(), Some(false)),
             (

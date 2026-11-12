@@ -165,7 +165,7 @@ impl Game<'_> {
                     .downcast_ref::<&str>()
                     .map(|text| (*text).to_owned())
                     .or_else(|| payload.downcast_ref::<String>().cloned())
-                    .map_or_else(|| "box".to_owned(), |text| text);
+                    .unwrap_or_else(|| "box".to_owned());
                 log::error!(
                     "general entity {kind} #{id}: its tick's writes were rolled back after a native mod panicked: {panic}"
                 );

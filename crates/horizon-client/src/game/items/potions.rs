@@ -122,6 +122,7 @@ const REAPPLICATION_DELAY: i32 = 20;
 pub(super) fn potion_cloud_from_nbt(tag: &Tag) -> Option<(Vec3, Breath)> {
     use horizon_client::save::{float, number, text};
     let at = horizon_client::entity_nbt::position(tag)?;
+    let motion = horizon_client::entity_nbt::loaded_motion(tag);
     let int = |key, default| number(tag.get(key)).map_or(default, |v| v as i32);
     let real = |key, default| float(tag.get(key)).map_or(default, |v| v as f32);
     let contents = tag.get("potion_contents");
@@ -166,6 +167,7 @@ pub(super) fn potion_cloud_from_nbt(tag: &Tag) -> Option<(Vec3, Breath)> {
             join: Default::default(),
             id: 0,
             at: [at.x, at.y, at.z],
+            motion: [motion.x, motion.y, motion.z],
             radius: real("Radius", 3.0).clamp(0.0, 32.0),
             age: int("Age", 0),
             duration: int("Duration", -1),
@@ -205,10 +207,11 @@ pub(super) fn potion_cloud_to_nbt(c: &Breath, uuid: [i32; 4], raw: Option<&Tag>)
         return Tag::End;
     };
     let at = Vec3::new(c.at[0], c.at[1], c.at[2]);
+    let motion = Vec3::new(c.motion[0], c.motion[1], c.motion[2]);
     let mut tag = horizon_client::entity_nbt::entity_base_tag(
         "minecraft:area_effect_cloud",
         at,
-        Vec3::ZERO,
+        motion,
         [0.0, 0.0],
         uuid,
         raw,
@@ -1831,7 +1834,7 @@ impl Game<'_> {
                 return false;
             }
             if deflect_stop {
-                return t.age < 1200 && t.position.y > -128.0;
+                return t.age < 1200 && t.position.y >= self.world.below_world_y();
             }
             t.position = next;
             let bounds = Aabb::new(
@@ -1839,7 +1842,7 @@ impl Game<'_> {
                 next.add_vector(Vec3::new(0.125, 0.25, 0.125)),
             );
             self.entity_powder_snow_particles(t.previous, next, bounds, t.velocity, false);
-            t.age < 1200 && t.position.y > -128.0
+            t.age < 1200 && t.position.y >= self.world.below_world_y()
         });
         self.potions.thrown = thrown;
         for id in deflected {
@@ -2031,6 +2034,7 @@ impl Game<'_> {
             join: Default::default(),
             id,
             at,
+            motion: [0.0; 3],
             radius: 2.5,
             age: 0,
             duration: 300,
@@ -2386,7 +2390,14 @@ impl Game<'_> {
         // Projectile.onHit calls onHitBlock first, then the potion's
         // affectEntitiesAround; both read the stack's `potion_contents`.
         if let Some((cell, face)) = hit {
-            self.potion_hit_block(stack, cell, face);
+            // `AbstractThrownPotion.douseFire` passes `getOwner()` to the
+            // campfire's `douse`, which is where the game event's source is.
+            let who = if owner.player {
+                Some(Who::Player)
+            } else {
+                owner.attacker.map(Who::Mob)
+            };
+            self.potion_hit_block(stack, cell, face, who);
         }
         self.affect_entities_around(stack, at, owner.player);
         let lingering = &*stack.item == "minecraft:lingering_potion";
@@ -2445,6 +2456,7 @@ impl Game<'_> {
                     join: Default::default(),
                     id,
                     at: [at.x, at.y, at.z],
+                    motion: [0.0; 3],
                     radius: 3.0,
                     age: 0,
                     duration: 600,
@@ -2872,6 +2884,7 @@ mod tests {
                     join: Default::default(),
                     id: 0,
                     at: [0.0, 80.0, 0.0],
+                    motion: [0.0; 3],
                     radius: 3.0,
                     age,
                     duration,
@@ -2939,7 +2952,7 @@ mod tests {
                 }
             }
         }
-        mod_api::__private::install(std::sync::Arc::from([mod_api::ModEntry::new(
+        mod_platform::__private::install(std::sync::Arc::from([mod_api::ModEntry::new(
             "test-potions",
             Box::new(TestMod),
         )]));
@@ -3127,6 +3140,7 @@ mod tests {
             join: Default::default(),
             id: 7,
             at: [1.5, 64.0, -2.5],
+            motion: [0.6, 0.0, 0.0],
             radius: 3.5,
             age: 12,
             duration: 400,
@@ -3155,6 +3169,7 @@ mod tests {
         let tag = potion_cloud_to_nbt(&cloud, [1, 2, 3, 4], None);
         let (at, back) = potion_cloud_from_nbt(&tag).expect("the cloud reads back");
         assert_eq!(at, Vec3::new(1.5, 64.0, -2.5), "the position");
+        assert_eq!(back.motion, [0.6, 0.0, 0.0], "the motion");
         assert_eq!((back.age, back.duration), (12, 400));
         assert!((back.radius - 3.5).abs() < 1.0e-6, "{}", back.radius);
         let potion = back.potion.expect("a potion cloud");
@@ -3328,6 +3343,7 @@ mod tests {
             join: Default::default(),
             id: 1,
             at: [1.0, 64.0, 0.0],
+            motion: [0.0; 3],
             radius: 5.0,
             age: 0,
             duration: 200,
@@ -3354,6 +3370,7 @@ mod tests {
             join: Default::default(),
             id: 1,
             at: [0.0, 64.0, 0.0],
+            motion: [0.0; 3],
             radius: 3.0,
             age: 0,
             duration: 600,
@@ -3372,6 +3389,7 @@ mod tests {
             join: Default::default(),
             id: 2,
             at: [0.0, 64.0, 0.0],
+            motion: [0.0; 3],
             radius: 3.0,
             age: 0,
             duration: 600,
@@ -3403,6 +3421,7 @@ mod tests {
             join: Default::default(),
             id: 3,
             at: [0.0, 64.0, 0.0],
+            motion: [0.0; 3],
             radius: 5.0,
             age: 219,
             duration: 200,
@@ -3421,6 +3440,7 @@ mod tests {
             join: Default::default(),
             id: 3,
             at: [0.0, 64.0, 0.0],
+            motion: [0.0; 3],
             radius: 5.0,
             age: 220,
             duration: 200,
@@ -3440,6 +3460,7 @@ mod tests {
             join: Default::default(),
             id: 4,
             at: [10.0, 64.0, 0.0],
+            motion: [0.0; 3],
             radius: 1.0,
             age: 0,
             duration: 200,
@@ -3460,6 +3481,7 @@ mod tests {
             join: Default::default(),
             id: 5,
             at: [0.0, 64.0, 0.0],
+            motion: [0.0; 3],
             radius: 1.0,
             age: 0,
             duration: 200,
@@ -3508,7 +3530,7 @@ mod tests {
                 self.calls.fetch_add(1, Ordering::Relaxed);
                 assert_eq!(
                     event.effect.id,
-                    mod_api::__private::part_tests::effect_key(self.case.id)
+                    mod_platform::__private::part_tests::effect_key(self.case.id)
                 );
                 assert_eq!((event.effect.duration, event.effect.amplifier), (450, 1));
                 assert_eq!(event.screen.id, self.screen);
@@ -3615,7 +3637,7 @@ mod tests {
                         };
                         let mods: Mods =
                             vec![ModEntry::new("effect-tips", Box::new(listener.clone()))].into();
-                        mod_api::testing::with_mods(mods, || {
+                        mod_platform::testing::with_mods(mods, || {
                             let lines = game
                                 .draw_inventory_effects(&mut batch, origin, image_width)
                                 .unwrap();
@@ -3653,7 +3675,7 @@ mod tests {
                                 ModEntry::new("hide-panels", Box::new(HidePanels)),
                             ]
                             .into();
-                            mod_api::testing::with_mods(hidden, || {
+                            mod_platform::testing::with_mods(hidden, || {
                                 assert!(
                                     game.draw_inventory_effects(&mut batch, origin, image_width)
                                         .is_none()

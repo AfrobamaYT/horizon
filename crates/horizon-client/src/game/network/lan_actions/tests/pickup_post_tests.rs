@@ -4,10 +4,8 @@ use crate::game::Game;
 use horizon_client::items::ItemStack;
 use horizon_client::motion::PlayerMotion;
 use horizon_core::geometry::Vec3;
-use mod_api::{
-    Hooks, ItemPickedUpEvent, ItemPickedUpPostEvent, ModEntry, ServerHost, TriState,
-    testing::with_mods,
-};
+use mod_api::{Hooks, ItemPickedUpEvent, ItemPickedUpPostEvent, ModEntry, ServerHost, TriState};
+use mod_platform::testing::with_mods;
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]

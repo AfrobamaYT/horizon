@@ -149,7 +149,7 @@ mod survive_tests;
 mod tests;
 
 pub use bonemeal::{BonemealCheck, TemplateSettings};
-pub use buckets::{BucketContent, fluid_bucket, fluid_pickup_sound};
+pub use buckets::{BucketContent, fluid_bucket, fluid_empty_sound, fluid_pickup_sound};
 pub use data::{BlockData, ItemBinding, ItemKind, Named, Props, PushReaction, StateFacts, Tags};
 pub use falling::Landing;
 pub use fluids::{
@@ -930,6 +930,27 @@ pub trait LevelAccess: BlockEntityNeighbors {
     ) -> bool {
         vanilla
     }
+    /// `PistonStructureResolver`'s slime test (`IBlockExtension.isSlimeBlock`) of `state`
+    /// once vanilla answered `vanilla` (a slime block): the answer to use. The default keeps it.
+    fn adjust_is_slime_block(&self, _state: BlockStateId, vanilla: bool) -> bool {
+        vanilla
+    }
+    /// `PistonStructureResolver.isSticky` (`IBlockExtension.isStickyBlock`) of `state` once
+    /// vanilla answered `vanilla` (a slime or honey block): the answer to use. The default
+    /// keeps it.
+    fn adjust_is_sticky_block(&self, _state: BlockStateId, vanilla: bool) -> bool {
+        vanilla
+    }
+    /// `IBlockExtension.canStickTo`: whether `state` sticks to the `other` beside it once the
+    /// library answered `vanilla`: the answer to use. The default keeps it.
+    fn adjust_can_stick_to(
+        &self,
+        _state: BlockStateId,
+        _other: BlockStateId,
+        vanilla: bool,
+    ) -> bool {
+        vanilla
+    }
     /// Whether redstone wire connection queries need the level hook.
     fn has_redstone_wire_connection_hook(&self) -> bool {
         false
@@ -1069,7 +1090,7 @@ pub trait LevelAccess: BlockEntityNeighbors {
     /// The `piston_carries_block_entity` hook (Horizon's own) for the block
     /// `state` at `pos`, asked at the last step of `PistonBaseBlock.isPushable`, for a block that got
     /// past its push reaction: `Some(false)` keeps it in place, `Some(true)`
-    /// lets a piston move it with its mod block entity, and `None` keeps
+    /// lets a piston move it with its block entity, and `None` keeps
     /// vanilla's rule (a block with a block entity does not move). The default
     /// answers `None`.
     fn adjust_piston_carries_block_entity(
@@ -1079,7 +1100,7 @@ pub trait LevelAccess: BlockEntityNeighbors {
     ) -> Option<bool> {
         None
     }
-    /// Take the mod block entity at `from` out of the level with its
+    /// Take the block entity at `from` out of the level with its
     /// attachments, running none of its removal side effects, for the moving
     /// piston `PistonBaseBlock.moveBlocks` puts at `to`, which holds it until
     /// its block lands. Levels without block entities do nothing.
@@ -1871,3 +1892,5 @@ mod dimension_key_tests {
 
 #[cfg(test)]
 mod block_entity_neighbor_tests;
+
+mod piston_reactions;

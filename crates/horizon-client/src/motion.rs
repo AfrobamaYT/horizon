@@ -47,6 +47,7 @@ use std::{
     path::Path,
     sync::Arc,
 };
+mod restitution;
 
 /// A living entity jumped (`LivingEvent.LivingJumpEvent`).
 #[inline(never)]
@@ -408,6 +409,10 @@ pub enum MotionEvent {
 }
 #[derive(Clone)]
 pub struct PlayerMotion {
+    /// Entity-owned random stream, independent of the level. Like mobs, a new
+    /// body seeds it from its initial identity/position without drawing from the
+    /// level. It lives with this body (including guest turns), not player NBT.
+    pub random: horizon_core::random::EntityRandom,
     pub swimming: bool,
     /// `Entity.isPassenger()`: this body rides a vehicle. `Entity.updateSwimming`
     /// needs it false, so the server's copy of a guest who boards a boat while
@@ -702,13 +707,11 @@ impl PlayerMotion {
         !self.spectator && !self.freeze_immune
     }
     /// What powder snow's contextual collision asks of the player.
-    pub fn powder_snow_subject(&self) -> crate::collisions::PowderSnowSubject {
+    pub fn powder_snow_subject(&self) -> crate::collisions::PowderSnowSubject<'static> {
         crate::collisions::PowderSnowSubject {
             fall_distance: self.fall_distance,
-            falling_block: false,
             leather_boots: self.leather_boots,
-            walkable_type: false,
-            lava_walker: false,
+            ..Default::default()
         }
     }
     /// `LivingEntity.tryAddFrost`: the frozen slowdown, on anything but air.
@@ -2057,14 +2060,14 @@ impl MotionWorld<'_, '_, '_> {
         }
         Ok(())
     }
-    /// `Entity.move(MoverType.SHULKER_BOX, movement)`: a shulker box lid pushed
-    /// the player. An ordinary move — the collision scan steps and reads the
-    /// ground flag — whose end writes the ground state
-    /// (`Entity.setOnGroundWithMovement`): a lid lifting the body off the
-    /// ground leaves it airborne, and the next tick's gravity lands it on the
-    /// lid again instead of the client holding it on a stale ground.
-    pub fn shulker_box_push(&mut self, movement: Vec3) -> Result<()> {
-        entity_move::move_entity(self, MoverType::ShulkerBox, movement)
+    /// `Entity.move(MoverType.SHULKER_BOX or SHULKER, movement)`: a shulker
+    /// box's or a shulker's lid pushed the player. An ordinary move — the
+    /// collision scan steps and reads the ground flag — whose end writes the
+    /// ground state (`Entity.setOnGroundWithMovement`): a lid lifting the body
+    /// off the ground leaves it airborne, and the next tick's gravity lands it
+    /// on the lid again instead of the client holding it on a stale ground.
+    pub fn lid_push(&mut self, mover: MoverType, movement: Vec3) -> Result<()> {
+        entity_move::move_entity(self, mover, movement)
     }
     /// `LocalPlayer.move`: the move, then `updateAutoJump` with the float
     /// horizontal displacement.
@@ -2645,12 +2648,7 @@ impl RestitutionWorld for MotionWorld<'_, '_, '_> {
         Ok(self.resources.blocks.get(state)?.suppresses_bounce)
     }
     fn block_bounce_restitution(&mut self, state: BlockStateId) -> Result<f32> {
-        Ok(self
-            .resources
-            .blocks
-            .get(state)?
-            .coefficients
-            .bounce_restitution)
+        self.part_bounce_restitution(state)
     }
     fn air_drag(&mut self) -> Result<f32> {
         living_motion::air_drag(self)
@@ -4089,7 +4087,7 @@ mod tests {
         let mut player = PlayerMotion::new(&resources, at).unwrap();
         let mut found = 0;
         for seed in 0..64 {
-            scene.random = horizon_core::random::LegacyRandom::new(seed);
+            scene.random.set_seed(seed);
             player.events.clear();
             MotionWorld {
                 tag_items: None,
@@ -4125,7 +4123,7 @@ mod tests {
             assert_eq!(velocity.y, f64::from(0.05_f32));
         }
         player.events.clear();
-        scene.random = horizon_core::random::LegacyRandom::new(1);
+        scene.random.set_seed(1);
         MotionWorld {
             tag_items: None,
             block_registries: None,

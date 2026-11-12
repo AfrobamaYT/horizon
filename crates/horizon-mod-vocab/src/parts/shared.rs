@@ -74,6 +74,9 @@ pub struct Parts {
     /// Capability providers by capability name, then by block entity type, in registration
     /// order.
     pub(crate) capabilities: Capabilities<BlockProviderOf>,
+    /// Block capability providers by capability name, then by block, in registration order:
+    /// those asked of a block whatever block entity it has, or none.
+    pub(crate) block_capabilities: Capabilities<BlockProviderOf>,
     /// Item capability providers by capability name, then by item, in registration order.
     pub(crate) item_capabilities: Capabilities<ItemProviderOf>,
     /// Entity capability providers by capability name, then by entity type, in registration
@@ -108,11 +111,12 @@ pub struct HookParts {
 
 /// Which things a capability's providers are registered by.
 // hidden: a lookup's view of the registrar's table, not part of the mod surface
-// exhaustive: the three kinds of thing a capability is asked of
+// exhaustive: the four kinds of thing a capability is asked of
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, horizon_mod_api_macros::Wire)]
 pub enum ProvidedBy {
     BlockEntity,
+    Block,
     Item,
     Entity,
 }

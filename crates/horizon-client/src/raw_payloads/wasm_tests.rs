@@ -22,6 +22,13 @@ use crate::lan::{NetEvent, PlayerSender};
 #[test]
 #[ignore = "requires compiled HORIZON_WASM_FIXTURE and HORIZON_WASM_STD"]
 fn compiled_guest_observes_physical_provider_pressure() {
+    // Enters the guest: libtest's thread is smaller than the guest stack policy requires.
+    horizon_guest_stack::run_on_guest_stack(
+        compiled_guest_observes_physical_provider_pressure_on_guest_stack,
+    );
+}
+
+fn compiled_guest_observes_physical_provider_pressure_on_guest_stack() {
     // Only this test initializes points in this process. Run explicitly by exact name.
     use horizon_mod_package::manifest::Package;
     let path = std::env::var("HORIZON_WASM_FIXTURE").unwrap();
@@ -46,8 +53,9 @@ fn compiled_guest_observes_physical_provider_pressure() {
     loaded.initialize(&[info]).unwrap();
     let mut mods = loaded.mods;
     mods.push(mod_api::ModEntry::new("raw_probe", Box::new(Native)));
-    mod_api::testing::with_mods(mods.into(), || {
-        mod_api::__private::part_tests::install_parts_fixture(mod_api::__private::mods()).unwrap();
+    mod_platform::testing::with_mods(mods.into(), || {
+        mod_platform::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
+            .unwrap();
         let transport = Transport::capture(Side::Server).unwrap();
         transport
             .accept(transport.local.manifest.entries())

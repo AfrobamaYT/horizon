@@ -14,8 +14,16 @@ For a complete declaration value, `PayloadDeclaration::new` takes the channel,
 version, protocol, direction, optional flag, and handler thread explicitly;
 registration still owns channel and version validation.
 
+A trait mod overrides `Hooks::register` directly; it does not need to implement a
+block, item, or other Part. The example below assumes the owning mod's id is
+`example`. Payload declarations use the same load-owned registrar and freeze point
+as Parts, not a separate manifest channel list.
+
 ```rust,ignore
-use mod_api::{IPayloadContext, IPayloadHandler, PayloadBytes, PayloadId, Registrar};
+use mod_api::{
+    Hooks, IPayloadContext, IPayloadHandler, PayloadBytes, PayloadId, Registrar,
+    RegistrationContext, horizon_mod,
+};
 use std::sync::Arc;
 
 struct Update;
@@ -27,9 +35,14 @@ impl IPayloadHandler for Update {
         Ok(())
     }
 }
-fn register(registrar: &mut dyn Registrar) {
-    registrar.payload_handlers().registrar("1")
-        .play_to_server(PayloadId("example:update".into()), Arc::new(Update));
+struct ExampleMod;
+
+#[horizon_mod]
+impl Hooks for ExampleMod {
+    fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+        r.payload_handlers().registrar("1")
+            .play_to_server(PayloadId("example:update".into()), Arc::new(Update));
+    }
 }
 ```
 
@@ -102,6 +115,62 @@ direction, or service authority. The former envelope hooks and tick-capped send
 methods are removed, without aliases or fallback handlers. Private custom books
 advertise their own version on `horizon:recipe_book_settings`; book support does not
 depend on a mod transport flag.
+
+## Raw plugin channels
+
+A server mod can also speak a plain plugin channel that a vanilla client, a
+client mod or the proxy uses (`bungeecord:main`, `voicechat:secret`), by
+declaring it by its exact id: `registrar.play_raw(PayloadId(id), Some(handler))`,
+or `None` for a channel the mod only sends on. A raw declaration is a server's
+unnegotiated policy for that channel, not a payload: it is not in the
+negotiation offer, makes no client mod-required, and a raw-only mod needs no
+Horizon peer. `PlayerRef::send_payload` sends the exact bytes in a vanilla
+custom payload to any client in play; above vanilla's clientbound limit
+(1,048,576 bytes) it returns `PayloadTooLarge`. What a client sends on the
+channel reaches every mod that declared it with a handler, once each, in mod
+load order and on the main thread; one mod's error is logged and rolls back its
+own work only. The serverbound limit stays vanilla's 32,767 bytes. An
+undeclared channel is ignored as before. `minecraft:` and `horizon:` ids cannot
+be declared, and a raw id that a typed payload also registers refuses load,
+naming both mods. `PlayerRef::announced_channels` reads what the client
+announced in `minecraft:register` (less `minecraft:unregister`), in
+configuration and play: at most 128 channels of up to 64 bytes. Raw channels
+are server-side only and take exact ids; a namespace wildcard may follow.
+
+A trait mod declares its raw channels in its own `Hooks::register`, through the
+same registrar as typed payloads; no Part and no manifest entry are needed:
+
+```rust,ignore
+use mod_api::{
+    Hooks, IPayloadContext, IPayloadHandler, PayloadBytes, PayloadId, Registrar,
+    RegistrationContext,
+};
+use std::sync::Arc;
+
+struct VoiceSecret;
+impl IPayloadHandler for VoiceSecret {
+    fn handle(&self, bytes: PayloadBytes, context: &mut dyn IPayloadContext) -> Result<(), String> {
+        let player = context.player().map_err(|e| format!("{e:?}"))?;
+        let host = context.server_host().map_err(|e| format!("{e:?}"))?;
+        // Answer on the same channel; above 1,048,576 bytes this is PayloadTooLarge.
+        let id = PayloadId("voicechat:secret".into());
+        player.send_payload(host, &id, bytes).map_err(|e| format!("{e:?}"))?;
+        Ok(())
+    }
+}
+
+struct MyMod;
+#[mod_api::horizon_mod]
+impl Hooks for MyMod {
+    fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+        r.payload_handlers()
+            .registrar("1")
+            .play_raw(PayloadId("voicechat:secret".into()), Some(Arc::new(VoiceSecret)))
+            // Send-only: the mod sends on it but receives nothing.
+            .play_raw(PayloadId("bungeecord:main".into()), None);
+    }
+}
+```
 
 ## Stage 2: the value codec
 

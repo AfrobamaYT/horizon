@@ -995,9 +995,8 @@ impl Game<'_> {
     /// push a `mod_api::Block` per block, the same declaration
     /// a content mod's `data/<id>/horizon/block/<path>.json` holds (a
     /// vanilla `template`, `properties`, `state_properties`, `shapes`...),
-    /// with its id in your mod's namespace. `item: true` gives it a block
-    /// item, as a file does unless told not to (`..Default::default()`
-    /// leaves it false). They join the content mods' blocks: the one whose
+    /// with its id in your mod's namespace. It has a block item, as a file's
+    /// does, unless `item` is false (`Block::with_item(false)`). They join the content mods' blocks: the one whose
     /// id is that namespace when it is on (your models, textures, loot and
     /// recipes are its files), else one of their own, with the template's
     /// look. Ids, saves and the check that a joining client has the same
@@ -3991,25 +3990,23 @@ impl Game<'_> {
     ) {
         self.fire_player_stop_tracking(player, name, entity, uuid, kind);
     }
-    /// Whether a mod listens to the mobs' `native_living_equipment_change`: a
-    /// mod that hooks it hooks this one too and sets `listened` (HEAD,
-    /// `*listened = true`). Without it the game does not read every mob's
-    /// equipment each tick, and mobs are not told (armor stands still are). A
-    /// mob that ticks once it is set counts from empty. Asked once a tick, after
-    /// the mobs' tick. Server-side.
+    /// Whether a mod listens to `native_living_equipment_change` for mobs and
+    /// connected players: a mod that hooks it hooks this one too and sets
+    /// `listened` (HEAD, `*listened = true`). Without it the game does not read
+    /// their equipment each tick and only armor stands are told. A mob or player
+    /// counts from empty once it is set. Asked once a tick. Server-side.
     pub(in crate::game) fn native_living_equipment_listened(&mut self, listened: &mut bool) {
         self.fire_living_equipment_listened(listened);
     }
-    /// A mob's or an armor stand's equipment slot took a different stack
-    /// (NeoForge's `LivingEquipmentChangeEvent`, posted in
-    /// `LivingEntity.collectEquipmentChanges`): `entity` is its ID and `kind`
-    /// its type (`minecraft:zombie`), `slot` the `EquipmentSlot` (`mainhand`,
-    /// `offhand`, `feet`, `legs`, `chest`, `head`, `body`, `saddle`), `from`
-    /// what the slot held when this was last heard (none for empty) and `to`
-    /// what it holds now. Once for each slot that changed, in that order,
-    /// after the mobs' tick, so a mob that joins the level wearing something
-    /// counts from empty on its first tick. It only hears: change the mob with
-    /// its own helpers. Players are heard by `native_on_equip`. Server-side.
+    /// A mob's, an armor stand's or a connected player's equipment slot took a
+    /// different stack (NeoForge's `LivingEquipmentChangeEvent`,
+    /// `LivingEntity.collectEquipmentChanges`): `entity` its ID, `kind` its type
+    /// (`minecraft:player` for a player), `slot` the `EquipmentSlot`, `from` what
+    /// the slot held when last heard and `to` what it holds now. Once per changed
+    /// slot, after the mobs' tick; one new to the level counts from empty. A
+    /// player's `mainhand` is the selected hotbar slot; their `body` and `saddle`
+    /// are never told. The world host's own player is heard by `native_on_equip`.
+    /// It only hears. Server-side.
     pub(in crate::game) fn native_living_equipment_change(
         &mut self,
         entity: u32,
@@ -4301,20 +4298,6 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         self.fire_pickup_xp(player, dimension, orb, value, count, canceled);
-    }
-    /// The selected damaged Mending `stack` and the proposed durability repair
-    /// for `experience` points. The amount is clamped to the stack's current damage. Zero leaves the
-    /// experience unspent when it overrides a positive proposal. If the selected
-    /// stack changes, the repair is skipped.
-    /// Server-side, including `PlayerRef::give_experience_points`.
-    pub(in crate::game) fn native_mending_repair(
-        &mut self,
-        player: u128,
-        stack: &ItemStack,
-        experience: u32,
-        repair: &mut u32,
-    ) {
-        self.fire_mending_repair(player, stack, experience, repair);
     }
     /// A player's hit landed on the mob `entity` of type `kind`
     /// (`minecraft:zombie`), holding `stack`: where `Item.hurtEnemy` is called,

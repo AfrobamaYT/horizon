@@ -9,6 +9,10 @@ pub mod boot_paint;
 pub mod heap_census;
 pub mod jobs;
 pub mod process_memory;
+pub mod stack_dump;
+/// Alt+Space and a bare Alt never open the window's system menu, as in GLFW.
+#[cfg(target_os = "windows")]
+pub mod system_menu;
 
 use std::sync::{
     OnceLock,
@@ -81,7 +85,11 @@ pub fn par_chunks_mut_with<T: Send>(
     std::thread::scope(|scope| {
         let helpers = worker_count().saturating_sub(1).clamp(1, count - 1);
         let threads: Vec<_> = (0..helpers)
-            .filter_map(|_| std::thread::Builder::new().spawn_scoped(scope, work).ok())
+            .filter_map(|_| {
+                horizon_guest_stack::builder()
+                    .spawn_scoped(scope, work)
+                    .ok()
+            })
             .collect();
         work();
         for t in threads {

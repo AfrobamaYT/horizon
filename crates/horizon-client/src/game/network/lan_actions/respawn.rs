@@ -14,7 +14,7 @@ impl Game<'_> {
         if !host.hub.guests[i].dead {
             return;
         }
-        let uuid = host.hub.guests[i].uuid;
+        let (uuid, entity_id) = (host.hub.guests[i].uuid, host.hub.guests[i].entity_id);
         let original = self.capture_original_player(conn);
         // PlayerList.respawn replaces the player, retaining only opted-in data.
         if let Some(attachments) = self
@@ -26,6 +26,8 @@ impl Game<'_> {
             attachments.replace_contents(copy);
         }
         self.reinitialize_server_player(uuid, conn);
+        // The new `ServerPlayer` is filed where it is placed, untold.
+        self.entity_section_forget(entity_id as u32);
         // PlayerList.respawn removes the dead player (Player.remove).
         self.guest_drop_carried(i);
         // AbstractContainerScreen.tick / ServerPlayer.closeContainer: the dead
@@ -403,7 +405,7 @@ impl Game<'_> {
                 let me = self.player_text(&name, uuid);
                 let text = match cause {
                     Some(key) => horizon_client::text::Text::translate(&key, &[me]),
-                    None if at[1] < f64::from(self.world.bottom_y() - 64) => {
+                    None if at[1] < self.world.below_world_y() => {
                         horizon_client::text::Text::translate("death.attack.outOfWorld", &[me])
                     }
                     None => self.guest_death_message(conn, me),

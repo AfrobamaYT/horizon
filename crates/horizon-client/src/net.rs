@@ -380,45 +380,52 @@ impl Session {
         let recorder = Arc::new(Mutex::new(None));
         let thread_recorder = recorder.clone();
         let (address_owned, name_owned) = (address.to_owned(), name.to_owned());
-        let thread = std::thread::Builder::new()
-            .name("horizon-net".into())
-            .spawn(move || {
-                horizon_threads::favour_current();
-                let result = captured_payloads.map_err(Reason::plain).and_then(|_| {
-                    run(
-                        local,
-                        &address_owned,
-                        &name_owned,
-                        auth.as_deref(),
-                        info,
-                        &lang,
-                        &send,
-                        &thread_writer,
-                        &thread_configuring,
-                        &thread_counters,
-                        &thread_cookies,
-                        &thread_far,
-                        transferred,
-                        &resources,
-                        lan,
-                        &thread_recorder,
-                        &thread_payloads,
-                    )
-                });
-                thread_payloads.close();
-                thread_far.cancel();
-                let from_server = result.is_ok();
-                let why = result.unwrap_or_else(|e| e);
-                if let Some(w) = thread_writer.lock().unwrap().take() {
-                    w.shutdown();
-                }
-                let _ = send.send(Event::Disconnected {
-                    reason: why.text,
-                    key: why.key,
-                    from_server,
-                });
-            })
-            .ok();
+        // Payload handlers of wasm mods run on this thread (the client's network root).
+        let thread = horizon_guest_stack::spawn("horizon-net".into(), move || {
+            horizon_threads::favour_current();
+            let result = captured_payloads.map_err(Reason::plain).and_then(|_| {
+                run(
+                    local,
+                    &address_owned,
+                    &name_owned,
+                    auth.as_deref(),
+                    info,
+                    &lang,
+                    &send,
+                    &thread_writer,
+                    &thread_configuring,
+                    &thread_counters,
+                    &thread_cookies,
+                    &thread_far,
+                    transferred,
+                    &resources,
+                    lan,
+                    &thread_recorder,
+                    &thread_payloads,
+                )
+            });
+            thread_payloads.close();
+            thread_far.cancel();
+            let from_server = result.is_ok();
+            let why = result.unwrap_or_else(|e| e);
+            if let Some(w) = thread_writer.lock().unwrap().take() {
+                w.shutdown();
+            }
+            let _ = send.send(Event::Disconnected {
+                reason: why.text,
+                key: why.key,
+                from_server,
+            });
+        })
+        .inspect_err(|error| {
+            // No reader runs to report the end: say it here, or the session waits forever.
+            let _ = payload_events.send(Event::Disconnected {
+                reason: format!("network thread: {error}"),
+                key: None,
+                from_server: false,
+            });
+        })
+        .ok();
         let debug = std::env::var_os("HORIZON_NET_DEBUG").is_some();
         Self {
             events,
@@ -1306,6 +1313,8 @@ fn receive_application(
             );
             Ok(None)
         }
+        // Raw channels are server-side: a client's table has none.
+        crate::raw_payloads::Classified::Raw(_) => Ok(None),
     }
 }
 
@@ -1623,13 +1632,31 @@ fn brand() -> Vec<u8> {
 }
 
 /// Flatten a JSON chat component (login disconnects are JSON).
+/// At most `horizon_protocol::text::MAX_TEXT` bytes, as `plain`: a login-phase reason from a
+/// server is any JSON it likes.
 pub fn json_text(v: &serde_json::Value, lang: &Language) -> String {
+    use horizon_protocol::text::{MAX_TEXT, push_capped};
     match v {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Array(a) => a.iter().map(|e| json_text(e, lang)).collect(),
+        serde_json::Value::String(s) => {
+            let mut out = String::new();
+            push_capped(&mut out, s);
+            out
+        }
+        serde_json::Value::Array(a) => {
+            let mut out = String::new();
+            for e in a {
+                if out.len() >= MAX_TEXT {
+                    break;
+                }
+                push_capped(&mut out, &json_text(e, lang));
+            }
+            out
+        }
         serde_json::Value::Object(o) => {
             let mut out = if let Some(t) = o.get("text").and_then(|t| t.as_str()) {
-                t.to_owned()
+                let mut out = String::new();
+                push_capped(&mut out, t);
+                out
             } else if let Some(key) = o.get("translate").and_then(|t| t.as_str()) {
                 let args: Vec<String> = o
                     .get("with")
@@ -1651,7 +1678,10 @@ pub fn json_text(v: &serde_json::Value, lang: &Language) -> String {
             };
             if let Some(extra) = o.get("extra").and_then(|e| e.as_array()) {
                 for e in extra {
-                    out.push_str(&json_text(e, lang));
+                    if out.len() >= MAX_TEXT {
+                        break;
+                    }
+                    push_capped(&mut out, &json_text(e, lang));
                 }
             }
             out
@@ -2006,6 +2036,18 @@ mod tests {
             drop(shared_writer);
             std::fs::remove_dir_all(root).unwrap();
         }
+    }
+
+    #[test]
+    fn a_login_reason_repeating_its_argument_stays_bounded() {
+        let pattern = "%1$s".repeat(16_000);
+        let mut v = serde_json::json!({ "text": "A" });
+        for _ in 0..3 {
+            v = serde_json::json!({ "translate": "x.unknown", "fallback": pattern, "with": [v] });
+        }
+        let v = serde_json::json!({ "text": "", "extra": [v.clone(), v] });
+        let text = json_text(&v, &Language::default());
+        assert!(text.len() <= horizon_protocol::text::MAX_TEXT);
     }
 
     fn pack(namespace: &str, id: &str, version: &str) -> cfg::KnownPack {

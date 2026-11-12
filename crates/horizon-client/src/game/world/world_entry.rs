@@ -111,7 +111,7 @@ impl Game<'_> {
                 })
                 .unwrap_or_default();
             let data_source = self.pack.data_changes.clone();
-            self.creation_job = std::thread::Builder::new()
+            let job = horizon_guest_stack::builder()
                 .name("world-creation".into())
                 .spawn(move || {
                     horizon_client::vanillagen::shared_data_from(
@@ -122,8 +122,20 @@ impl Game<'_> {
                     )
                     .map(|_| ())
                     .map_err(|e| e.to_string())
-                })
-                .ok();
+                });
+            match job {
+                Ok(job) => self.creation_job = Some(job),
+                Err(error) => {
+                    log::warn!("Horizon: world creation worker could not start: {error}");
+                    if let Some(title) = self.title.as_mut() {
+                        title.finish_preparing();
+                        title.failed(format!(
+                            "{}: {error}",
+                            horizon_client::lang::get("createWorld.preparing")
+                        ));
+                    }
+                }
+            }
             return;
         }
         if !self
@@ -362,22 +374,33 @@ impl Game<'_> {
         let packs: Vec<_> = std::iter::once(&stack.content)
             .chain(stack.enabled_packs())
             .collect();
-        let files: Vec<(String, Vec<Vec<u8>>)> =
-            horizon_client::datapack::registry_files(&packs, &keys)
-                .into_iter()
-                .map(|(path, versions)| {
-                    let versions = super::condition_reload_state::registry_versions(
-                        versions, conditions, &path,
-                    );
-                    (path, versions)
-                })
-                .collect();
+        let files: Vec<_> = horizon_client::datapack::registry_files(
+            &packs,
+            &keys,
+            !conditions.has_registered(),
+            |path, pack, bytes| {
+                !super::condition_reload_state::registry_versions(
+                    vec![(pack.to_owned(), bytes.to_vec())],
+                    conditions,
+                    path,
+                )
+                .is_empty()
+            },
+        )
+        .map_err(|error| {
+            format!(
+                "datapack registry {} entry {} (pack {}, file {}): {:?}",
+                error.registry, error.entry, error.pack, error.file, error.reason
+            )
+        })?
+        .into_iter()
+        .collect();
         mod_api::DatapackCandidate::build(declarations, &files)
             .map(Some)
             .map_err(|error| {
                 format!(
-                    "datapack registry {} entry {} ({}): {:?}",
-                    error.registry, error.entry, error.file, error.reason
+                    "datapack registry {} entry {} (pack {}, file {}): {:?}",
+                    error.registry, error.entry, error.pack, error.file, error.reason
                 )
                 .into()
             })
@@ -564,7 +587,7 @@ impl Game<'_> {
     pub(super) fn prepare_parts(&self, items: &Items) -> Result<PreparedParts> {
         let registry = self.pack.assets.registry;
         let block_tags = &items.block_tags;
-        let tags = native_world_read::prepare_block_tags(block_tags);
+        let tags = self.block_tag_sets(items);
         let parts = mod_api::__private::prepare_parts(
             block_tags,
             &items.item_tags,
@@ -675,6 +698,7 @@ impl Game<'_> {
         native_world_read::install_block_tags(prepared.tags);
         mod_api::__private::install_resolved_parts(prepared.parts);
         self.resolve_pathfindable();
+        self.resolve_piston_reactions();
     }
     pub(super) fn resolve_pathfindable(&self) {
         let asked = mod_api::__private::has_scoped_hook(mod_api::HookId::IsPathfindable);
