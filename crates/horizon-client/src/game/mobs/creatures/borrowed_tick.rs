@@ -110,8 +110,12 @@ impl Game<'_> {
         let uuid = state.uuid;
         let level_id = state.level_id;
         let round = state.round;
-        // Each mob's position updates in its tick, in order, filed once the game is free.
+        // Each mob's position updates in its tick, in order, filed once the game is free: its
+        // teleports (`snapTo`, kept while this record is open), then where its tick left it.
         let mut section_moves = std::mem::take(&mut self.native_lifecycle.entity_sections.ticked);
+        let teleports = round
+            .sections()
+            .then(horizon_client::mobs::living::teleports::Record::open);
         let mut dispatch_panic = None;
         let mut pushes = std::mem::take(state.pushes);
         let original_len = snapshot.len();
@@ -498,11 +502,10 @@ impl Game<'_> {
                         super::super::tick_profile::add(level_id, &kind, started);
                     }
                     let m = &mut mobs[i];
-                    // Its `xo` (`previous`) is where its tick began, unless a teleport in the
-                    // tick (`snapTo`) moved it along: that teleport, then where the tick left
-                    // it, are two position updates (`EntityInLevelCallback.onMove` for each).
-                    if round.sections() {
-                        section_moves.push((m.id, m.previous));
+                    // Each teleport in its tick, then where the tick left it: one position update
+                    // each (`EntityInLevelCallback.onMove` for each).
+                    if let Some(teleports) = &teleports {
+                        teleports.take_into(&mut section_moves);
                         section_moves.push((m.id, m.position));
                     }
                     if let Some(selection) = &selection

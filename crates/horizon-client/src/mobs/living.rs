@@ -2416,8 +2416,7 @@ pub fn random_teleport(
         return false;
     }
     // Entity.teleportTo -> snapTo: the old position moves too, the motion stays.
-    m.position = Vec3::new(x, ny, z);
-    m.previous = m.position;
+    teleports::snap_to(m, Vec3::new(x, ny, z));
     m.ai.nav.stop();
     // `randomTeleport(..., true)` broadcasts entity event 46.
     events.push(MobEvent::EntityEvent {
@@ -3692,6 +3691,7 @@ mod tests {
 #[cfg(test)]
 #[path = "living/size_answer_tests.rs"]
 mod size_answer_tests;
+pub mod teleports;
 
 #[cfg(test)]
 mod farmland_event_tests {

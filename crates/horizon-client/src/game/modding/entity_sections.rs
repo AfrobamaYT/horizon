@@ -286,9 +286,9 @@ impl Game<'_> {
         self.tell_entity_sections();
     }
 
-    /// What a family's ticks moved, in order (`moves`: each mob's last teleport in its tick, or
-    /// where it began, then where its tick left it): each filed as one position update, and
-    /// `moves` emptied. Told with the family's round.
+    /// What a family's ticks moved, in order (`moves`: each mob's teleports in its tick, then
+    /// where its tick left it): each filed as one position update, and `moves` emptied. Told
+    /// with the family's round.
     pub(super) fn entity_sections_ticked(&mut self, moves: &mut Vec<(u32, Vec3)>) {
         if let Some(scope) = self.entity_section_scope() {
             let sections = &mut self.native_lifecycle.entity_sections;

@@ -251,18 +251,60 @@ fn floating_cow(game: &mut crate::game::Game<'_>, at: [f64; 3]) -> u32 {
     id
 }
 
-/// The cow `id` teleported to `to` (`snapTo`: its position and its `xo` move together, as an
-/// enderman's, a pet's or a shulker's teleport moves them in its tick), then one mob tick that
-/// walks it on at `velocity`.
-fn teleport_then_walk(game: &mut crate::game::Game<'_>, id: u32, to: [f64; 3], velocity: [f64; 3]) {
+/// A goal that, when it starts, teleports its mob to each of its targets in turn, once: the
+/// `snapTo` an enderman's, a pet's or a shulker's teleport makes in its tick.
+#[derive(Clone, Debug)]
+struct Teleports(Vec<[f64; 3]>);
+
+impl horizon_client::mobs::goals::Goal for Teleports {
+    fn flags(&self) -> u8 {
+        0
+    }
+    fn can_use(
+        &mut self,
+        _: &mut horizon_client::mobs::Mob,
+        _: &mut horizon_client::mobs::goals::Cx<'_, '_, '_>,
+    ) -> bool {
+        !self.0.is_empty()
+    }
+    fn start(
+        &mut self,
+        m: &mut horizon_client::mobs::Mob,
+        _: &mut horizon_client::mobs::goals::Cx<'_, '_, '_>,
+    ) {
+        for [x, y, z] in self.0.drain(..) {
+            let at = horizon_core::geometry::Vec3::new(x, y, z);
+            horizon_client::mobs::living::teleports::snap_to(m, at);
+        }
+    }
+    fn box_clone(&self) -> Box<dyn horizon_client::mobs::goals::Goal> {
+        Box::new(self.clone())
+    }
+}
+
+/// The cow `id`, moving at `velocity`, runs real mob ticks until one has teleported it through
+/// `targets` (its [`Teleports`] goal starting) and then walked it on, in that same tick.
+fn teleport_then_walk(
+    game: &mut crate::game::Game<'_>,
+    id: u32,
+    targets: &[[f64; 3]],
+    velocity: [f64; 3],
+) {
     use horizon_core::geometry::Vec3;
     let i = game.mobs.iter().position(|m| m.id == id).unwrap();
+    let start = game.mobs[i].position.y;
     game.mobs.update(i, |m| {
-        m.position = Vec3::new(to[0], to[1], to[2]);
-        m.previous = m.position;
+        m.ai.goals.add(0, Teleports(targets.to_vec()));
         m.velocity = Vec3::new(velocity[0], velocity[1], velocity[2]);
     });
-    game.tick_creature_entities().unwrap();
+    for _ in 0..4 {
+        game.tick_creature_entities().unwrap();
+        let at = game.mobs.iter().find(|m| m.id == id).unwrap().position;
+        if (at.y - start).abs() > 5.0 {
+            return;
+        }
+    }
+    panic!("the cow's tick never teleported it");
 }
 
 #[test]
@@ -272,7 +314,7 @@ fn a_mobs_teleport_and_its_walk_in_one_tick_are_two_crossings() {
         with_game(|game| {
             // Section y 6 (blocks 96 to 111), teleported near the top of y 7, then 0.6 up into y 8.
             let id = floating_cow(game, [8.5, 100.0, 8.5]);
-            teleport_then_walk(game, id, [8.5, 127.75, 8.5], [0.0, 0.6, 0.0]);
+            teleport_then_walk(game, id, &[[8.5, 127.75, 8.5]], [0.0, 0.6, 0.0]);
             let at = game.mobs.iter().find(|m| m.id == id).unwrap().position;
             assert!(at.y >= 128.0, "the walk took it into y 8: {at:?}");
             assert_eq!(
@@ -293,7 +335,7 @@ fn a_mobs_teleport_out_and_its_walk_back_in_one_tick_are_two_crossings() {
         with_game(|game| {
             // Teleported just over y = 112 into section y 7, then 0.6 down, back into y 6.
             let id = floating_cow(game, [8.5, 100.0, 8.5]);
-            teleport_then_walk(game, id, [8.5, 112.25, 8.5], [0.0, -0.6, 0.0]);
+            teleport_then_walk(game, id, &[[8.5, 112.25, 8.5]], [0.0, -0.6, 0.0]);
             let at = game.mobs.iter().find(|m| m.id == id).unwrap().position;
             assert!(at.y < 112.0, "the walk took it back into y 6: {at:?}");
             assert_eq!(
@@ -301,6 +343,30 @@ fn a_mobs_teleport_out_and_its_walk_back_in_one_tick_are_two_crossings() {
                 &[
                     (false, id, [0, 6, 0], [0, 7, 0], false),
                     (false, id, [0, 7, 0], [0, 6, 0], false),
+                ]
+            );
+        })
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_mob_that_teleports_twice_in_its_tick_then_walks_is_three_crossings() {
+    observe(|calls| {
+        with_game(|game| {
+            // y 6, then in one tick teleported into y 7 and on near the top of y 8, then 0.6 up
+            // into y 9: A -> B, B -> C and C -> D, not only the last teleport.
+            let id = floating_cow(game, [8.5, 100.0, 8.5]);
+            let targets = [[8.5, 120.0, 8.5], [8.5, 143.75, 8.5]];
+            teleport_then_walk(game, id, &targets, [0.0, 0.6, 0.0]);
+            let at = game.mobs.iter().find(|m| m.id == id).unwrap().position;
+            assert!(at.y >= 144.0, "the walk took it into y 9: {at:?}");
+            assert_eq!(
+                calls.lock().unwrap().as_slice(),
+                &[
+                    (false, id, [0, 6, 0], [0, 7, 0], false),
+                    (false, id, [0, 7, 0], [0, 8, 0], false),
+                    (false, id, [0, 8, 0], [0, 9, 0], false),
                 ]
             );
         })
