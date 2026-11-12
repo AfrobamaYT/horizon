@@ -116,6 +116,7 @@ struct Finder {
     feature: bool,
     required: bool,
     position: PackPosition,
+    hidden: bool,
 }
 #[mod_api::__subscriptions]
 impl Hooks for Finder {
@@ -131,6 +132,7 @@ impl Hooks for Finder {
             );
             pack.always_active = self.required;
             pack.position = self.position;
+            pack.hidden = self.hidden;
             if self.feature && kind == PackType::ServerData {
                 pack.source = PackSource::Feature;
             }
@@ -142,6 +144,9 @@ fn with_finder(test: impl FnOnce()) {
     with_finder_config(false, false, test);
 }
 fn with_finder_config(feature: bool, required: bool, test: impl FnOnce()) {
+    with_finder_hidden(feature, required, false, test);
+}
+fn with_finder_hidden(feature: bool, required: bool, hidden: bool, test: impl FnOnce()) {
     with_mods(
         vec![ModEntry::new(
             "packmod",
@@ -149,11 +154,39 @@ fn with_finder_config(feature: bool, required: bool, test: impl FnOnce()) {
                 feature,
                 required,
                 position: PackPosition::Bottom,
+                hidden,
             }),
         )]
         .into(),
         test,
     );
+}
+
+#[test]
+fn hidden_packs_reach_the_screens_marked_hidden_and_still_apply() {
+    let fixture = Fixture::new(false);
+    let sources = fixture.sources();
+    with_finder_hidden(false, true, true, || {
+        let packs = discover(PackType::ClientResources, &sources);
+        let infos = crate::game::packs::pack_infos(&fixture.root, &[], &packs);
+        let info = infos
+            .iter()
+            .find(|info| info.id == fixture.asset_id())
+            .unwrap();
+        assert!(info.hidden && info.required);
+        let data = data_packs(&sources);
+        assert!(data[0].selection.as_ref().is_some_and(|info| info.hidden));
+        // Required and hidden: on without the player picking it.
+        let base = fixture.root.join("base");
+        fs::create_dir_all(base.join("assets/packmod/lang")).unwrap();
+        fs::write(base.join(ASSET), b"base").unwrap();
+        let on = packs::resources(
+            ResourceSource::directory(base),
+            &packs::enabled(&packs, &[fixture.asset_id()]),
+        )
+        .unwrap();
+        assert_eq!(on.read(ASSET).unwrap(), br#"{"packmod.optional":"first"}"#);
+    });
 }
 
 #[test]
