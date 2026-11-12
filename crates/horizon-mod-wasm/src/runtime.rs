@@ -84,6 +84,12 @@ pub(crate) const ENGINE_CONFIG: (&str, bool) = ("epoch_interruption", true);
 pub(crate) fn engine() -> wasmtime::Result<Engine> {
     let mut config = wasmtime::Config::new();
     config.epoch_interruption(ENGINE_CONFIG.1);
+    config.max_wasm_stack(horizon_guest_stack::GUEST_STACK_BYTES);
+    // Wasmtime validates this bound even for synchronous engines. No async
+    // support or fiber execution is enabled by setting its size.
+    config.async_stack_size(
+        horizon_guest_stack::GUEST_STACK_BYTES + horizon_guest_stack::HOST_HEADROOM,
+    );
     let engine = Engine::new(&config)?;
     let weak = engine.weak();
     std::thread::Builder::new()
@@ -258,17 +264,16 @@ impl WasmHandler {
         {
             return value;
         }
-        let names = self
-            .module
-            .call(
-                CallClass::Callback,
-                Frame::default(),
-                export_id,
-                Some(self.index),
-                |_| {},
-                |r| r.take(),
-            )
-            .unwrap_or_default();
+        let Some(names) = self.module.call(
+            CallClass::Callback,
+            Frame::default(),
+            export_id,
+            Some(self.index),
+            |_| {},
+            |r| r.take(),
+        ) else {
+            return &[];
+        };
         let value = crate::boundary::subscriptions_of(owner, names);
         self.module
             .subscriptions
@@ -478,6 +483,7 @@ impl WasmMod {
         members: &[Member<'_>],
         cache: Option<&crate::module_cache::ModuleCache>,
     ) -> Result<Vec<Self>, Refusal> {
+        horizon_guest_stack::check_current().map_err(|error| Refusal::Runtime(error.into()))?;
         let mut store = Store::new(engine, State::default());
         store.limiter(|state| &mut state.limits);
         store.set_epoch_deadline(30_000);
@@ -585,6 +591,10 @@ impl WasmMod {
         // guards. Their destructors must not reenter the still-lent guest.
         if std::thread::panicking() {
             self.disable();
+            return None;
+        }
+        if let Err(error) = horizon_guest_stack::check_current() {
+            log::error!("wasm mod {}: {error}", self.mod_id());
             return None;
         }
         if self.running.poisoned.load(Ordering::Relaxed) {

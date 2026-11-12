@@ -128,14 +128,14 @@ fn with_case(
         drops: Arc::default(),
         calls: AtomicUsize::new(0),
     });
-    mod_api::testing::with_mods(
+    mod_platform::testing::with_mods(
         vec![ModEntry::new(
             "executor_probe",
             Box::new(Registration(probe.clone())),
         )]
         .into(),
         || {
-            mod_api::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
+            mod_platform::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
                 .unwrap();
             let transport = Transport::capture(Side::Server).unwrap();
             assert!(transport.local.owns(CHANNEL));

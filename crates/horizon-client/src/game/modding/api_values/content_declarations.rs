@@ -233,6 +233,57 @@ mod tests {
         );
     }
 
+    /// A block that leaves `item` out has its block item, declared in a file
+    /// or in code (`Block::new`, `Block::default`) alike.
+    #[test]
+    fn a_block_has_its_item_unless_told_not_to_in_files_and_in_code() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.hmod");
+        let manifest = "id = \"test\"\nname = \"Test\"\nversion = \"0.1.0\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n";
+        let block_file: &[u8] = br#"{"template": "minecraft:stone"}"#;
+        let files = [("data/test/horizon/block/file.json", block_file)];
+        std::fs::write(
+            &path,
+            horizon_mod_package::Package::write_files(manifest, &files).unwrap(),
+        )
+        .unwrap();
+        let package = horizon_mod_package::Package::read(&path).unwrap();
+        let from_file = horizon_mod_package::Content::read(&path, &package.manifest).unwrap();
+        let mut default = Block::default();
+        default.id = "test:default".into();
+        default.template = "minecraft:stone".into();
+        let declared = |block: Block| {
+            let mut content = horizon_mod_package::Content::declared("test");
+            content
+                .declare(&[block.try_into_engine(&()).unwrap()], &[])
+                .unwrap();
+            content
+        };
+        let item = |id: &str| engine::Item {
+            id: id.into(),
+            template: "minecraft:stick".into(),
+            ..Default::default()
+        };
+        for (mut content, id) in [
+            (from_file, "test:file"),
+            (
+                declared(Block::new("test:new", "minecraft:stone")),
+                "test:new",
+            ),
+            (declared(default), "test:default"),
+        ] {
+            // The block item holds the id: an item of the same id is refused.
+            assert_eq!(
+                content.declare(&[], &[item(id)]),
+                Err(format!(
+                    "item {id} is declared twice, or is also a block's item"
+                )),
+            );
+        }
+        let mut without = declared(Block::new("test:bare", "minecraft:stone").with_item(false));
+        assert_eq!(without.declare(&[], &[item("test:bare")]), Ok(()));
+    }
+
     #[test]
     fn duplicate_component_ids_refuse_blocks_and_items() {
         let set = || Some(Tag::List(vec![]));

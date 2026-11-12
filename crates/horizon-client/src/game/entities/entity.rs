@@ -2883,6 +2883,7 @@ mod set_rotation_tests {
     fn set_rotation_keeps_yaw_and_clamps_pitch_on_kinds_that_had_none() {
         let mut orb = ExperienceOrb {
             attachment_lifetime: Default::default(),
+            fall_distance: 0.0,
             join: Default::default(),
             no_gravity: false,
             id: 0,

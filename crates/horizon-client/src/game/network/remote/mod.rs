@@ -76,6 +76,7 @@ use {
 mod abilities;
 mod client_level_tick;
 mod item_use;
+mod remote_attributes;
 mod tables;
 
 pub(super) use super::villager_client::builtin_registries;
@@ -3210,24 +3211,8 @@ impl Game<'_> {
         if kind == "minecraft:experience_orb" {
             // Its value (ExperienceOrb.DATA_VALUE) follows in SetEntityData.
             self.orbs.retain(|o| o.id != id as u32);
-            self.orbs.push(ExperienceOrb {
-                attachment_lifetime: Default::default(),
-                rotation: [0.0, 0.0],
-                join: Default::default(),
-                no_gravity: false,
-                id: id as u32,
-                position: at,
-                previous: at,
-                velocity: Vec3::ZERO,
-                value: 1,
-                age: 0,
-                on_ground: false,
-                count: 1,
-                ticks: 0,
-                health: 5,
-                air: 300,
-                following: None,
-            });
+            self.orbs
+                .push(ExperienceOrb::new(id as u32, at, Vec3::ZERO, 1));
         }
         if let Some(t) = mob_type {
             // The window's copy of the server's mob: no mod part goals —
@@ -3667,60 +3652,6 @@ impl Game<'_> {
         }
         if internal >= super::stations::INPUT && self.station.is_some() {
             self.remote_station_slot_changed(internal);
-        }
-    }
-
-    /// `ClientPacketListener.handleUpdateAttributes` for a mob, each value from
-    /// `AttributeInstance.calculateValue`: its maximum health (the hearts drawn
-    /// over its mount), and its `minecraft:scale`, which sizes its box
-    /// (`LivingEntity.getDimensions`) and model (`LivingEntityRenderState.scale`)
-    /// as the local player's does: NPC plugins make their fake players bigger
-    /// with it, datapacks scale any mob.
-    fn remote_mob_attributes(&mut self, id: i32, values: &[play::AttributeSnapshot]) {
-        let catalog = &self.motion.attributes;
-        let value = |name: &str| {
-            let attribute = catalog.id(name)?;
-            let s = values
-                .iter()
-                .find(|s| s.attribute == attribute.registry_id())?;
-            Some(
-                catalog
-                    .attribute(attribute)
-                    .definition
-                    .sanitize(snapshot_value(s)),
-            )
-        };
-        let (max_health, scale) = (value("minecraft:max_health"), value("minecraft:scale"));
-        let (speed, jump) = (
-            value("minecraft:movement_speed"),
-            value("minecraft:jump_strength"),
-        );
-        let Some(m) = self.mob_index.get_mut(&mut self.mobs, id as u32) else {
-            return;
-        };
-        // A horse its rider's client moves goes at its own speed and jumps
-        // its own height (`getSpeed`, `getCustomJump`).
-        if horizon_client::mobs::equine::moved_by_rider(m.species()) {
-            if let Some(speed) = speed {
-                horizon_client::mobs::finalize::set_base(
-                    m,
-                    horizon_client::mobs::finalize::Attr::MovementSpeed,
-                    speed,
-                );
-            }
-            if let Some(jump) = jump {
-                m.extra.vector[0] = jump;
-            }
-        }
-        if let Some(max_health) = max_health {
-            horizon_client::mobs::finalize::set_base(
-                m,
-                horizon_client::mobs::finalize::Attr::MaxHealth,
-                max_health,
-            );
-        }
-        if let Some(scale) = scale {
-            m.extra.model_scale = scale as f32;
         }
     }
 
@@ -4970,7 +4901,16 @@ impl Game<'_> {
             // HUD draws and the health it may hold), reach, speed and so on.
             // Then the received health again, which the old maximum clamped.
             C::UpdateAttributes(p) if self.remote.as_ref().is_some_and(|r| r.entity_id == p.id) => {
+                let nameplate = self.remote_nameplate_values(&p.values);
                 self.apply_own_attributes(p.values);
+                if let Some(m) = self.player_model.as_mut() {
+                    if let Some(value) = nameplate.name_tag {
+                        m.set_name_tag_distance(value);
+                    }
+                    if let Some(value) = nameplate.below_name {
+                        m.set_below_name_distance(value);
+                    }
+                }
                 self.apply_remote_health();
             }
             C::UpdateAttributes(p) => self.remote_mob_attributes(p.id, &p.values),
@@ -12059,8 +11999,8 @@ mod tests {
         use horizon_protocol::connection::Pipe;
         use mod_api::{
             ClientHost, ClientMiningPredictEvent, ClientPacketSendEvent, Flow, Hooks, ModEntry,
-            testing::with_mods,
         };
+        use mod_platform::testing::with_mods;
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
@@ -12183,7 +12123,7 @@ mod tests {
         )]
         .into();
         crate::game::api_values::install_parts(&mods).unwrap();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_client_game(|game| {
                 let (client, _server) = horizon_protocol::connection::Pipe::pair();
                 game.connect_local(client, "animation-client").unwrap();
@@ -12537,7 +12477,7 @@ mod tests {
                 mod_api::Flow::Continue
             }
         }
-        mod_api::__private::install(std::sync::Arc::from([mod_api::ModEntry::new(
+        mod_platform::__private::install(std::sync::Arc::from([mod_api::ModEntry::new(
             "test-chat-received",
             Box::new(Censor),
         )]));
@@ -12978,7 +12918,7 @@ mod tests {
                 event.draw.fill([0.0, 0.0, 80.0, 10.0], 0xFF102030);
             }
         }
-        mod_api::testing::with_mods(
+        mod_platform::testing::with_mods(
             vec![mod_api::ModEntry::new("transition_test", Box::new(Arrival))].into(),
             || {
                 let mut registrations = Vec::new();
@@ -13742,7 +13682,7 @@ mod tests {
                 living
                     .effect(
                         game,
-                        mod_api::__private::part_tests::effect_key("minecraft:speed")
+                        mod_platform::__private::part_tests::effect_key("minecraft:speed")
                     )
                     .is_none()
             );
@@ -13757,7 +13697,7 @@ mod tests {
             let effect = living
                 .effect(
                     game,
-                    mod_api::__private::part_tests::effect_key("minecraft:speed"),
+                    mod_platform::__private::part_tests::effect_key("minecraft:speed"),
                 )
                 .unwrap();
             assert_eq!((effect.duration, effect.amplifier), (600, 1));

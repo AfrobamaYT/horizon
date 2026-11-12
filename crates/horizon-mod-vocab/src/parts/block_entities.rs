@@ -177,8 +177,8 @@ pub trait BlockEntitiesRegistrar {
     /// Look up a vanilla or another mod's type. The final registry validates it at load.
     fn block_entity_type_key(&mut self, id: &str) -> crate::BlockEntityTypeKey;
 
-    /// Declare block entity type `path` in a namespace owned by this mod's manifest, held by `blocks`; mods usually
-    /// reach it through `block_entity_type`.
+    /// Declare block entity type `path` in a namespace owned by this mod's manifest, held by `blocks`
+    /// (a bare name is this mod's); mods usually reach it through `block_entity_type`.
     fn declare_block_entity_type(
         &mut self,
         path: &str,

@@ -14,8 +14,12 @@ impl Game<'_> {
         let Some(consumable) = self.consumable(&stack) else {
             return false;
         };
-        if info.food.is_some()
-            && (self.player.is_none() || !self.can_eat(Some(&stack), info.can_always_eat))
+        if horizon_client::item_sync::food(&stack, info.food).is_some()
+            && (self.player.is_none()
+                || !self.can_eat(
+                    Some(&stack),
+                    horizon_client::item_sync::can_always_eat(&stack, info.can_always_eat),
+                ))
         {
             return false;
         }

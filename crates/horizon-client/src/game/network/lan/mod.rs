@@ -5074,7 +5074,7 @@ mod tests {
             }
         }
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new("replier", Box::new(Replier))].into();
-        mod_api::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             with_game(|game| {
                 let settings = super::LanSettings {
                     port: 0,
@@ -5440,7 +5440,7 @@ mod tests {
                 ModEntry::new("effect-reset", Box::new(Reset)),
             ]
             .into();
-            mod_api::testing::with_mods(mods, || {
+            mod_platform::testing::with_mods(mods, || {
                 // The game fixture bypasses content_root, which normally resolves
                 // the particle registry before any hook converts particle values.
                 let particles: Vec<_> = ParticleType::ALL
