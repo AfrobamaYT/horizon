@@ -15,7 +15,9 @@ in INTEGRATION_TESTS also run their `tests/` integration tests. The job fails wh
 tools/ci/ignored-tests-known-failures.txt doesn't list, when a listed test passes (take it off the
 list: the list only shrinks), and when a listed test no longer exists. A test marked `flaky` there
 may pass or fail; one marked `harness` is a parity harness's step, run by its harness with the
-environment it sets, and is skipped here; one marked `gpu` needs a graphics adapter and runs only where
+environment it sets, and is skipped here; one marked `needs` reads an input only its parity harness provides
+(REFERENCE names the environment variable): without that variable it is refused by name at the start of the
+shard, and with it, it runs and must pass; one marked `gpu` needs a graphics adapter and runs only where
 the runner has a Vulkan driver (an ICD file), and must pass there.
 
 Runtime diagnostics expose identities and allowlisted panic categories, never arbitrary assertion
@@ -136,17 +138,25 @@ def in_leg(test, number, count):
     return number is None or zlib.crc32(test.encode()) % count == number - 1
 
 
-def known_failures():
-    """(package, test) -> its mark (None, "flaky", "harness" or "gpu"), from the checked-in list."""
-    known = {}
+def listed_entries():
+    """(package, test, reference, mark) for each line of the checked-in list."""
     for number, line in enumerate(KNOWN.read_text().splitlines(), 1):
         line = line.split(" # ", 1)[0].split()
         if not line or line[0].startswith("#"):
             continue
-        if len(line) < 3 or line[3:] not in ([], ["flaky"], ["harness"], ["gpu"]):
-            sys.exit(f"{KNOWN.name}:{number}: expected `PACKAGE TEST REFERENCE [flaky|harness|gpu]`")
-        known[(line[0], line[1])] = line[3] if len(line) > 3 else None
-    return known
+        if len(line) < 3 or line[3:] not in ([], ["flaky"], ["harness"], ["gpu"], ["needs"]):
+            sys.exit(f"{KNOWN.name}:{number}: expected `PACKAGE TEST REFERENCE [flaky|harness|gpu|needs]`")
+        yield line[0], line[1], line[2], line[3] if len(line) > 3 else None
+
+
+def known_failures():
+    """(package, test) -> its mark (None, "flaky", "harness" or "gpu"), from the checked-in list."""
+    return {(package, test): mark for package, test, _, mark in listed_entries() if mark != "needs"}
+
+
+def harness_inputs():
+    """(package, test) -> the environment variable it reads that only its parity harness provides."""
+    return {(package, test): variable for package, test, variable, mark in listed_entries() if mark == "needs"}
 
 
 # Budgets include UTF-8 newlines; summary metadata is outside the payload budget.
@@ -473,7 +483,8 @@ def run(package, skip, number=None, count=None):
             print(f"{package}: target {target_number} started {target_count} tests")
             awaiting_count = False
         if found := RESULT.match(line):
-            results[found[1]] = found[2] == "ok"
+            # A test may report more than once (below); it passes only if every record passed.
+            results[found[1]] = results.get(found[1], True) and found[2] == "ok"
         elif line.startswith("screen-effect event loop error: "):
             print(line)
         elif found := SUMMARY.match(line):
@@ -495,14 +506,19 @@ def run(package, skip, number=None, count=None):
                 # --include-ignored must execute listed tests; an ignored record
                 # is not promoted to a passing result or missing-test credit.
                 if status != "ignored":
-                    results[name] = status == "ok"
-    framing_problems = {name: "duplicate-result" for name, seen in occurrences.items() if seen > 1}
-    framing_problems.update({name: "ambiguous-result" for name in ambiguous})
+                    results[name] = results.get(name, True) and status == "ok"
+    # A fixture that reruns its own test executable (`run_fresh_cases`, the death-weapon cases) prints the
+    # child's result record for the same name beside the parent's. Several records for one name are expected
+    # and combined above, so a FAILED among them fails the test; only an unreadable record is a framing problem.
+    if repeated := sum(seen > 1 for seen in occurrences.values()):
+        print(f"{package}: {repeated} listed tests reported more than one result (fixtures that rerun their own "
+              "test); each passes only if every result passed")
+    framing_problems = {name: "ambiguous-result" for name in ambiguous}
     if framing_problems:
         remaining = _active_budget if _active_budget is not None else [FAILURE_TOTAL_BYTES]
         for name, category in sorted(framing_problems.items()):
             bounded_record(f"  {safe_identity(name)}; category={category}\n", remaining)
-        print(f"{package}: {len(framing_problems)} listed identities have ambiguous or duplicate result framing")
+        print(f"{package}: {len(framing_problems)} listed identities have ambiguous result framing")
         return None
     if incomplete or awaiting_count or target_count is not None:
         print(f"{package}: test target did not finish (cargo exit {process.returncode})")
@@ -537,6 +553,7 @@ def main(shards):
     global _active_budget
     _active_budget = [FAILURE_TOTAL_BYTES]
     known = known_failures()
+    inputs = harness_inputs()
     skipped = {"harness"} if has_vulkan() else {"harness", "gpu"}
     if "gpu" in skipped:
         print("no Vulkan driver on this runner: the tests marked `gpu` are skipped")
@@ -556,6 +573,10 @@ def main(shards):
     for shard in selections:
         package, number, count = parse_shard(shard)
         skip = [test for (listed, test), mark in known.items() if listed == package and mark in skipped]
+        for (listed, test), variable in sorted(inputs.items()):
+            if listed == package and in_leg(test, number, count) and not os.environ.get(variable):
+                print(f"{package} {safe_identity(test)}: refused, needs {variable}; run by the parity harness")
+                skip.append(test)
         results = run(package, skip, number, count) if number is not None else run(package, skip)
         if results is None:
             problems.append(f"{shard}: the test run did not complete")

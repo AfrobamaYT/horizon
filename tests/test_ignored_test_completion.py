@@ -63,6 +63,37 @@ class IgnoredTests(unittest.TestCase):
         self.assertCountEqual(seen, names)
         self.assertIn(f"{names[0]}: failed, and isn't a known failure", log.getvalue())
 
+    def test_a_test_needing_a_harness_input_is_refused_by_name_without_it(self):
+        inputs = {("example", "needs_input"): "HORIZON_EXAMPLE_INPUT"}
+        with patch.dict(os.environ), patch.object(ignored_tests, "known_failures", return_value={}), \
+                patch.object(ignored_tests, "harness_inputs", return_value=inputs), \
+                patch.object(ignored_tests, "run", return_value={"other": True}) as execute, \
+                contextlib.redirect_stdout(io.StringIO()) as log:
+            os.environ.pop("HORIZON_EXAMPLE_INPUT", None)
+            self.assertEqual(ignored_tests.main(["example"]), 0)
+        self.assertEqual(execute.call_args.args, ("example", ["needs_input"]))
+        self.assertIn("example needs_input: refused, needs HORIZON_EXAMPLE_INPUT; run by the parity harness\n",
+                      log.getvalue())
+
+    def test_a_test_needing_a_harness_input_runs_and_must_pass_with_it(self):
+        inputs = {("example", "needs_input"): "HORIZON_EXAMPLE_INPUT"}
+        with patch.dict(os.environ, {"HORIZON_EXAMPLE_INPUT": "/input"}), \
+                patch.object(ignored_tests, "known_failures", return_value={}), \
+                patch.object(ignored_tests, "harness_inputs", return_value=inputs), \
+                patch.object(ignored_tests, "run", return_value={"needs_input": False}) as execute, \
+                contextlib.redirect_stdout(io.StringIO()) as log:
+            self.assertEqual(ignored_tests.main(["example"]), 1)
+        self.assertEqual(execute.call_args.args, ("example", []))
+        self.assertNotIn("refused", log.getvalue())
+        self.assertIn("example needs_input: failed, and isn't a known failure", log.getvalue())
+
+    def test_needs_entries_name_a_variable_and_are_not_known_failures(self):
+        inputs = ignored_tests.harness_inputs()
+        self.assertTrue(inputs)
+        for (package, test), variable in inputs.items():
+            self.assertRegex(variable, r"^[A-Z][A-Z0-9_]*$")
+            self.assertNotIn((package, test), ignored_tests.known_failures())
+
     def test_explicit_client_lib_selection_is_not_split_again(self):
         with patch.object(ignored_tests, "known_failures", return_value={}), patch.object(ignored_tests, "run", return_value={}) as execute:
             self.assertEqual(ignored_tests.main(["horizon-client-lib#2of3"]), 0)
@@ -254,27 +285,39 @@ class Legs(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(list(ignored_tests.listed_result_records(text, expected, len(name))), [])
 
-    def test_duplicate_and_ambiguous_listed_results_fail_closed(self):
+    def test_ambiguous_listed_results_fail_closed(self):
         name = leg_names()[1][0]
-        cases = [
-            (f"test {name} ... ok\ntest {name} ... ok\n", "duplicate-result"),
-            (f"test {name} ... ok\n\x1b[0mPRIVATE_PAYLOAD test {name} ... FAILED\n", "duplicate-result"),
-            (f"test fixture_peer ... PRIVATE_PAYLOAD test {name} ... ok test {name} ... ok\n", "duplicate-result"),
-            (f"test fixture_peer ... PRIVATE_PAYLOAD test {name} ... ok EXTRA\n", "ambiguous-result"),
-            (f"PRIVATE_PAYLOAD test {name} ... ok EXTRA\n", "ambiguous-result"),
-            (f"test {name} ... ok\ntest fixture_peer ... PRIVATE_PAYLOAD test {name} ... ok EXTRA\n", "ambiguous-result"),
-            (f"test {name} ... ok\ntest fixture_peer ... PRIVATE_PAYLOAD test {name} ... FAILED\n", "duplicate-result"),
-        ]
-        for record, category in cases:
-            with self.subTest(category=category):
+        for record in (
+                f"test fixture_peer ... PRIVATE_PAYLOAD test {name} ... ok EXTRA\n",
+                f"PRIVATE_PAYLOAD test {name} ... ok EXTRA\n",
+                f"test {name} ... ok\ntest fixture_peer ... PRIVATE_PAYLOAD test {name} ... ok EXTRA\n"):
+            with self.subTest(record=record.count("\n")):
                 def fake(command, **_):
                     text = f"{name}: test\n" if "--list" in command else target(1, record, summary(passed=1))
                     return subprocess.CompletedProcess(command, 0, text)
                 with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()) as log:
                     self.assertIsNone(ignored_tests.run("example", [], 1, 2))
-                self.assertIn(f"{name}; category={category}", log.getvalue())
+                self.assertIn(f"{name}; category=ambiguous-result", log.getvalue())
                 self.assertNotIn("PRIVATE_PAYLOAD", log.getvalue())
                 self.assertNotIn("EXTRA", log.getvalue())
+
+    def test_a_test_that_reruns_itself_completes_and_fails_if_any_of_its_records_failed(self):
+        # A fixture that reruns its own test executable prints the child's record beside the parent's.
+        name = leg_names()[1][0]
+        for record, passed in (
+                (f"test {name} ... ok\ntest {name} ... ok\n", True),
+                (f"test {name} ... ok\n\x1b[0mPRIVATE_PAYLOAD test {name} ... FAILED\n", False),
+                (f"test fixture_peer ... PRIVATE_PAYLOAD test {name} ... ok test {name} ... ok\n", True),
+                (f"test {name} ... FAILED\ntest fixture_peer ... PRIVATE_PAYLOAD test {name} ... ok\n", False)):
+            with self.subTest(passed=passed, record=record.count("\n")):
+                def fake(command, **_):
+                    text = f"{name}: test\n" if "--list" in command else target(1, record, summary(passed=1))
+                    return subprocess.CompletedProcess(command, 0, text)
+                with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()) as log:
+                    self.assertEqual(ignored_tests.run("example", [], 1, 2)[name], passed)
+                self.assertIn("example: 1 listed tests reported more than one result", log.getvalue())
+                self.assertNotIn("category=", log.getvalue())
+                self.assertNotIn("PRIVATE_PAYLOAD", log.getvalue())
 
     def test_recovery_requires_exact_listed_identity_and_complete_status(self):
         name = leg_names()[1][0]
