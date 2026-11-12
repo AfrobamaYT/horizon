@@ -64,6 +64,9 @@ pub struct World {
     /// The holders lent to mods since the last flush, whose synced changes
     /// `flush_attachment_sync` sends.
     pub attachment_syncs: FxHashSet<horizon_mod_runtime::attachments::Holder>,
+    /// Block entities a moving piston landed since the last flush, whose
+    /// synced attachments `flush_attachment_sync` sends whole (#3184).
+    pub attachment_landings: FxHashSet<horizon_mod_runtime::attachments::Holder>,
     /// The level's build range and skylight (its dimension type); its
     /// chunks hold `shape.column()`.
     pub shape: LevelShape,
@@ -266,6 +269,7 @@ impl World {
             modified: ModifiedChunks::default(),
             attachments: Default::default(),
             attachment_syncs: FxHashSet::default(),
+            attachment_landings: FxHashSet::default(),
             block_entities: Default::default(),
             carrier_fences: Default::default(),
             carrier_data_existed_at_open: false,
