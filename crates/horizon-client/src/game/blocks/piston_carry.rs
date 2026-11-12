@@ -1,5 +1,5 @@
 //! Pistons carry a mod block entity while its block moves (#3184), when the
-//! block's part lets it move (`relocability`): the game's side of the level's
+//! block's part lets it move (`piston_carries_block_entity`): the game's side of the level's
 //! `carry_block_entity` and `land_block_entity`, the carried block entity in
 //! its moving piston's saved tag, and a client's copy. `BlockEntities` holds
 //! what is carried (`carry`, `land`).
@@ -59,11 +59,15 @@ impl GameLevel<'_> {
             self.native_piston_post(self.dimension, piston, step, extending, push, destroy);
         }
     }
-    /// `IBlockExtension.getRelocability` for the block `state` at `pos`: what
+    /// `piston_carries_block_entity` for the block `state` at `pos`: what
     /// its part answers, or None.
-    pub(super) fn relocability(&self, pos: BlockPos, state: BlockStateId) -> Option<bool> {
+    pub(super) fn piston_carries_block_entity(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) -> Option<bool> {
         let mut movable = None;
-        self.native_relocability(self.dimension, pos, state, &mut movable);
+        self.native_piston_carries_block_entity(self.dimension, pos, state, &mut movable);
         movable
     }
     /// Takes the block entity at `from` out of the world for the moving piston
@@ -80,7 +84,8 @@ impl GameLevel<'_> {
         self.world.block_entities.carry(from, to);
     }
     /// Installs the block entity the moving piston at `pos` carried there; its
-    /// custom name is the block's again, as for one loaded there.
+    /// custom name is the block's again, as for one loaded there, and on a
+    /// server its synced attachments go whole to the players who see it.
     pub(super) fn land_carried_block_entity(&mut self, pos: BlockPos) -> bool {
         let key = (pos.x, pos.y, pos.z);
         if !self.world.block_entities.land(key) {
@@ -90,6 +95,11 @@ impl GameLevel<'_> {
             && let Some(name) = entity.nbt.get(&CUSTOM_NAME.into())
         {
             self.world.block_names.insert(key, name.clone());
+        }
+        if self.native_authoritative && self.world.block_entities.attachments(key).is_some() {
+            self.world.attachment_landings.insert(
+                horizon_mod_runtime::attachments::Holder::BlockEntity([pos.x, pos.y, pos.z]),
+            );
         }
         true
     }
@@ -147,7 +157,16 @@ impl Game<'_> {
             Some((_, entity)) => {
                 let attachments = match attachment_compound(tag.get(ATTACHMENTS_KEY)) {
                     Ok(Some(data)) => Some(Attachments::from_nbt(data.clone())),
-                    _ => None,
+                    Ok(None) => None,
+                    Err(_) => {
+                        log::warn!(
+                            "Horizon: unreadable attachments on the block entity in the moving piston at {} {} {}; it lands without them",
+                            pos.x,
+                            pos.y,
+                            pos.z
+                        );
+                        None
+                    }
                 };
                 self.world.block_entities.hold_carried(
                     (pos.x, pos.y, pos.z),
@@ -252,6 +271,24 @@ mod tests {
                 vanilla,
                 "nothing carried, nothing added"
             );
+
+            // Attachments that can't be read: the block entity lands without them.
+            assert!(game.world.block_entities.carry(to, to));
+            let mut saved = game.saved_moving_piston(at, &piston);
+            let Some(Tag::Compound(carried)) = saved.get_mut(CARRIED_KEY) else {
+                panic!("the carried block entity is saved")
+            };
+            carried.insert(ATTACHMENTS_KEY.into(), Tag::Int(1));
+            let mut extras = ChunkExtras::default();
+            extras.block_entities.push(saved);
+            game.world.block_entities.unload(|p| *p == to);
+            game.restore_moving_piston(at, piston, Some(&extras));
+            assert!(game.world.block_entities.land(to));
+            assert!(matches!(
+                game.world.block_entities.get(&to),
+                Some(BlockEntity::Chest(items)) if items[0].as_ref().is_some_and(|s| s.count == 3)
+            ));
+            assert!(game.world.block_entities.attachments(to).is_none());
 
             // A key that can't be read: the piston loads, its block lands bare.
             let Tag::Compound(mut bad) = vanilla.clone() else {

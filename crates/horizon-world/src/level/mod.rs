@@ -1035,17 +1035,21 @@ pub trait LevelAccess: BlockEntityNeighbors {
     /// Whether a block entity a mod made lives at `pos` (`native_block_entity`),
     /// whatever its block's template: it is removed with its block, as for a
     /// template that has one, and a piston moves it only when the block's
-    /// `relocability` answers `Some(true)` ([`Self::adjust_relocability`]).
+    /// part answers `Some(true)` ([`Self::adjust_piston_carries_block_entity`]).
     fn has_mod_block_entity(&self, _pos: BlockPos) -> bool {
         false
     }
-    /// `IBlockExtension.getRelocability` for the block `state` at `pos`, asked
-    /// at the last step of `PistonBaseBlock.isPushable`, for a block that got
+    /// The `piston_carries_block_entity` hook (Horizon's own) for the block
+    /// `state` at `pos`, asked at the last step of `PistonBaseBlock.isPushable`, for a block that got
     /// past its push reaction: `Some(false)` keeps it in place, `Some(true)`
     /// lets a piston move it with its mod block entity, and `None` keeps
     /// vanilla's rule (a block with a block entity does not move). The default
     /// answers `None`.
-    fn adjust_relocability(&self, _pos: BlockPos, _state: BlockStateId) -> Option<bool> {
+    fn adjust_piston_carries_block_entity(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+    ) -> Option<bool> {
         None
     }
     /// Take the mod block entity at `from` out of the level with its

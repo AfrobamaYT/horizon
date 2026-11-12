@@ -1,5 +1,5 @@
 //! Pistons carry a mod block entity while its block moves (#3184), when the
-//! block's `relocability` lets it move. The level holds the block entities;
+//! block's `piston_carries_block_entity` lets it move. The level holds the block entities;
 //! these tests stand in for it with a map. They need the prepared resources,
 //! as the other level tests do.
 use super::tests::{Fixture, TestLevel, fixture};
@@ -16,8 +16,8 @@ struct Contents {
 
 struct CarryLevel {
     inner: TestLevel,
-    /// What the block's part answers to `relocability`.
-    relocability: fn(BlockPos) -> Option<bool>,
+    /// What the block's part answers to `piston_carries_block_entity`.
+    carries: fn(BlockPos) -> Option<bool>,
     entities: HashMap<BlockPos, Contents>,
     carried: HashMap<BlockPos, Contents>,
     /// The diamonds each removal with side effects dropped, and where.
@@ -43,8 +43,12 @@ impl LevelAccess for CarryLevel {
     fn has_mod_block_entity(&self, pos: BlockPos) -> bool {
         self.entities.contains_key(&pos)
     }
-    fn adjust_relocability(&self, pos: BlockPos, _state: BlockStateId) -> Option<bool> {
-        (self.relocability)(pos)
+    fn adjust_piston_carries_block_entity(
+        &self,
+        pos: BlockPos,
+        _state: BlockStateId,
+    ) -> Option<bool> {
+        (self.carries)(pos)
     }
     fn carry_block_entity(&mut self, from: BlockPos, to: BlockPos) {
         let contents = self
@@ -79,7 +83,7 @@ struct World {
     ticks: Ticks,
 }
 impl World {
-    fn new(f: &'static Fixture, relocability: fn(BlockPos) -> Option<bool>) -> Self {
+    fn new(f: &'static Fixture, carries: fn(BlockPos) -> Option<bool>) -> Self {
         let mut ticks = Ticks::new(0);
         for x in -4..4 {
             for z in -4..4 {
@@ -89,7 +93,7 @@ impl World {
         let mut w = Self {
             level: CarryLevel {
                 inner: TestLevel::new(&f.behaviours),
-                relocability,
+                carries,
                 entities: HashMap::new(),
                 carried: HashMap::new(),
                 dropped: Vec::new(),
@@ -144,11 +148,11 @@ impl World {
     }
 }
 macro_rules! carry_world {
-    ($relocability:expr) => {{
+    ($carries:expr) => {{
         let Some(f) = fixture() else {
             return;
         };
-        World::new(f, $relocability)
+        World::new(f, $carries)
     }};
 }
 
@@ -258,4 +262,62 @@ fn replacing_the_moving_block_drops_its_block_entitys_contents_once() {
     assert_eq!(w.level.dropped, [(PUSHED, 3)]);
     assert!(w.level.entities.is_empty());
     assert!(w.level.carried.is_empty());
+}
+
+#[test]
+fn power_lost_mid_extension_leaves_one_block_entity_where_its_block_ends() {
+    let mut w = carry_world!(|_| Some(true));
+    let block = sticky_piston_and_block(&mut w);
+    w.set(POWER, w.id("redstone_block", &[]));
+    for _ in 0..4 {
+        if w.progress(PUSHED) == Some(0.5) {
+            break;
+        }
+        w.full_tick();
+    }
+    assert_eq!(w.progress(PUSHED), Some(0.5));
+
+    // The retraction finishes the move first; wherever the block ends, its
+    // block entity is there, once, and nothing drops.
+    w.set(POWER, w.f.behaviours.air());
+    for _ in 0..6 {
+        w.full_tick();
+    }
+    let at = [BLOCK, PUSHED]
+        .into_iter()
+        .find(|p| w.get(*p) == block)
+        .expect("the block lands");
+    assert_eq!(w.level.entities.len(), 1);
+    assert_eq!(w.level.entities.get(&at), Some(&CONTENTS));
+    assert!(w.level.carried.is_empty());
+    assert!(w.level.dropped.is_empty());
+}
+
+#[test]
+fn a_block_stuck_to_slime_takes_its_block_entity_along() {
+    let mut w = carry_world!(|_| Some(true));
+    let (piston, slime, power) = (
+        BlockPos::new(0, 3, 0),
+        BlockPos::new(1, 3, 0),
+        BlockPos::new(-1, 3, 0),
+    );
+    let (stuck, landed) = (BlockPos::new(1, 4, 0), BlockPos::new(2, 4, 0));
+    let block = w.id("iron_block", &[]);
+    let (piston_state, slime_state) = (
+        w.id("piston", &[("facing", "east")]),
+        w.id("slime_block", &[]),
+    );
+    w.level.set_raw(piston, piston_state);
+    w.level.set_raw(slime, slime_state);
+    w.level.set_raw(stuck, block);
+    w.level.entities.insert(stuck, CONTENTS);
+    w.set(power, w.id("redstone_block", &[]));
+    for _ in 0..4 {
+        w.full_tick();
+    }
+    assert_eq!(w.get(landed), block);
+    assert_eq!(w.level.entities.get(&landed), Some(&CONTENTS));
+    assert_eq!(w.level.entities.len(), 1);
+    assert!(w.level.carried.is_empty());
+    assert!(w.level.dropped.is_empty());
 }

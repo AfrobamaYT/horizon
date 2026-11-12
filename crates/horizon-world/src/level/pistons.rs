@@ -358,13 +358,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             return false;
         }
         // `!state.hasBlockEntity()`, extended to mod block entities. A part's
-        // `relocability` answers first: `Some(true)` moves a mod block entity
+        // `piston_carries_block_entity` answers first: `Some(true)` moves a mod block entity
         // with its block (#3184), never a vanilla one, whose state other
         // tables keep by position.
         let mod_entity = self.level.has_mod_block_entity(pos);
         let vanilla_entity =
             !mod_entity && b.has_flag(state, super::data::state_flags::BLOCK_ENTITY);
-        match self.level.adjust_relocability(pos, state) {
+        match self.level.adjust_piston_carries_block_entity(pos, state) {
             Some(movable) => movable && !vanilla_entity,
             None => !vanilla_entity && !mod_entity && !self.level.has_native_block_entity(state),
         }
