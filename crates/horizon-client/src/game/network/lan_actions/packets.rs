@@ -772,9 +772,6 @@ impl Game<'_> {
             {
                 self.guest_book_settings(conn, &p.data)
             }
-            S::CustomPayload(p) if p.channel == horizon_protocol::mod_net::CHANNEL => {
-                self.guest_native_net(conn, &p.data)
-            }
             S::CustomPayload(p) if p.channel == horizon_client::lan::recipes::TRANSFER_CHANNEL => {
                 self.guest_recipe_transfer(conn, &p.data);
             }

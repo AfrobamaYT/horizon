@@ -2405,7 +2405,6 @@ impl Game<'_> {
         log("INFO", "Stopping server");
         self.native_players_leaving();
         log("INFO", "Saving players");
-        self.flush_native_net();
         // PlayerList.removeAll: each player's file, with the vehicle it
         // alone rides, then its records.
         if !crashed {

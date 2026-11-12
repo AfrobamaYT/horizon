@@ -3,6 +3,8 @@
 //! versions, one library copy shared by its dependents). Every refusal names its reason for the
 //! Mods page.
 mod compile_child;
+#[cfg(feature = "test-copy-probe")]
+pub mod copy_probe;
 #[cfg(feature = "runtime-fixture")]
 pub mod fixture;
 pub mod link;

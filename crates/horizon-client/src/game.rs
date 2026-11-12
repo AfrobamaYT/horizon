@@ -3146,7 +3146,7 @@ struct Game<'a> {
     /// Native mods' config files this game loaded (game/modding/native_configs.rs).
     native_configs: native_configs::NativeConfigs,
     mod_phase: mod_api::__private::PhaseOwner,
-    /// Native mods' messages waiting (`game/modding/native_net.rs`).
+    /// Private custom-book connection and placement state.
     native_net: native_net::NativeNet,
     /// The mod whose own screen is open (`Screen::Mod`).
     native_mod_screen: Option<String>,

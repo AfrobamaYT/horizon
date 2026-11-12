@@ -3733,23 +3733,6 @@ impl Game<'_> {
     ) {
         self.fire_attack_entity(entity, kind, pos, canceled);
     }
-    /// A message from `player`'s client on `channel` (`mod_id:name`), within
-    /// the caps (`native_net.rs`): check `channel`, and treat `data` as the
-    /// player's own bytes, checked by nothing. Runs in the tick after it
-    /// arrives, with no player's state swapped in. Server-side.
-    pub(in crate::game) fn native_net_from_client(
-        &mut self,
-        player: u128,
-        channel: &str,
-        data: &[u8],
-    ) {
-        self.fire_net_from_client(player, channel, data);
-    }
-    /// A message from the server on `channel` (`mod_id:name`), whose `data`
-    /// is the sender's own bytes. The window's game only.
-    pub(in crate::game) fn native_net_from_server(&mut self, channel: &str, data: &[u8]) {
-        self.fire_net_from_server(channel, data);
-    }
     /// `dimension`'s level opened on the server (NeoForge's `LevelEvent.Load`,
     /// posted in `MinecraftServer.createLevels`): before any of its chunks
     /// (`native_chunk_load`), so a mod sets up what it keeps for the level
@@ -3810,7 +3793,7 @@ impl Game<'_> {
     }
     /// `player` (`name`) joined the game (NeoForge's
     /// `PlayerLoggedInEvent`): placed in the world and listed in
-    /// `native_server_players`, so `net_send_to_player` reaches them.
+    /// `host.players().server_players()`, so `PlayerRef::send_payload` can reach them.
     /// Once a join, with no player's state swapped in. Server-side.
     pub(in crate::game) fn native_player_logged_in(&mut self, player: u128, name: &str) {
         self.fire_player_logged_in(player, name);
@@ -3976,7 +3959,7 @@ impl Game<'_> {
     /// changes. It comes into range, its client's chunks reach it, or it is
     /// put in the level; another player is an entity too, and a player never
     /// tracks their own. A mod sends the player what they need to show it
-    /// (`net_send_to_player`). The entity is as it was last tick: it
+    /// (`PlayerRef::send_payload`). The entity is as it was last tick: it
     /// may be gone by now. Heard after the tick's players and entities have
     /// moved, in order, with no player's state swapped in. Server-side.
     pub(in crate::game) fn native_player_start_tracking(
