@@ -33,7 +33,7 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `IBlockExtension` | 60 | 10 | 18 | 32 | 0 |
 | `IBlockStateExtension` | 57 | 9 | 17 | 31 | 0 |
-| `IItemExtension` | 46 | 9 | 15 | 22 | 0 |
+| `IItemExtension` | 46 | 13 | 14 | 19 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
 | `IBlockEntityExtension` | 9 | 2 | 3 | 3 | 1 |
@@ -147,8 +147,8 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `onDroppedByPlayer(stack, player)` | Partial | `item_toss` (`hooks/item_toss.rs`) | Global `ItemTossEvent`, cancellable; the item is not a Part attachment. |
 | `getHighlightTip(stack, name)` | Missing | — | No highlight-name hook. |
 | `onItemUseFirst(stack, context)` | Covered | `ItemPart::on_item_use_first` (`hooks/on_item_use_first.rs`) | Runs after `use_item_on_block` let it through, before the block's own use. |
-| `isPiglinCurrency(stack)` | Missing | — | Piglin barter currency is a hard-coded item tag. |
-| `makesPiglinsNeutral(stack, entity)` | Missing | — | Piglin neutrality is a hard-coded item/tag rule. |
+| `isPiglinCurrency(stack)` | Covered | `ItemPart::is_piglin_currency` (`hooks/is_piglin_currency.rs`) | Starts from vanilla's answer, which is the item `minecraft:gold_ingot` (`PiglinAi.BARTERING_ITEM`; 26.3 has no currency tag), and is asked where vanilla asks: a piglin wanting a stack on the ground, an adult taking one from the hand (and the client's prediction of that click), and the end of the admiring, where currency is bartered or lost to a hit. A ground stack is admired only when it is also `#piglin_loved`. Both sides. [#3226](https://github.com/arismoko/horizon/issues/3226). |
+| `makesPiglinsNeutral(stack, entity)` | Covered | `ItemPart::makes_piglins_neutral` (`hooks/makes_piglins_neutral.rs`) | Starts from `#minecraft:piglin_safe_armor` (which content mods can already add to) for each stack in a player's armour slots, with the wearer, and may make a piece count or refuse a tagged one. Server-side. [#3226](https://github.com/arismoko/horizon/issues/3226). |
 | `isCombineRepairable(stack)` | Partial | `minecraft:repairable` component via `ItemResource::repairable` | Data answers which material repairs it; the anvil combine predicate is not exposed. |
 | `getXpRepairRatio(stack)` | Partial | `mending_repair` (`hooks/base.rs`, a global hook) | Changes the repair amount for Mending; the per-item ratio is not a separate read, and the hook is not scoped to the item. |
 | `onStopUsing(stack, entity, timeLeft)` | Partial | `ItemPart::release_using` (`hooks/base.rs`) | Runs on an early release only, after the vanilla item's release; finishing the use or switching to another item stops it without asking. Both sides. |

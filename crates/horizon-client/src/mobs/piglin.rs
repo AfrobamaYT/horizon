@@ -25,11 +25,14 @@ const CONVERSION: i32 = 300;
 /// `DANCING` memories last.
 const CELEBRATION: i32 = 300;
 
+/// `PiglinAi.BARTERING_ITEM`: vanilla's barter currency, compared by item.
+pub const BARTERING_ITEM: &str = "minecraft:gold_ingot";
+
 /// `Piglin.holdInOffHand`: equip the item being admired, dropped when the
 /// piglin is killed; anything but the barter item keeps the piglin from
 /// despawning.
 pub fn hold_in_offhand(m: &mut Mob, item: std::sync::Arc<str>) {
-    if &*item != "minecraft:gold_ingot" {
+    if &*item != BARTERING_ITEM {
         m.persistent = true;
     }
     super::finalize::set_item(m, super::finalize::OFFHAND, &item);
@@ -122,6 +125,9 @@ pub struct Memories {
     pub admire_disabled: i32,
     /// `ATE_RECENTLY`: the ticks left.
     pub ate_recently: i32,
+    /// A hit stopped the admiring (`wasHurtBy`): the `FinishAdmiring` it raised
+    /// doesn't barter.
+    pub hit_stop: bool,
 }
 /// Existing guarded-block anger, with the causal player's authoritative UUID.
 /// This adds identity only; targeting and countdown keep their existing policy.
@@ -874,17 +880,16 @@ pub fn receive_attack_target(
     let new = position(target, false)?;
     (m.distance_sqr(now) >= m.distance_sqr(new)).then_some(target)
 }
-/// `PiglinAi.stopHoldingOffHandItem` without bartering (`wasHurtBy`): a gold
-/// ingot is not bartered and is gone; anything else ends its admiring next
-/// tick, as if the time ran out, and the game side puts it away.
+/// `PiglinAi.wasHurtBy`'s `stopHoldingOffHandItem` without bartering: the
+/// admiring ends, and the game, handling the `FinishAdmiring` raised here,
+/// takes the off-hand item (currency is lost, anything else put away).
 pub fn stop_admiring(m: &mut Mob) {
-    if m.extra.off_hand_id() == Some("minecraft:gold_ingot") {
-        m.extra
-            .set_slot_stack(horizon_items::equipment::OFFHAND, None);
-        m.extra.using_item = 0;
-    } else {
-        m.extra.using_item = i32::from(m.extra.off_hand_id().is_some() && m.extra.using_item > 0);
+    if m.extra.off_hand_id().is_none() {
+        return;
     }
+    m.extra.using_item = 0;
+    m.extra.piglin.hit_stop = true;
+    m.outbox.push(MobEvent::FinishAdmiring { mob: m.id });
 }
 /// Whether two entities are of one type: both the player, or both mobs of
 /// one species.
