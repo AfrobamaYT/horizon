@@ -368,18 +368,30 @@ impl Game<'_> {
                     let Some(host) = self.lan.as_mut() else {
                         return;
                     };
+                    let used =
+                        host.play
+                            .get(&conn)
+                            .and_then(|play| play.using)
+                            .and_then(|(slot, _)| {
+                                let guest = &host.hub.guests[gi];
+                                if slot == crate::game::shield::OFFHAND_SLOT {
+                                    guest.offhand.clone()
+                                } else {
+                                    guest.inventory[slot].clone()
+                                }
+                            });
                     let (offhand, main) = host.hub.guests.update(gi, |g| {
                         let slot = g.selected;
                         std::mem::swap(&mut g.inventory[slot], &mut g.offhand);
                         (g.offhand.clone(), g.inventory[slot].clone())
                     });
-                    if let Some(play) = host.play.get_mut(&conn) {
-                        play.using = None;
-                    }
                     // setItemInHand: the off hand, then the main hand.
                     self.as_guest(conn, |g| {
                         g.player_on_equip("offhand", main.as_ref(), offhand.as_ref());
                         g.player_on_equip("mainhand", offhand.as_ref(), main.as_ref());
+                        if let Some(stack) = used {
+                            g.stop_using_item(&stack);
+                        }
                     });
                     if mod_api::__private::listened(mod_api::HookId::PlayerSwapWithEquipmentSlot) {
                         let Some(host) = self.lan.as_ref() else {
@@ -443,14 +455,14 @@ impl Game<'_> {
                     let value = p.slot as usize;
                     host.hub.guests.update(gi, |guest| guest.selected = value);
                 }
-                if let Some(play) = host.play.get_mut(&conn)
-                    && changed
-                    && play
-                        .using
-                        .is_some_and(|(slot, _)| slot != crate::game::shield::OFFHAND_SLOT)
-                {
-                    play.using = None;
-                }
+                self.as_guest(conn, |g| {
+                    if changed
+                        && g.using
+                            .is_some_and(|(slot, _)| slot != crate::game::shield::OFFHAND_SLOT)
+                    {
+                        g.stop_active_item_use();
+                    }
+                });
                 if changed {
                     self.native_player_switch_hotbar_slot_post(
                         uuid,

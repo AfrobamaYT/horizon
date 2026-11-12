@@ -1166,7 +1166,7 @@ impl Game<'_> {
                     .using
                     .is_some_and(|(held, _)| held != crate::game::shield::OFFHAND_SLOT)
             {
-                game.using = None;
+                game.stop_active_item_use();
             }
         }) {
             return false;
