@@ -11,6 +11,8 @@ mod object_memory;
 #[cfg(test)]
 #[path = "persist/anger_tests.rs"]
 mod anger_tests;
+#[path = "persist/hurt_by_refs.rs"]
+mod hurt_by_refs;
 #[cfg(test)]
 #[path = "persist/lookup_order_tests.rs"]
 mod lookup_order_tests;
@@ -1379,43 +1381,6 @@ impl Game<'_> {
     /// A mob's entity tag with the mobs riding it under `Passengers`.
     pub(super) fn mob_tree_nbt(&mut self, i: usize) -> Tag {
         self.mob_object_tree_nbt(MobObject::Resident(i))
-    }
-
-    /// `LivingEntity.addAdditionalSaveData`'s `last_hurt_by_mob` and
-    /// `ticks_since_last_hurt_by_mob`, a PARTIAL projection at save time: both
-    /// from `ai.last_hurt_by` while the attacker is a living mob in the level
-    /// with a registered UUID and at most 100 ticks have passed (`baseTick`
-    /// drops the record after that, or once the attacker is dead). Otherwise
-    /// both keys go, a copy read from loaded data included. A player attacker
-    /// is not written. This is not `baseTick`'s cleanup itself, the AI's
-    /// record, `#no_anger`, or reading the keys back.
-    pub(super) fn put_last_hurt_by_mob(&self, m: &horizon_client::mobs::Mob, tag: &mut Tag) {
-        let Tag::Compound(c) = tag else { return };
-        let since = i64::from(m.age) - i64::from(m.ai.last_hurt_by_time);
-        let reference = match m.ai.last_hurt_by {
-            Some(horizon_client::mobs::Who::Mob(attacker))
-                if (0..=100).contains(&since)
-                    && self.mobs.iter().any(|a| a.id == attacker && a.alive()) =>
-            {
-                self.persist.uuid_of(attacker)
-            }
-            _ => None,
-        };
-        match reference {
-            Some(uuid) => {
-                c.insert("last_hurt_by_mob".into(), Tag::IntArray(uuid.to_vec()));
-                c.insert(
-                    "ticks_since_last_hurt_by_mob".into(),
-                    Tag::Int(since as i32),
-                );
-            }
-            None => {
-                c.remove(&horizon_core::nbt::JavaString::from("last_hurt_by_mob"));
-                c.remove(&horizon_core::nbt::JavaString::from(
-                    "ticks_since_last_hurt_by_mob",
-                ));
-            }
-        }
     }
     /// Forget an entity that left the world (its UUID and loaded compound).
     pub(super) fn forget_entity(&mut self, id: u32) {
