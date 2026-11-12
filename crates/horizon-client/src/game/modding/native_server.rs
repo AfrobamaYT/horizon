@@ -4784,6 +4784,14 @@ pub(super) mod fake_action_tests {
             // Half a fist's cooldown (delay 5 ticks): the charge is (2 + 0.5) / 5 = 0.5.
             with_game(|game| {
                 let (player, fake_conn, _) = fake(game, None, 0);
+                // A placed fake participates in actions, not online-player tracking.
+                // The packet attack gate must still reach the hook and damage below.
+                let host = game.lan.as_ref().unwrap();
+                let guest = host.hub.guest(fake_conn).unwrap();
+                assert!(guest.is_fake());
+                assert!(guest.placed);
+                assert_eq!(guest.dimension, host.hub.config.dimension);
+                assert!(!guest.participates_online());
                 game.lan
                     .as_mut()
                     .unwrap()

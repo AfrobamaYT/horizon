@@ -15,6 +15,17 @@ Started from fork main `503cdc1ffa63c38876f769a6cb6253e23313b62a`. Incoming delt
 - Process probes and the byte-identical scrubber move to horizon-system; Horizon-layer re-exports remain as upstream ships them. Dedicated performance reporting uses system probes off the tick. The client already depended on horizon-system, so discard the silently duplicated auto-merge manifest key. OptiFine's dev-only probe dependency changes from bench to system while retaining fork asset/zip dependencies.
 - Take the orb fall-distance command corpus and real dedicated-server wind-charge parity harness. Neither was run locally.
 
+## Fork behavior kept at the new guest attack gate
+
+| Boundary | Decision |
+| --- | --- |
+| Placed fake player | Accept a Fake guest placed in the hub's active dimension as well as an online guest. Keep participates_online network-only. Fake PlayerAction::Attack must still reach the native attack_entity hook and Player.attack. The existing registered fake-attack fixture now explicitly asserts fake/placed/current-dimension/non-online setup before its unchanged hook, damage and cancellation assertions. |
+| Guest already leaving | Stop when left_reason is nonempty. Upstream filters new NetEvent packets before putting them in an inbox, but neither the attack dispatcher nor the new gate rechecks a kick after events have been drained as a batch. This one-line boundary guard prevents later attacks in that batch. |
+| Horizon-layer probes | Keep upstream's horizon_bench process-probe re-export and current callers: restoring upstream's Horizon layer takes precedence over treating this as a mod API compatibility path. |
+| Nameplate range fixture | Keep upstream's existing origin-centered box assertion unchanged in this repair. Its distance-isolation weakness is a coverage carry, not evidence that the new distance behavior ran. |
+
+Sync checklist: for every newly imported Guest gate, check each fork-only GuestKind, especially Fake, through its actual action boundary rather than assuming online participation and simulation actions are the same predicate.
+
 ## Dead incoming files and deliberate divergences
 
 Diverges from upstream: incoming entity_nbt/orb.rs, game/item_entities.rs, game/loaded_arrow_shot_tests.rs, game/lan_actions.rs and game/remote_attributes.rs are not compiled owners on the fork. Their changed behavior maps to the inline typed codecs, game orb creation, creatures fixture module, network/lan_actions and network/remote owners respectively. Three new resource-backed rocket/orb tests and one missing sound de-duplication test are restored at those actual compiled owners.

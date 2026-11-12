@@ -14,7 +14,9 @@ impl Game<'_> {
             return true;
         };
         let guest = &host.hub.guests[gi];
-        if !host.hub.here(guest) {
+        let present = host.hub.here(guest)
+            || (guest.is_fake() && guest.placed && guest.dimension == host.hub.config.dimension);
+        if !present || !guest.left_reason.is_empty() {
             return true;
         }
         let conn = guest.conn;
