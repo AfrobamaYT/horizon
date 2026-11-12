@@ -32,6 +32,9 @@ pub fn replace(from: &Path, to: &Path) -> io::Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
+        // The launcher's Windows suite compiles this file under edition 2021, which sorts
+        // these names differently from the 2024 crates: keep one order for both.
+        #[rustfmt::skip]
         use windows_sys::Win32::Storage::FileSystem::{
             MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
         };
