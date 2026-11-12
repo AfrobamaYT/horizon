@@ -561,7 +561,8 @@ mod tests {
             view_formats: &[],
         });
         let atlas_view = atlas.create_view(&Default::default());
-        let mut primitives = WorldPrimitives::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+        let mut primitives =
+            WorldPrimitives::new(&device, (wgpu::TextureFormat::Rgba8Unorm, false));
         let view_proj = Mat4::IDENTITY;
         let red = quad(view_proj, [0.0, 0.0, 32.0, 32.0], 2.0, RED);
         let blue = quad(view_proj, [32.0, 32.0, 64.0, 64.0], 2.0, BLUE);

@@ -4315,8 +4315,12 @@ impl Renderer {
             fragment: "fs_entity_unmarked",
             write_mask: wgpu::ColorWrites::ALL,
         });
-        let world_text_pipeline =
-            world_text::pipeline(&device, Some(&entity_layout), &entity_shader, frame_format);
+        let world_text_pipeline = world_text::pipeline(
+            &device,
+            Some(&entity_layout),
+            &entity_shader,
+            (frame_format, linear_light),
+        );
         // RenderPipelines.ENTITY_SOLID: a surface of an entity that is coplanar with
         // terrain wins the tie in vanilla (the boat's floor over the trapdoor on the
         // ground it is stopped by, #5950). Terrain and entities are separate draw

@@ -3191,7 +3191,8 @@ mod tests {
             r#"{"minecraft:stick":{},"minecraft:diamond_axe":{"minecraft:weapon":{"disable_blocking_for_seconds":5.0}}}"#,
         )
         .unwrap();
-        let items = Items::catalog(&root, &PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items = Items::catalog(&root, &PackOverlay::NONE, &defaults).unwrap();
         let mut axe = ItemStack::new("minecraft:diamond_axe", 1);
         assert_eq!(items.weapon_disable_blocking(&axe), 5.0);
         for item in ["minecraft:stick", "test:unknown", "minecraft:air"] {

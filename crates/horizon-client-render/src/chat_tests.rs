@@ -1089,7 +1089,10 @@ fn a_chat_option_change_keeps_the_readers_place_but_a_rescale_does_not() {
     chat.set_abilities(&font, ChatAbilities::new(ChatVisibility::System));
     assert_eq!(chat.scroll, 3);
     assert!(chat.new_since_scroll);
-    let atlas = crate::hud::HudAtlas::build(Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    let atlas = crate::hud::HudAtlas::build(&crate::resource_source::ResourceSource::directory(
+        "/nonexistent/horizon-test-assets".into(),
+    ))
+    .unwrap();
     chat.rescale(&atlas);
     assert_eq!(chat.scroll, 0);
     assert!(!chat.new_since_scroll);

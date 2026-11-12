@@ -1990,7 +1990,10 @@ mod tests {
         // Once they are in the world, the next tick's splashes near them are excluded; ones
         // farther than the radius from all of them spawn, again without excluding each other.
         engine.tick(&level);
-        let splashes = |p: &&Particle| p.polytone_type.as_deref() == Some("test:splash");
+        let splashes = |p: &&PendingParticle| {
+            p.ordinary()
+                .is_some_and(|p| p.polytone_type.as_deref() == Some("test:splash"))
+        };
         engine.polytone_entity(&level, "minecraft:player", [1.0, 64.0, 1.0]);
         assert_eq!(engine.pending.iter().filter(splashes).count(), 0);
         engine.polytone_entity(&level, "minecraft:player", [9.0, 64.0, 1.0]);
@@ -2622,7 +2625,11 @@ mod tests {
             player: None,
             cached_chunk: std::cell::Cell::new(None),
         };
-        let mut engine = engine(Registry::read(&root, Default::default(), blocks));
+        let mut engine = engine(Registry::read(
+            &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
+            Default::default(),
+            blocks,
+        ));
         let mut joined = |entity: &str| {
             engine.particles.clear();
             engine.pending.clear();

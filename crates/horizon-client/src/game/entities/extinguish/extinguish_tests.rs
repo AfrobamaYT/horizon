@@ -1,8 +1,8 @@
 //! Powder snow and water cauldrons putting a burning player out: the hiss
 //! (`Entity.playEntityOnFireExtinguishedSound`) plays either way, the block
 //! change only where `mayInteract` allows it.
-use super::super::native_machines::tests::server_game;
 use super::*;
+use crate::game::game_tests::tests::server_game;
 use horizon_client::motion::{MotionWorld, PlayerMotion};
 use horizon_core::geometry::Vec3;
 use horizon_world::chunk::BlockState;
@@ -11,9 +11,11 @@ use horizon_world::registry::BlockStateId;
 
 /// A server's game on the prepared resources, or None when they are absent
 /// (CI has none: the tests then skip quietly).
-fn server() -> Option<Game<'static>> {
+fn server<'a>(
+    resources: &'a mut Option<std::sync::Arc<crate::game::Resources>>,
+) -> Option<Game<'a>> {
     std::env::var_os("HORIZON_TEST_RESOURCES")?;
-    Some(server_game())
+    Some(server_game(resources))
 }
 
 fn state(game: &Game<'_>, name: &str, level: &str) -> BlockStateId {
@@ -43,7 +45,7 @@ fn heard(game: &Game<'_>) -> u32 {
 /// A server's player standing in the block at `pos` (feet on its floor), on
 /// fire: the tick `guest_server_tick` runs for it, its block effects and the
 /// consumer of their events.
-fn burn_in(game: &mut Game<'static>, pos: [i32; 3]) {
+fn burn_in(game: &mut Game<'_>, pos: [i32; 3]) {
     let at = Vec3::new(
         f64::from(pos[0]) + 0.5,
         f64::from(pos[1]),
@@ -85,7 +87,8 @@ fn outside_the_border(game: &mut Game<'_>) {
 /// burning player put out, with the hiss.
 #[test]
 fn powder_snow_puts_a_burning_player_out_with_the_hiss() {
-    let Some(mut game) = server() else {
+    let mut resources = None;
+    let Some(mut game) = server(&mut resources) else {
         return;
     };
     let pos = [4, 64, 4];
@@ -101,7 +104,8 @@ fn powder_snow_puts_a_burning_player_out_with_the_hiss() {
 /// cauldron drops to level 2, and the hiss plays.
 #[test]
 fn a_cauldron_puts_a_burning_player_out_with_the_hiss() {
-    let Some(mut game) = server() else {
+    let mut resources = None;
+    let Some(mut game) = server(&mut resources) else {
         return;
     };
     let pos = [4, 64, 4];
@@ -123,7 +127,8 @@ fn a_cauldron_puts_a_burning_player_out_with_the_hiss() {
 /// out and the hiss still plays, but the powder snow stays.
 #[test]
 fn outside_the_border_powder_snow_stays_but_the_fire_goes_out() {
-    let Some(mut game) = server() else {
+    let mut resources = None;
+    let Some(mut game) = server(&mut resources) else {
         return;
     };
     let pos = [4, 64, 4];
@@ -140,7 +145,8 @@ fn outside_the_border_powder_snow_stays_but_the_fire_goes_out() {
 /// hiss plays.
 #[test]
 fn outside_the_border_a_cauldron_keeps_its_level_but_the_fire_goes_out() {
-    let Some(mut game) = server() else {
+    let mut resources = None;
+    let Some(mut game) = server(&mut resources) else {
         return;
     };
     let pos = [4, 64, 4];

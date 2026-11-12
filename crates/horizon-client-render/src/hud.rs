@@ -3514,7 +3514,7 @@ mod tests {
             (128, 64)
         );
         assert!(
-            atlas.text_shader.is_some(),
+            atlas.text_shaders.gui.is_some(),
             "the archive shader and its include translate"
         );
         let registry = crate::trims::TrimRegistry::load(&source);
@@ -3958,7 +3958,10 @@ mod tests {
             Some(r#"{"animation":{"frames":[1024,0],"frametime":3}}"#),
         );
         write_strip(&textures.join("still.png"), 16, 32, &[[7, 8, 9, 255]], None);
-        let atlas = HudAtlas::build(&root).unwrap();
+        let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        ))
+        .unwrap();
         let _ = fs::remove_dir_all(&root);
         let rect = atlas.sprites["nexo:abc123"];
         assert_eq!(rect.texels((atlas.width, atlas.height)), (16, 16));

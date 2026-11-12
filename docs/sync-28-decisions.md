@@ -222,3 +222,11 @@ Merge current main `b96005b7c9115c9061fa996e00b5b029a7fc0efc` before publishing.
 ## Native hook declarations
 
 The incoming native_hooks.rs change dereferences the new level RNG wrapper inside an obsolete contextless service. The fork removed that service; no hook declaration or capability is added back. Existing typed host and RNG contracts remain. Wire, derive, hook catalog and the parts vocabulary layout are unchanged by this sync.
+
+## Compile integration corrections
+
+Incoming structure, item and entity code uses the fork's relocated `horizon_core::nbt` boundary, including its SNBT parser. New item-table fixtures load installation-scoped ItemDefaults explicitly. The accidentally restored lever veto test was already removed on the fork base with its contextless redstone callback; that obsolete test is not restored, and no replacement capability is claimed.
+
+The forced-ring ranking helper reads the single authoritative combined `Streaming::forced` set, which includes command and mod tickets, rather than restoring the removed separate mod-forced set. Ranking and queue invalidation use that same combined set. Incoming forced-ring assertions are retained.
+
+Source discovery explicitly excludes the retained upstream `game/creatures` folder; feature-gated declarations own those source files. The extinguish regression is nested under its owning module and uses scoped resource fixtures, preventing duplicate module discovery and resource leaks. Duplicate renderer and remote-item methods from upstream extractions are removed while retaining text-patch invalidation and typed interaction gates.

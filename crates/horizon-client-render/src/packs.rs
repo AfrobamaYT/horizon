@@ -4,6 +4,7 @@
 //! and an overlay resource root that layers the enabled packs over the
 //! vanilla resources (later packs win), so every loader sees one tree.
 mod cache;
+mod import;
 use crate::resource_source::stays_inside;
 use crate::text::Style;
 use crate::text::Text;

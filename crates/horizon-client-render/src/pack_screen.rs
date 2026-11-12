@@ -1834,8 +1834,10 @@ mod icon_tests {
     #[test]
     fn dropped_files_require_yes_and_keep_the_pending_selection() {
         let atlas =
-            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
-                .unwrap();
+            crate::hud::HudAtlas::build(&crate::resource_source::ResourceSource::directory(
+                "/nonexistent/horizon-test-assets".into(),
+            ))
+            .unwrap();
         let m = Measure(&atlas.font);
         let mut screen = PackScreen::new(
             &m,
