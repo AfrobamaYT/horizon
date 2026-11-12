@@ -626,8 +626,9 @@ fn alertable(m: &Mob, w: &MobWorld) -> bool {
             && !p.sneaking
             && (p.position.y - y).abs() <= 6.0
             && {
-                let range =
-                    (12.0 * p.visibility_percent(Some(m.kind.id.as_str()), w.items)).max(2.0);
+                let range = (12.0
+                    * w.player_visibility(p, m.id, p.visibility_percent(m.species())))
+                .max(2.0);
                 m.distance_sqr(p.position) <= range * range
             }
     })
@@ -1643,7 +1644,6 @@ mod consume_tests {
         use super::*;
         use crate::mobs::sensor_scan_tests::kind;
         use crate::mobs::world::{test_player, with_test_world};
-        use horizon_core::random::LegacyRandom;
         use std::sync::Arc;
 
         /// `Fox.FoxBehaviorGoal.alertable` uses
@@ -1669,11 +1669,11 @@ mod consume_tests {
                             looks_remaining: 0,
                         },
                     );
-                    let mut lr = LegacyRandom::new(0);
+                    let mut lr = crate::health::TestLevel::new(0);
                     let mut events = Vec::new();
                     let mut cx = Cx {
                         w: &world,
-                        lr: &mut lr,
+                        level: &mut lr.level(),
                         events: &mut events,
                     };
                     let mut goals = std::mem::take(&mut fox.ai.goals);

@@ -31,6 +31,16 @@ pub struct BiomeFacts {
 pub fn placement_ok(entity: &str, species: Species, w: &MobWorld, x: i32, y: i32, z: i32) -> bool {
     super::spawn_rules::is_spawn_position_ok(entity, species, w, x, y, z)
 }
+/// `Spider.SpiderEffectsGroupData.setRandomEffect`: Speed on two of five
+/// draws, then Strength, Regeneration and Invisibility on one each.
+pub fn spider_random_effect(random: &mut impl horizon_core::random::RandomSource) -> &'static str {
+    match random.next_int_bound(5).unwrap_or(0) {
+        0 | 1 => "minecraft:speed",
+        2 => "minecraft:strength",
+        3 => "minecraft:regeneration",
+        _ => "minecraft:invisibility",
+    }
+}
 /// Mob.finalizeSpawn for natural, chunk-generation and summoned mobs.
 /// `DifficultyInstance`: the local difficulty at a position.
 #[derive(Clone, Copy, Debug)]

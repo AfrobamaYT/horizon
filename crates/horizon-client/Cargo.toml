@@ -123,7 +123,8 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
 
 [features]
-# Source-retention feature only: upstream parallel mob code is not compiled on this fork.
+# Source retention only: not compiled/tested on the fork; incompatible with typed residency.
+# Do not enable (including via --all-features); integration is tracked in #3491.
 upstream-parallel-mobs = []
 default = ["audio", "controllers", "horizon-extras"]
 # Scoped trait-mod installation for a mod's own tests.

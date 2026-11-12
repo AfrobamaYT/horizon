@@ -329,8 +329,10 @@ mod tests {
         if !root.join("items.json").exists() {
             return;
         }
-        let items = Items::tags_only(&root, &horizon_world::loot::PackOverlay::NONE).unwrap();
-        let b = Banners::load(&root);
+        let defaults = horizon_world::item_defaults::shared(&root).unwrap();
+        let items =
+            Items::tags_only(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
+        let b = Banners::load(&root, &defaults);
         let mut dye = ItemStack::new("minecraft:white_dye", 1);
         assert_eq!(&*b.loom_dye(&items, &dye).unwrap(), "white");
         dye.data_mut()
@@ -350,8 +352,10 @@ mod tests {
         if !root.join("items.json").exists() {
             return;
         }
-        let items = Items::tags_only(&root, &horizon_world::loot::PackOverlay::NONE).unwrap();
-        let b = Banners::load(&root);
+        let defaults = horizon_world::item_defaults::shared(&root).unwrap();
+        let items =
+            Items::tags_only(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
+        let b = Banners::load(&root, &defaults);
         let mut pattern = ItemStack::new("minecraft:globe_banner_pattern", 1);
         assert!(b.is_pattern_item(&items, &pattern));
         pattern.data_mut().set_other(
@@ -368,7 +372,8 @@ mod tests {
         if !root.join("items.json").exists() {
             return;
         }
-        let b = Banners::load(&root);
+        let defaults = horizon_world::item_defaults::shared(&root).unwrap();
+        let b = Banners::load(&root, &defaults);
         let mut pattern = ItemStack::new("minecraft:globe_banner_pattern", 1);
         assert_eq!(&*b.selectable(Some(&pattern))[0], "minecraft:globe");
         pattern.data_mut().set_other(

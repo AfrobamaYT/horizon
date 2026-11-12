@@ -9499,7 +9499,10 @@ mod tests {
     fn a_chunk_from_before_1_17_loads_the_entities_it_keeps() {
         let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Biomes::load(&root).expect("biomes");
+        let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.clone(),
+        ))
+        .expect("biomes");
         let world = std::env::temp_dir().join(format!("horizon-lazy-116-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&world);
         let save = SaveDir::new(

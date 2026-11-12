@@ -5,7 +5,7 @@
 //! or over a pond instead.
 use super::*;
 use horizon_core::geometry::Vec3;
-use horizon_core::random::{EntityRandom, LegacyRandom};
+use horizon_core::random::LegacyRandom;
 use std::sync::Arc;
 
 const SEEDS: i64 = 200;
@@ -49,7 +49,7 @@ fn horse(seed: i64, types: &crate::mobs::MobTypes) -> Mob {
         kind,
         Vec3::new(0.5, 64.0, 0.5),
         0.0,
-        EntityRandom::own(LegacyRandom::new(seed)),
+        LegacyRandom::new(seed),
     );
     m.on_ground = true;
     // `isVehicle`: a mob's back is enough to bolt.
@@ -76,11 +76,11 @@ fn a_bucking_horse_bolts_only_where_the_filters_allow() {
                 let _ = expected.next_int_bound(9);
                 let _ = expected.next_int_bound(11);
             }
-            let mut lr = LegacyRandom::new(seed);
+            let mut lr = crate::health::TestLevel::new(seed);
             let mut events = Vec::new();
             let mut cx = Cx {
                 w,
-                lr: &mut lr,
+                level: &mut lr.level(),
                 events: &mut events,
             };
             let mut goal = RunAroundLikeCrazy::new();

@@ -960,8 +960,10 @@ pub fn perform_ranged_attack(m: &mut Mob, who: Who, cx: &mut Cx, power: f32) {
         Some(Who::Mob(m.id)),
     );
     // From the arrow's own random, after its UUID.
-    if let (ProjectileKind::Arrow { base_damage, .. }, Some(a)) = (&mut p.kind, p.arrow.as_mut()) {
-        *base_damage = f64::from(power) * 2.0 + a.random.triangle(f64::from(id) * 0.11, 0.574_25);
+    let damage =
+        f64::from(power) * 2.0 + p.entity_random().triangle(f64::from(id) * 0.11, 0.574_25);
+    if let ProjectileKind::Arrow { base_damage, .. } = &mut p.kind {
+        *base_damage = damage;
     }
     p.set_bonus(super::gear::arrow_bonus(m));
     ignite_for_wither_skeleton(m, &mut p);
@@ -1329,7 +1331,7 @@ impl Goal for AttackTurtleEgg {
             }
             // `playBreakSound`: volume 0.7, pitch 0.9 + the level random's
             // float * 0.2.
-            let pitch = 0.9 + cx.lr.next_float() * 0.2;
+            let pitch = 0.9 + cx.level.random().next_float() * 0.2;
             cx.events.push(MobEvent::Sound(
                 "entity.turtle.egg_break",
                 [
@@ -1597,11 +1599,11 @@ mod turtle_egg_tests {
             goal.base.reached = true;
             // Past `RemoveBlockGoal`'s sixty ticks: the egg goes this tick.
             goal.since_reached = 61;
-            let mut lr = horizon_core::random::LegacyRandom::new(level_seed);
+            let mut lr = crate::health::TestLevel::new(level_seed);
             let mut events = Vec::new();
             let mut cx = Cx {
                 w,
-                lr: &mut lr,
+                level: &mut lr.level(),
                 events: &mut events,
             };
             goal.tick(&mut m, &mut cx);
@@ -1614,7 +1616,7 @@ mod turtle_egg_tests {
                     }
                     _ => None,
                 })
-                .map(|pitch| (pitch, lr.next_float()));
+                .map(|pitch| (pitch, lr.random().next_float()));
         });
         ran.then_some(out).flatten()
     }
@@ -1822,11 +1824,11 @@ mod trident_continue_tests {
             m.fluids.eye_in_water = true;
             m.extra.counter = 599;
 
-            let mut lr = LegacyRandom::new(0);
+            let mut lr = crate::health::TestLevel::new(0);
             let mut events = Vec::new();
             let mut cx = Cx {
                 w,
-                lr: &mut lr,
+                level: &mut lr.level(),
                 events: &mut events,
             };
 

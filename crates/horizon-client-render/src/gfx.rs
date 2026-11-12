@@ -247,9 +247,9 @@ pub use entity_batch::{
     WATER_MASK_OVERLAY, WORLD_TEXT_OVERLAY, WORLD_TEXT_POLYGON_OFFSET_OVERLAY, is_native_terrain,
     mark_oit,
 };
-use external::{shadow_casters, shadow_runs};
+use external::{shadow_box, shadow_runs};
 pub use frustum::{Cull, Frusta, ShadowCull};
-use frustum::{block_entities_within_reach, frustum, taa_frustum};
+use frustum::{block_entities_within_reach, frustum, shadow_casters, taa_frustum};
 use section_fade::{
     CHUNK_VISIBILITY_THRESHOLD, FadeInputs, chunk_visibility, fade_millis, section_instance,
     section_visibility,
@@ -12901,17 +12901,6 @@ pub(crate) fn square_downscale(pixels: &[u8], width: u32, height: u32, size: [u3
         }
     }
     out
-}
-/// The shadow camera's box that the shadow pass draws terrain in: the sides of `view.cull`, and
-/// its near and far planes only with `depth_planes`.
-fn shadow_box(view: &external::ShadowView) -> Frustum {
-    let mut planes = frustum(view.cull);
-    if !view.depth_planes {
-        // `frustum`'s faces at depth 0 and 1 take in everything.
-        planes[4] = Vec4::W;
-        planes[5] = Vec4::W;
-    }
-    Frustum { planes }
 }
 /// Camera-relative clip planes (`Frustum`).
 #[derive(Clone, Copy, Debug)]

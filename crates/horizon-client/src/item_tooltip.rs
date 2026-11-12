@@ -1143,39 +1143,6 @@ pub fn enchantment_lines(
     lines
 }
 
-/// `ItemAttributeModifiers` from the stack's component, else the item's.
-fn stack_modifiers(
-    stack: &ItemStack,
-    info: Option<&ItemInfo>,
-) -> Vec<(String, String, f64, String, String)> {
-    let data = stack.data();
-    if data.is_some_and(|d| d.other("!minecraft:attribute_modifiers").is_some()) {
-        return Vec::new();
-    }
-    if let Some(horizon_core::nbt::Tag::List(entries)) =
-        data.and_then(|d| d.other("minecraft:attribute_modifiers"))
-    {
-        return entries
-            .iter()
-            .filter_map(|entry| {
-                let string = |key: &str| match entry.get(key) {
-                    Some(horizon_core::nbt::Tag::String(s)) => Some(s.to_string_lossy()),
-                    _ => None,
-                };
-                Some((
-                    string("type")?,
-                    string("id")?,
-                    horizon_world::datafix::dynamic::as_number(entry.get("amount")?)?.float_value()
-                        as f64,
-                    string("operation").unwrap_or_else(|| "add_value".into()),
-                    string("slot").unwrap_or_else(|| "any".into()),
-                ))
-            })
-            .collect();
-    }
-    info.map(|info| info.modifiers.clone()).unwrap_or_default()
-}
-
 /// The lines of `stack` below its name that its components give, in
 /// `ItemStack.addDetailsToTooltip` order.
 pub fn detail_lines(
@@ -2605,7 +2572,6 @@ mod tests {
 
 #[cfg(test)]
 mod stack_modifier_tests {
-    use super::stack_modifiers;
     use horizon_client::items::ItemStack;
 
     #[test]
@@ -2631,10 +2597,10 @@ mod stack_modifier_tests {
             "minecraft:attribute_modifiers",
             Some(horizon_core::nbt::Tag::List(vec![attack])),
         );
-        let modifiers = stack_modifiers(&sword, None);
+        let modifiers = sword.default_attribute_modifiers_or(&[]);
         assert_eq!(modifiers.len(), 1);
-        assert_eq!(modifiers[0].0, "minecraft:attack_damage");
-        assert_eq!(modifiers[0].2, 5.0);
+        assert_eq!(modifiers[0].attribute, "minecraft:attack_damage");
+        assert_eq!(modifiers[0].amount, 5.0);
         sword.data_mut().set_other(
             "!minecraft:attribute_modifiers",
             Some(horizon_core::nbt::Tag::compound(Vec::<(
@@ -2642,6 +2608,6 @@ mod stack_modifier_tests {
                 horizon_core::nbt::Tag,
             )>::new())),
         );
-        assert!(stack_modifiers(&sword, None).is_empty());
+        assert!(sword.default_attribute_modifiers_or(&[]).is_empty());
     }
 }

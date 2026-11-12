@@ -818,9 +818,7 @@ impl Guest {
     /// [`Self::send`] of a `ChunksBiomes` whose body is `packet.encode()`, the same
     /// bytes for each guest with those columns. `note_change` ignores that packet.
     pub fn send_chunks_biomes_body(&self, body: Vec<u8>) {
-        if self.fake
-            && !super::conn::fake_wants_id(horizon_protocol::ids::play::clientbound::CHUNKS_BIOMES)
-        {
+        if !self.participates_online() {
             return;
         }
         self.sender.send(body);
@@ -2492,7 +2490,6 @@ mod tests {
                 latency: Arc::new(AtomicI32::new(0)),
                 address: "127.0.0.1:25565".parse().unwrap(),
                 expected: false,
-                configured: Default::default(),
             },
             2,
             [0.5, 64.0, 0.5],

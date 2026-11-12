@@ -863,7 +863,6 @@ mod tests {
     #[test]
     fn a_celebrating_raider_does_not_jump_while_riding() {
         use crate::mobs::world::with_test_world;
-        use horizon_core::random::LegacyRandom;
         use std::sync::Arc;
         let _ = with_test_world(&[], |w, _| {
             let jumped = |seed: i64, riding: bool| {

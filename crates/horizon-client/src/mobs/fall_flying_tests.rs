@@ -3,7 +3,7 @@
 //! The expected flags are vanilla 26.3's, measured on loaded husks summoned
 //! with `FallFlying:1b` (tools/test_mob_glide_state_parity.py).
 use super::*;
-use horizon_core::{nbt::Tag, random::LegacyRandom};
+use horizon_core::nbt::Tag;
 use std::sync::Arc;
 
 fn husk(types: &crate::mobs::MobTypes, no_ai: bool, chest_damage: Option<u32>) -> Mob {

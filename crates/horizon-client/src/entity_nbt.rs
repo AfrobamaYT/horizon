@@ -6,7 +6,7 @@
 //! survive a Horizon save.
 use crate::{
     arrows::Pickup,
-    entities::{Cushion, ExperienceOrb, ItemEntity, ItemFrame, Painting},
+    entities::{ArmorStand, Cushion, ExperienceOrb, ItemEntity, ItemFrame, Painting},
     mobs::{Mob, MobType, Who},
     nbt_path::int_value,
     projectiles::{Projectile, ProjectileKind},
@@ -2872,6 +2872,7 @@ pub fn orb_to_nbt(o: &ExperienceOrb, uuid: [i32; 4]) -> Tag {
     let mut tag = base.tag(None);
     for (key, value) in [
         ("Health", Tag::Short(o.health as i16)),
+        ("Air", Tag::Short(o.air as i16)),
         ("Age", Tag::Short(o.age.min(i16::MAX as u32) as i16)),
         ("Value", Tag::Short(o.value as i16)),
         ("Count", Tag::Int(o.count.min(i32::MAX as u32) as i32)),
@@ -2906,6 +2907,7 @@ pub fn orbs_from_nbt(tag: &Tag) -> Vec<ExperienceOrb> {
         count,
         ticks: 0,
         health: number(tag.get("Health")).unwrap_or(5) as i32,
+        air: number(tag.get("Air")).map_or(300, |air| air as i32), // getIntOr("Air", max)
         // ExperienceOrb's followingPlayer is transient: never saved, so a
         // loaded orb starts without one.
         following: None,
@@ -3431,6 +3433,8 @@ pub struct RocketNbt {
     pub has_been_shot: bool,
     /// `Entity.isSilent`: no launch sound.
     pub silent: bool,
+    /// `Entity.load`'s fall_distance.
+    pub fall_distance: f64,
 }
 pub fn firework_rocket_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<RocketNbt> {
     let owner = uuid_from_tag(tag.get("Owner"));
@@ -3448,6 +3452,7 @@ pub fn firework_rocket_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<R
         rotation: rotation(tag),
         has_been_shot: flag(tag, "HasBeenShot"),
         silent: flag(tag, "Silent"),
+        fall_distance: float(tag.get("fall_distance")).unwrap_or(0.0),
     })
 }
 
@@ -3466,6 +3471,8 @@ pub struct RocketSave<'a> {
     /// `Entity.onGround`, from the rocket's last `Entity.move`.
     pub on_ground: bool,
     pub has_been_shot: bool,
+    /// `Entity.fallDistance`.
+    pub fall_distance: f64,
 }
 pub fn firework_rocket_to_nbt(r: &RocketSave, uuid: [i32; 4], raw: Option<&Tag>) -> Tag {
     let mut tag = Base {
@@ -3475,7 +3482,7 @@ pub fn firework_rocket_to_nbt(r: &RocketSave, uuid: [i32; 4], raw: Option<&Tag>)
         motion: r.motion,
         rotation: r.rotation,
         on_ground: r.on_ground,
-        fall_distance: 0.0,
+        fall_distance: r.fall_distance,
     }
     .tag(raw);
     for (key, value) in [
@@ -3722,7 +3729,7 @@ pub fn item_frame_from_nbt(tag: &Tag, id: u32) -> Option<ItemFrame> {
         facing: hanging::wrap_data_value(number(tag.get("Facing")).unwrap_or(0), 6),
         glow: kind(tag).as_deref() == Some("minecraft:glow_item_frame"),
         item: tag.get("Item").and_then(item_from_nbt),
-        rotation: (number(tag.get("ItemRotation")).unwrap_or(0) & 7) as u8,
+        rotation: (number(tag.get("ItemRotation")).unwrap_or(0) & 7) as i8,
         drop_chance: float(tag.get("ItemDropChance")).map_or(1.0, |v| v as f32),
         fixed: flag(tag, "Fixed"),
         invisible: flag(tag, "Invisible"),
@@ -3829,15 +3836,27 @@ pub fn armor_stand_to_nbt(a: &ArmorStand, uuid: [i32; 4], raw: Option<&Tag>) -> 
 }
 /// The attribute every living entity's first tick makes (`removeFrost`).
 const SPEED_ATTRIBUTE: &str = "minecraft:movement_speed";
+/// Vanilla 26.3 `Entity.setXRot`: finite pitch is clamped after modulo 360,
+/// non-finite pitch resets to 0.0.
+fn normalize_pitch(pitch: f32) -> f32 {
+    if pitch.is_finite() {
+        (pitch % 360.0).clamp(-90.0, 90.0)
+    } else {
+        0.0
+    }
+}
+
 pub fn armor_stand_from_nbt(tag: &Tag, id: u32) -> Option<ArmorStand> {
-    let mut a = ArmorStand::new(id, position(tag)?, rotation(tag)[0]);
+    let rot = rotation(tag);
+    let mut a = ArmorStand::new(id, position(tag)?, rot[0]);
+    a.pitch = normalize_pitch(rot[1]);
     a.enchantment_fall_distance = float(tag.get("fall_distance")).unwrap_or(0.0);
     // AttributeMap.load makes an instance for each saved attribute.
     a.speed_instance = matches!(tag.get("attributes"), Some(Tag::List(list))
         if list.iter().any(|attr| text(attr.get("id")).as_deref() == Some(SPEED_ATTRIBUTE)));
     a.velocity = loaded_motion(tag);
     a.health = float(tag.get("Health")).unwrap_or(20.0) as f32;
-    a.fire_ticks = number(tag.get("Fire")).unwrap_or(0) as i32;
+    a.fire_ticks = i32::from(number(tag.get("Fire")).unwrap_or(0) as i16);
     a.custom_name = tag.get("CustomName").map(name_text);
     a.name_visible = flag(tag, "CustomNameVisible");
     if let Some(eq) = tag.get("equipment") {
@@ -5979,6 +5998,7 @@ mod tests {
             attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
+            air: 300,
             no_gravity: false,
             id: 0,
             position: Vec3::ZERO,
@@ -6095,6 +6115,7 @@ mod tests {
             attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
+            air: 300,
             no_gravity: false,
             id: 0,
             position: Vec3::new(1.0, 2.0, 3.0),
@@ -8171,6 +8192,8 @@ mod fireball_nbt_tests {
         let saved = |raw: &Tag| {
             let (pos, facing, variant) = painting_from_nbt(raw).unwrap();
             let painting = crate::entities::Painting {
+                attachment_lifetime: Default::default(),
+                join: Default::default(),
                 id: 1,
                 pos,
                 facing,

@@ -2160,7 +2160,6 @@ pub enum MobEvent {
     /// `HoglinAi.broadcastAttackTarget`: receiver and source player connection.
     HoglinAttackTarget {
         mob: u32,
-        from: u32,
         target: Who,
         player: Option<u32>,
     },
@@ -2648,7 +2647,8 @@ impl MobEvent {
             | Self::Push { target, .. }
             | Self::Knockback { target, .. }
             | Self::StabDismount { target }
-            | Self::Ignite { target, .. }
+            | Self::Ignite(target, _)
+            | Self::ZombieIgnite(target, _)
             | Self::IronGolemHit { target, .. } => *target == Who::Player,
             Self::Projectile(projectile) => matches!(
                 &projectile.kind,

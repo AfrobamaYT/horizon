@@ -12,7 +12,8 @@ use std::sync::Arc;
 
 pub(crate) mod attribute_modifiers;
 pub(crate) mod kinetic;
-use horizon_world::consumable::{Consumable, UseAnimation};
+use horizon_core::use_animation::UseAnimation;
+use horizon_world::consumable::Consumable;
 pub type ItemConsumable = Consumable<String, ConsumeEffect>;
 
 /// A stack from the wire: its item by the built-in registry's id, its
@@ -1202,8 +1203,13 @@ mod tests {
         if !root.join("items.json").exists() {
             return;
         }
-        let items =
-            crate::items::Items::tags_only(&root, &horizon_world::loot::PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::shared(&root).unwrap();
+        let items = crate::items::Items::tags_only(
+            &root,
+            &horizon_world::loot::PackOverlay::NONE,
+            &defaults,
+        )
+        .unwrap();
         assert_eq!(equip_sound(&stack, &items), None);
         stack.data_mut().set_other(
             "minecraft:equippable",

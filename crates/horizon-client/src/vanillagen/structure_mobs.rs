@@ -686,7 +686,16 @@ mod tests {
     #[test]
     fn load_behind_without_resources_has_no_data() {
         let dir = std::env::temp_dir().join("horizon-structure-mobs-none");
-        let finalizer = StructureMobFinalizer::new(dir, "minecraft:overworld");
+        // The item data is a separate load from the (absent) structure resources.
+        let items = std::env::temp_dir().join("horizon-structure-mobs-items");
+        std::fs::create_dir_all(&items).unwrap();
+        std::fs::write(items.join("items.json"), "{}").unwrap();
+        let item_data = crate::test_resources::item_data(
+            &items,
+            horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
+        )
+        .unwrap();
+        let finalizer = StructureMobFinalizer::new(dir, "minecraft:overworld", item_data);
         finalizer.load_behind();
         // The thread has to fill the cell on its own, before anyone asks.
         for _ in 0..1000 {

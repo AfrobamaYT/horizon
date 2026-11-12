@@ -166,7 +166,6 @@ impl Hub {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_chat_filter::Guard;
 
     #[test]
     fn the_sender_is_told_why() {

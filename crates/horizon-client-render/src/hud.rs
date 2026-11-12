@@ -4461,8 +4461,11 @@ texture=wide",
             ("item/blurred".to_owned(), 32, 32, Vec::new()),
             ("block/stone".to_owned(), 32, 32, Vec::new()),
         ];
-        let models =
-            reducible_model_sprites(&root, &images, &HashSet::from(["item/blurred".to_owned()]));
+        let models = reducible_model_sprites(
+            &ResourceSource::directory(root.clone()),
+            &images,
+            &HashSet::from(["item/blurred".to_owned()]),
+        );
         let _ = fs::remove_dir_all(root);
         assert_eq!(
             models,

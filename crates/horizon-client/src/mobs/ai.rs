@@ -6042,7 +6042,7 @@ mod burn_and_rose_tests {
         let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
         register(&mut m);
         m.no_ai = true;
-        m.random = LegacyRandom::new(3);
+        m.random = horizon_core::random::LegacyRandom::new(3);
         m
     }
 
@@ -6090,11 +6090,11 @@ mod burn_and_rose_tests {
                 m.ignite_for_ticks(100);
                 assert!(m.is_on_fire());
                 let (mut lr, mut events) = (crate::health::TestLevel::new(7), Vec::new());
-                assert!(tick(&mut m, &day, &mut lr, &mut events));
+                assert!(tick(&mut m, &day, &mut lr.level(), &mut events));
                 let broken: Vec<([i32; 3], bool)> = events
                     .iter()
                     .filter_map(|e| match e {
-                        MobEvent::BreakBlock { pos, drop } => Some((*pos, *drop)),
+                        MobEvent::BreakBlock { pos, drop, .. } => Some((*pos, *drop)),
                         _ => None,
                     })
                     .collect();
@@ -6102,7 +6102,7 @@ mod burn_and_rose_tests {
                 assert_eq!(m.fire_ticks, 0, "and puts the zombie out");
                 events.clear();
                 for _ in 0..200 {
-                    tick(&mut m, &day, &mut lr, &mut events);
+                    tick(&mut m, &day, &mut lr.level(), &mut events);
                 }
                 assert!(!m.removed, "the zombie stays");
                 assert_eq!(m.fire_ticks, 0, "no sun burn while it stands in it");

@@ -1329,7 +1329,7 @@ mod tests {
                     level,
                     events: &mut events,
                 };
-                RunAroundLikeCrazy.tick(&mut m, &mut cx);
+                RunAroundLikeCrazy::new().tick(&mut m, &mut cx);
                 assert_eq!(m.extra.tame, !asks_animal_tame);
                 assert!(matches!(events.as_slice(), [MobEvent::Tamed { mob: 1 }]));
             }

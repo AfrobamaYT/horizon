@@ -3295,17 +3295,7 @@ impl Hub {
                 let bounds = super::prediction::bounds(&positions);
                 for &i in &viewers {
                     self.guests.update(i, |g| {
-                        let Some(record) = g.record.as_deref_mut() else {
-                            return;
-                        };
-                        let slack = super::prediction::slack(std::array::from_fn(|i| {
-                            g.position[i] - g.previous_position[i]
-                        }));
-                        for &(x, y, z) in &positions {
-                            if super::prediction::near(g.position, [x, y, z], slack) {
-                                record.changed_near(self.ticks, [x, y, z]);
-                            }
-                        }
+                        super::prediction::note_changes(g, self.ticks, bounds, &positions);
                     });
                 }
             }

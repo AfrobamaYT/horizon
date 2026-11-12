@@ -2340,7 +2340,6 @@ mod tests {
         use crate::mobs::goals::Cx;
         use crate::mobs::path::{Path, PathNode, PathType};
         use crate::mobs::world::with_test_world;
-        use horizon_core::random::LegacyRandom;
         use std::sync::Arc;
         let mut outcomes = Vec::new();
         if !with_test_world(&[], |w, _| {
@@ -2375,11 +2374,11 @@ mod tests {
                     0.8,
                     1.33,
                 ));
-                let mut lr = LegacyRandom::new(0);
+                let mut lr = crate::health::TestLevel::new(0);
                 let mut events = Vec::new();
                 let mut cx = Cx {
                     w,
-                    lr: &mut lr,
+                    level: &mut lr.level(),
                     events: &mut events,
                 };
                 outcomes.push(goal.can_continue(&mut m, &mut cx));

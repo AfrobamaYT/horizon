@@ -1103,30 +1103,6 @@ pub(super) fn unobstructed(level: &ParticleLevel<'_>, bb: horizon_core::geometry
     scene.cells_without_collision(bb) || scene.unobstructed(bb).unwrap_or(true)
 }
 
-impl ParticleEngine {
-    /// Whether a pending Polytone particle joins the world. One with physics whose box starts
-    /// inside a block's collision never does, and its type's `limit` is then counted among those
-    /// that joined, so one that never joins takes no place (measured on the mod: with `limit` 1,
-    /// one born inside a block and one clear of it in the same tick, the clear one shows).
-    pub(super) fn polytone_joins(&self, p: &Particle, level: &ParticleLevel<'_>) -> bool {
-        if !p.spawn_check {
-            return true;
-        }
-        if !unobstructed(level, p.bb) {
-            return false;
-        }
-        let Some(name) = p.polytone_type.as_deref() else {
-            return true;
-        };
-        let def = self.polytone.as_ref().and_then(|r| r.get(name));
-        let limit = def.and_then(|d| d.limit.filter(|_| d.gpu.is_none()));
-        limit.is_none_or(|limit| {
-            let same = |q: &&Particle| !q.removed && q.polytone_type.as_deref() == Some(name);
-            self.particles.iter().filter(same).count() < limit as usize
-        })
-    }
-}
-
 impl super::ParticleController for Controller {
     fn tick(&mut self, p: &mut Particle, level: &ParticleLevel<'_>) -> ParticleUpdate {
         let mut update = ParticleUpdate::default();

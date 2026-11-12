@@ -278,7 +278,7 @@ impl LentLevel {
     pub fn take(world: &mut crate::world::World) -> Self {
         Self {
             random: std::mem::replace(
-                &mut world.random,
+                &mut *world.random,
                 horizon_core::random::LegacyRandom::new(0),
             ),
             attachments: std::mem::take(&mut world.attachments),
@@ -287,7 +287,7 @@ impl LentLevel {
     }
     /// Put them back into `world`.
     pub fn give_back(self, world: &mut crate::world::World) {
-        world.random = self.random;
+        *world.random = self.random;
         world.attachments = self.attachments;
         world.attachment_syncs = self.attachment_syncs;
     }
