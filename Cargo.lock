@@ -2237,6 +2237,7 @@ dependencies = [
  "horizon-mod-api",
  "horizon-mod-package",
  "horizon-mod-wasm",
+ "horizon-platform",
  "log",
  "serde_json",
 ]
@@ -2357,6 +2358,7 @@ dependencies = [
  "horizon-mod-point-emit",
  "horizon-mod-points",
  "horizon-mod-runtime",
+ "horizon-threads",
  "log",
  "rustix 1.1.5",
  "serde_json",
@@ -2434,6 +2436,7 @@ dependencies = [
  "horizon-protocol",
  "horizon-server-files",
  "horizon-system",
+ "horizon-threads",
  "horizon-world",
 ]
 

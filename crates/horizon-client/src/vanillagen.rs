@@ -719,7 +719,7 @@ impl VanillaTerrain {
         const QUIET: u64 = 2_000;
         const LATEST: u64 = 60_000;
         let terrain = Arc::downgrade(self);
-        let spawned = std::thread::Builder::new()
+        let spawned = horizon_threads::guest_stack::builder()
             .name("Ring search".into())
             .spawn(move || {
                 horizon_threads::idle_current();

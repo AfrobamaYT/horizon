@@ -94,3 +94,6 @@ pub mod mod_build {
     /// Parsing and validation of injection point signatures.
     pub use point_shape;
 }
+
+/// Establish the executable stack policy before starting the game or supervisor.
+pub use horizon_threads::guest_stack::prepare_main as prepare_main_stack;

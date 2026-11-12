@@ -220,7 +220,7 @@ impl Pool {
         let mut started = 0;
         for i in 0..threads.max(1) {
             let worker = inner.clone();
-            let spawned = std::thread::Builder::new()
+            let spawned = crate::guest_stack::builder()
                 .name(format!("{name}-{i}"))
                 .spawn(move || {
                     // Ticks and frames come first.

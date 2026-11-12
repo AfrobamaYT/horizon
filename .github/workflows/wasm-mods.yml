@@ -21,6 +21,8 @@ permissions:
 concurrency:
   group: wasm-mods-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main') || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  RUST_MIN_STACK: "268435456"
 jobs:
   fixture:
     # Drafts skip it: the shared runners go to ready PRs (CI rule, 2026-11-08).
@@ -140,3 +142,16 @@ jobs:
           HORIZON_WASM_FIXTURE: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/fixture/target/horizon-mod/wasm_fixture.hmod
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
         run: cargo test --release -p horizon-mod-wasm --features listener-fixture --test bench block_entity_ticks -- --ignored --nocapture
+
+  guest-stack:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --locked -p horizon-threads --lib guest_stack
+      - run: cargo test --locked -p horizon-mod-wasm --lib deep_guest_stack_and_overflow_attribution
+      - run: cargo test --locked -p horizon-mod-wasm --lib sixty_thousand_frames_exceed_wasmtime_default
+      - run: cargo test --locked -p horizon-mod-wasm --lib generated_client_and_server_hooks_complete_sixty_thousand_frames

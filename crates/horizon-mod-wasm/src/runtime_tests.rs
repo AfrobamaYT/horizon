@@ -77,6 +77,10 @@ fn guest(layout: u64, body: &str) -> Vec<u8> {
       (import "horizon" "host" (func $host (param i32 i32 i32 i32 i32) (result i32)))
       (import "horizon" "host_reply" (func $reply (param i32)))
       (func (export "horizon_layout") (result i64) i64.const {layout})
+      (func $recurse (param $depth i32) (result i32)
+        local.get $depth i32.eqz
+        if (result i32) i32.const 0
+        else local.get $depth i32.const 1 i32.sub call $recurse i32.const 1 i32.add end)
       (global $in_len (mut i32) (i32.const 0))
       (func (export "horizon_in") (param i32) (result i32) local.get 0 global.set $in_len i32.const 512)
       (func (export "horizon_hook") (param i32) (result i64) (local i32 i32)
@@ -1529,4 +1533,217 @@ fn refusal_during_writeback_leaves_the_record_unchanged() {
     );
     assert_eq!(write(&mut record, &answered), Some(()));
     assert_eq!(record, (1, 2));
+}
+
+#[test]
+fn deep_guest_stack_and_overflow_attribution() {
+    capture_logs();
+    horizon_threads::guest_stack::builder()
+        .spawn(|| {
+            let before = rss();
+            let module = module(
+                "i32.const 1024 i32.const 60000 call $recurse i32.store i64.const 4398046511108",
+            );
+            let loaded = rss();
+            for hook in ["render_frame_pre", "server_tick"] {
+                let id = crate::boundary::export_id("Hooks", hook).unwrap();
+                assert_eq!(call_at(&module, id), Some(60000), "{hook}");
+            }
+            eprintln!(
+                "guest stack VmRSS KiB: unloaded={before:?}, loaded={loaded:?}, deep={:?}",
+                rss()
+            );
+            let (send, receive) = std::sync::mpsc::channel();
+            let pool = horizon_threads::jobs::Pool::new(1, "guest-recursion-test");
+            let job = Arc::new(RecursionJob {
+                module,
+                send: Mutex::new(Some(send)),
+            });
+            let registration = pool.register(job);
+            registration.notify();
+            assert_eq!(
+                receive.recv_timeout(Duration::from_secs(10)).unwrap(),
+                Some(60000)
+            );
+            drop(registration);
+            let runaway = module_for_runaway();
+            assert_eq!(call(&runaway), None);
+            assert!(runaway.is_stopped());
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+    assert!(
+        CAPTURE
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|line| line.contains("wasm mod test stopped its group") && line.contains("stack"))
+    );
+}
+
+fn module_for_runaway() -> WasmMod {
+    module("i32.const -1 call $recurse drop i64.const 0")
+}
+
+fn rss() -> Option<u64> {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()?
+        .lines()
+        .find(|line| line.starts_with("VmRSS:"))?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()
+}
+
+#[test]
+fn sixty_thousand_frames_exceed_wasmtime_default() {
+    horizon_threads::guest_stack::builder()
+        .spawn(|| {
+            let engine = Engine::default();
+            let bytes = wat::parse_str(
+                r#"(module
+          (func $recurse (export "recurse") (param i32) (result i32)
+            local.get 0 i32.eqz if (result i32) i32.const 0 else
+            local.get 0 i32.const 1 i32.sub call $recurse i32.const 1 i32.add end))"#,
+            )
+            .unwrap();
+            let module = wasmtime::Module::new(&engine, bytes).unwrap();
+            let mut store = Store::new(&engine, ());
+            let instance = wasmtime::Instance::new(&mut store, &module, &[]).unwrap();
+            let recurse = instance
+                .get_typed_func::<i32, i32>(&mut store, "recurse")
+                .unwrap();
+            let error = recurse.call(&mut store, 60000).unwrap_err();
+            assert_eq!(
+                error.downcast_ref::<wasmtime::Trap>(),
+                Some(&wasmtime::Trap::StackOverflow)
+            );
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+struct RecursionJob {
+    module: WasmMod,
+    send: Mutex<Option<std::sync::mpsc::Sender<Option<u32>>>>,
+}
+impl horizon_threads::jobs::Source for RecursionJob {
+    fn next(&self) -> Option<horizon_threads::jobs::Rank> {
+        self.send
+            .lock()
+            .unwrap()
+            .is_some()
+            .then_some(horizon_threads::jobs::Rank::new(
+                horizon_threads::jobs::Class::Near,
+                0,
+            ))
+    }
+    fn run(&self, _: usize) -> bool {
+        let Some(send) = self.send.lock().unwrap().take() else {
+            return false;
+        };
+        send.send(call(&self.module)).unwrap();
+        true
+    }
+}
+
+#[test]
+fn small_calling_thread_refuses_without_poisoning_the_mod() {
+    capture_logs();
+    let module = module("i64.const 2199023255556");
+    let module = std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(move || {
+            assert_eq!(call(&module), None);
+            assert!(!module.is_stopped());
+            module
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+    assert_eq!(call(&module), Some(42));
+    assert!(
+        CAPTURE
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|line| line.contains("wasm mod test: GuestStackUnavailable"))
+    );
+}
+
+#[test]
+fn generated_client_and_server_hooks_complete_sixty_thousand_frames() {
+    use mod_api::Hooks;
+    struct Host;
+    impl mod_api::Host for Host {}
+    mod_api::impl_host_areas!(Host);
+    impl mod_api::ClientHost for Host {}
+    mod_api::impl_client_host_areas!(Host);
+    impl mod_api::ServerHost for Host {}
+    mod_api::impl_server_host_areas!(Host);
+
+    // A hook writes a known reply only after recursion returns. Call id 0 reads
+    // the saved depth, independently proving that the real generated proxy ran it.
+    fn recursive_hook(reply: &Writer) -> WasmMod {
+        let stores: String = reply
+            .bytes()
+            .iter()
+            .enumerate()
+            .map(|(i, byte)| format!("i32.const {} i32.const {byte} i32.store8 ", 2048 + i))
+            .collect();
+        module(&format!(
+            "local.get 0 i32.eqz if (result i64)
+            i64.const 4398046511108
+            else i32.const 1024 i32.const 60000 call $recurse i32.store
+            {stores} i64.const {} end",
+            (2048u64 << 32) | reply.bytes().len() as u64
+        ))
+    }
+    horizon_threads::guest_stack::builder()
+        .spawn(|| {
+            let mut host = Host;
+            let mut reply = Writer::default();
+            reply.put(&Duration::from_secs(60000));
+            let client = recursive_hook(&reply);
+            let mut render = mod_api::RenderFramePreEvent {
+                elapsed: Duration::from_secs(1),
+            };
+            client.render_frame_pre(&mut host, &mut render);
+            assert_eq!(render.elapsed, Duration::from_secs(60000));
+            assert_eq!(call(&client), Some(60000));
+
+            let mut reply = Writer::default();
+            reply.put(&mod_api::ServerTickPhase::ServerTickEnd {
+                world_running: true,
+            });
+            let server = recursive_hook(&reply);
+            let mut context_bytes = Writer::default();
+            context_bytes.put(&mod_api::Authority::DedicatedServer);
+            context_bytes.put(&mod_api::WorldEpoch::new(1));
+            context_bytes.put(&mod_api::TickId::new(1));
+            let context: mod_api::LifecycleContext =
+                Reader::new(context_bytes.bytes()).take().unwrap();
+            let mut tick = mod_api::ServerTickEvent {
+                context: &context,
+                phase: mod_api::ServerTickPhase::ServerTickStart {
+                    world_running: true,
+                },
+            };
+            server.server_tick(&mut host, &mut tick);
+            assert!(matches!(
+                tick.phase,
+                mod_api::ServerTickPhase::ServerTickEnd {
+                    world_running: true
+                }
+            ));
+            assert_eq!(call(&server), Some(60000));
+        })
+        .unwrap()
+        .join()
+        .unwrap();
 }

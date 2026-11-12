@@ -264,3 +264,20 @@ maintainer confirmation and does not represent a measured pack.
 A failed check logs the reason once per launch. Unavailable, corrupt or incompatible entries
 fall back to compiling the wasm. Writes replace entries atomically without changing files that
 running modules have mapped. Deleting the cache is always safe: the next launch rebuilds it.
+
+## Guest stack
+
+Every wasm mod has the same 128 MiB guest stack limit; manifests cannot change it.
+At the reporter's measured ceiling of about 1.8 KB per frame, this covers about
+70,000 plain frames (Java's deepest reported case was about 59,000). Frame sizes
+vary with compiled code. Guest overflow still traps and names the mod.
+Guest-entering threads reserve another 8 MiB for host frames. Linux raises the
+main stack limit and re-execs before initialization, or refuses startup with
+`GuestStackUnavailable` when the hard limit is too low. Windows and macOS use
+executable linker stack reservations. These reserve address space; resident
+memory grows as stack pages are touched.
+
+When running wasm runtime tests directly, give libtest threads enough stack, for
+example `RUST_MIN_STACK=268435456 cargo test -p horizon-mod-wasm --lib`.
+CI uses this test-only reservation on Linux, Windows and macOS. Engine workers
+set their stack explicitly; player installations need no `RUST_MIN_STACK` setting.
