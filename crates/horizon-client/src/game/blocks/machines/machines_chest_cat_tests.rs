@@ -18,7 +18,7 @@ const WIRE: Pos = (2, 64, 0);
 /// A full chest at `CHEST`, a comparator east of it reading west into it,
 /// and the wire that carries the comparator's output, on a floor in a
 /// ticking chunk.
-fn game<'a>(resources: &'a mut Option<Arc<Resources>>) -> Game<'a> {
+fn game<'a>(resources: &'a mut Option<Arc<crate::game::Resources>>) -> Game<'a> {
     let mut game = server_game(resources);
     game.build_registries();
     game.set_allow_commands(true);
