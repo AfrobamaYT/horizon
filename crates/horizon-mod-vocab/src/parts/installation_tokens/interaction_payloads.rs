@@ -23,14 +23,6 @@ pub fn block_click<'a>(
 }
 /// Build the borrowed loot payload at its vocabulary boundary.
 #[cfg(any(test, feature = "testing"))]
-pub fn item_fished(
-    hook: u32,
-    position: [f64; 3],
-    drops: &[crate::ItemStack],
-) -> crate::ItemFished<'_> {
-    crate::ItemFished {
-        hook,
-        position,
-        drops,
-    }
+pub fn item_fished(hook: u32, position: [f64; 3]) -> crate::ItemFished {
+    crate::ItemFished { hook, position }
 }
