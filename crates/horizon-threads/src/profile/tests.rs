@@ -312,7 +312,7 @@ fn a_wall_session_also_records_cpu_samples_without_mixing_them() {
         agg.total(State::Running, false),
         agg.total(State::Waiting, false),
     );
-    let share = SPIN_SHARE.load(std::sync::atomic::Ordering::Relaxed) as usize;
+    let share = SPIN_SHARE.load(std::sync::atomic::Ordering::Relaxed);
     assert!(
         cpu > cpu_count(100) && running + waiting > 100,
         "cpu {cpu} running {running} waiting {waiting}"
