@@ -1204,26 +1204,6 @@ impl mod_api::item::menu::SlotView for ApiSlot<'_> {
         }
     }
 }
-/// Adapt a synchronous slot event; engine slot rules still own every write.
-pub(crate) fn menu_slot_rules(
-    context: &horizon_world::native_load_context::LoopContext,
-    menu: &str,
-    slot: usize,
-    stack: &EngineStack,
-    may_place: &mut bool,
-    max_stack: &mut u32,
-) {
-    if !mod_api::__private::has_part_hook(mod_api::HookId::MenuSlotRules) {
-        return;
-    }
-    let Ok(stack) = stack.try_into_api() else {
-        return;
-    };
-    let reader = horizon_client_render::api_context::LoopReader(context);
-    let context = reader.context();
-    mod_api::dispatch_menu_slot_rules(&context, menu, slot, &stack, may_place, max_stack);
-}
-
 /// Adapt a player's block menu `stillValid` check; the game asks only for a menu
 /// whose type has a part answering it (`menu_still_valid_listens`, when it opened).
 pub(crate) fn menu_still_valid(

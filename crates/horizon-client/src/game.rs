@@ -8517,24 +8517,11 @@ impl Game<'_> {
         };
         let menu_can_equip = self.menu_can_equip();
         let env = Env {
-            crafting_remainder: Some(self),
-            player: self
-                .lan_acting_uuid
-                .or_else(|| self.remote.as_ref().map(|r| r.profile())),
-            player_entity_id: Some(self.own_entity_id()),
-            loop_context: &self.loop_context,
-            items: self.items(),
-            recipes: self.recipes(),
-            brewing: &self.stations().brewing,
-            banners: &self.stations().banners,
-            station_recipes: &self.stations().recipes,
             enchantments: self.item_enchantments(),
-            names: &self.pack.names,
             trade: Some(&trade_env),
             maps: level_maps.as_ref().map(|m| m as _),
-            limited_crafting: self.limited_crafting(),
             can_equip: Some(&menu_can_equip),
-            known_recipes: Some(&self.level.recipe_book),
+            ..self.menu_env()
         };
         menu.creative = creative;
         menu.selected = self.selected;

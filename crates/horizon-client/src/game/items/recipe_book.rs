@@ -386,6 +386,7 @@ impl Game<'_> {
                 limited_crafting: self.limited_crafting(),
                 can_equip: None,
                 known_recipes: Some(&self.level.recipe_book),
+                slot_rules: Some(self),
             };
             for i in 0..36 {
                 menu.set_player_item(i, self.inventory[i].clone());

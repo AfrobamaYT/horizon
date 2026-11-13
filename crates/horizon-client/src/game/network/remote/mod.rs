@@ -16044,6 +16044,7 @@ pub(crate) mod tests {
             limited_crafting: false,
             can_equip: None,
             known_recipes: None,
+            slot_rules: None,
         };
         let mut menu = Menu::new(Kind::Inventory);
         let cobblestone = ItemStack {
