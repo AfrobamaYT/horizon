@@ -53,6 +53,10 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
             a.data().map_or(&[], |d| d.stored_enchantments.as_slice()),
             b.data().map_or(&[], |d| d.stored_enchantments.as_slice()),
         ),
+        "minecraft:enchantment_glint_override" => {
+            a.data().and_then(|d| d.other(id)).and_then(component_bool)
+                == b.data().and_then(|d| d.other(id)).and_then(component_bool)
+        }
         "minecraft:custom_name" => {
             a.data().and_then(|d| d.custom_name.as_ref())
                 == b.data().and_then(|d| d.custom_name.as_ref())
