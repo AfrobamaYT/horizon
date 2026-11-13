@@ -2002,6 +2002,8 @@ impl Game<'_> {
             tree: execution_tree,
             arguments,
         });
+        host.hub
+            .set_selector_tokens(super::native_entity_selectors::selector_tokens());
         if refresh {
             host.hub.store_mod_commands(0, tree);
         } else {

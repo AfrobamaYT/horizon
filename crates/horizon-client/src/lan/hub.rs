@@ -458,6 +458,7 @@ pub struct Hub {
     /// Server mods' commands, a root in the commands report's format, sent
     /// after vanilla's; the key the game last set them for.
     mod_commands: (serde_json::Value, Option<u64>),
+    selector_tokens: Vec<horizon_client_core::registries::SelectorToken>,
     /// Players' areas in other levels and what their clients view of them (#3716).
     pub viewed: super::viewed_levels::ViewedLevels,
 }
@@ -821,6 +822,7 @@ impl Hub {
             entity_out: Vec::new(),
             entity_gone: Vec::new(),
             mod_commands: (serde_json::Value::Null, None),
+            selector_tokens: Vec::new(),
             native_menu_events: Vec::new(),
             chunk_watches: ChunkWatchLog::default(),
             packet_drain: None,
@@ -2003,6 +2005,14 @@ impl Hub {
         changed
     }
 
+    /// Publish the frozen server token inventory before sending any command trees.
+    pub fn set_selector_tokens(
+        &mut self,
+        tokens: Vec<horizon_client_core::registries::SelectorToken>,
+    ) {
+        self.selector_tokens = tokens;
+    }
+
     /// Commands.sendCommands: the command tree for this player.
     fn send_commands(&self, i: usize) {
         let g = &self.guests[i];
@@ -2020,6 +2030,14 @@ impl Hub {
             if let Some(root) = packet.nodes.get_mut(root) {
                 root.children.retain(|c| !hidden.contains(c));
             }
+        }
+        if g.brand == "horizon" {
+            g.send(&C::CustomPayload(
+                horizon_protocol::packets::configuration::CustomPayload {
+                    channel: super::commands::selector_sync::CHANNEL.into(),
+                    data: super::commands::selector_sync::encode(&self.selector_tokens),
+                },
+            ));
         }
         g.send(&C::Commands(packet));
     }

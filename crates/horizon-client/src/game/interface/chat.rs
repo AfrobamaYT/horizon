@@ -914,7 +914,9 @@ impl Game<'_> {
             .map(|(k, _)| k.clone())
             .collect();
         self.sync_enchantment_registries();
-        self.ui.registries.selector_tokens = super::native_entity_selectors::selector_tokens();
+        if self.remote.is_none() {
+            self.ui.registries.selector_tokens = super::native_entity_selectors::selector_tokens();
+        }
         // After the export, which keys the registry with vanilla's tags.
         self.sync_stat_registries();
     }

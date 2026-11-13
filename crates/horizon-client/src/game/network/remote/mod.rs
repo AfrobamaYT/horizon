@@ -1121,6 +1121,7 @@ impl Game<'_> {
                     }
                 };
             });
+        self.ui.registries.selector_tokens.clear();
         self.remote = Some(Remote {
             professions: self.client_professions()?,
             session,
@@ -1364,6 +1365,7 @@ impl Game<'_> {
         let chat_tree = self.chat_tree_for(None);
         let services_keys = Arc::new(std::sync::Mutex::new(ServicesKeys::Ready(Vec::new())));
 
+        self.ui.registries.selector_tokens.clear();
         self.remote = Some(Remote {
             professions: self.client_professions()?,
             session,
@@ -3567,6 +3569,12 @@ impl Game<'_> {
             // The server's next generation of mod registries: all of it or the connection.
             C::CustomPayload(p) if p.channel == horizon_client::datapack_net::CHANNEL => {
                 horizon_client::datapack_net::accept_chunk(&p.data)?;
+            }
+            C::CustomPayload(p)
+                if p.channel == horizon_client::lan::commands::selector_sync::CHANNEL =>
+            {
+                let tokens = horizon_client::lan::commands::selector_sync::decode(&p.data)?;
+                self.ui.registries.selector_tokens = tokens;
             }
             // Another level's world: its open, its packets and its close (`viewed_worlds`).
             C::CustomPayload(p) if p.channel == horizon_protocol::viewed_levels::CHANNEL => {
