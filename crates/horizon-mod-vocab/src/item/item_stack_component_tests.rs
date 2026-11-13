@@ -211,3 +211,15 @@ fn copying_a_component_preserves_own_value_removal_and_inheritance() {
         assert_eq!(target.count(), 16);
     }
 }
+
+#[test]
+fn copying_an_id_that_is_not_a_component_id_changes_nothing() {
+    let mut source = ItemStack::of(ItemKey(0));
+    source.clear_damage();
+    let mut target = ItemStack::new(ItemKey(1), 16).unwrap();
+    target.set_damage(1);
+    // The removal marker is not a component id: it must not be read as a value and refused.
+    target.copy_component_from(&source, "!minecraft:damage");
+    target.copy_component_from(&source, "Damage");
+    assert_eq!(target.damage_component(), Some(1));
+}

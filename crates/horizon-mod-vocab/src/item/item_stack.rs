@@ -355,7 +355,12 @@ impl ItemStack {
     }
     /// Copy this component's own value or explicit removal from `other`, without
     /// consulting item defaults. If `other` inherits it, clear this stack's override too.
+    /// An `id` that is not a namespaced component id (`Damage`, or a removal marker such as
+    /// `!minecraft:damage`) changes nothing.
     pub fn copy_component_from(&mut self, other: &Self, id: &str) {
+        if crate::ComponentId::new(id).is_none() {
+            return;
+        }
         if id == "minecraft:damage"
             && let Some(damage) = other.damage
         {
