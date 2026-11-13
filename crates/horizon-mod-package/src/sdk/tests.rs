@@ -38,6 +38,10 @@ fn index(files: &[(&str, &[u8])]) -> Index {
         content_api: crate::manifest::API.into(),
         surface: Surface {
             hash: "ab".repeat(16),
+            previous: None,
+            source: None,
+            changes: Vec::new(),
+            notes: Vec::new(),
         },
         mixins: Mixins {
             rev: crate::mixins_tool::REV.into(),
@@ -65,6 +69,45 @@ fn written_index_reads_back_and_unknown_fields_are_ignored() {
     value["later"] = serde_json::json!({"field": 1});
     value["assets"][ENGINE]["later"] = serde_json::json!(true);
     assert_eq!(read(&value).unwrap(), written);
+}
+
+#[test]
+fn the_comparison_with_the_previous_sdk_is_written_and_read_back() {
+    let mut written = index(&[(ENGINE, b"engine")]);
+    let hash = written.surface.hash.clone();
+    let diff = serde_json::json!({
+        "old": "cd".repeat(16), "new": hash, "verdict": "breaking",
+        "changes": [
+            {"id": "hook.a", "kind": "removed", "class": "breaking", "what": ["removed"],
+             "notes": [{"file": "a.toml", "why": "merged into b"}]},
+            {"id": "type.b", "kind": "changed", "class": "additive", "what": ["field added"],
+             "notes": [{"file": "a.toml", "why": "merged into b"},
+                       {"file": "b.toml", "why": "renamed", "migrate": "use c"}]},
+        ],
+    });
+    written
+        .compare("f".repeat(40).as_str(), &serde_json::to_vec(&diff).unwrap())
+        .unwrap();
+    let surface = &written.surface;
+    assert_eq!(surface.previous.as_deref(), Some("f".repeat(40).as_str()));
+    assert_eq!(surface.source, Some(Verdict::Breaking));
+    assert_eq!(surface.changes, ["hook.a", "type.b"]);
+    assert_eq!(
+        surface.notes,
+        ["a.toml: merged into b", "b.toml: renamed Migrate: use c"]
+    );
+    assert_eq!(read(&json(&written)).unwrap(), written);
+    // A diff of another surface, or one that is not a diff, is refused.
+    let mut other = index(&[(ENGINE, b"engine")]);
+    let mut wrong = diff.clone();
+    wrong["new"] = "00".repeat(16).into();
+    let refused = other.compare("f", &serde_json::to_vec(&wrong).unwrap());
+    assert!(matches!(refused, Err(Refusal::Malformed(why)) if why.contains("not this build's")));
+    assert!(matches!(
+        other.compare("f", b"[]"),
+        Err(Refusal::Malformed(_))
+    ));
+    assert_eq!(other.surface.previous, None);
 }
 
 #[test]
