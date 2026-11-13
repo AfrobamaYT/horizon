@@ -27,6 +27,7 @@ pub const DECODED_COMPONENTS: &[&str] = &[
     "minecraft:repair_cost",
     "minecraft:max_damage",
     "minecraft:max_stack_size",
+    "minecraft:map_id",
     "minecraft:rarity",
     "minecraft:enchantments",
     "minecraft:stored_enchantments",
@@ -55,7 +56,8 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
         "minecraft:damage"
         | "minecraft:repair_cost"
         | "minecraft:max_damage"
-        | "minecraft:max_stack_size" => {
+        | "minecraft:max_stack_size"
+        | "minecraft:map_id" => {
             Tag::Int(int_of(value).expect("validated numeric component") as i32)
         }
         "minecraft:enchantments" | "minecraft:stored_enchantments" => {
@@ -83,6 +85,8 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
 /// The codecs of the item components commands commonly set.
 pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), String> {
     match id {
+        // MapId.CODEC is Codec.INT, without a non-negative constraint.
+        "minecraft:map_id" => int_of(t).map(|_| ()).ok_or_else(|| "Not a number".into()),
         "minecraft:damage" | "minecraft:repair_cost" => {
             let v = int_of(t).ok_or("Not a number")?;
             if v < 0 {
