@@ -2506,7 +2506,7 @@ mod tests {
 
     /// The launcher's toolchain in `dir` for every host it ships one for: the build commands are
     /// checked for each host on whichever machine runs the tests, not only for its own.
-    fn toolchains(dir: impl Into<PathBuf>) -> Vec<Toolchain> {
+    pub(super) fn toolchains(dir: impl Into<PathBuf>) -> Vec<Toolchain> {
         let dir = dir.into();
         rust_toolchain::hosts()
             .iter()

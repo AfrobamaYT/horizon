@@ -110,7 +110,13 @@ pub(super) fn compile(
         })
         .cloned()
         .ok_or("no dynamic standard library")?;
-    let system = native_libraries(rust, out)?;
+    // Linux only: on windows-gnu rustc's list adds a second static unwinder (`-lgcc_eh`,
+    // `-l:libpthread.a`) beside std's `libgcc_s_seh-1.dll`, and macOS's system libraries come
+    // with std's dylib; both keep the link lines the slice proof measured.
+    let system = match std::env::consts::OS {
+        "windows" | "macos" => Vec::new(),
+        _ => native_libraries(rust, runtime, out)?,
+    };
     super::run(
         link(rust, &library, &members, &runtime_deps, &std, &system)?,
         "Linking the mods library",
@@ -134,8 +140,18 @@ fn reserved(projects: &[api::Project<'_>], krate: &str) -> Result<(), String> {
 
 /// The C libraries Rust's standard library needs on this target, as rustc itself lists them for
 /// a static library (`--print native-static-libs`): on Linux these include `-lm`, which a mod's
-/// float maths calls into.
-fn native_libraries(rust: &Toolchain, out: &Path) -> Result<Vec<String>, String> {
+/// float maths calls into. The answer depends only on the toolchain, so it is kept beside the
+/// prebuilt game's slices (`runtime`'s folder), in a file named for the Rust version and target,
+/// and asked of rustc only when that file is missing.
+fn native_libraries(rust: &Toolchain, runtime: &Path, out: &Path) -> Result<Vec<String>, String> {
+    let cache = runtime.with_file_name(format!(
+        "native-libraries-{}-{}",
+        crate::rust_toolchain::VERSION,
+        rust.host.target
+    ));
+    if let Ok(text) = fs::read_to_string(&cache) {
+        return Ok(text.lines().map(str::to_owned).collect());
+    }
     let source = out.join("native_libraries.rs");
     fs::write(&source, "").map_err(|e| e.to_string())?;
     let output = rust
@@ -153,7 +169,15 @@ fn native_libraries(rust: &Toolchain, out: &Path) -> Result<Vec<String>, String>
         .map_err(|e| e.to_string())?;
     let text = String::from_utf8_lossy(&output.stderr).into_owned()
         + &String::from_utf8_lossy(&output.stdout);
-    static_libs(&text).ok_or_else(|| format!("rustc listed no native libraries: {text}"))
+    let libraries =
+        static_libs(&text).ok_or_else(|| format!("rustc listed no native libraries: {text}"))?;
+    // Written whole, then renamed: a reader never sees half a list.
+    let partial = out.join("native-libraries");
+    fs::write(&partial, libraries.join("\n")).map_err(|e| e.to_string())?;
+    fs::rename(&partial, &cache)
+        .or_else(|_| fs::copy(&partial, &cache).map(drop))
+        .map_err(|e| format!("{}: {e}", cache.display()))?;
+    Ok(libraries)
 }
 
 /// The arguments of rustc's `native-static-libs:` note in `text`.
@@ -174,8 +198,9 @@ fn library_name(krate: &str) -> String {
 }
 
 /// Link the object files `members` into the shared library `library`, against the game's two
-/// libraries in `deps` and `std`, with this OS's C toolchain: the rlibs' metadata members are left
-/// out, which rustc's own dylib link cannot do without the game's crates as rlibs.
+/// libraries in `deps`, `std` and (Linux) the C libraries `system`, with this OS's C toolchain:
+/// the rlibs' metadata members are left out, which rustc's own dylib link cannot do without the
+/// game's crates as rlibs.
 fn link(
     rust: &Toolchain,
     library: &Path,
@@ -198,7 +223,6 @@ fn link(
             cmd.arg(game("horizon_mod_host")?)
                 .arg(game("horizon_mod_wasm")?)
                 .arg(std)
-                .args(system)
                 .arg("-Wl,--no-undefined");
             cmd
         }
@@ -220,8 +244,7 @@ fn link(
                 .arg(format!("@rpath/{name}"))
                 .arg(game("horizon_mod_host")?)
                 .arg(game("horizon_mod_wasm")?)
-                .arg(std)
-                .args(system);
+                .arg(std);
             cmd
         }
         _ => {
@@ -266,7 +289,10 @@ fn extract_objects(rlib: &Path, into: &Path) -> Result<Vec<PathBuf>, String> {
         }
         // A bare file name only: never a folder, `..` or an absolute path.
         let mut parts = Path::new(&name).components();
-        if !matches!((parts.next(), parts.next()), (Some(Component::Normal(_)), None)) {
+        if !matches!(
+            (parts.next(), parts.next()),
+            (Some(Component::Normal(_)), None)
+        ) {
             return Err(shown(&format!("an archive member named {name}")));
         }
         let path = into.join(&name);
@@ -300,6 +326,28 @@ mod tests {
             ]
         );
         assert_eq!(static_libs("warning: nothing"), None);
+    }
+
+    #[test]
+    fn the_native_libraries_are_asked_once_per_toolchain() {
+        let folder = super::super::tests::dir("api-route-native-libraries");
+        let runtime = folder.join("runtime");
+        // A toolchain folder with no rustc: only the cached answer can be returned.
+        for rust in super::super::tests::toolchains(folder.join("no-rust")) {
+            let cache = folder.join(format!(
+                "native-libraries-{}-{}",
+                crate::rust_toolchain::VERSION,
+                rust.host.target
+            ));
+            fs::write(&cache, "-lm\n-lc").unwrap();
+            assert_eq!(
+                native_libraries(&rust, &runtime, &folder).unwrap(),
+                ["-lm", "-lc"]
+            );
+            fs::remove_file(&cache).unwrap();
+            assert!(native_libraries(&rust, &runtime, &folder).is_err());
+        }
+        fs::remove_dir_all(folder).unwrap();
     }
 
     #[test]

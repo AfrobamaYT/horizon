@@ -60,9 +60,6 @@ NATIVE_MODS_METADATA = "horizon-native-mods"
 API_MAIN = ROOT / "crates/horizon-client/src/native_api_main.rs"
 # The folder holding that executable and the stub, in the `runtime` slice.
 RUNTIME = "bin"
-# The bytes the launcher looks for in an executable before it runs it under the holder (`holder::capable`).
-HOLDER_MARK = re.search(rb'CAPABILITY: \[u8; \d+\] = \*b"([^"]+)"',
-                        (ROOT / "crates/horizon-mod-package/src/holder.rs").read_bytes()).group(1)
 # The required inputs (`horizon_mod_package::sdk::Inputs`): `members` lists what each slice must hold.
 INPUTS = ROOT / "crates/horizon-mod-package/src/sdk/inputs.json"
 # The crates an API-only mod may name; their closure is the `api` archive.
@@ -291,6 +288,17 @@ def api_route_files() -> set[str]:
     """What OUT/bin may hold: the executable and the stub, with its import library on Windows."""
     library = f"{dylib_prefix()}{NATIVE_MODS}{dylib_suffix()}"
     return {EXECUTABLE, library, *([f"{library}.a"] if sys.platform == "win32" else [])}
+
+
+def holder_mark() -> bytes:
+    """The bytes the launcher looks for in an executable before it runs it under the holder (`holder::capable`),
+    read from their one definition, `holder.rs`'s `CAPABILITY`."""
+    source = ROOT / "crates/horizon-mod-package/src/holder.rs"
+    found = re.search(rb'CAPABILITY: \[u8; \d+\] = \*b"([^"]+)"', source.read_bytes())
+    if not found:
+        sys.exit(f"{source.relative_to(ROOT)} no longer defines CAPABILITY as `[u8; N] = *b\"...\"`: "
+                 "update holder_mark() in tools/prebuilt_game.py to read it")
+    return found.group(1)
 
 
 def holds(names: list[str], member: str) -> bool:
@@ -564,8 +572,9 @@ def check(out: Path) -> None:
                for member in members if not holds(sliced.get(kind, []), member)]
     if lacking:
         sys.exit(f"prebuilt slices lack required members: {lacking}")
-    if HOLDER_MARK not in (out / RUNTIME / EXECUTABLE).read_bytes():
-        sys.exit(f"{RUNTIME}/{EXECUTABLE} does not carry the holder marker {HOLDER_MARK.decode()}")
+    mark = holder_mark()
+    if mark not in (out / RUNTIME / EXECUTABLE).read_bytes():
+        sys.exit(f"{RUNTIME}/{EXECUTABLE} does not carry the holder marker {mark.decode()}")
 
 
 def smoke(out: Path) -> None:
@@ -602,7 +611,7 @@ def smoke(out: Path) -> None:
              *extern("horizon_client"), *extern("mod_api"), *extern("horizon_mod_package"), "--extern", f"horizon_mod_host={dylib(deps, 'horizon_mod_host')}",
              "--extern", f"mod_0={scratch / 'libmod_0.rlib'}", "-L", f"dependency={scratch}",
              "-o", str(installed / EXECUTABLE), str(scratch / "main.rs")])
-    if HOLDER_MARK not in (installed / EXECUTABLE).read_bytes():
+    if holder_mark() not in (installed / EXECUTABLE).read_bytes():
         sys.exit("smoke: holder capability missing from the executable")
     for library in runtime_libraries(deps):
         shutil.copy2(library, installed / library.name)
