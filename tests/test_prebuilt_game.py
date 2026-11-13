@@ -631,3 +631,23 @@ class PrebuiltContentsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SmokeStartTests(unittest.TestCase):
+    def test_only_expected_missing_resources_exit_is_accepted_and_homes_are_scratch(self):
+        from types import SimpleNamespace
+        for code in (1, 0, 2, 3221225477):
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                result = subprocess.CompletedProcess([], code, stdout=prebuilt_game.NO_RESOURCES)
+                with patch.dict(sys.modules, {"lab": SimpleNamespace(game_env=lambda **_: {"HORIZON_HOME": "/inherited"})}), \
+                     patch.object(prebuilt_game.subprocess, "run", return_value=result) as run, \
+                     contextlib.redirect_stdout(io.StringIO()):
+                    if code == 1:
+                        prebuilt_game.start(root / "out")
+                    else:
+                        with self.assertRaises(SystemExit):
+                            prebuilt_game.start(root / "out")
+                environment = run.call_args.kwargs["env"]
+                for key in ("HORIZON_HOME", "HORIZON_LAUNCHER_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME"):
+                    self.assertTrue(Path(environment[key]).is_relative_to(root))

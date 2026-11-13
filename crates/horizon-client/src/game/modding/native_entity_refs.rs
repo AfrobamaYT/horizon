@@ -955,6 +955,17 @@ pub(super) mod tests {
     use mod_api::__private::game::*;
     /// Isolate declarations and frozen registries without changing another test's resources.
     pub(in crate::game) fn run_fresh_cases(name: &str, flag: &str, cases: &[&str]) -> bool {
+        run_fresh_cases_at_once(name, flag, cases, 1)
+    }
+
+    /// [`run_fresh_cases`] with up to `at_once` children running together, for a test that runs
+    /// alone in its job (the wasm fixture's): each child still has its own process and folders.
+    pub(in crate::game) fn run_fresh_cases_at_once(
+        name: &str,
+        flag: &str,
+        cases: &[&str],
+        at_once: usize,
+    ) -> bool {
         if std::env::var_os(flag).is_some() {
             return false;
         }
@@ -964,15 +975,8 @@ pub(super) mod tests {
                 .unwrap();
         let scratch_owner = tempfile::tempdir().unwrap();
         let target = scratch_owner.path();
-        for case in cases {
-            let scratch = target.join(format!(
-                "be-types-fixture-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
+        let run = |case: &str| {
+            let scratch = target.join(format!("fresh-case-{case}"));
             std::fs::create_dir(&scratch).unwrap();
             let mut command = std::process::Command::new(std::env::current_exe().unwrap());
             command
@@ -1004,15 +1008,31 @@ pub(super) mod tests {
             }
             let output = output_within(&mut command, name, case);
             std::fs::remove_dir_all(scratch).unwrap();
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            // The child's log, captured with this test's own output.
-            print!("{stdout}");
-            eprint!("{}", String::from_utf8_lossy(&output.stderr));
-            assert!(output.status.success(), "{name}: {case}");
-            assert!(
-                ran_one_test(&stdout),
-                "{name}: {case}: the child matched no test of that name"
-            );
+            output
+        };
+        for group in cases.chunks(at_once.max(1)) {
+            let run = &run;
+            let outputs: Vec<_> = std::thread::scope(|scope| {
+                let running: Vec<_> = group
+                    .iter()
+                    .map(|&case| scope.spawn(move || run(case)))
+                    .collect();
+                running
+                    .into_iter()
+                    .map(|child| child.join().unwrap())
+                    .collect()
+            });
+            for (case, output) in group.iter().zip(outputs) {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                // The child's log, captured with this test's own output.
+                print!("{stdout}");
+                eprint!("{}", String::from_utf8_lossy(&output.stderr));
+                assert!(output.status.success(), "{name}: {case}");
+                assert!(
+                    ran_one_test(&stdout),
+                    "{name}: {case}: the child matched no test of that name"
+                );
+            }
         }
         true
     }

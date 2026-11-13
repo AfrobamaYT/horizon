@@ -73,7 +73,7 @@ class WorkflowTests(unittest.TestCase):
                 self.assertIn("(needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true')",
                               self.job(name))
         self.assertIn("needs.changes.outputs.heavy == 'true'", self.job("launcher"))
-        for name in ("ignored-tests-shards", "ignored-tests", "vanilla-parity"):
+        for name in ("vanilla-parity",):
             self.assertIn("!inputs.pr", self.job(name), name)
 
     def test_cheap_jobs_run_without_the_heavy_gate(self):

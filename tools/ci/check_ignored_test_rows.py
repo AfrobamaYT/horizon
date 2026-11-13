@@ -2,7 +2,8 @@
 """verify-static's guard for tools/ci/ignored-tests/: read every policy file as the ignored-test readers do.
 
 Fails on a malformed row, a test listed in two files, a folder with no rows or with a file other than `*.txt`
-and README.md, and a file at the retired single-list path. Builds nothing.
+and README.md, and a file at the retired single-list path. The shared reader validates both `needs`
+and `needs-plain` fixture rows; neither is a known failure. Builds nothing.
 """
 import sys
 from pathlib import Path
