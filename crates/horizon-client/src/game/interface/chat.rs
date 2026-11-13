@@ -2076,11 +2076,6 @@ impl Game<'_> {
     /// The carrier store's open-time state settles here too, before the
     /// first tick and any player: a refusal fails the open.
     pub(super) fn load_world_state(&mut self) -> crate::Result<()> {
-        self.ui.rules = GameRules::load_with_registry(
-            &self.world_root,
-            &self.level.enabled_features,
-            self.level.rule_registry.clone(),
-        );
         self.ui.dispatcher = SessionDispatcher(Arc::new(
             horizon_client::command::vanilla::session_dispatcher(
                 &self.level.rule_registry,

@@ -922,7 +922,8 @@ fn set_level_types(
 /// The terrain of a level whose stem names a generator a mod registered, the
 /// stem being read as the game's own generator reads it: a pack's or mod's,
 /// else the saved one. A stem naming any other generator is left to that
-/// generator, which refuses all but noise.
+/// generator, which refuses all but noise. A biome source a mod registered
+/// that names a biome the world lacks refuses the level.
 fn mod_terrain(
     world_root: &std::path::Path,
     resources: &std::path::Path,
@@ -933,8 +934,11 @@ fn mod_terrain(
     dim: Dim,
     shape: horizon_client::chunk::LevelShape,
     seed: i64,
-) -> Option<horizon_client::modgen::ModTerrain> {
-    use horizon_world::worldgen::{mod_generators::mod_chunk_generators, overrides::DIMENSIONS};
+) -> Option<std::result::Result<horizon_client::modgen::ModTerrain, String>> {
+    use horizon_world::worldgen::{
+        mod_biome_sources::mod_biome_sources, mod_generators::mod_chunk_generators,
+        overrides::DIMENSIONS,
+    };
     let generators = mod_chunk_generators();
     if generators.is_empty() {
         return None;
@@ -953,8 +957,9 @@ fn mod_terrain(
     horizon_client::modgen::ModTerrain::for_stem(
         &stem,
         generators,
+        mod_biome_sources(),
         registry,
-        |biome| biomes.id(biome),
+        |biome| biomes.contains(biome).then(|| biomes.id(biome)),
         shape,
         seed,
     )
@@ -1145,7 +1150,9 @@ pub(super) fn make_streaming(
         dim,
         shape,
         seed,
-    ) {
+    )
+    .transpose()?
+    {
         Streaming::new(
             Arc::new(Persistent {
                 inner: Arc::new(inner),
@@ -1717,7 +1724,9 @@ mod tests {
             mod_terrain(&world, &root, &[], &[], registry, &biomes, dim, shape, 0)
         };
         let pocket = Dim::Extra(mod_api::__private::dimension_key("test:pocket"));
-        let terrain = open(pocket).expect("the stem names a registered generator");
+        let terrain = open(pocket)
+            .expect("the stem names a registered generator")
+            .unwrap();
         let chunk = terrain.finish(terrain.proto(&mut (), 0, 0));
         assert_eq!(
             chunk.block(0, -128, 0),

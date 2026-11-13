@@ -108,8 +108,13 @@ pub struct DimensionSettings {
     /// The one biome the level has, with the `Fixed` biome source.
     pub biome: String,
     /// How the level chooses its biomes. Only `Fixed` suits a mod's own chunk generator, which
-    /// writes terrain only.
+    /// writes terrain only. Not read when `mod_biome_source` is set.
     pub biome_source: BiomeSourceKind,
+    /// A biome source a mod registered with `register_biome_source` (`mymod:chaos`), which then
+    /// chooses the level's biomes in place of `biome_source` and the fields it reads. It suits the
+    /// `minecraft:noise` generator and a chunk generator of a mod's own; it may come from a mod
+    /// that loads later.
+    pub mod_biome_source: Option<String>,
     /// The biomes a `Checkerboard` source alternates, at least one (vanilla sets no maximum).
     pub biomes: Vec<String>,
     /// A `Points` source's biomes and the climate each is chosen for, at least one.
@@ -205,6 +210,7 @@ impl Default for DimensionSettings {
             noise_settings: "minecraft:overworld".into(),
             biome: "minecraft:plains".into(),
             biome_source: BiomeSourceKind::Fixed,
+            mod_biome_source: None,
             biomes: Vec::new(),
             biome_points: Vec::new(),
             biome_scale: 2,
@@ -319,8 +325,12 @@ pub struct LevelDimensionType {
 }
 
 impl DimensionSettings {
-    /// What the biome source's codec refuses, if anything.
+    /// What the biome source's codec refuses, if anything. A mod's biome source is checked once
+    /// every mod has registered.
     pub fn invalid_biome_source(&self) -> Option<String> {
+        if self.mod_biome_source.is_some() {
+            return None;
+        }
         let reason = match self.biome_source {
             BiomeSourceKind::Fixed => return None,
             BiomeSourceKind::Checkerboard if self.biomes.is_empty() => {
