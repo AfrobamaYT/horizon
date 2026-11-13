@@ -434,4 +434,23 @@ fn components_enchantable_decodes_positive_records_and_matches_values() {
         Some(Tag::compound([("value", Tag::Int(0))])),
     );
     assert!(!ingredient.test_in(&context, &sword));
+
+    let absence_source = r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"!minecraft:enchantable":{}}}"#;
+    let absence = parse(absence_source, &items);
+    let mut removed = ItemStack::new("minecraft:diamond_sword", 1);
+    assert!(!absence.test_in(&context, &removed));
+    removed.data_mut().set_other(
+        "!minecraft:enchantable",
+        Some(Tag::compound([] as [(&str, Tag); 0])),
+    );
+    assert!(absence.test_in(&context, &removed));
+    assert!(!ingredient.test_in(&context, &removed));
+    let no_defaults = Items::empty();
+    let bare = ItemStack::new("minecraft:diamond_sword", 1);
+    assert!(parse(absence_source, &no_defaults).test_in(&context, &bare));
+    let positive_without_default = parse(
+        r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:enchantable":{"value":15}}}"#,
+        &no_defaults,
+    );
+    assert!(!positive_without_default.test_in(&context, &bare));
 }
