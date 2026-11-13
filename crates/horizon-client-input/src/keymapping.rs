@@ -265,6 +265,7 @@ pub struct ModKeys {
     keys: Vec<ModKey>,
     /// Each bound key's mappings, by its name.
     by_input: HashMap<Box<str>, Vec<usize>>,
+    by_mouse: HashMap<winit::event::MouseButton, Vec<usize>>,
     /// Each mod's mappings, by id.
     by_id: HashMap<Box<str>, HashMap<Box<str>, usize>>,
     /// Every mapping is up with no clicks, so `release_all` has nothing to do.
@@ -275,6 +276,7 @@ impl ModKeys {
     /// and pending clicks across a rebinding; an unbound one hears no input.
     pub fn bind<'a>(&mut self, bindings: impl IntoIterator<Item = ModBinding<'a>>) {
         self.by_input.clear();
+        self.by_mouse.clear();
         self.by_id.clear();
         let mut count = 0;
         for (index, binding) in bindings.into_iter().enumerate() {
@@ -290,6 +292,9 @@ impl ModKeys {
                     old.context = key.context;
                 }
                 None => self.keys.push(key),
+            }
+            if let Some(button) = crate::keybinds::mouse_button(&binding.input) {
+                self.by_mouse.entry(button).or_default().push(index);
             }
             if !binding.input.is_empty() && binding.input != "key.keyboard.unknown" {
                 self.by_input
@@ -320,8 +325,47 @@ impl ModKeys {
         let Some(indices) = self.by_input.get(input) else {
             return;
         };
+        Self::dispatch(
+            &mut self.keys,
+            &mut self.idle,
+            indices,
+            action,
+            mouse,
+            screen_open,
+            held,
+        );
+    }
+    /// Dispatch a mouse event by the identity resolved at binding time.
+    pub fn button(
+        &mut self,
+        button: winit::event::MouseButton,
+        action: KeyAction,
+        screen_open: bool,
+        held: u32,
+    ) {
+        if let Some(indices) = self.by_mouse.get(&button) {
+            Self::dispatch(
+                &mut self.keys,
+                &mut self.idle,
+                indices,
+                action,
+                true,
+                screen_open,
+                held,
+            );
+        }
+    }
+    fn dispatch(
+        keys: &mut [ModKey],
+        idle: &mut bool,
+        indices: &[usize],
+        action: KeyAction,
+        mouse: bool,
+        screen_open: bool,
+        held: u32,
+    ) {
         for &index in indices {
-            let key = &mut self.keys[index];
+            let key = &mut keys[index];
             if action != KeyAction::Release && !key.active(held, screen_open) {
                 continue;
             }
@@ -331,7 +375,7 @@ impl ModKeys {
             } else {
                 key.state.key(action, screen_open, false);
             }
-            self.idle = false;
+            *idle = false;
         }
     }
     fn index(&self, owner: &str, id: &str) -> Option<usize> {

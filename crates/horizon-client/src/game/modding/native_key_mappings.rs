@@ -99,7 +99,11 @@ impl Game<'_> {
         } else {
             KeyAction::Release
         };
-        self.mod_mappings_input(&horizon_client::keybinds::mouse_name(button), action, true);
+        let screen_open = self.mod_mappings_screen_open();
+        let held = glfw_modifiers(self.modifiers);
+        self.native_input
+            .mappings
+            .button(button, action, screen_open, held);
     }
     fn mod_mappings_input(&mut self, input: &str, action: KeyAction, mouse: bool) {
         let screen_open = self.mod_mappings_screen_open();
