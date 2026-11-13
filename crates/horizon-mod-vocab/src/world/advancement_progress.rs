@@ -1,7 +1,7 @@
 //! Owned advancement progress captured at a criterion's grant or revoke, and a loaded
 //! advancement's definition.
 
-use crate::{Identifier, Text};
+use crate::{Identifier, ItemStack, Text};
 
 /// One criterion in an advancement, including criteria not yet obtained.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -107,8 +107,8 @@ pub struct AdvancementDisplay {
     pub title: Text,
     /// The description.
     pub description: Text,
-    /// The icon's item id. The game keeps only the id of the icon stack.
-    pub icon: Identifier,
+    /// The icon: the stack the file names, with its count and components.
+    pub icon: ItemStack,
     /// The frame.
     pub frame: AdvancementFrame,
     /// Whether completing it shows a toast.
@@ -124,7 +124,7 @@ impl AdvancementDisplay {
     pub fn new(
         title: Text,
         description: Text,
-        icon: Identifier,
+        icon: ItemStack,
         frame: AdvancementFrame,
         show_toast: bool,
         announce_to_chat: bool,

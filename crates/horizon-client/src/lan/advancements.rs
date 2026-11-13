@@ -415,7 +415,7 @@ impl ServerAdvancements {
         if let Some(d) = &a.display {
             w.nbt(&json_to_nbt(&d.title));
             w.nbt(&json_to_nbt(&d.description));
-            w.varint(sync.id("minecraft:item", &d.icon).unwrap_or(0));
+            w.varint(sync.id("minecraft:item", &d.icon.item).unwrap_or(0));
             w.varint(1);
             w.varint(0);
             w.varint(0);
