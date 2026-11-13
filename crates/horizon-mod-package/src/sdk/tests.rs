@@ -469,7 +469,8 @@ mod unpack {
         let mut names: Vec<String> = std::fs::read_dir(folder.path())
             .unwrap()
             .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-            .filter(|name| name != "download")
+            // The lock file stays: removing a lock file another process may hold is racy.
+            .filter(|name| name != "download" && !name.ends_with(LOCK_SUFFIX))
             .collect();
         names.sort();
         names
@@ -552,7 +553,7 @@ mod unpack {
     fn links_escapes_and_damage_are_refused_and_leave_nothing() {
         for (bytes, why) in [
             (LINK, "link is not a file or folder"),
-            (ESCAPE, "../x leaves the folder"),
+            (ESCAPE, "../x is not a plain path"),
             (b"not xz".as_slice(), ""),
         ] {
             let (folder, result) = unpacked(bytes, 1 << 20);
@@ -587,36 +588,180 @@ mod unpack {
     }
 
     #[test]
-    fn a_busy_rename_is_retried_then_refused() {
+    fn a_busy_rename_is_retried_on_windows_only() {
         let denied = || std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let sharing = || std::io::Error::from_raw_os_error(32);
         let tick = std::time::Duration::from_millis(1);
-        let mut calls = 0;
-        rename_retrying(Path::new("a"), Path::new("b"), tick, |_, _| {
-            calls += 1;
-            if calls < 3 { Err(denied()) } else { Ok(()) }
-        })
-        .unwrap();
-        assert_eq!(calls, 3);
-        let mut calls = 0;
-        let refused = rename_retrying(Path::new("a"), Path::new("b"), tick, |_, _| {
-            calls += 1;
-            Err(denied())
-        });
+        let calls_until = |error: fn() -> std::io::Error, succeed_at: usize| {
+            let mut calls = 0;
+            let result = rename_retrying(Path::new("a"), Path::new("b"), tick, |_, _| {
+                calls += 1;
+                if calls == succeed_at {
+                    Ok(())
+                } else {
+                    Err(error())
+                }
+            });
+            (calls, result.is_ok())
+        };
+        if cfg!(windows) {
+            assert_eq!(calls_until(denied, 3), (3, true));
+            assert_eq!(calls_until(sharing, 3), (3, true));
+            assert_eq!(calls_until(denied, 0), (6, false));
+        } else {
+            assert_eq!(calls_until(denied, 3), (1, false));
+            assert_eq!(calls_until(sharing, 3), (1, false));
+        }
+        assert_eq!(
+            calls_until(|| std::io::Error::from(std::io::ErrorKind::NotFound), 3),
+            (1, false)
+        );
+        assert!(!busy(&std::io::Error::from(std::io::ErrorKind::NotFound)));
+        assert_eq!(busy(&sharing()), cfg!(windows));
+    }
+
+    #[test]
+    fn a_second_unpack_to_the_same_folder_is_refused_while_the_first_holds_it() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("download");
+        std::fs::write(&file, FIXTURE).unwrap();
+        let listed = index(&[(ENGINE, FIXTURE)]);
+        let into = folder.path().join("sdk");
+        let held = lock(&into).unwrap();
+        assert_eq!(
+            unpack(&listed, ENGINE, &file, &into, 1 << 20).unwrap_err(),
+            Refusal::Busy(into.display().to_string())
+        );
+        assert!(!into.exists());
+        drop(held);
+        unpack(&listed, ENGINE, &file, &into, 1 << 20).unwrap();
+    }
+
+    /// A tar of one file entry named `path`, written plain, as a GNU long name, or behind a PAX
+    /// header, all by hand (the `tar` crate refuses to write unsafe names).
+    fn named(form: &str, path: &str) -> Vec<u8> {
+        fn header(name: &[u8], kind: u8, size: usize) -> Vec<u8> {
+            let mut h = tar::Header::new_ustar();
+            h.as_mut_bytes()[..name.len()].copy_from_slice(name);
+            h.set_mode(0o644);
+            h.set_size(size as u64);
+            h.set_entry_type(tar::EntryType::new(kind));
+            h.set_cksum();
+            h.as_bytes().to_vec()
+        }
+        fn padded(out: &mut Vec<u8>, data: &[u8]) {
+            out.extend(data);
+            out.resize(out.len().div_ceil(512) * 512, 0);
+        }
+        let mut out = Vec::new();
+        let short = match form {
+            "plain" => path.as_bytes(),
+            "gnu" => {
+                let data = format!("{path}\0");
+                out.extend(header(b"././@LongLink", b'L', data.len()));
+                padded(&mut out, data.as_bytes());
+                b"placeholder"
+            }
+            "pax" => {
+                let record = |len: usize| format!("{len} path={path}\n");
+                let mut len = record(0).len();
+                while record(len).len() != len {
+                    len = record(len).len();
+                }
+                let data = record(len);
+                out.extend(header(b"PaxHeaders/x", b'x', data.len()));
+                padded(&mut out, data.as_bytes());
+                b"placeholder"
+            }
+            _ => unreachable!(),
+        };
+        out.extend(header(short, b'0', 1));
+        padded(&mut out, b"x");
+        out.extend([0u8; 1024]);
+        out
+    }
+
+    #[test]
+    fn every_name_form_writes_inside_and_refuses_each_escape() {
+        let into = tempfile::tempdir().unwrap();
+        for form in ["plain", "gnu", "pax"] {
+            let path = format!("deps/{form}.rmeta");
+            untar(ENGINE, &named(form, &path)[..], into.path()).unwrap();
+            assert!(into.path().join(&path).is_file(), "{form}");
+            for escape in [
+                "../x",
+                "/etc/x",
+                "deps/C:x",
+                "deps/a\\..\\..\\x",
+                "deps/CON.txt",
+                "deps/x.",
+            ] {
+                let refused = untar(ENGINE, &named(form, escape)[..], into.path());
+                assert!(
+                    matches!(&refused, Err(Refusal::Archive { why, .. }) if why.contains("not a plain path")),
+                    "{form} {escape}: {refused:?}"
+                );
+            }
+        }
+        assert!(!into.path().parent().unwrap().join("x").exists());
+    }
+
+    #[test]
+    fn plain_paths_are_told_from_escapes() {
+        let into = Path::new("sdk");
+        for path in [
+            "deps/a.rmeta",
+            "./deps/a",
+            "host/lib-x_1.so",
+            "com10",
+            "deps/CONSOLE",
+        ] {
+            assert!(entry_target(into, path.as_bytes()).is_some(), "{path}");
+        }
+        for path in [
+            "..",
+            "a/../b",
+            "/a",
+            "C:x",
+            "a\\b",
+            "a\0b",
+            "CON",
+            "con.txt",
+            "aux.tar.xz",
+            "NUL",
+            "COM1",
+            "lpt9.dll",
+            "a/b ",
+            "a/b.",
+        ] {
+            assert!(entry_target(into, path.as_bytes()).is_none(), "{path:?}");
+        }
+    }
+
+    #[test]
+    fn unknown_pax_records_and_a_dangling_long_name_are_refused() {
+        let into = tempfile::tempdir().unwrap();
+        let pax = named("pax", "deps/a").into_iter().collect::<Vec<u8>>();
+        let text = String::from_utf8_lossy(&pax[512..1024]).into_owned();
+        let record = text.trim_end_matches('\0');
+        // The same header with its record turned into a `size` override of the same length.
+        let swapped = record.replacen("path=deps/a", "size=999999", 1);
+        let mut size = pax.clone();
+        size[512..512 + swapped.len()].copy_from_slice(swapped.as_bytes());
+        let refused = untar(ENGINE, &size[..], into.path());
         assert!(
-            matches!(refused, Err(Refusal::Rename { .. })),
+            matches!(&refused, Err(Refusal::Archive { why, .. }) if why.contains("PAX record \"size\"")),
             "{refused:?}"
         );
-        assert_eq!(calls, 6);
-        let mut calls = 0;
-        let refused = rename_retrying(Path::new("a"), Path::new("b"), tick, |_, _| {
-            calls += 1;
-            Err(std::io::Error::from(std::io::ErrorKind::NotFound))
-        });
+        // A long name and then the end of the archive.
+        let mut dangling = named("gnu", "deps/a");
+        dangling.truncate(1024);
+        dangling.extend([0u8; 1024]);
+        let refused = untar(ENGINE, &dangling[..], into.path());
         assert!(
-            matches!(refused, Err(Refusal::Rename { .. })),
+            matches!(&refused, Err(Refusal::Archive { why, .. }) if why.contains("no entry after it")),
             "{refused:?}"
         );
-        assert_eq!(calls, 1);
     }
 
     fn tar_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {

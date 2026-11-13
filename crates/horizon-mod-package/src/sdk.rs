@@ -366,6 +366,8 @@ pub enum Refusal {
     Io(String),
     /// The input list has no such route.
     Route(String),
+    /// Another unpack to the same folder holds its lock.
+    Busy(String),
     /// The folder an asset would unpack into already exists.
     Exists(String),
     /// The unpacked folder could not be moved into place.
@@ -416,6 +418,7 @@ impl fmt::Display for Refusal {
             Self::Io(why) => f.write_str(why),
             Self::Route(route) => write!(f, "the SDK's input list has no route {route}"),
             Self::Exists(path) => write!(f, "{path} already exists"),
+            Self::Busy(path) => write!(f, "another program is unpacking into {path}; try again"),
             Self::Rename { to, why } => write!(f, "could not move the unpacked SDK to {to}: {why}"),
             Self::MissingInputs { missing, how } => {
                 write!(f, "missing required inputs: {}", missing.join(", "))?;
@@ -688,6 +691,11 @@ pub const DICTIONARY_LIMIT: usize = 64 << 20;
 #[cfg(feature = "prebuilt")]
 pub const EXTENSION_LIMIT: u64 = 64 << 10;
 
+/// What [`unpack`] appends to the destination's name for the file it holds an exclusive lock on
+/// while it unpacks.
+#[cfg(feature = "prebuilt")]
+pub const LOCK_SUFFIX: &str = ".lock";
+
 /// What [`unpack`] appends to the destination's name for the folder it unpacks into first: a
 /// leftover one is a crash's, removed before the next unpack (and by cache eviction).
 #[cfg(feature = "prebuilt")]
@@ -713,6 +721,7 @@ pub fn unpack(
         let path = path.display().to_string();
         move |error: std::io::Error| Refusal::Io(format!("{path}: {error}"))
     };
+    let _lock = lock(into)?;
     if into.symlink_metadata().is_ok() {
         return Err(Refusal::Exists(into.display().to_string()));
     }
@@ -739,8 +748,37 @@ pub fn unpack(
     )
 }
 
-/// Rename `from` to `to`, retrying an access-denied error (Windows, while a scanner or indexer
-/// holds a file just written) five times, waiting `delay`, then twice as long each time (about
+/// The exclusive lock on `<into>.lock` ([`LOCK_SUFFIX`]), held by the returned file until it
+/// drops: a second unpack to the same destination waits up to a second, then is refused as
+/// [`Refusal::Busy`]. It is an OS file lock, so a crashed unpack never leaves it held. It guards
+/// only this unpack's folders; PR 6's cache lock wraps it for the whole download and stamp.
+#[cfg(feature = "prebuilt")]
+fn lock(into: &Path) -> Result<std::fs::File, Refusal> {
+    let mut path = into.as_os_str().to_owned();
+    path.push(LOCK_SUFFIX);
+    let path = PathBuf::from(path);
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .map_err(|error| Refusal::Io(format!("{}: {error}", path.display())))?;
+    for _ in 0..20 {
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                std::thread::sleep(std::time::Duration::from_millis(50))
+            }
+            Err(std::fs::TryLockError::Error(error)) => {
+                return Err(Refusal::Io(format!("{}: {error}", path.display())));
+            }
+        }
+    }
+    Err(Refusal::Busy(into.display().to_string()))
+}
+
+/// Rename `from` to `to`, retrying while [`busy`] (Windows, while a scanner or indexer holds a file
+/// just written) five times, waiting `delay`, then twice as long each time (about
 /// 3 s at 100 ms); then [`Refusal::Rename`].
 #[cfg(feature = "prebuilt")]
 fn rename_retrying(
@@ -753,7 +791,7 @@ fn rename_retrying(
     loop {
         match rename(from, to) {
             Ok(()) => return Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied && tries < 5 => {
+            Err(error) if busy(&error) && tries < 5 => {
                 tries += 1;
                 std::thread::sleep(delay);
                 delay *= 2;
@@ -766,6 +804,15 @@ fn rename_retrying(
             }
         }
     }
+}
+
+/// Whether a failed rename is another process briefly holding a file: on Windows access denied or
+/// a sharing violation (OS error 32); elsewhere never.
+#[cfg(feature = "prebuilt")]
+fn busy(error: &std::io::Error) -> bool {
+    cfg!(windows)
+        && (error.kind() == std::io::ErrorKind::PermissionDenied
+            || error.raw_os_error() == Some(32))
 }
 
 /// Decode the xz tar `body` into the existing folder `into`, counting the decoded bytes as they
@@ -806,13 +853,19 @@ fn extract(name: &str, body: impl Read + 'static, into: &Path, limit: u64) -> Re
     })
 }
 
+/// The PAX records [`untar`] accepts: `path`, applied to the next entry, and metadata it does not
+/// use. Any other record (a `size` override, say) is refused.
+#[cfg(feature = "prebuilt")]
+const PAX_KEYS: [&str; 10] = [
+    "path", "linkpath", "mtime", "atime", "ctime", "uid", "gid", "uname", "gname", "comment",
+];
+
 /// Unpack the tar stream `body` into the existing folder `into`. Entries are read raw, so the tar
 /// reader never buffers an extension entry itself: a GNU long name or a PAX `path` is read here,
-/// capped at [`EXTENSION_LIMIT`], and applied to the entry after it. Only files and folders are
-/// written, each at a relative path with no `..`.
+/// capped at [`EXTENSION_LIMIT`], and applied to the entry after it; one with no entry after it is
+/// refused. Only files and folders are written, each at a path [`entry_target`] accepts.
 #[cfg(feature = "prebuilt")]
 fn untar(name: &str, body: impl Read, into: &Path) -> Result<(), Refusal> {
-    use std::path::Component;
     let damaged = |why: String| Refusal::Archive {
         asset: name.to_owned(),
         why,
@@ -838,10 +891,17 @@ fn untar(name: &str, body: impl Read, into: &Path) -> Result<(), Refusal> {
             entry.read_to_end(&mut data).map_err(error)?;
             if kind.is_gnu_longname() {
                 long_name = Some(data.split(|b| *b == 0).next().unwrap_or_default().to_vec());
-            } else if kind.is_pax_local_extensions() {
+            } else if kind.is_pax_local_extensions() || kind.is_pax_global_extensions() {
                 for extension in tar::PaxExtensions::new(&data) {
                     let extension = extension.map_err(error)?;
-                    if extension.key() == Ok("path") {
+                    let key = extension.key().unwrap_or("");
+                    if !PAX_KEYS.contains(&key) {
+                        return Err(damaged(format!("a tar PAX record {key:?}")));
+                    }
+                    if key == "path" {
+                        if kind.is_pax_global_extensions() {
+                            return Err(damaged("a global tar PAX path".into()));
+                        }
                         long_name = Some(extension.value_bytes().to_vec());
                     }
                 }
@@ -849,25 +909,15 @@ fn untar(name: &str, body: impl Read, into: &Path) -> Result<(), Refusal> {
             continue;
         }
         let path = match long_name.take() {
-            Some(bytes) => PathBuf::from(
-                String::from_utf8(bytes).map_err(|_| damaged("a path that is not UTF-8".into()))?,
-            ),
-            None => entry.path().map_err(error)?.into_owned(),
+            Some(bytes) => bytes,
+            None => entry.path_bytes().into_owned(),
         };
+        let shown = String::from_utf8_lossy(&path).into_owned();
         if !kind.is_file() && !kind.is_dir() {
-            return Err(damaged(format!(
-                "{} is not a file or folder",
-                path.display()
-            )));
+            return Err(damaged(format!("{shown} is not a file or folder")));
         }
-        let mut target = into.to_path_buf();
-        for component in path.components() {
-            match component {
-                Component::Normal(part) => target.push(part),
-                Component::CurDir => {}
-                _ => return Err(damaged(format!("{} leaves the folder", path.display()))),
-            }
-        }
+        let target = entry_target(into, &path)
+            .ok_or_else(|| damaged(format!("{shown} is not a plain path inside the folder")))?;
         if kind.is_dir() {
             std::fs::create_dir_all(&target).map_err(error)?;
             continue;
@@ -885,7 +935,40 @@ fn untar(name: &str, body: impl Read, into: &Path) -> Result<(), Refusal> {
                 .map_err(error)?;
         }
     }
+    if long_name.is_some() {
+        return Err(damaged("a long name with no entry after it".into()));
+    }
     Ok(())
+}
+
+/// Where the archive path `path` (`/`-separated bytes) goes under `into`, or `None` unless it is
+/// plain on every OS: relative, UTF-8, and each component neither `..` nor holding `:`, `\` or a
+/// NUL, nor a Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`, with
+/// any extension), nor ending in a dot or a space. `.` (the archive's root folder) is `into`
+/// itself. The result is checked to stay under `into`.
+#[cfg(feature = "prebuilt")]
+fn entry_target(into: &Path, path: &[u8]) -> Option<PathBuf> {
+    let path = std::str::from_utf8(path).ok()?;
+    if path.starts_with('/') {
+        return None;
+    }
+    let mut target = into.to_path_buf();
+    for part in path
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+    {
+        let stem = part.split('.').next().unwrap_or("").to_ascii_uppercase();
+        let device = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+            || (stem.len() == 4
+                && (stem.starts_with("COM") || stem.starts_with("LPT"))
+                && matches!(stem.as_bytes()[3], b'1'..=b'9'));
+        if part == ".." || part.contains([':', '\\', '\0']) || device || part.ends_with(['.', ' '])
+        {
+            return None;
+        }
+        target.push(part);
+    }
+    target.starts_with(into).then_some(target)
 }
 
 /// The folder an unpack writes before its rename, removed when dropped.
