@@ -578,6 +578,13 @@ Owner launch also refuses unsupported requirement contexts (including entity fla
 and invalid clamped level-value ranges before insertion. Supported requirements
 are entity type predicates, random chance, and their boolean combinations.
 
+A living type may set optional `shadow_radius` and `shadow_strength` next to `template`:
+`{ "template": "minecraft:zombie", "shadow_radius": 0.2, "shadow_strength": 0.6 }`.
+Each omitted value inherits the template renderer's value. Values must be finite and nonnegative;
+admission errors name the file. Radius 0 disables its shadow. Radius follows `minecraft:scale`,
+baby age scaling and the template's extra baby factors; cube sizes, pufferfish and dragon retain
+their renderer rules. The usual visibility, 32-block radius cap and distance fade still apply.
+
 A living type copies a mob, `minecraft:zombie` or `minecraft:villager`, the way NeoForge's
 `EntityType.Builder.of(Zombie::new, ...)` makes a type of a vanilla class. It has no `item` or `damage`. `attributes`
 sets default attribute values that differ from its template's (`EntityAttributeCreationEvent`), by attribute id, and
