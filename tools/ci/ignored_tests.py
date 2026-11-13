@@ -92,6 +92,9 @@ DAILY_TARGET = re.compile(r"^(?:lib|(?:bin|test):[\w-]+)$")
 # Why a test is a daily test (CONTRIBUTING.md "CI tiers"): slower than 2 s, or what it needs.
 DAILY_REASONS = ("slow", "game-boot", "resources", "child-process", "network", "wasm-fixture")
 ICD_DIRS = ("/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d")
+# The largest tracked Rust file read to check a panic location's line: above every source in the tree (the largest
+# are near 0.7 MB), so a location in any tracked source of any package is reported, while a blob stays bounded.
+SOURCE_BYTES = 2_000_000
 
 
 def compile_diagnostics(output):
@@ -139,7 +142,7 @@ def source_lines(path):
     fields = entry.stdout.split()
     if entry.returncode or len(fields) != 5 or fields[0] not in ("100644", "100755") or fields[1] != "blob":
         return None
-    if not fields[3].isdigit() or int(fields[3]) > 256_000:
+    if not fields[3].isdigit() or int(fields[3]) > SOURCE_BYTES:
         return None
     blob = subprocess.run(["git", "show", f"HEAD:{path}"], capture_output=True, text=True, errors="replace")
     return blob.stdout.splitlines() if blob.returncode == 0 else None
@@ -347,7 +350,7 @@ def tracked_rust_paths():
         for line in listing.stdout.splitlines():
             fields = line.split()
             if (len(fields) == 5 and fields[0] in ("100644", "100755") and
-                    fields[1] == "blob" and fields[3].isdigit() and int(fields[3]) <= 256_000 and
+                    fields[1] == "blob" and fields[3].isdigit() and int(fields[3]) <= SOURCE_BYTES and
                     re.fullmatch(r"(?:crates|launcher)/[A-Za-z0-9_./-]+\.rs", fields[4]) and
                     not any(part in ("", ".", "..", "target", ".local") for part in fields[4].split("/"))):
                 paths.add(fields[4])
