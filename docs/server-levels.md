@@ -126,5 +126,3 @@ is sent in play yet.
 
 - **Entities through portals between levels.** Mobs, items and minecarts that enter a portal on a
   server, and portal tickets (`TeleportTransition.PLACE_PORTAL_TICKET`), are not handled.
-- **Unlimited selectors.** `@e` without a distance or volume reads only the source's level. Vanilla's
-  reads every level.
