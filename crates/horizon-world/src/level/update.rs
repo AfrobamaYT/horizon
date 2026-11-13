@@ -80,20 +80,9 @@ enum Update {
         skip: Option<Direction>,
         index: usize,
     },
-    /// A nested write's state-change notification, queued behind that write's own updates.
-    Notify {
-        pos: BlockPos,
-        old: BlockStateId,
-        new: BlockStateId,
-    },
 }
 
 enum Step {
-    Notify {
-        pos: BlockPos,
-        old: BlockStateId,
-        new: BlockStateId,
-    },
     Shape {
         direction: Direction,
         neighbor_state: BlockStateId,
@@ -115,6 +104,9 @@ enum Step {
 pub(crate) struct NeighborUpdater {
     stack: Vec<Update>,
     added: Vec<Update>,
+    /// State-change notices of the writes made while the updates ran, in the order of the
+    /// writes, heard once the updates have all run.
+    notices: std::collections::VecDeque<(BlockPos, BlockStateId, BlockStateId)>,
     count: i32,
 }
 
@@ -140,7 +132,6 @@ impl Update {
                 },
                 false,
             ),
-            Self::Notify { pos, old, new } => (Step::Notify { pos, old, new }, false),
             Self::Simple {
                 pos,
                 block,
@@ -354,15 +345,14 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
         true
     }
-    /// A write inside a running neighbour update only queued its own updates, so its
-    /// notification goes behind them (and keeps the order of the writes); a write outside one
-    /// has already run them.
+    /// A write inside a running neighbour update only queued its own updates, so its notice
+    /// waits until they have all run, in the order of the writes, and is queued only when
+    /// something listens; a write outside one has already run them.
     fn notify_state_change(&mut self, pos: BlockPos, old: BlockStateId, new: BlockStateId) {
-        let updater = &mut self.ticks.updater;
-        if updater.count == 0 {
+        if self.ticks.updater.count == 0 {
             self.level.observe_block_state_change(pos, old, new);
-        } else {
-            updater.added.push(Update::Notify { pos, old, new });
+        } else if self.level.observes_block_state_change(old, new) {
+            self.ticks.updater.notices.push_back((pos, old, new));
         }
     }
     /// `LevelChunk.setBlockState`: the previous state when the write happened.
@@ -709,6 +699,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
             }
         }
+        while let Some((pos, old, new)) = self.ticks.updater.notices.pop_front() {
+            self.level.observe_block_state_change(pos, old, new);
+        }
         let updater = &mut self.ticks.updater;
         updater.stack.clear();
         updater.added.clear();
@@ -716,7 +709,6 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     fn execute(&mut self, step: Step) {
         match step {
-            Step::Notify { pos, old, new } => self.level.observe_block_state_change(pos, old, new),
             Step::Shape {
                 direction,
                 neighbor_state,
