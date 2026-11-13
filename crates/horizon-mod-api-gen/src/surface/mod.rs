@@ -231,7 +231,8 @@ fn export_here(root: &Path) -> Result<Export, String> {
     let providers = crate::capability_providers::generate(root, &included)?.0;
     let mut with_providers = included.to_vec();
     with_providers.push(("capability_providers_generated.rs", providers.as_str()));
-    let wire = crate::wire::surface(root, &with_providers)?;
+    // A listed boundary trait an older tree lacks is noted by `Roles::resolve`, not refused.
+    let wire = crate::wire::surface_reading(root, &with_providers, Some(&mut Vec::new()))?;
     let boundary = Boundary::from_wire(&wire);
     let mut index = wire.types.index;
     build(root, &mut index, &catalog.hooks, &boundary)
@@ -553,6 +554,8 @@ struct Pending {
     item: ItemId,
     doc: String,
     paths: Vec<String>,
+    impls: Vec<String>,
+    fields_hash: Option<String>,
     contract: TypeContract,
     fields: Vec<Field>,
     variants: Vec<Variant>,
@@ -798,6 +801,8 @@ pub(crate) fn build(
             record.variants,
         );
         built.paths = record.paths;
+        built.impls = record.impls;
+        built.fields_hash = record.fields_hash;
         types.push(built);
     }
 
@@ -878,7 +883,7 @@ fn trait_record(
                 syn::TraitItem::Const(c) => c.ident.to_string(),
                 _ => unreachable!("associated items only"),
             };
-            if is_required && role == Role::Implement {
+            if is_required && role != Role::Call {
                 required.push(Required {
                     name: name.clone(),
                     signature: signature.clone(),
@@ -909,7 +914,7 @@ fn trait_record(
             None => None,
         };
         let is_required = method.default.is_none();
-        if is_required && role == Role::Implement {
+        if is_required && role != Role::Call {
             required.push(Required {
                 name: method_name.clone(),
                 signature: signature.clone(),
@@ -972,36 +977,33 @@ fn type_record(
     let (generics, mut contract_refs) = writer.generics(module, item_generics);
     let params = param_names(item_generics);
     let owner = id.clone();
-    let mut field_records =
-        |writer: &mut Writer<'_, '_>, list: &syn::Fields| -> (bool, Vec<String>) {
-            let mut all_public = true;
-            let mut written = Vec::new();
-            for (position, field) in list.iter().enumerate() {
-                let (ty, mut refs) = writer.ty(module, &params, &field.ty);
-                let name = field
-                    .ident
-                    .as_ref()
-                    .map_or_else(|| position.to_string(), ToString::to_string);
-                written.push(match &field.ident {
-                    Some(ident) => format!("{ident}: {ty}"),
-                    None => ty.clone(),
-                });
-                if !matches!(field.vis, Visibility::Public(_)) {
-                    all_public = false;
-                    continue;
-                }
-                if hidden(&field.attrs) {
-                    continue;
-                }
-                merge(&mut refs, vec![owner.clone()]);
-                fields.push(Field::new(
-                    format!("{id}.{name}"),
-                    doc(&field.attrs),
-                    FieldContract { ty, refs },
-                ));
+    // Every public field a literal must name, `#[doc(hidden)]` ones included.
+    let mut literal_fields: Vec<(String, String)> = Vec::new();
+    let mut field_records = |writer: &mut Writer<'_, '_>, list: &syn::Fields| -> bool {
+        let mut all_public = true;
+        for (position, field) in list.iter().enumerate() {
+            let (ty, mut refs) = writer.ty(module, &params, &field.ty);
+            let name = field
+                .ident
+                .as_ref()
+                .map_or_else(|| position.to_string(), ToString::to_string);
+            if !matches!(field.vis, Visibility::Public(_)) {
+                all_public = false;
+                continue;
             }
-            (all_public, written)
-        };
+            literal_fields.push((name.clone(), ty.clone()));
+            if hidden(&field.attrs) {
+                continue;
+            }
+            merge(&mut refs, vec![owner.clone()]);
+            fields.push(Field::new(
+                format!("{id}.{name}"),
+                doc(&field.attrs),
+                FieldContract { ty, refs },
+            ));
+        }
+        all_public
+    };
     let (kind, constructible) = match item {
         Item::Struct(s) => {
             let kind = match &s.fields {
@@ -1009,21 +1011,13 @@ fn type_record(
                 syn::Fields::Unnamed(_) => TypeKind::TupleStruct,
                 syn::Fields::Unit => TypeKind::UnitStruct,
             };
-            let (all_public, written) = field_records(writer, &s.fields);
-            let constructible = all_public && !non_exhaustive;
-            if constructible {
-                members = written;
-            }
-            (kind, constructible)
+            // A struct's field set is its `fields_hash`, outside its own hash.
+            let all_public = field_records(writer, &s.fields);
+            (kind, all_public && !non_exhaustive)
         }
         Item::Union(u) => {
-            let (all_public, written) =
-                field_records(writer, &syn::Fields::Named(u.fields.clone()));
-            let constructible = all_public && !non_exhaustive;
-            if constructible {
-                members = written;
-            }
-            (TypeKind::Union, constructible)
+            let all_public = field_records(writer, &syn::Fields::Named(u.fields.clone()));
+            (TypeKind::Union, all_public && !non_exhaustive)
         }
         Item::Enum(e) => {
             for variant in &e.variants {
@@ -1087,7 +1081,8 @@ fn type_record(
         }
         _ => unreachable!("only types reach here"),
     };
-    let mut impls = BTreeSet::new();
+    // Derived and hand-written alike, by trait; `Wire` is `wire_form`'s.
+    let mut impls: BTreeSet<String> = derives.iter().filter(|d| *d != "Wire").cloned().collect();
     for (impl_module, impl_params, trait_path) in trait_impls {
         // How a type crosses is `wire_form`'s.
         if trait_path
@@ -1097,8 +1092,7 @@ fn type_record(
         {
             continue;
         }
-        let (written, refs) = writer.path(*impl_module, impl_params, trait_path);
-        merge(&mut contract_refs, refs);
+        let (written, _) = writer.path(*impl_module, impl_params, trait_path);
         impls.insert(written);
     }
     let form = wire_forms::form_of(item_id, &attrs, &derives, forms);
@@ -1113,11 +1107,21 @@ fn type_record(
         item: item_id,
         doc: doc(&attrs),
         paths: Vec::new(),
+        impls: impls.into_iter().collect(),
+        fields_hash: matches!(
+            kind,
+            TypeKind::Struct | TypeKind::TupleStruct | TypeKind::UnitStruct | TypeKind::Union
+        )
+        .then(|| {
+            mod_surface::fields_hash_of(
+                literal_fields
+                    .iter()
+                    .map(|(name, ty)| (name.as_str(), ty.as_str())),
+            )
+        }),
         contract: TypeContract {
             kind,
             generics,
-            derives,
-            impls: impls.into_iter().collect(),
             wire: wire_form.is_some(),
             wire_form,
             constructible,

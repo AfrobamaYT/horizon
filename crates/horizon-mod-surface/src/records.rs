@@ -67,7 +67,10 @@ impl Counterparts {
     }
 }
 
-/// A hook's contract: everything a listener relies on.
+/// A hook's contract: everything a listener relies on. Its own hash ([`crate::Hook::new`]) covers
+/// side, kind, scope, cancellable, context, host, owner, `answered_by_mod` and whether it has an
+/// output; each argument and the output is a member record of its own, and `version`,
+/// `arguments`, `output` and `refs` are outside the hook's hash.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HookContract {
     pub version: u64,
@@ -111,6 +114,10 @@ pub struct Hook {
     pub counterparts: Counterparts,
     #[serde(flatten)]
     pub contract: HookContract,
+    /// Its arguments and output as member records, `hook:<name>.<argument>`, in declaration
+    /// order; each hash covers the name and type.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<Field>,
 }
 
 /// What a mod does with a trait.
@@ -134,7 +141,8 @@ pub struct Required {
 }
 
 /// A trait's own contract. Its methods are records of their own; only the required methods of
-/// a trait mods implement are part of it, because a new one breaks every implementation.
+/// a trait mods implement are part of it, because a new one breaks every implementation. Its
+/// `bounds` and `refs` are hashed unless mods only call it ([`crate::Trait::new`]).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraitContract {
     pub role: Role,
@@ -144,7 +152,7 @@ pub struct TraitContract {
     /// Supertraits, normalised.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bounds: Vec<String>,
-    /// With role `implement`: the members with no default, in declaration order.
+    /// Unless mods only call it: the members with no default, in declaration order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required: Vec<Required>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -308,21 +316,16 @@ pub enum TypeKind {
 }
 
 /// A type's own contract. Its fields and variants are records of their own; the member set is
-/// part of it only where a new member breaks users: the fields of a `constructible` struct and
-/// the variants of an exhaustive enum.
+/// part of it only for an exhaustive enum, where a new variant breaks every `match`. A struct's
+/// field set is never part of it: a new field breaks only a mod that builds the value with a
+/// full literal, which the fit test judges from the mod's source through `fields_hash`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TypeContract {
     pub kind: TypeKind,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub generics: String,
-    /// The traits of its `#[derive(…)]` lists, by last path segment, sorted.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub derives: Vec<String>,
-    /// The trait impls written for it in the API's crates (`From<String>`, `Default`), by
-    /// normalised trait path, sorted; derives are in `derives`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub impls: Vec<String>,
-    /// It crosses the WebAssembly boundary: it derives `Wire` or has a `Wire` impl.
+    /// It crosses the WebAssembly boundary: it derives `Wire` or has a `Wire` impl. Outside the
+    /// hash, with `wire_form`: a native mod cannot observe how a type crosses.
     pub wire: bool,
     /// How it crosses: `derive` (its Rust fields), `fields` (a hand-written impl's declared
     /// `layout_fields!`), `via:<type>` (as another type), or `manual` (a hand-written impl that
@@ -337,8 +340,8 @@ pub struct TypeContract {
     /// An alias's target.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
-    /// For a constructible struct its fields (`name: Type`), for an exhaustive enum its variants
-    /// (`Name`, `Name(A, B)`, `Name { a: A }`), in declaration order.
+    /// For an exhaustive enum its variants (`Name`, `Name(A, B)`, `Name { a: A }`), in
+    /// declaration order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub members: Vec<String>,
     /// An alias's references.
@@ -359,6 +362,15 @@ pub struct Type {
     pub shape: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub paths: Vec<String>,
+    /// The traits it implements, derived or written in the API's crates alike (`Clone`,
+    /// `From<String>`, `Default`), by normalised trait path, sorted; `Wire` is `wire`'s. A set
+    /// outside the hash: gaining one is additive, and the fit test checks the set itself.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub impls: Vec<String>,
+    /// For a struct, tuple struct or union: [`crate::fields_hash`] of its public fields, outside
+    /// the hash. A mod that builds the value with a full literal needs it unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields_hash: Option<String>,
     #[serde(flatten)]
     pub contract: TypeContract,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -375,7 +387,8 @@ pub struct FieldContract {
     pub refs: Vec<String>,
 }
 
-/// `type:<path>.<field>`: a public field (a tuple struct's by position).
+/// `type:<path>.<field>`: a public field (a tuple struct's by position); also a hook's argument
+/// or output, `hook:<name>.<argument>`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Field {
     pub id: String,
