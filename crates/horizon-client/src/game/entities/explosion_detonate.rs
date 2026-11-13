@@ -13,8 +13,9 @@ impl Game<'_> {
     /// kind is in it: the entity-list walk, then the item frames, paintings,
     /// cushions and end crystals the walk misses. The list they leave in
     /// `combat.blast_hit_list` is what the blast's walks then use: what a
-    /// listener leaves in it is hurt and pushed, in the list's order, and
-    /// nothing else is. Without a listener nothing is listed, and the walks
+    /// listener leaves in it is eligible for the normal hurt/push checks.
+    /// Order controls only the ordinary-storage walk, not the separate crystal,
+    /// dragon, player and decoration passes. Without a listener nothing is listed, and the walks
     /// enumerate the storages as before.
     pub(super) fn explosion_detonate(
         &mut self,
@@ -64,8 +65,7 @@ impl Game<'_> {
         let Some(epoch) = self.native_lifecycle.epoch() else {
             return;
         };
-        let in_box =
-            |lo: [f64; 3], hi: [f64; 3]| (0..3).all(|k| lo[k] <= max[k] && hi[k] >= min[k]);
+        let in_box = |lo: [f64; 3], hi: [f64; 3]| (0..3).all(|k| lo[k] < max[k] && hi[k] > min[k]);
         let listed = |id: u32, lo: [f64; 3], hi: [f64; 3], entities: &mut Vec<EntityRef>| {
             if Some(id) != source && in_box(lo, hi) {
                 entities.push(EntityRef::new(epoch, id));
@@ -158,6 +158,12 @@ mod tests {
     use mod_api::{EntityRef, ExplosionDetonateEvent, Hooks, ServerHost};
     use std::sync::{Arc, Mutex};
 
+    struct Noop;
+    #[mod_api::__subscriptions]
+    impl Hooks for Noop {
+        fn explosion_detonate(&self, _: &mut dyn ServerHost, _: &mut ExplosionDetonateEvent<'_>) {}
+    }
+
     const SPARED: u32 = 901;
     const FAR: u32 = 905;
 
@@ -200,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn an_entity_taken_out_is_neither_hurt_nor_pushed() {
         let heard = Arc::new(Mutex::new(Vec::new()));
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
@@ -230,7 +236,7 @@ mod tests {
     /// `getEntities(source, box)` leaves the blast's exploding source out:
     /// it is not in the list and its own blast does not hurt it.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_exploding_source_is_not_in_the_list_nor_hurt() {
         let heard = Arc::new(Mutex::new(Vec::new()));
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
@@ -256,7 +262,7 @@ mod tests {
     /// The list is the walk: an entity a listener adds is hurt as any other,
     /// and a handle that names nothing real is refused, with no panic.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn an_added_entity_is_hurt_and_an_empty_handle_is_refused() {
         struct Add;
         #[mod_api::__subscriptions]
@@ -270,6 +276,10 @@ mod tests {
                     return;
                 };
                 let epoch = first.epoch();
+                // Rebuild the list, adding an eligible live entity as well as
+                // the out-of-range and nonexistent entries below.
+                event.entities.clear();
+                event.entities.push(EntityRef::new(epoch, 900));
                 event.entities.push(EntityRef::new(epoch, FAR));
                 event.entities.push(EntityRef::new(epoch, 424242));
             }
@@ -280,9 +290,10 @@ mod tests {
                 zombie(game, 900, 2.0);
                 zombie(game, FAR, 40.0);
                 explode(game);
-                assert!(
-                    health_of(game, FAR) < 20.0,
-                    "the added mob is walked though it was out of the box"
+                assert_eq!(health_of(game, FAR), 20.0);
+                assert_eq!(
+                    game.mobs.iter().find(|mob| mob.id == FAR).unwrap().velocity,
+                    Vec3::ZERO
                 );
                 assert!(health_of(game, 900) < 20.0);
             });
@@ -292,7 +303,7 @@ mod tests {
     /// The list's order is the visit order: the reversed list reverses the
     /// order the mobs take their hurt in (`living_damage_post`'s).
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn the_list_order_is_the_walk_order() {
         struct Reverse(Arc<Mutex<Vec<u32>>>);
         #[mod_api::__subscriptions]
@@ -344,7 +355,7 @@ mod tests {
     /// A position a listener takes out keeps its block and gets no fire,
     /// while the blast still reaches the entities.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_position_taken_out_keeps_its_block() {
         struct SpareBlocks;
         #[mod_api::__subscriptions]
@@ -378,7 +389,7 @@ mod tests {
     /// blast hurts what the outer one spared, and the outer's list is back
     /// afterwards for its own walk.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_nested_blast_keeps_its_own_spared() {
         struct FirstOnly(Arc<Mutex<usize>>);
         #[mod_api::__subscriptions]
@@ -442,24 +453,26 @@ mod tests {
     /// broken and the same hurt as with a listener that edits nothing, so
     /// the hook costs the random sequence nothing.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn with_no_listener_the_blast_is_unchanged() {
-        struct Noop;
-        #[mod_api::__subscriptions]
-        impl Hooks for Noop {
-            fn explosion_detonate(
-                &self,
-                _: &mut dyn ServerHost,
-                _: &mut ExplosionDetonateEvent<'_>,
-            ) {
-            }
-        }
-        fn blast(mods: mod_api::Mods) -> (Vec<([i32; 3], u32)>, f32) {
+        fn blast(mods: mod_api::Mods) -> (Vec<([i32; 3], u32)>, f32, i32) {
             let mut blocks = Vec::new();
             let mut health = 20.0;
+            let mut random = 0;
             mod_platform::testing::with_mods(mods, || {
                 with_game(|game| {
                     zombie(game, 900, 2.0);
+                    let mut boat = crate::game::boats::Boat::new(
+                        930,
+                        "oak".into(),
+                        Vec3::new(-2.0, 1.0, 0.0),
+                        0.0,
+                    )
+                    .with_chest();
+                    boat.items[0] =
+                        Some(horizon_client::items::ItemStack::new("minecraft:stick", 3));
+                    game.boats.push(boat);
+                    game.world.random.set_seed(7);
                     explode(game);
                     for y in 0..4 {
                         for z in -4..=4 {
@@ -470,14 +483,75 @@ mod tests {
                         }
                     }
                     health = health_of(game, 900);
+                    random = game.world.random.next_int();
                 });
             });
-            (blocks, health)
+            (blocks, health, random)
         }
         let plain = blast(Vec::new().into());
         let noop: mod_api::Mods = vec![mod_api::ModEntry::new("noop", Box::new(Noop))].into();
         let hooked = blast(noop);
         assert_eq!(plain.0, hooked.0, "the same blocks broken and burnt");
         assert_eq!(plain.1, hooked.1, "the same hurt");
+        assert_eq!(plain.2, hooked.2, "the same subsequent level-random draw");
+    }
+    #[test]
+    #[ignore = "daily"]
+    fn destroying_two_vehicles_keeps_the_next_stable_identity_with_or_without_a_listener() {
+        for listened in [false, true] {
+            let mods: mod_api::Mods = if listened {
+                vec![mod_api::ModEntry::new("noop", Box::new(Noop))].into()
+            } else {
+                Vec::new().into()
+            };
+            mod_platform::testing::with_mods(mods, || {
+                with_game(|game| {
+                    for (id, x) in [(920, -1.0), (921, 1.0)] {
+                        game.boats.push(crate::game::boats::Boat::new(
+                            id,
+                            "oak".into(),
+                            Vec3::new(x, 1.0, 0.0),
+                            0.0,
+                        ));
+                        game.carts.push(crate::game::minecarts::Minecart::new(
+                            id + 10,
+                            crate::game::minecarts::CartKind::Rideable,
+                            Vec3::new(x, 1.0, 2.0),
+                        ));
+                    }
+                    explode(game);
+                    assert!(game.boats.iter().all(|boat| ![920, 921].contains(&boat.id)));
+                    assert!(game.carts.iter().all(|cart| ![930, 931].contains(&cart.id)));
+                    assert_eq!(game.combat.blast_hit_list, None);
+                })
+            });
+        }
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn special_query_excludes_a_box_that_only_touches_the_boundary() {
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("noop", Box::new(Noop))].into();
+        mod_platform::testing::with_mods(mods, || {
+            with_game(|game| {
+                for (id, x) in [(940, 8.0), (941, 7.99)] {
+                    game.crystals.push(crate::game::dragon::Crystal {
+                        attachment_lifetime: Default::default(),
+                        join: Default::default(),
+                        id,
+                        position: Vec3::new(x, 1.0, 0.0),
+                        show_bottom: false,
+                        time: 0,
+                        beam: None,
+                        invulnerable: false,
+                        fall: (false, 0.0),
+                    });
+                }
+                game.explosion_detonate([0.0, 1.0, 0.0], 3.0, &mut Vec::new());
+                let listed = game.combat.blast_hit_list.as_ref().unwrap();
+                assert!(!listed.contains(&940));
+                assert!(listed.contains(&941));
+            })
+        });
     }
 }

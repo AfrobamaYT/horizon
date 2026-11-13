@@ -12,7 +12,12 @@ pub trait Hooks {
     /// item frames, paintings, cushions and end crystals it misses. Take one
     /// out and it is neither hurt nor pushed, and `explosion_knockback` is
     /// not asked for it; one a mod adds is walked as any other, and the list
-    /// the listeners leave is the order the blast visits in. Server-side.
+    /// the listeners leave controls membership, subject to the usual distance,
+    /// exposure and per-kind immunity checks. Order controls the ordinary-storage
+    /// walk only, not global effect order: crystals/dragon and players run in
+    /// separate earlier passes, and decorations run last in storage order.
+    /// Block positions are shuffled before destruction, so their list order is
+    /// not destruction order either. Server-side.
     #[hook(
         side = "server",
         contract = "collect",
