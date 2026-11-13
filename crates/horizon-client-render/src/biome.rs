@@ -177,6 +177,7 @@ pub struct Biomes {
     /// plains, but a chunk saves its name back unchanged. Shared by clones (recoloured
     /// copies keep the ids); a table rebuilt with other packs starts empty.
     placeholders: Arc<Mutex<Vec<String>>>,
+    exhausted: Arc<std::sync::atomic::AtomicBool>,
 }
 /// The grass, foliage and dry foliage colormaps.
 struct Colormaps {
@@ -372,6 +373,7 @@ impl Biomes {
             files: Arc::new(files_by_name),
             info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
             placeholders: Default::default(),
+            exhausted: Default::default(),
         })
     }
     /// The built-in biomes with a world's data packs' biome files (id →
@@ -382,6 +384,7 @@ impl Biomes {
     pub fn with_packs<'a>(&self, files: impl IntoIterator<Item = (&'a str, &'a Value)>) -> Self {
         let mut out = self.builtin_only();
         out.placeholders = Arc::default();
+        out.exhausted = Arc::default();
         let mut files: Vec<(&str, &Value)> = files.into_iter().collect();
         files.sort_by(|a, b| identifier_order(a.0, b.0));
         for (name, json) in files {
@@ -481,7 +484,7 @@ impl Biomes {
     }
     /// The id a saved chunk's biome `name` loads as: its own, or a placeholder that keeps the
     /// name for the next save when this table lacks it (`id` would make it plains for good).
-    /// Plains when the ids run out.
+    /// Exhaustion makes this table unsaveable; the original on-disk data must remain intact.
     pub fn saved_id(&self, name: &str) -> u16 {
         if let Some(&id) = self.index.get(name) {
             return id;
@@ -496,11 +499,28 @@ impl Biomes {
         let slot = match placeholders.iter().position(|p| p == name) {
             Some(slot) => slot,
             None => {
+                if self.list.len() + placeholders.len() > usize::from(u16::MAX) {
+                    self.exhausted
+                        .store(true, std::sync::atomic::Ordering::Release);
+                    log::error!(
+                        "{BiomeIdExhausted}: cannot retain saved biome {name}; saving is refused"
+                    );
+                    return self.id("minecraft:plains");
+                }
                 placeholders.push(name.to_owned());
                 placeholders.len() - 1
             }
         };
-        u16::try_from(self.list.len() + slot).unwrap_or_else(|_| self.id("minecraft:plains"))
+        (self.list.len() + slot) as u16
+    }
+    /// Refuse writes after any saved name could not be represented. This is sticky for
+    /// the world table: subsequent loads cannot make a destructive save safe again.
+    pub fn ensure_saveable(&self) -> Result<(), BiomeIdExhausted> {
+        if self.exhausted.load(std::sync::atomic::Ordering::Acquire) {
+            Err(BiomeIdExhausted)
+        } else {
+            Ok(())
+        }
     }
     /// A world is opening: its missing saved biomes are reported again, once each.
     pub fn forget_missing_warnings() {
@@ -721,6 +741,7 @@ mod pack_tests {
             list,
             info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
             placeholders: Default::default(),
+            exhausted: Default::default(),
             colormaps: Arc::new(maps),
             packs: BTreeMap::new(),
             files: Arc::default(),
@@ -822,6 +843,7 @@ impl Biomes {
             list,
             info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
             placeholders: Default::default(),
+            exhausted: Default::default(),
             colormaps: Arc::new(maps),
             packs: BTreeMap::new(),
             files: Arc::new(
@@ -868,6 +890,7 @@ mod color_tests {
             list,
             info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
             placeholders: Default::default(),
+            exhausted: Default::default(),
             colormaps: Arc::new(maps),
             packs: BTreeMap::new(),
             files: Arc::default(),
@@ -963,6 +986,7 @@ mod blend_tests {
             }),
             packs: BTreeMap::new(),
             placeholders: Default::default(),
+            exhausted: Default::default(),
         };
         // Any id returns the shared default plains biome, no panic.
         let b = empty.get(0);
@@ -1202,5 +1226,37 @@ mod placeholder_tests {
         assert_eq!(recolored.saved_name(gone), "gone_mod:highland");
         let rebuilt = biomes.with_packs([]);
         assert_eq!(rebuilt.saved_name(gone), "minecraft:plains");
+    }
+}
+
+/// The resident biome identifier space cannot retain another saved name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BiomeIdExhausted;
+impl std::fmt::Display for BiomeIdExhausted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "biome ID limit of 65536 exhausted; refusing destructive save"
+        )
+    }
+}
+impl std::error::Error for BiomeIdExhausted {}
+
+#[cfg(test)]
+mod exhaustion_tests {
+    use super::*;
+    #[test]
+    fn last_id_is_retained_and_exhaustion_refuses_saving() {
+        let biomes = Biomes::from_jsons(&[]);
+        *biomes.placeholders.lock().unwrap() =
+            (0..65535).map(|i| format!("missing:biome_{i}")).collect();
+        assert_eq!(biomes.saved_id("missing:last"), 65535);
+        assert_eq!(biomes.saved_name(65535), "missing:last");
+        assert!(biomes.ensure_saveable().is_ok());
+        biomes.saved_id("missing:overflow");
+        assert_eq!(biomes.placeholders.lock().unwrap().len(), 65536);
+        assert_eq!(biomes.ensure_saveable(), Err(BiomeIdExhausted));
+        assert!(BiomeIdExhausted.to_string().contains("65536"));
+        assert_eq!(biomes.saved_name(65535), "missing:last");
     }
 }
