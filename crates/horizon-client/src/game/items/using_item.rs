@@ -9,14 +9,6 @@ pub(super) struct UseStart {
     pub(super) ticks_set: bool,
     pub(super) item: Option<ItemStack>,
 }
-impl UseStart {
-    pub(super) fn of(item: ItemStack) -> Self {
-        Self {
-            ticks_set: false,
-            item: Some(item),
-        }
-    }
-}
 
 impl Game<'_> {
     /// `Consumable.startConsuming` for a held consumable: food needs
