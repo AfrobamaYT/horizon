@@ -4106,8 +4106,12 @@ pub fn spawn(job: Job, cmd: Command, tx: Sender<Msg>) -> Result<Running, String>
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = crate::run_leases::spawn(&mut cmd, true)
-        .map_err(|e| format!("Could not start {:?}: {e}", cmd.get_program()))?;
+    let mut child = crate::run_leases::spawn(&mut cmd, true).map_err(|error| {
+        crate::i18n::trf(
+            "Could not complete game launch: {error}",
+            &[("error", &error.to_string())],
+        )
+    })?;
     let stdin = child.stdin.take();
     let mut readers = Vec::new();
     let out = child

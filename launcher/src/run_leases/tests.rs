@@ -2,6 +2,59 @@ use super::*;
 use std::io::{BufRead, Write};
 use std::process::{Child, Stdio};
 
+#[cfg(target_os = "macos")]
+#[test]
+fn spawn_errors_distinguish_missing_working_directory_and_program() {
+    let root = tempfile::tempdir().unwrap();
+    let missing_cwd = root.path().join("Application Support/missing-instance");
+    let error = spawn_program(Command::new("/usr/bin/true").current_dir(&missing_cwd)).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    assert!(error.to_string().contains("working directory"));
+    assert!(error
+        .to_string()
+        .contains(&missing_cwd.display().to_string()));
+    let missing_program = root.path().join("Application Support/missing-helper");
+    let error = spawn_program(Command::new(&missing_program).current_dir(root.path())).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    assert!(error.to_string().contains("execute"));
+    assert!(error
+        .to_string()
+        .contains(&missing_program.display().to_string()));
+}
+
+#[test]
+fn failed_launch_log_keeps_paths_but_not_argument_or_environment_secrets() {
+    let root = tempfile::tempdir().unwrap();
+    let mut command = Command::new(root.path().join("game"));
+    command
+        .args(["--token", "private-argument", "--token=private-inline"])
+        .current_dir(root.path())
+        .env("HORIZON_ACCOUNT_SESSIONS", "private-environment")
+        .env("TMPDIR", root.path());
+    let error = std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "open completion marker /version/.installed: not found",
+    );
+    let path = write_launch_failure(&root.path().join("logs"), &command, &error).unwrap();
+    let text = fs::read_to_string(&path).unwrap();
+    assert!(text.contains("/version/.installed"));
+    assert!(text.contains("cwd:"));
+    assert!(text.contains("TMPDIR:"));
+    assert!(text.contains("exists=true is-dir=true permissions="));
+    assert!(text.contains("stat failed:"));
+    assert!(!text.contains("private-argument"));
+    assert!(!text.contains("private-inline"));
+    assert!(!text.contains("private-environment"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+}
+
 fn directory(path: &Path) -> Dir {
     fs::create_dir_all(path).unwrap();
     Dir::open_ambient_dir(path, cap_std::ambient_authority()).unwrap()
