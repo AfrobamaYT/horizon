@@ -469,6 +469,7 @@ def start(out: Path) -> None:
         game.mkdir()
         # A dedicated server stops at an unaccepted EULA before it reaches the prepared files (the EULA is accepted).
         (game / "eula.txt").write_text("eula=true\n")
+        executable = installed / EXECUTABLE
         if sys.platform == "darwin":
             # Use the launcher's actual bundle preparation, not a second list of libraries.
             bundle_source = scratch / "bundle.rs"
@@ -482,12 +483,13 @@ def start(out: Path) -> None:
             run(["rustc", "--edition=2021", str(bundle_source), "-o", str(bundle_tool)])
             run([str(bundle_tool), str(installed)])
             bundled = installed / "Horizon.app/Contents/MacOS/horizon-client"
+            executable = bundled
             probe = subprocess.run([str(bundled), "--launch-api"], cwd=game, env=environment,
                                    capture_output=True, text=True, timeout=60)
             if probe.returncode != 0:
                 sys.exit(f"bundled launch API failed: {probe.stderr}")
             json.loads(probe.stdout)
-        command = [str(installed / EXECUTABLE), "--resources", str(scratch / "no-resources"), "--dedicated", "--nogui"]
+        command = [str(executable), "--resources", str(scratch / "no-resources"), "--dedicated", "--nogui"]
         print("+", " ".join(command), flush=True)
         result = subprocess.run(command, cwd=game, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 encoding="utf-8", errors="replace", timeout=300)

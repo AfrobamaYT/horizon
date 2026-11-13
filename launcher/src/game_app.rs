@@ -119,7 +119,10 @@ pub fn ensure(version: &Path) -> io::Result<PathBuf> {
 
 // Runtime libraries installed by the native route; keep bundle discovery in one place.
 fn runtime_library(name: &str) -> bool {
-    name.ends_with(".dylib") && (name.starts_with("libhorizon_mod_") || name.starts_with("libstd-"))
+    name.ends_with(".dylib")
+        && (name.starts_with("libhorizon_mod_")
+            || name == "libhorizon_client.dylib"
+            || name.starts_with("libstd-"))
 }
 
 fn sync_native_directory(version: &Path, programs: &Path, name: &str) -> io::Result<()> {
@@ -202,11 +205,13 @@ mod tests {
         let library = version.join("libhorizon_mod_host.dylib");
         fs::write(&library, b"old").unwrap();
         fs::write(version.join("libstd-test.dylib"), b"std").unwrap();
+        fs::write(version.join("libhorizon_client.dylib"), b"game").unwrap();
         fs::create_dir_all(version.join("horizon-native-mods/example")).unwrap();
         let program = ensure(&version).unwrap();
         let bundled = program.with_file_name("libhorizon_mod_host.dylib");
         assert!(same_file(&library, &bundled));
         assert!(program.with_file_name("libstd-test.dylib").exists());
+        assert!(program.with_file_name("libhorizon_client.dylib").exists());
         assert!(program
             .with_file_name("horizon-native-mods/example")
             .is_dir());
