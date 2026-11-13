@@ -185,7 +185,7 @@ pub struct Module {
     pub visibility: Option<String>,
 }
 
-pub use mod_vocab::__private::native::Side;
+use mod_vocab::Side;
 
 /// What a content mod adds; the player sees it before turning the mod on.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]

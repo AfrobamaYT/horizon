@@ -11,23 +11,12 @@ mod registry_installation;
 /// (`horizon_mod_package::runtime`). It lives in the API's closure so that the launcher's
 /// `horizon_native_mods` library, built from the API slice alone, can name it.
 pub mod native {
-    /// One native mod compiled into the executable.
+    /// One native mod compiled into the executable, with its manifest's `side`.
     #[derive(Clone, Copy, Debug, Default, PartialEq)]
     pub struct BuiltMod {
         pub id: &'static str,
         pub version: &'static str,
-        pub side: Side,
-    }
-
-    /// Which games a mod belongs to (`horizon-mod.toml`'s `side`).
-    #[derive(Clone, Copy, Debug, Default, serde::Deserialize, serde::Serialize, PartialEq)]
-    #[serde(rename_all = "lowercase")]
-    pub enum Side {
-        /// Local content, not compared with the server's mods when joining.
-        #[default]
-        Client,
-        /// Both, and the server tells clients which version it expects.
-        Both,
+        pub side: crate::Side,
     }
 }
 

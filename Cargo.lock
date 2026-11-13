@@ -2184,6 +2184,7 @@ dependencies = [
  "horizon-client-core",
  "horizon-core",
  "horizon-mod-package",
+ "horizon-mod-vocab",
  "horizon-world",
  "log",
  "serde",

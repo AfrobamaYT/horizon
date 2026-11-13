@@ -1149,14 +1149,16 @@ fn announced_entry(
     version: &str,
     side: mod_api::Side,
 ) -> horizon_protocol::mod_list::Entry {
-    use mod_api::Side;
     use horizon_protocol::mod_list;
+    use mod_api::Side;
     mod_list::Entry {
         id: id.to_owned(),
         version: version.to_owned(),
-        side: match side {
-            Side::Both => mod_list::Side::Both,
-            Side::Client => mod_list::Side::Client,
+        // `Side` is open to new kinds; until the list carries one, such a mod stays local.
+        side: if side == Side::Both {
+            mod_list::Side::Both
+        } else {
+            mod_list::Side::Client
         },
     }
 }
@@ -1878,7 +1880,8 @@ mod tests {
     }
 
     use super::*;
-    use horizon_mod_package::runtime::{BuiltMod, Runtime};
+    use horizon_mod_package::runtime::Runtime;
+    use mod_api::__private::native::BuiltMod;
 
     #[test]
     fn only_clients_collect_registered_keys() {

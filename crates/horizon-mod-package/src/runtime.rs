@@ -6,8 +6,7 @@ use crate::{
 };
 use std::path::{Path, PathBuf};
 
-#[doc(hidden)]
-pub use mod_vocab::__private::native::BuiltMod;
+use mod_vocab::__private::native::BuiltMod;
 
 /// Validated once before installing hooks. Vanilla explicitly supplies an empty inventory.
 #[derive(Debug, Default)]
@@ -118,7 +117,7 @@ impl std::error::Error for RuntimeError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Side;
+    use mod_vocab::Side;
 
     const BUILT: &[BuiltMod] = &[
         BuiltMod {
@@ -150,9 +149,10 @@ mod tests {
                 "id = '{}'\nname = 'A mod'\nversion = '{}'\napi = '0.2'\nside = '{}'\ncapabilities = ['registries']\n",
                 expected.id,
                 expected.version,
-                match expected.side {
-                    Side::Both => "both",
-                    Side::Client => "client",
+                if expected.side == Side::Both {
+                    "both"
+                } else {
+                    "client"
                 }
             );
             if native {

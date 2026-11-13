@@ -38,6 +38,6 @@ pub mod sdk;
 pub mod selection;
 
 pub use content::Content;
-pub use manifest::{Capability, Manifest, Package, Side, find};
+pub use manifest::{Capability, Manifest, Package, find};
 /// The SDK's build-pinned data files and their common header.
 pub use point_shape::build_data;
