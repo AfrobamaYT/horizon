@@ -164,3 +164,31 @@ fn a_failed_backup_cancels_the_open() {
     assert!(matches!(&f.title.mode, Mode::Error { message, .. }
         if message.starts_with(&lang::tr("horizon.missing_mods.backup_failed", &[&""]))));
 }
+
+/// However many mods are missing, the text fits between the heading and the buttons: the mods
+/// that don't fit become one line counting them, and a short list is shown whole.
+#[test]
+fn a_long_list_keeps_the_heading_and_buttons_on_screen() {
+    let line = |text: &str| vec![text.to_owned()];
+    let description = vec!["a".to_owned(), "b".to_owned()];
+    let mods: Vec<Vec<String>> = (0..30).map(|i| line(&format!("mod {i}"))).collect();
+    // A 240 high window: the column must end on it.
+    let max = max_lines(240.0);
+    let top = confirm_top(240.0, max);
+    assert!(top >= 0.0 && top + 85.0 + max as f32 * 9.0 <= 240.0);
+    let shown = fit(description.clone(), mods.clone(), max);
+    assert_eq!(shown.len(), max);
+    assert_eq!(shown[..2], description[..]);
+    let kept = max - 3;
+    assert_eq!(
+        shown[2..2 + kept],
+        (0..kept).map(|i| format!("mod {i}")).collect::<Vec<_>>()[..]
+    );
+    assert_eq!(
+        shown.last().unwrap(),
+        &lang::tr("horizon.missing_mods.more", &[&(30 - kept)])
+    );
+    // A list that fits is shown whole, with no count.
+    let short = fit(description.clone(), mods[..2].to_vec(), max);
+    assert_eq!(short, ["a", "b", "mod 0", "mod 1"]);
+}

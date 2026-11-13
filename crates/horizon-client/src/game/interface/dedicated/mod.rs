@@ -384,8 +384,11 @@ pub(super) fn preflight(options: &mut Options) -> Result<bool> {
                 allow_missing_mods = true
             }
             "help" => {
+                let allow = missing_mods::in_english(|| {
+                    horizon_client::lang::get("horizon.missing_mods.server.help")
+                });
                 eprintln!(
-                    "Option                Description\n------                -----------\n--allowMissingMods    Opens a world saved with mods that are not loaded now, removing their blocks\n--help\n--game-tests          Enables test-only mod content (or HORIZON_GAME_TESTS=1/true)\n--initSettings        Initializes 'server.properties' and 'eula.txt', then quits\n--nogui\n--port <Integer>      (default: -1)\n--universe <String>   (default: .)\n--world <String>"
+                    "Option                Description\n------                -----------\n--allowMissingMods    {allow}\n--help\n--game-tests          Enables test-only mod content (or HORIZON_GAME_TESTS=1/true)\n--initSettings        Initializes 'server.properties' and 'eula.txt', then quits\n--nogui\n--port <Integer>      (default: -1)\n--universe <String>   (default: .)\n--world <String>"
                 );
                 return Ok(false);
             }

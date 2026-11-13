@@ -40,7 +40,7 @@ fn allowed_by_server_toml() -> Result<bool> {
 
 /// `f` with English as the language when none is set: a dedicated server's log is English, as
 /// vanilla's is.
-fn in_english<R>(f: impl FnOnce() -> R) -> R {
+pub(super) fn in_english<R>(f: impl FnOnce() -> R) -> R {
     use horizon_client::lang;
     if lang::current().is_some() {
         return f();
@@ -104,7 +104,7 @@ mod tests {
     /// world; with it the world opens.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn a_missing_mod_refuses_the_start_unless_allowed() {
+    fn check_missing_mods_refuses_unless_allowed_and_writes_nothing() {
         use horizon_core::nbt::Tag;
         let dir = std::env::temp_dir().join(format!(
             "horizon-dedicated-missing-mod-{}",
