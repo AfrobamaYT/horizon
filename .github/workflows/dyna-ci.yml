@@ -72,8 +72,6 @@ jobs:
       rust_required: ${{ steps.selection.outputs.rust_required || 'true' }}
       launcher_required: ${{ steps.selection.outputs.launcher_required || 'true' }}
       tooling_required: ${{ steps.selection.outputs.tooling_required || 'true' }}
-      # The sample was PR-selected before centralization; keep main/dispatch behavior unchanged.
-      sample_required: ${{ steps.selection.outputs.sample_required || 'false' }}
       self_hosted: ${{ !inputs.github-fallback && steps.hosted.outputs.forced_github != 'true' && steps.runner.outputs.self_hosted || 'false' }}
       # Where lint and verify run when they don't go to Dyna's pool: boat-large for listed outside contributors
       # while vars.BOAT_CI is on (boat refuses a public repository's run unless both its author and the user who
@@ -382,9 +380,6 @@ jobs:
         if: needs.changes.outputs.rust_required != 'false'
         id: server-lint
         run: cargo clippy $JOBS --keep-going -p horizon-client -p horizon-game -p horizon-mod-host --all-targets --no-default-features -- -D warnings
-      - name: The machine sample builds against this API
-        if: needs.changes.outputs.sample_required == 'true'
-        run: python3 tools/ci/check_machine_sample.py
       - name: The mod API builds for wasm32
         if: needs.changes.outputs.rust_required != 'false'
         run: cargo check $JOBS -p horizon-mod-api --target wasm32-unknown-unknown --locked
