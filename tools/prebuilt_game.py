@@ -24,10 +24,9 @@ import tomllib
 import time
 from pathlib import Path
 
-try:
-    from . import lab
-except ImportError:
-    import lab
+# lab sits beside this file; the script also loads by path (tests, CI) with no package around it.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import lab  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 PROFILE = "release"
