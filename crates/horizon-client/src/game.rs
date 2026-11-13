@@ -2033,7 +2033,7 @@ struct Game<'a> {
     panel: native_panel::Panel,
     /// Horizon's own shader pack, while one is picked (`game/modding/native_shaders.rs`).
     native_shaders: native_shaders::NativeShaders,
-    /// The items native client mods claim and the events they haven't polled (game/modding/native_claimed_items.rs).
+    /// Native client mods' claimed items, unpolled events and key mappings (game/modding/native_claimed_items.rs).
     native_input: native_claimed_items::ModInput,
     /// The native lifecycle bookkeeping.
     native_lifecycle: native_lifecycle::NativeLifecycle,

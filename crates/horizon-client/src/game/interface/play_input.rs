@@ -288,6 +288,7 @@ impl Game<'_> {
             self.toggles.screen_closed(options);
         } else {
             self.toggles.screen_opened(options);
+            self.native_input.mappings.release_all();
         }
         self.sync_toggle(0);
         self.sync_toggle(1);

@@ -687,6 +687,8 @@ impl Game<'_> {
                     )
                     .into());
                 }
+                // The mods' mappings hear it as the window's key, before anything takes it.
+                self.agent_mod_mappings_key(key, action);
                 if arg(2)? != "up" {
                     self.input_keyboard_used();
                     // As a window's key press: the radial menu closes, and the key goes on.
@@ -843,6 +845,7 @@ impl Game<'_> {
             "release" => {
                 self.keys.clear();
                 self.physical_keys.clear();
+                self.native_input.mappings.set_all_up();
                 self.modifiers = winit::keyboard::ModifiersState::empty();
                 // Sneak and sprint pressed through `key` live in the toggle
                 // mappings: release them as their key's release would (a
@@ -883,7 +886,14 @@ impl Game<'_> {
                 if arg(2)? != "up" {
                     self.pad_radial_cancel();
                 }
-                match arg(2)? {
+                let action = arg(2)?;
+                if matches!(action, "down" | "click") {
+                    self.mod_mappings_button(button, true);
+                }
+                if matches!(action, "up" | "click") {
+                    self.mod_mappings_button(button, false);
+                }
+                match action {
                     "down" => {
                         self.extras_mouse(button, true);
                         self.mouse_mapping(button, true, Source::Agent)?

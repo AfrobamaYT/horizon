@@ -120,6 +120,21 @@ impl Game<'_> {
                 self.physical_keys.remove(&key);
             }
         }
+        if let WindowEvent::KeyboardInput {
+            event,
+            is_synthetic: false,
+            ..
+        } = &event
+            && let PhysicalKey::Code(key) = event.physical_key
+        {
+            use horizon_client::keymapping::KeyAction;
+            let action = match (event.state, event.repeat) {
+                (ElementState::Released, _) => KeyAction::Release,
+                (_, false) => KeyAction::Press,
+                (_, true) => KeyAction::Repeat,
+            };
+            self.mod_mappings_key(key, action);
+        }
         if matches!(
             &event,
             WindowEvent::MouseInput {
@@ -154,6 +169,11 @@ impl Game<'_> {
             if canceled {
                 return;
             }
+        }
+        if mouse.is_some()
+            && let WindowEvent::MouseInput { state, button, .. } = &event
+        {
+            self.mod_mappings_button(*button, *state == ElementState::Pressed);
         }
         let resized = matches!(event, WindowEvent::Resized(_));
         self.handle_window_event_inner(event_loop, event);

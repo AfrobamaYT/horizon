@@ -64,6 +64,29 @@ impl KeyState {
             self.is_down = down;
         }
     }
+    /// `KeyboardHandler.keyPress` for this mapping's key: a release sets it up
+    /// (`KeyMapping.set(key, false)`); a press or a repeat with no screen open
+    /// sets it down and clicks it (`KeyMapping.set(key, true)`, `KeyMapping.click`).
+    pub fn key(&mut self, action: KeyAction, screen_open: bool, needs_toggle: bool) {
+        match action {
+            KeyAction::Release => self.set_down(false, needs_toggle),
+            KeyAction::Press | KeyAction::Repeat if !screen_open => {
+                self.set_down(true, needs_toggle);
+                self.click();
+            }
+            _ => {}
+        }
+    }
+    /// `MouseHandler.onButton` for this mapping's button: only without a
+    /// screen or overlay, and a press clicks it.
+    pub fn button(&mut self, pressed: bool, screen_open: bool, needs_toggle: bool) {
+        if !screen_open {
+            self.set_down(pressed, needs_toggle);
+            if pressed {
+                self.click();
+            }
+        }
+    }
     /// A controller's toggle button: flips the mapping like `setDown(true)`
     /// with its option on, whatever the option says.
     pub fn pad_toggle(&mut self) {
@@ -151,14 +174,7 @@ impl ToggleKeys {
     /// the mapping up (`KeyMapping.set(key, false)`); a press or a repeat
     /// with no screen open sets it down and clicks it.
     pub fn key(&mut self, slot: usize, action: KeyAction, screen_open: bool, needs_toggle: bool) {
-        match action {
-            KeyAction::Release => self.0[slot].set_down(false, needs_toggle),
-            KeyAction::Press | KeyAction::Repeat if !screen_open => {
-                self.0[slot].set_down(true, needs_toggle);
-                self.0[slot].click();
-            }
-            _ => {}
-        }
+        self.0[slot].key(action, screen_open, needs_toggle);
     }
     /// A controller's toggle button bound to `slot` (the pad's toggle-sneak):
     /// a press with no screen open flips the mapping and clicks it, as a
@@ -172,12 +188,7 @@ impl ToggleKeys {
     /// `MouseHandler.onButton` for a button bound to `slot`: only without a
     /// screen or overlay.
     pub fn button(&mut self, slot: usize, pressed: bool, screen_open: bool, needs_toggle: bool) {
-        if !screen_open {
-            self.0[slot].set_down(pressed, needs_toggle);
-            if pressed {
-                self.0[slot].click();
-            }
-        }
+        self.0[slot].button(pressed, screen_open, needs_toggle);
     }
     /// `Gui.setScreen` with a screen: `KeyMapping.releaseAll`.
     pub fn screen_opened(&mut self, needs_toggle: [bool; 4]) {
@@ -205,8 +216,100 @@ impl ToggleKeys {
     }
 }
 
+/// The plain `KeyMapping`s mods register (`Registrar::register_key_mapping`), by
+/// their place in the registration list. A mapping no input reached yet is up,
+/// with no clicks.
+#[derive(Clone, Debug, Default)]
+pub struct ModKeys(Vec<KeyState>);
+impl ModKeys {
+    /// Mapping `index`, to set or click.
+    pub fn get_mut(&mut self, index: usize) -> &mut KeyState {
+        if self.0.len() <= index {
+            self.0.resize_with(index + 1, KeyState::plain);
+        }
+        &mut self.0[index]
+    }
+    /// Whether mapping `index` is held.
+    pub fn is_down(&self, index: usize) -> bool {
+        self.0.get(index).is_some_and(|key| key.is_down)
+    }
+    /// `consumeClick` of mapping `index`.
+    pub fn consume_click(&mut self, index: usize) -> bool {
+        self.0.get_mut(index).is_some_and(KeyState::consume_click)
+    }
+    /// `KeyMapping.releaseAll` (a screen opened): every mapping is up and its
+    /// pending clicks are gone.
+    pub fn release_all(&mut self) {
+        for key in &mut self.0 {
+            key.release(false);
+        }
+    }
+    /// Every mapping is up (a script let go of all its keys); pending clicks stay.
+    pub fn set_all_up(&mut self) {
+        for key in &mut self.0 {
+            key.set_down(false, false);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    /// A tap is one click, consumed once.
+    #[test]
+    fn a_tap_adds_one_click() {
+        let mut keys = ModKeys::default();
+        keys.get_mut(1).key(KeyAction::Press, false, false);
+        assert!(keys.is_down(1));
+        keys.get_mut(1).key(KeyAction::Release, false, false);
+        assert!(!keys.is_down(1));
+        assert!(keys.consume_click(1));
+        assert!(!keys.consume_click(1));
+        assert!(!keys.consume_click(0), "another mapping has none");
+    }
+    /// Each auto-repeat of a held key is one more click, as its press.
+    #[test]
+    fn a_held_key_adds_one_click_per_repeat() {
+        let mut keys = ModKeys::default();
+        let key = keys.get_mut(0);
+        key.key(KeyAction::Press, false, false);
+        key.key(KeyAction::Repeat, false, false);
+        key.key(KeyAction::Repeat, false, false);
+        assert_eq!(key.pending_clicks(), 3);
+        assert!(keys.is_down(0));
+        assert_eq!(
+            (0..4).map(|_| keys.consume_click(0)).collect::<Vec<_>>(),
+            [true, true, true, false]
+        );
+    }
+    /// A screen opening drops every pending click and lets go; presses behind
+    /// it count nothing, its releases still let go.
+    #[test]
+    fn a_screen_opening_zeroes_the_clicks() {
+        let mut keys = ModKeys::default();
+        keys.get_mut(0).key(KeyAction::Press, false, false);
+        keys.get_mut(0).key(KeyAction::Repeat, false, false);
+        keys.get_mut(2).button(true, false, false);
+        keys.release_all();
+        assert!(!keys.is_down(0) && !keys.is_down(2));
+        assert!(!keys.consume_click(0) && !keys.consume_click(2));
+        keys.get_mut(0).key(KeyAction::Press, true, false);
+        keys.get_mut(2).button(true, true, false);
+        assert!(!keys.is_down(0) && !keys.is_down(2));
+        assert_eq!(keys.get_mut(0).pending_clicks(), 0);
+    }
+    /// `KeyMapping.setDown` holds without a click; `KeyMapping.click` is a press's increment.
+    #[test]
+    fn set_changes_only_the_held_state() {
+        let mut keys = ModKeys::default();
+        keys.get_mut(0).set_down(true, false);
+        assert!(keys.is_down(0));
+        assert!(!keys.consume_click(0));
+        keys.get_mut(0).click();
+        assert!(keys.is_down(0));
+        assert!(keys.consume_click(0));
+        assert!(!keys.consume_click(0));
+    }
+
     /// `KeyMapping.resetToggleKeys` (a new `LocalPlayer`): a sneak and a sprint toggled on in one
     /// world are off in the next.
     #[test]
