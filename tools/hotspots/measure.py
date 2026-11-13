@@ -353,7 +353,7 @@ def report(git, raw, min_rollup, min_prs):
         if found:
             out.append("")
             out.append("Conflicting constructs (first line, times):")
-            for text, n in found.most_common(15):
+            for text, n in found.most_common(10):
                 out.append(f"- `{text.replace('`', chr(39))}` ({n})")
         out.append("")
     return "\n".join(out)
