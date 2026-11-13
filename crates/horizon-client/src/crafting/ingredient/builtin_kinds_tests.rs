@@ -1062,4 +1062,28 @@ fn item_model_component_literals_decode_validate_and_match() {
             .is_err()
         );
     }
+    let absence = parse(
+        r#"{"type":"neoforge:components","items":["minecraft:stick","minecraft:iron_ingot"],"components":{"!minecraft:item_model":{}}}"#,
+        &items,
+    );
+    let positive = parse(
+        r#"{"type":"neoforge:components","items":["minecraft:stick","minecraft:iron_ingot"],"components":{"minecraft:item_model":"unregistered/model"}}"#,
+        &items,
+    );
+    let mut removed = ItemStack::new("minecraft:stick", 1);
+    assert!(!absence.test_in(&context, &removed));
+    removed
+        .data_mut()
+        .set_loot_component("minecraft:item_model", &None);
+    assert!(absence.test_in(&context, &removed));
+    assert!(!positive.test_in(&context, &removed));
+    let mut populated = ItemStack::new("minecraft:stick", 1);
+    populated.data_mut().set_loot_component(
+        "minecraft:item_model",
+        &Some(Tag::String("unregistered/model".into())),
+    );
+    assert!(!absence.test_in(&context, &populated));
+    let no_default = ItemStack::new("minecraft:iron_ingot", 1);
+    assert!(absence.test_in(&context, &no_default));
+    assert!(!positive.test_in(&context, &no_default));
 }
