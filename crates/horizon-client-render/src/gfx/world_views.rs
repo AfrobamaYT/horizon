@@ -5,7 +5,7 @@
 //! its projection's near plane; a mirrored view's projection flips x, and it draws through
 //! pipelines that cull the front faces instead (`Flipped`).
 
-use super::{Cull, Frame, Frustum, Globals, Renderer, frustum, native_render};
+use super::{Cull, Frame, Frustum, Globals, Renderer, SolidPipeline, frustum, native_render};
 use glam::{DVec3, Mat4, Vec3, Vec4};
 use std::collections::HashMap;
 
@@ -87,44 +87,63 @@ pub(super) struct ViewCamera {
     pub own_view_proj: Mat4,
     /// The view's eye, relative to the frame's camera.
     pub offset: Vec3,
+    /// The clip-space depth entities move forward (`ENTITY_MARGIN`), 0 without a clip plane.
+    pub entity_shift: f32,
     view: Mat4,
     aspect: f32,
 }
 
+/// How far forward a clipped view's entities move, as a share of their distance. A clip plane
+/// leaves depth changing little with distance (`near_plane_on`), so the entities' constant bias
+/// (gfx.rs `entity_bias`, 128 steps of the depth's float) would bring one blocks forward through
+/// the wall it stands behind; a clipped view draws them without it and moves them this share
+/// instead: one more than 1/1024 of its distance behind terrain stays hidden, and a surface on
+/// terrain's plane (a boat's floor on a trapdoor) still wins wherever that share is more than
+/// the depth's rounding (roughly, while the camera is more than 1/300 of the surface's
+/// distance behind the plane).
+const ENTITY_MARGIN: f32 = 1.0 / 1024.0;
+
 impl ViewCamera {
     pub fn new(view: &native_render::WorldView, camera: DVec3, far: f32) -> Self {
         let aspect = view.size[0] as f32 / view.size[1] as f32;
-        let mirror = Vec3::new(if view.mirror { -1.0 } else { 1.0 }, 1.0, 1.0);
-        let rotation = Mat4::from_scale(mirror)
-            * crate::camera::view_matrix_rolled(view.yaw, view.pitch, view.roll);
+        let mut rotation = crate::camera::view_matrix_rolled(view.yaw, view.pitch, view.roll);
+        if view.mirror {
+            rotation = Mat4::from_scale(Vec3::new(-1.0, 1.0, 1.0)) * rotation;
+        }
         let projection = super::world_projection(view.fov_degrees, aspect, far);
         let offset = (view.camera - camera).as_vec3();
         let mut own_view_proj = projection * rotation;
-        // The plane relative to the view's camera, in f64 so far from the origin it loses nothing.
-        if let Some(plane) = view.clip_plane.and_then(crate::render_views::unit_plane) {
-            let relative = plane.truncate().dot(view.camera) + plane.w;
-            let plane = plane.truncate().as_vec3().extend(relative as f32);
-            let tan_half = (view.fov_degrees.to_radians() / 2.0).tan();
-            own_view_proj = near_plane_on(own_view_proj, plane, tan_half, aspect);
+        let mut entity_shift = 0.0;
+        if let Some(plane) = view.camera_clip_plane() {
+            let k = corner_cosine((view.fov_degrees.to_radians() / 2.0).tan(), aspect);
+            own_view_proj = near_plane_on(own_view_proj, plane, k);
+            // Depth at `w` is a constant plus `k * -plane.w / w`: a shift of that term's share
+            // moves a point the same share of its distance.
+            entity_shift = ENTITY_MARGIN * k * -plane.w;
         }
         Self {
             view_proj: own_view_proj * Mat4::from_translation(-offset),
             own_view_proj,
             offset,
+            entity_shift,
             view: rotation * Mat4::from_translation(-offset),
             aspect,
         }
     }
 }
 
-/// `view_proj`, a reversed-Z perspective from the origin with the vertical half-angle's tangent
-/// `tan_half` and `aspect`, with its near plane turned onto `plane` (a unit normal, the origin
-/// behind it): the clip z row becomes `w - k * plane`, so `z <= w` keeps what is in front of the
-/// plane and depth still falls with distance. `k` is the cosine of the angle out to the
-/// frustum's corners: nothing in the frustum is farther in front of the plane than its `w` over
-/// `k`, so `z >= 0` leaves none of it out (the far plane goes).
-fn near_plane_on(view_proj: Mat4, plane: Vec4, tan_half: f32, aspect: f32) -> Mat4 {
-    let k = 1.0 / (1.0 + tan_half * tan_half * (1.0 + aspect * aspect)).sqrt();
+/// The cosine of the angle out to the corners of a frustum with the vertical half-angle's
+/// tangent `tan_half` and `aspect`.
+fn corner_cosine(tan_half: f32, aspect: f32) -> f32 {
+    1.0 / (1.0 + tan_half * tan_half * (1.0 + aspect * aspect)).sqrt()
+}
+
+/// `view_proj`, a reversed-Z perspective from the origin, with its near plane turned onto
+/// `plane` (a unit normal, the origin behind it): the clip z row becomes `w - k * plane`, so
+/// `z <= w` keeps what is in front of the plane and depth still falls with distance. With `k`
+/// the frustum's `corner_cosine`, nothing in the frustum is farther in front of the plane than
+/// its `w` over `k`, so `z >= 0` leaves none of it out (the far plane goes).
+fn near_plane_on(view_proj: Mat4, plane: Vec4, k: f32) -> Mat4 {
     let rows = view_proj.transpose();
     Mat4::from_cols(
         rows.x_axis,
@@ -140,7 +159,7 @@ fn near_plane_on(view_proj: Mat4, plane: Vec4, tan_half: f32, aspect: f32) -> Ma
 /// are the ones the view unmirrored drops (gfx.rs builds the per-section ones, `flat::Flat` the
 /// flat ones).
 pub(super) struct Flipped {
-    pub solid: wgpu::RenderPipeline,
+    pub solid: SolidPipeline,
     pub translucent: wgpu::RenderPipeline,
 }
 
@@ -160,7 +179,7 @@ pub(super) struct Kept {
 }
 
 impl Kept {
-    pub fn new(solid: wgpu::RenderPipeline, translucent: wgpu::RenderPipeline) -> Self {
+    pub fn new(solid: SolidPipeline, translucent: wgpu::RenderPipeline) -> Self {
         Self {
             targets: HashMap::new(),
             flipped: Flipped { solid, translucent },
@@ -234,15 +253,18 @@ impl Renderer {
                     (view.fov_degrees.to_radians() / 2.0).tan(),
                 ],
                 outline_params: super::outline_params(view.size[0], view.size[1]),
-                view_origin: camera
-                    .offset
-                    .extend(if view.mirror { -1.0 } else { 0.0 })
-                    .into(),
+                view_origin: [camera.offset.x, camera.offset.y, camera.offset.z, 0.0],
+                world_view: [
+                    if view.mirror { -1.0 } else { 1.0 },
+                    camera.entity_shift,
+                    0.0,
+                    0.0,
+                ],
                 ..lists.globals
             };
             self.uploads
                 .buffer(encoder, &self.globals, 0, bytemuck::bytes_of(&globals));
-            self.draw_world_view(encoder, target, frame, lists, view.mirror);
+            self.draw_world_view(encoder, target, frame, lists, view);
             native_render::world_view_drawn(&mut native_render::WorldViewDrawn {
                 id: view.id,
                 device: &self.device,
@@ -270,16 +292,16 @@ impl Renderer {
 
     /// The sky, the solid terrain, the entities and the translucent terrain, in the world
     /// pass's order, without what follows one camera alone (the sunrise's mesh, the sun and
-    /// moon, stars, clouds, particles, weather, the block outline, the hand). `mirror`: the
-    /// terrain through the `Flipped` pipelines (the sky, entities and block entities cull no
-    /// faces).
+    /// moon, stars, clouds, particles, weather, the block outline, the hand). A mirrored view's
+    /// terrain draws through the `Flipped` pipelines (the sky, entities and block entities cull
+    /// no faces); a clipped view's entities without the constant bias (`ENTITY_MARGIN`).
     fn draw_world_view(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         target: &Target,
         frame: &Frame,
         lists: &Lists,
-        mirror: bool,
+        view: &native_render::WorldView,
     ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Native world view"),
@@ -308,16 +330,22 @@ impl Renderer {
             pass.draw(0..3, 0..1);
         }
         let flat = self.flat.as_ref().filter(|_| lists.flat);
-        let flipped = mirror.then(|| flat.map_or(&self.world_views.flipped, |f| &f.flipped));
+        let flipped = view
+            .mirror
+            .then(|| flat.map_or(&self.world_views.flipped, |f| &f.flipped));
         let vertices = || super::flat_vertices(&self.arena, self.translucent_arena.as_ref());
         match flat {
             Some(flat) => {
-                pass.set_pipeline(flipped.map_or(flat.solid.get(lists.hdr), |f| &f.solid));
+                pass.set_pipeline(
+                    flipped.map_or(flat.solid.get(lists.hdr), |f| f.solid.get(lists.hdr)),
+                );
                 flat.draw(&mut pass, &flat.calls[..flat.solid_calls], vertices());
                 pass.set_bind_group(0, &self.group, &[]);
             }
             None => {
-                pass.set_pipeline(flipped.map_or(self.solid.get(lists.hdr), |f| &f.solid));
+                pass.set_pipeline(
+                    flipped.map_or(self.solid.get(lists.hdr), |f| f.solid.get(lists.hdr)),
+                );
                 pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.set_vertex_buffer(1, self.instances.slice(..));
                 self.draw_solid_sections(&mut pass, &self.indirect, 0, 0, lists.solid_draws);
@@ -347,7 +375,11 @@ impl Renderer {
         }
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
         if lists.entity_quads > 0 {
-            pass.set_pipeline(&self.entity_pipeline);
+            // the entities' pipeline without its constant bias, as translucent items draw
+            pass.set_pipeline(match view.clip_plane {
+                Some(_) => &self.translucent_item_pipeline,
+                None => &self.entity_pipeline,
+            });
             pass.set_bind_group(0, &self.entity_group, &[]);
             pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
             pass.draw_indexed(0..lists.entity_quads * 6, 0, 0..1);
@@ -500,7 +532,7 @@ mod tests {
         let tan_half = 35f32.to_radians().tan();
         let corner = Vec3::new(2.0 * tan_half, tan_half, -1.0).normalize();
         let lens = super::super::world_projection(70.0, 2.0, 512.0);
-        let clipped = near_plane_on(lens, corner.extend(-1.0), tan_half, 2.0);
+        let clipped = near_plane_on(lens, corner.extend(-1.0), corner_cosine(tan_half, 2.0));
         let far = clipped * (corner * 1000.0).extend(1.0);
         assert!((far.z / far.w - 0.001).abs() < 1e-5, "{far}");
     }

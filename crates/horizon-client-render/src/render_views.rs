@@ -1,4 +1,4 @@
-use glam::{DVec3, DVec4, Mat4};
+use glam::{DVec3, Mat4, Vec4};
 
 /// The most world views ([`crate::render_slots::world_views`]) one frame draws.
 pub const MAX_WORLD_VIEWS: usize = 4;
@@ -62,8 +62,8 @@ impl WorldView {
     /// left out, as a wall behind a portal's far side is. The camera must be behind the plane
     /// (where `x * camera.x + y * camera.y + z * camera.z + d < 0`): the plane becomes the
     /// view's near plane, which every backend draws. A view whose camera is not behind it, or
-    /// whose plane has a normal `[x, y, z]` of zero or a value that is not finite, is out of
-    /// range and left out.
+    /// whose plane has a normal `[x, y, z]` of zero, a value that is not finite, or a scaled form
+    /// or distance from the camera that is not (as f32 too), is out of range and left out.
     pub fn with_clip_plane(self, plane: [f64; 4]) -> Self {
         Self {
             clip_plane: Some(plane),
@@ -94,16 +94,23 @@ impl WorldView {
                 .size
                 .iter()
                 .all(|&s| (1..=max_side.min(MAX_WORLD_VIEW_SIDE)).contains(&s))
-            && self.clip_plane.is_none_or(|plane| {
-                unit_plane(plane).is_some_and(|p| p.truncate().dot(self.camera) + p.w < 0.0)
-            })
+            && (self.clip_plane.is_none() || self.camera_clip_plane().is_some())
     }
-}
 
-/// `plane` scaled to a unit normal, `None` for a normal of zero or a value that is not finite.
-pub(crate) fn unit_plane([x, y, z, d]: [f64; 4]) -> Option<DVec4> {
-    let length = DVec3::new(x, y, z).length();
-    (length > 0.0 && length.is_finite() && d.is_finite()).then(|| DVec4::new(x, y, z, d) / length)
+    /// The clip plane relative to the camera, as the projection takes it: a unit normal and the
+    /// camera's distance in front of the plane (below 0, behind it), worked out in f64 so far
+    /// from the origin it loses nothing. `None` without one, or for one out of range: a normal
+    /// of zero, a value or its scaled or camera-relative form not finite (in f32 too), or the
+    /// camera not behind it.
+    pub(crate) fn camera_clip_plane(&self) -> Option<Vec4> {
+        let [x, y, z, d] = self.clip_plane?;
+        let length = DVec3::new(x, y, z).length();
+        let normal = DVec3::new(x, y, z) / length;
+        let plane = normal
+            .as_vec3()
+            .extend((normal.dot(self.camera) + d / length) as f32);
+        (length > 0.0 && length.is_finite() && plane.is_finite() && plane.w < 0.0).then_some(plane)
+    }
 }
 
 /// A world view just drawn ([`crate::render_slots::world_view_drawn`]): its picture and depth, and what a mod needs
@@ -178,6 +185,11 @@ mod tests {
             view(32, 70.0, [64, 64]).with_clip_plane([0.0, 0.0, 1.0, f64::INFINITY]),
             view(33, 70.0, [64, 64]).with_clip_plane([0.0, 0.0, -1.0, 0.0]),
             view(34, 70.0, [64, 64]).with_clip_plane([0.0, 0.0, 2.0, 6.0]),
+            // finite values whose scaled or camera-relative form is not (camera at 0)
+            WorldView::new(35, DVec3::ZERO, 0.0, 0.0, 70.0, [64, 64])
+                .with_clip_plane([0.0, 0.0, 1.0, -1e40]),
+            WorldView::new(36, DVec3::ZERO, 0.0, 0.0, 70.0, [64, 64])
+                .with_clip_plane([1e-160, 0.0, 0.0, -1e308]),
             // the camera behind the plane z = 0, mirrored too
             view(8, 70.0, [64, 64])
                 .with_clip_plane([0.0, 0.0, 0.5, 0.0])

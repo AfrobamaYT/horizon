@@ -39,6 +39,10 @@ struct Globals {
     hdr_gains: vec4<f32>,
     // The eye fog is measured from, camera-relative: zero but in a mod's world view.
     view_origin: vec4<f32>,
+    // A mod's world view's own, zero outside one (gfx/world_views.rs's `ViewCamera`): x -1 when
+    // mirrored (its screen runs right to left), else 1; y the clip-space depth its clip plane's
+    // entities move forward, 0 without one.
+    world_view: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(0) @binding(1) var atlas: texture_2d<f32>;
@@ -182,6 +186,9 @@ fn entity_vertex(position: vec3<f32>, uv: vec2<f32>,
     var out = entity_vertex(position, uv, overlay & 0xffffu, color, light, normal);
     out.glint_uv = glint_uv;
     out.tier = (overlay >> 16u) & 0xffu;
+    // A clipped world view draws entities without the pipeline's constant bias, which its depth
+    // near the plane would make blocks deep: they move forward by a share of its distance.
+    out.clip.z += globals.world_view.y;
     return out;
 }
 // Retained bolt-local geometry, translated using the same f64 camera

@@ -18,10 +18,11 @@ direction) for each one wanted this frame. For a view through a portal or a mirr
 - `with_mirror()` mirrors the picture left to right, as a mirror shows it: give the camera reflected through the
   mirror. A mirrored picture turns every triangle's winding round, so the view draws with face culling flipped to
   make up for it: the faces culled are the ones the unmirrored view culls, and back faces stay hidden.
- Up to `MAX_WORLD_VIEWS` (4) draw, each at most `MAX_WORLD_VIEW_SIDE`
-(4096) pixels a side, or the device's largest texture side when that is smaller; one with a value out of range or an `id` already asked for is left out. A clip plane
-is out of range when its normal `[x, y, z]` is zero, a value is not finite, or the camera is not behind it. Push
-the same views each time within a frame.
+
+Up to `MAX_WORLD_VIEWS` (4) draw, each at most `MAX_WORLD_VIEW_SIDE` (4096) pixels a side, or the device's largest
+texture side when that is smaller; one with a value out of range or an `id` already asked for is left out. A clip
+plane is out of range when its normal `[x, y, z]` is zero, a value or its scaled or camera-relative form is not
+finite (as f32 too), or the camera is not behind it. Push the same views each time within a frame.
 
 Each view is drawn after the frame's world with the frame's terrain (solid and translucent), sky colour, fog and
 entities (block entities too), from its own camera and with its own frustum; then `world_view_drawn` hands it back

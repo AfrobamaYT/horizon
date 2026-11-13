@@ -1145,7 +1145,7 @@ mod tests {
             })
         };
         let pipeline = &pipeline;
-        let solid = |layout: &wgpu::PipelineLayout, label: &str, _: &str, _: &str| {
+        let solid = |layout: &wgpu::PipelineLayout, label: &str, _: &str, _: &str, _| {
             super::super::SolidPipeline {
                 plain: pipeline(layout, label, "", "", None, None, true),
                 hdr: None,

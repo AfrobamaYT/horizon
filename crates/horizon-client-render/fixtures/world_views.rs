@@ -4,8 +4,10 @@
 //! two. The frame's own picture stays as it was; each view comes back at its size with what its
 //! own camera sees. Behind the player's camera, a blue wall facing it: mirrored views draw its
 //! front and cull its back as an unmirrored view does, mirrored left to right; a clip plane
-//! leaves the green wall out of a view behind it. Run with throwaway HORIZON_HOME, HORIZON_LAUNCHER_HOME, XDG_DATA_HOME and
-//! XDG_CONFIG_HOME, through production source staging: `python3 tools/run_world_views.py <output-dir>`;
+//! leaves the green wall out of a view behind it, and a clipped view's entities keep their
+//! depth order against terrain. Run with throwaway HORIZON_HOME, HORIZON_LAUNCHER_HOME,
+//! XDG_DATA_HOME and XDG_CONFIG_HOME, through production source staging:
+//! `python3 tools/run_world_views.py <output-dir>`;
 //! `--bench` (an optimized build): instead, the time of a frame of rolling land 49 by 49
 //! chunks around the camera at 1920 by 1080 without a view, with a 1 by 1 one (the culling it
 //! turns off), a 640 by 360 one and a 1920 by 1080 one.
@@ -214,25 +216,26 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     renderer.upload((0, 10, 1), &wall(0xff00_ff00, &both));
     // blue at z -4 behind the player's camera, facing south (toward it) only
     renderer.upload((0, 10, -1), &wall(0xffff_0000, &[[3, 2, 1, 0]]));
-    // an entity quad between the player's camera and the white wall, at z 6
-    let entity: Vec<Vertex> = [
-        [7.5, 103.5, 6.0],
-        [7.5, 104.5, 6.0],
-        [8.5, 104.5, 6.0],
-        [8.5, 103.5, 6.0],
-    ]
-    .into_iter()
-    .zip([[0., 1.], [0., 0.], [1., 0.], [1., 1.]])
-    .map(|(p, uv)| Vertex {
-        pos: [p[0] - 8.0, p[1] - 104.0, p[2] - 0.5],
-        uv,
-        layer: 0,
-        color: 0xff40_40ff,
-        light: 0xf0,
-        normal: [0, 0, 0, 0],
-        glint_uv: [0.0; 2],
-    })
-    .collect();
+    // entity quads: red between the player's camera and the white wall, at z 6; yellow 0.1
+    // behind the green wall (z 27.9) and cyan on its plane (z 28), seen from past it
+    let quad = |[x0, y0, x1, y1]: [f32; 4], z: f32, color: u32| {
+        [[x0, y0], [x0, y1], [x1, y1], [x1, y0]]
+            .into_iter()
+            .zip([[0., 1.], [0., 0.], [1., 0.], [1., 1.]])
+            .map(move |([x, y], uv)| Vertex {
+                pos: [x - 8.0, y - 104.0, z - 0.5],
+                uv,
+                layer: 0,
+                color,
+                light: 0xf0,
+                normal: [0, 0, 0, 0],
+                glint_uv: [0.0; 2],
+            })
+    };
+    let entity: Vec<Vertex> = quad([7.5, 103.5, 8.5, 104.5], 6.0, 0xff40_40ff)
+        .chain(quad([4.0, 100.0, 8.0, 104.0], 27.9, 0xff40_ffff))
+        .chain(quad([9.0, 105.0, 13.0, 109.0], 28.0, 0xffff_ff40))
+        .collect();
     let hud = HudBatch::new([320, 180], GUI);
     let shot = |renderer: &mut Renderer, name: &str, views: Vec<WorldView>| {
         *VIEWS.lock().unwrap() = views;
@@ -392,6 +395,57 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         "and the view sees the white wall: {clip_white}"
     );
 
+    // Clipped views' entities: seen from z 76 through a plane 0.05 in front of the
+    // camera, where depth changes little with distance, the yellow quad 0.1 behind the green wall
+    // stays hidden; the cyan one on the wall's plane shows as an unclipped view shows it, clip and
+    // mirror together too.
+    let (yellow, cyan) = ([255, 255, 64], [64, 255, 255]);
+    let north = |id, z, size| WorldView::new(id, DVec3::new(8.0, 104.0, z), 180.0, 0.0, 70.0, size);
+    let entity_views = vec![
+        north(21, 76.0, [256, 256]).with_clip_plane([0.0, 0.0, -1.0, 75.95]),
+        north(22, 40.0, [64, 64]).with_clip_plane([0.0, 0.0, -1.0, 36.0]),
+        north(23, 40.0, [64, 64]),
+        north(24, 40.0, [64, 64])
+            .with_clip_plane([0.0, 0.0, -1.0, 36.0])
+            .with_mirror(),
+    ];
+    let (_, drawn) = shot(&mut renderer, "clipped_entities", entity_views);
+    for (id, size, pixels) in &drawn {
+        write_png(&out.join(format!("entity_view_{id}.png")), *size, pixels)?;
+    }
+    let behind_wall = count(&drawn[0].2, yellow);
+    assert!(
+        count(&drawn[0].2, [0, 255, 0]) > 2000,
+        "the far view sees the green wall"
+    );
+    assert_eq!(
+        behind_wall, 0,
+        "an entity behind a wall stays hidden in a clipped view"
+    );
+    let coplanar = drawn[1..]
+        .iter()
+        .map(|v| count(&v.2, cyan))
+        .collect::<Vec<_>>();
+    assert!(
+        coplanar[1] > 150,
+        "the unclipped view sees the cyan quad: {coplanar:?}"
+    );
+    assert!(
+        coplanar.iter().all(|&c| c.abs_diff(coplanar[1]) < 8),
+        "and the clipped ones, mirrored too, as much of it: {coplanar:?}"
+    );
+    let (clipped, both) = (&drawn[1].2, &drawn[3].2);
+    let clip_mirror_unlike = (0..64 * 64)
+        .filter(|i| {
+            let (a, b) = (both[*i], clipped[i / 64 * 64 + 63 - i % 64]);
+            (0..3).any(|c| a[c].abs_diff(b[c]) >= 40)
+        })
+        .count();
+    assert!(
+        clip_mirror_unlike < 64,
+        "clipped and mirrored is the clipped picture left to right: {clip_mirror_unlike}"
+    );
+
     // a view asked for again at another size and roll comes back at that size
     let turned = behind.with_roll(30.0);
     let mut resized = turned;
@@ -412,6 +466,8 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
             "view_entity_pixels": red, "frame_unchanged_with_views": true,
             "mirrored_front_pixels": front_blue, "mirrored_back_pixels": back_blue[0],
             "mirrored_unlike_pixels": unlike, "clipped_white_pixels": clip_white,
+            "clipped_behind_wall_pixels": behind_wall, "coplanar_pixels": coplanar,
+            "clipped_mirrored_unlike_pixels": clip_mirror_unlike,
             "graphics_adapter": client::crash::system_details("fixture").into_iter()
                 .find(|(name, _)| name == "Graphics Adapter").map(|(_, detail)| detail),
         }))?,

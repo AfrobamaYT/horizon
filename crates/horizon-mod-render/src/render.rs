@@ -222,8 +222,8 @@ impl WorldView {
     /// left out, as a wall behind a portal's far side is. The camera must be behind the plane
     /// (where `x * camera.x + y * camera.y + z * camera.z + d < 0`): the plane becomes the
     /// view's near plane, which every backend draws. A view whose camera is not behind it, or
-    /// whose plane has a normal `[x, y, z]` of zero or a value that is not finite, is out of
-    /// range and left out.
+    /// whose plane has a normal `[x, y, z]` of zero, a value that is not finite, or a scaled form
+    /// or distance from the camera that is not (as f32 too), is out of range and left out.
     pub fn with_clip_plane(self, plane: [f64; 4]) -> Self {
         Self {
             clip_plane: Some(plane),

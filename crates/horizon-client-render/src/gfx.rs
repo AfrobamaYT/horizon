@@ -563,8 +563,11 @@ struct Globals {
     /// (`Hdr::draw_params`).
     hdr_settings: [f32; 4],
     hdr_gains: [f32; 4],
-    /// The camera-relative eye fog is measured from, zero but in a world view; w: -1 when mirrored.
+    /// The camera-relative eye fog is measured from: zero but in a mod's world view.
     view_origin: [f32; 4],
+    /// A mod's world view's own (`world_views::ViewCamera`), zero outside one: x -1 when it is
+    /// mirrored, else 1; y the clip-space depth its clip plane's entities move forward.
+    world_view: [f32; 4],
 }
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -3296,13 +3299,14 @@ impl Renderer {
                 None,
             )
         };
-        // A solid terrain pipeline (back faces culled, depth written, no blend) without HDR
+        // A solid terrain pipeline (`cull` faces culled, depth written, no blend) without HDR
         // output's lighting, and with it where the display offers HDR output.
         let solid_in = |layout: &wgpu::PipelineLayout,
                         label: &str,
                         vertex: &str,
                         fragment: &str,
-                        buffers: &[Option<wgpu::VertexBufferLayout<'_>>]| {
+                        buffers: &[Option<wgpu::VertexBufferLayout<'_>>],
+                        cull: wgpu::Face| {
             let build = |constants: &[(&str, f64)]| {
                 pipeline_with(
                     constants,
@@ -3312,7 +3316,7 @@ impl Renderer {
                     fragment,
                     buffers,
                     wgpu::PrimitiveTopology::TriangleList,
-                    Some(wgpu::Face::Back),
+                    Some(cull),
                     true,
                     true,
                     None,
@@ -3353,6 +3357,7 @@ impl Renderer {
             "vs_terrain",
             "fs_solid",
             &terrain_buffers,
+            wgpu::Face::Back,
         );
         // `solid` in two passes (terrain.wgsl's `opaque_quad`, `mesher::Part`), for the
         // world pass without a shader pack: no cutout first, through a shader that never
@@ -3363,6 +3368,7 @@ impl Renderer {
             "vs_terrain_opaque",
             "fs_opaque",
             &terrain_buffers,
+            wgpu::Face::Back,
         );
         let solid_cutout = solid_in(
             &layout,
@@ -3370,6 +3376,7 @@ impl Renderer {
             "vs_terrain_cutout",
             "fs_solid",
             &terrain_buffers,
+            wgpu::Face::Back,
         );
         // The water mirror's camera sees the world from the other side of the plane, and a
         // mirrored world view's picture is flipped (`world_views::Flipped`): each turns the
@@ -3388,7 +3395,14 @@ impl Renderer {
             )
         };
         let solid_mirror = front("Terrain solid (mirrored)", "fs_solid_mirror", None);
-        let flipped = front("Terrain solid (flipped)", "fs_solid", None);
+        let flipped = solid_in(
+            &layout,
+            "Terrain solid (flipped)",
+            "vs_terrain",
+            "fs_solid",
+            &terrain_buffers,
+            wgpu::Face::Front,
+        );
         let alpha = Some(alpha_blend);
         let translucent_flipped = front("Terrain translucent (flipped)", "fs_translucent", alpha);
         let translucent = pipeline(
@@ -4929,7 +4943,9 @@ impl Renderer {
                         layout, label, vertex, fragment, buffers, tri, cull, true, true, blend,
                     )
                 },
-                |layout, label, vertex, fragment| solid_in(layout, label, vertex, fragment, &[]),
+                |layout, label, vertex, fragment, cull| {
+                    solid_in(layout, label, vertex, fragment, &[], cull)
+                },
             )
         });
         // With flat draws' page groups the per-section solid draws read their vertices from
@@ -4943,29 +4959,37 @@ impl Renderer {
                     ..Default::default()
                 });
                 let origins = [None, terrain_buffers[1].clone()];
-                let solid = |label: &str, vertex: &str, fragment: &str| {
-                    solid_in(&pulled_layout, label, vertex, fragment, &origins)
+                let solid = |label: &str, vertex: &str, fragment: &str, cull| {
+                    solid_in(&pulled_layout, label, vertex, fragment, &origins, cull)
                 };
-                let front = |label, fragment| {
+                let (back, front) = (wgpu::Face::Back, wgpu::Face::Front);
+                (
+                    solid("Terrain solid", "vs_section", "fs_solid", back),
+                    solid(
+                        "Terrain solid opaque",
+                        "vs_section_opaque",
+                        "fs_opaque",
+                        back,
+                    ),
+                    solid(
+                        "Terrain solid cutout",
+                        "vs_section_cutout",
+                        "fs_solid",
+                        back,
+                    ),
                     pipeline_in(
                         &pulled_layout,
-                        label,
+                        "Terrain solid (mirrored)",
                         "vs_section",
-                        fragment,
+                        "fs_solid_mirror",
                         &origins,
                         tri,
-                        Some(wgpu::Face::Front),
+                        Some(front),
                         true,
                         true,
                         None,
-                    )
-                };
-                (
-                    solid("Terrain solid", "vs_section", "fs_solid"),
-                    solid("Terrain solid opaque", "vs_section_opaque", "fs_opaque"),
-                    solid("Terrain solid cutout", "vs_section_cutout", "fs_solid"),
-                    front("Terrain solid (mirrored)", "fs_solid_mirror"),
-                    front("Terrain solid (flipped)", "fs_solid"),
+                    ),
+                    solid("Terrain solid (flipped)", "vs_section", "fs_solid", front),
                 )
             }
             None => (solid, solid_opaque, solid_cutout, solid_mirror, flipped),
@@ -8476,6 +8500,7 @@ impl Renderer {
             hdr_settings,
             hdr_gains,
             view_origin: [0.0; 4],
+            world_view: [0.0; 4],
         };
         self.uploads
             .buffer(&mut encoder, &self.globals, 0, bytemuck::bytes_of(&globals));
@@ -8549,7 +8574,7 @@ impl Renderer {
             .water_plane
             .filter(|_| !frame.title && self.wants_water_plane());
         let mirror = mirror_plane.map(|plane| Frustum {
-            planes: frustum(mirror_view_projection(
+            planes: frustum(view::mirror_view_projection(
                 cull_proj,
                 plane - frame.camera.y as f32,
             )),
@@ -10423,13 +10448,13 @@ impl Renderer {
             if let Some(mirror) = &self.mirror {
                 // Mirrored about y = `plane` (camera-relative).
                 let plane = plane - frame.camera.y as f32;
-                let inverse_view = mirror_inverse_view(globals.inverse_view, plane);
+                let inverse_view = view::mirror_inverse_view(globals.inverse_view, plane);
                 // fog_ends.w: the plane, below which fs_solid_mirror cuts the world away
                 // (only entity.wgsl reads the glint strength there, and no entity draws here).
                 let mut fog_ends = globals.fog_ends;
                 fog_ends[3] = plane;
                 let mirror_globals = Globals {
-                    view_proj: mirror_view_projection(view_proj, plane).to_cols_array_2d(),
+                    view_proj: view::mirror_view_projection(view_proj, plane).to_cols_array_2d(),
                     inverse_view,
                     fog_ends,
                     hdr_light: [
@@ -12934,25 +12959,6 @@ pub(crate) fn world_projection(fov_degrees: f32, aspect: f32, far: f32) -> Mat4 
     Mat4::perspective_rh(fov_degrees.to_radians(), aspect, far, NEAR_PLANE)
 }
 
-/// `view_proj` mirrored about the horizontal plane at the camera-relative height `plane`:
-/// with F the mirror (y flips and moves to 2 * plane), `view_proj * F` negates column 1
-/// and moves column 3 by 2 * plane times column 1.
-///
-/// `mirror_inverse_view` is the inverse's other side: F * `inverse_view`.
-fn mirror_view_projection(view_proj: Mat4, plane: f32) -> Mat4 {
-    let mut m = view_proj.to_cols_array_2d();
-    let col1 = m[1];
-    m[1] = col1.map(|v| -v);
-    m[3] = std::array::from_fn(|i| m[3][i] + 2.0 * plane * col1[i]);
-    Mat4::from_cols_array_2d(&m)
-}
-
-/// The mirror's `inverse_view` (the sky's rays): what the view sees, mirrored about the
-/// horizontal plane at the camera-relative height `plane`, so F * `inverse_view`.
-fn mirror_inverse_view(inverse_view: [[f32; 4]; 4], plane: f32) -> [[f32; 4]; 4] {
-    inverse_view.map(|[x, y, z, w]| [x, 2.0 * plane * w - y, z, w])
-}
-
 /// Calls `draw(first, quads)` for each run of a mesh's solid quads that can
 /// face `eye` (`view::projection_center`), the mesh at the camera-relative
 /// `origin`; all of them when there is no eye.
@@ -13251,7 +13257,7 @@ mod tests {
         let view_proj = super::world_projection(70.0, 1.5, 512.0)
             * Mat4::look_to_rh(Vec3::ZERO, Vec3::new(0.3, -0.4, -1.0), Vec3::Y);
         let plane = -3.25;
-        let mirror = super::mirror_view_projection(view_proj, plane);
+        let mirror = super::view::mirror_view_projection(view_proj, plane);
         for p in [Vec3::new(1.0, 2.0, -9.0), Vec3::new(-4.0, -1.5, -20.0)] {
             let reflected = Vec3::new(p.x, 2.0 * plane - p.y, p.z);
             let a = mirror * Vec4::from((p, 1.0));
@@ -13265,7 +13271,7 @@ mod tests {
         // A camera looking down: its mirror looks up, by as much.
         let forward = Vec3::new(0.3, -0.64, -1.0).normalize();
         let view = Mat4::look_to_rh(Vec3::ZERO, forward, Vec3::Y);
-        let mirrored = super::mirror_inverse_view(view.inverse().to_cols_array_2d(), -3.25);
+        let mirrored = super::view::mirror_inverse_view(view.inverse().to_cols_array_2d(), -3.25);
         let ray = Mat4::from_cols_array_2d(&mirrored) * Vec4::new(0.0, 0.0, -1.0, 0.0);
         let reflected = Vec3::new(forward.x, -forward.y, forward.z);
         assert!((ray.truncate() - reflected).length() < 1e-5, "{ray}");
