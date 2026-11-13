@@ -440,6 +440,15 @@ fn file_facts(text: &str) -> Result<FileFacts<'_>, usize> {
                     }
                     start = use_tree(&tokens, start, end, &mut Vec::new(), &mut imports);
                 }
+                // `a::b::{self}` binds `b`, and `{self as x}` binds `x`, both to `a::b`.
+                for (path, local) in imports.iter_mut() {
+                    if path.len() >= 2 && path.last() == Some(&"self") {
+                        path.pop();
+                        if *local == "self" {
+                            *local = path[path.len() - 1];
+                        }
+                    }
+                }
             }
             Token::Ident("type") => {
                 // `type X = path::Y<…>;`: X names Y.
@@ -586,9 +595,13 @@ struct ModFacts<'t> {
     others: BTreeSet<&'t str>,
     /// The modules the mod declares, `mod x;` or `mod x { … }`.
     modules: BTreeSet<&'t str>,
-    /// The names some file brings in from the API: the local name of every `use` that starts at
-    /// an API root, and the roots themselves.
-    api_names: BTreeSet<&'t str>,
+    /// Every name a `use` anywhere in the mod binds, with each path it binds it to.
+    bindings: BTreeMap<&'t str, Vec<Vec<&'t str>>>,
+    /// The path of every glob import anywhere in the mod, `*` left out.
+    all_globs: Vec<Vec<&'t str>>,
+    /// Names no path inside the mod can make its own: the API's roots and every
+    /// `extern crate … as` name.
+    crate_names: BTreeSet<&'t str>,
 }
 
 fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
@@ -618,18 +631,38 @@ fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
         item_aliases: BTreeMap::new(),
         others: BTreeSet::new(),
         modules: BTreeSet::new(),
-        api_names: BTreeSet::new(),
+        bindings: BTreeMap::new(),
+        all_globs: Vec::new(),
+        crate_names: BTreeSet::new(),
     };
-    facts.api_names.extend(facts.roots.iter().copied());
+    facts.crate_names.extend(facts.roots.iter().copied());
+    for file in files {
+        for (path, name) in &file.imports {
+            if *name == "*" {
+                facts.all_globs.push(path[..path.len() - 1].to_vec());
+            } else {
+                facts.bindings.entry(name).or_default().push(path.clone());
+            }
+        }
+        for at in 0..file.tokens.len() {
+            if ident(&file.tokens, at) == Some("extern")
+                && ident(&file.tokens, at + 1) == Some("crate")
+                && let Some(name) = ident(&file.tokens, at + 2)
+            {
+                let local = match ident(&file.tokens, at + 3) {
+                    Some("as") => ident(&file.tokens, at + 4).unwrap_or(name),
+                    _ => name,
+                };
+                facts.crate_names.insert(local);
+            }
+        }
+    }
     for file in files {
         for (path, name) in &file.imports {
             if path.len() < 2 || !facts.roots.contains(path[0]) {
                 continue;
             }
             let last = path[path.len() - 1];
-            if *name != "*" {
-                facts.api_names.insert(name);
-            }
             if *name == "*" {
                 facts.globs.insert(path[1..path.len() - 1].join("::"));
                 continue;
@@ -862,21 +895,78 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
         .values()
         .flat_map(|paths| paths.iter().map(String::as_str))
         .collect();
-    // Whether a segment between `crate::` (or `super::`, `self::`) and the name certainly leads
-    // through the mod's own modules: a module the mod declares that no API import, renamed crate
-    // or API glob may stand for.
-    let own_segment = |segment: &str| {
-        matches!(segment, "super" | "self")
-            || (module.modules.contains(segment)
-                && !module.api_names.contains(segment)
-                && !module.globs.iter().any(|glob| {
-                    let module = if glob.is_empty() {
-                        format!("{segment}::")
-                    } else {
-                        format!("{glob}::{segment}::")
-                    };
-                    api_paths.iter().any(|path| path.starts_with(&module))
-                }))
+    // The modules a path inside the mod certainly leads through: the least set where a name is
+    // in when the mod declares it with `mod`, no API root or `extern crate` takes it, no API glob
+    // may hand over a module of that name, and every `use` anywhere that binds it certainly
+    // leads to the mod's own modules: its path starts at `crate`, `self` or `super` and every
+    // later segment is in the set (the bound name itself may end it: `use crate::world;`).
+    // Built in rounds, so a cycle of bindings stays out, and bounded, so a chain longer than
+    // the bound stays out too. A glob through a path that is not certainly the mod's own, or of
+    // a name the scan cannot follow, may bring in any module, and then no segment is own.
+    let segment_keyword = |segment: &str| matches!(segment, "crate" | "super" | "self");
+    let api_glob_module = |segment: &str| {
+        module.globs.iter().any(|glob| {
+            let module = if glob.is_empty() {
+                format!("{segment}::")
+            } else {
+                format!("{glob}::{segment}::")
+            };
+            api_paths.iter().any(|path| path.starts_with(&module))
+        })
+    };
+    let candidates: Vec<&str> = module
+        .modules
+        .iter()
+        .copied()
+        .filter(|name| !module.crate_names.contains(name) && !api_glob_module(name))
+        .collect();
+    let mut own_modules: BTreeSet<&str> = BTreeSet::new();
+    for _ in 0..MAX_USE_NESTING {
+        let more: Vec<&str> = candidates
+            .iter()
+            .copied()
+            .filter(|name| !own_modules.contains(name))
+            .filter(|name| {
+                module.bindings.get(name).into_iter().flatten().all(|path| {
+                    path.first().is_some_and(|first| segment_keyword(first))
+                        && path[1..].iter().enumerate().all(|(i, segment)| {
+                            segment_keyword(segment)
+                                || own_modules.contains(segment)
+                                || (i == path.len() - 2 && segment == name)
+                        })
+                })
+            })
+            .collect();
+        if more.is_empty() {
+            break;
+        }
+        own_modules.extend(more);
+    }
+    let globs_certain = module.all_globs.iter().all(|path| {
+        path.first()
+            .is_some_and(|first| module.roots.contains(first))
+            || (path.first().is_some_and(|first| segment_keyword(first))
+                && path[1..]
+                    .iter()
+                    .all(|segment| segment_keyword(segment) || own_modules.contains(segment)))
+    });
+    if !globs_certain {
+        own_modules.clear();
+    }
+    let own_segment =
+        |segment: &str| matches!(segment, "super" | "self") || own_modules.contains(segment);
+    // Whether a path written in `file` starting at `first` starts inside the mod: `crate`,
+    // `super`, `self`, or one of the mod's own modules that this file binds by a `use` or declares
+    // with `mod` (either shadows any crate of that name), in a file that is one scope.
+    let starts_own = |file: &FileFacts<'_>, first: &str| {
+        segment_keyword(first)
+            || (own_modules.contains(first)
+                && !file.inline_modules
+                && (file.imports.iter().any(|(_, local)| *local == first)
+                    || (1..file.tokens.len()).any(|at| {
+                        ident(&file.tokens, at) == Some(first)
+                            && ident(&file.tokens, at - 1) == Some("mod")
+                    })))
     };
     // Whether a name reached through a path inside the mod (`crate::`, `super::`, `self::`, then
     // `middle`) certainly means the mod's own type: every middle segment is the mod's own module,
@@ -904,7 +994,8 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
             && ((file.defines.contains(name) && !api_alias_here)
                 || file.imports.iter().any(|(path, local)| {
                     *local == name
-                        && matches!(path.first(), Some(&("crate" | "super" | "self")))
+                        && path.len() >= 2
+                        && starts_own(file, path[0])
                         && own_by_path(name, &path[1..path.len() - 1])
                 }))
     };
@@ -947,7 +1038,7 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                         self_own = Some(match &path[..] {
                             _ if name != *target => false,
                             [_] => own_in(file, name),
-                            ["crate" | "super" | "self", middle @ .., _] => {
+                            [first, middle @ .., _] if starts_own(file, first) => {
                                 own_by_path(name, middle)
                             }
                             _ => false,
@@ -1024,7 +1115,7 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                         .step_by(3)
                         .filter_map(|i| ident(tokens, i))
                         .collect();
-                    matches!(ident(tokens, start), Some("crate" | "super" | "self"))
+                    ident(tokens, start).is_some_and(|first| starts_own(file, first))
                         && own_by_path(name, &middle)
                 } else {
                     own_in(file, name)

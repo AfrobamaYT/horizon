@@ -1801,6 +1801,78 @@ fn a_path_inside_the_mod_is_its_own_only_through_modules_it_declares() {
         own,
         ("src/terrain.rs", make),
     ]));
+    // An API module bound through `{self}`, through a `use` from `crate::` that passes the renamed
+    // crate, or re-exported by one of the mod's own modules, while the mod declares its own
+    // `world` elsewhere.
+    let client = ("src/client/mod.rs", "mod world;");
+    for (lib, terrain) in [
+        ("use mod_api::world::{self};\nmod terrain;", &written),
+        ("use mod_api::world::{self};\nmod terrain;", &imported),
+        (
+            "use mod_api as api;\npub use crate::api::world;\nmod terrain;",
+            &written,
+        ),
+        (
+            "use mod_api as api;\npub use self::api::world;\nmod terrain;",
+            &written,
+        ),
+    ] {
+        refused_for_the_new_field(fits_a_new_dims_field(&[
+            ("src/lib.rs", lib),
+            client,
+            own,
+            ("src/terrain.rs", terrain),
+        ]));
+    }
+    let through_shim = format!("fn f() {{ let d = crate::shim::world::{DIMS_LITERAL}; }}");
+    refused_for_the_new_field(fits_a_new_dims_field(&[
+        (
+            "src/lib.rs",
+            "use mod_api::world as w;\nmod shim;\nmod terrain;",
+        ),
+        ("src/shim.rs", "pub use crate::w as world;"),
+        client,
+        own,
+        ("src/terrain.rs", &through_shim),
+    ]));
+    // A glob through a path that is not certainly the mod's own may bring in any module.
+    refused_for_the_new_field(fits_a_new_dims_field(&[
+        (
+            "src/lib.rs",
+            "use mod_api as api;\nuse crate::api::*;\nmod terrain;",
+        ),
+        client,
+        own,
+        ("src/terrain.rs", &written),
+    ]));
+    // The mod's own `world`, imported from inside the mod, stays its own; so does a glob of
+    // the mod's own module.
+    let own_world = (
+        "src/world.rs",
+        "pub struct DimensionSettings { pub mine: u8 }",
+    );
+    let built = "use crate::world;\nfn f() { let d = world::DimensionSettings { mine: 1 }; }";
+    let mine = |extra: &'static str| {
+        let mut made_for = base();
+        made_for.types.push(dims(&[]));
+        let uses = scan_files(
+            made_for,
+            &[("src/lib.rs", extra), own_world, ("src/terrain.rs", built)],
+        );
+        entry(&uses, "type:DimensionSettings").built
+    };
+    assert_eq!(mine("mod world;\nmod terrain;"), Some(Built::None));
+    assert_eq!(
+        mine("mod world;\nmod terrain;\nuse crate::world::*;\nuse super::*;"),
+        Some(Built::None)
+    );
+    // A cycle of bindings is not certain.
+    assert_eq!(
+        mine(
+            "mod world;\nmod terrain;\nmod a;\nmod b;\npub use crate::a::world;\npub use crate::b::world as w2;\npub use crate::w2 as world;"
+        ),
+        Some(Built::Full)
+    );
     // A segment the mod never declares as a module.
     let undeclared = format!("fn f() {{ let d = crate::util::{DIMS_LITERAL}; }}");
     refused_for_the_new_field(fits_a_new_dims_field(&[

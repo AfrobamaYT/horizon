@@ -47,3 +47,33 @@ Types are Rust API event field types, including their borrow lifetimes.
 | `return_ty` | Function return type, with `()` for no return value. |
 | `at_return` | Whether API listeners can run at the return. |
 | `api_refusal` | Reason API listeners are refused at registration, or `null` when an API record is available. |
+
+## Checking a mod against a build's surface
+
+The SDK catalog above and a build's surface export (`surface.json`) are separate documents. Given the surface
+of the build a mod was made for and the mod's folder, write the mod's uses table, then check it against
+another build's surface:
+
+```sh
+horizon-stage uses MADE_FOR_SURFACE MOD_DIR --json uses.json --made-for BUILD
+horizon-stage fits uses.json TARGET_SURFACE
+```
+
+`uses` prints each API item the mod uses with the place that brought it in, then how the mod builds each struct
+it builds with a literal. The table it writes records, per item, its hash at the made-for build. It also records
+the type's trait impls and the public paths the mod writes it by. For each struct the mod names, it records
+whether the mod builds it in full, with `..`, or not at all, and the field set when built in full. For a trait's
+member, it records every host trait in the mod's list that leads to the member's trait.
+
+`fits` exits 0 when the mod fits (`fits (N items, made for BUILD)`). It exits 1 when it does not, printing
+`does not fit: K of the N items it uses changed` and one line per changed item, for example
+``the method `PlayersHost::player` (removed)`` or
+``the type `DimensionSettings` gained the field `ultrawarm`, and `src/world.rs:12` builds it field by field``.
+It exits 2 when an input cannot be read or judged.
+
+The check is a scan of the mod's source, not a compiler. A name it cannot resolve with certainty counts as used
+and as built field by field, so doubt gives a refusal, never a wrong "fits". Some sources cannot be judged at
+all: a `use` statement nested deeper than 64 groups, a symbolic link, or a `#[path]` or `include!` that leaves
+the mod's folder or is computed. A mod with a `[native.*]` table or internals is made for exactly one build, and
+this check does not apply to it. A mod that fits is still compiled against the target build, and the binary
+built is exact to that build.
