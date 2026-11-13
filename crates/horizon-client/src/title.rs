@@ -1349,56 +1349,7 @@ impl Title {
             alert: None,
         });
     }
-    /// Polling is done once per rendered frame so filesystem work never blocks drawing.
-    pub fn poll_backup(&mut self) {
-        self.poll_realms();
-        self.poll_onboarding(std::time::Instant::now());
-        self.poll_account();
-        self.poll_optimize();
-        if !self.backup_shown.get() {
-            return;
-        }
-        let Some(receiver) = &self.backup else {
-            return;
-        };
-        let result = match receiver.try_recv() {
-            Ok(result) => result,
-            Err(mpsc::TryRecvError::Empty) => return,
-            Err(mpsc::TryRecvError::Disconnected) => Err("Backup worker stopped".into()),
-        };
-        self.backup = None;
-        if let Mode::Backup { world } = &self.mode {
-            let world = world.clone();
-            let folder = world.folder.clone();
-            if std::mem::take(&mut self.open_after_mods_backup) {
-                return self.mods_backup_done(world, result);
-            }
-            if std::mem::take(&mut self.restore_after_backup) {
-                // `makeBackupAndShowToast(..).thenAcceptAsync(..)` in attemptRestore: the restore
-                // runs, backup failed or not.
-                self.attempt_restore(world.clone());
-            } else if let Some(erase_cache) = self.optimize_after_backup.take() {
-                // `conditionallyMakeBackupAndShowToast(..).thenAcceptAsync(..)`: the toast shows
-                // and OptimizeWorldScreen opens, backup failed or not.
-                self.begin_optimize(world.clone(), erase_cache);
-            } else {
-                self.return_to_list(Some(&folder));
-            }
-            // EditWorldScreen opens the world after the backup, failed or not: through the
-            // checks WorldOpenFlows still has to make.
-            if let Some(stem_asked) = self.backup_then_open.take()
-                && let Action::Play { folder } = self.after_prompt(world.clone(), stem_asked)
-            {
-                self.open_request = Some(folder);
-            }
-            let toast = match result {
-                Ok((_, bytes)) => WorldToast::Created { folder, bytes },
-                Err(error) => WorldToast::Failed(error),
-            };
-            self.pending_toast = Some(toast);
-        }
-    }
-    /// A client-lib decision for the game to admit before applying it.
+
     pub fn take_pending_toast(&mut self) -> Option<crate::toasts::SystemToast> {
         let (title, message) = self.pending_toast.take()?.text();
         Some(crate::toasts::SystemToast::new(title, Some(message)))
