@@ -169,6 +169,7 @@ impl Game<'_> {
             limited_crafting: self.limited_crafting(),
             can_equip: None,
             known_recipes: Some(&self.level.recipe_book),
+            slot_rules: Some(self),
         }
     }
 
@@ -452,7 +453,7 @@ impl Game<'_> {
         let furnace = matches!(kind, Kind::Furnace(_));
         // CrafterBlockEntity.containerData: the disabled slots, then triggered.
         let crafter_data = match self.world.block_entities.get(&pos) {
-            Some(BlockEntity::Crafter(c)) => Some((c.disabled, c.triggered)),
+            Some(BlockEntity::Crafter(c)) => Some((c.disabled, c.is_triggered())),
             _ => None,
         };
         if host.hub.guests[gi].spectator() {

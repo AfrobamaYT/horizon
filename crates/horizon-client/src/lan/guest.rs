@@ -184,6 +184,9 @@ pub struct Guest {
     pub left_reason: String,
     /// A validated movement report the mods have not ruled on yet (`player_move`).
     pub pending_move: Option<super::hub::PendingMove>,
+    /// A disconnect was started ([`Guest::begin_disconnect`]); the connection closes when the
+    /// server next polls it, and until then no other disconnect is sent.
+    pub disconnect_pending: bool,
     pub uuid: u128,
     pub name: String,
     /// The profile's properties, for the player list (skins).
@@ -605,6 +608,19 @@ impl Guest {
         guest
     }
 
+    /// Sends the play disconnect with `reason` and keeps `text` (the reason as the log's
+    /// "lost connection" line gives it, as vanilla's), once: while the disconnect is pending a
+    /// second one is refused and the first reason stands. Whether this call started it.
+    pub fn begin_disconnect(&mut self, text: String, reason: horizon_core::nbt::Tag) -> bool {
+        if self.disconnect_pending {
+            return false;
+        }
+        self.disconnect_pending = true;
+        self.left_reason = text;
+        self.sender.disconnect(reason);
+        true
+    }
+
     pub fn participates_online(&self) -> bool {
         self.kind == GuestKind::Network
     }
@@ -666,6 +682,7 @@ impl Guest {
             center_sent: None,
             left_reason: String::new(),
             pending_move: None,
+            disconnect_pending: false,
             uuid: j.uuid,
             name: j.name,
             properties: j.properties,

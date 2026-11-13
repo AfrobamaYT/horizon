@@ -20,7 +20,10 @@ pub trait ChunkAccess {
     fn metadata(&self) -> &dyn BlockMetadata;
     /// `ChunkAccess.getPos`.
     fn pos(&self) -> ChunkPos;
-    /// The world's seed.
+    /// The id of the level this chunk belongs to (`mymod:pocket`), so one stateless generator
+    /// can tell the levels it serves apart.
+    fn level(&self) -> &str;
+    /// The level's seed: the world's seed.
     fn seed(&self) -> i64;
     /// The lowest block Y the terrain fills: the level's (`getMinY`), or with
     /// [`VanillaStages`] its noise settings', as vanilla's noise fill reads them.
@@ -72,7 +75,7 @@ pub struct VanillaStages {
 /// kept by the game; deterministic and stateless.
 pub trait ChunkGenerator: Send + Sync + 'static {
     /// `ChunkGenerator.buildTerrain`: write the terrain of `chunk`, which
-    /// starts as air. The same seed and chunk give the same blocks.
+    /// starts as air. The same level id, seed and chunk give the same blocks.
     fn build_terrain(&self, chunk: &mut dyn ChunkAccess);
     /// The vanilla stages the level runs after [`build_terrain`](Self::build_terrain),
     /// asked once, at registration. None by default.

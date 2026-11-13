@@ -186,6 +186,9 @@ impl ModuleCache {
                 }
                 .into());
             }
+            // Only a bounded child compile reports why caching is off; Windows has none (#2901).
+            #[cfg(not(unix))]
+            let _ = why;
             return Module::new(engine, bytes).map(|module| (module, Source::Compiled));
         }
         let path = self.entry_path(&Self::key(engine, bytes));

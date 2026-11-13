@@ -60,6 +60,7 @@ identities.
 |---|---|
 | `set_nickname(host, nickname)` | Changes the name shown in chat and the Tab list; `None` restores the account name. Commands, selectors, logs and events use the real name. Validate the nickname's length, filtering and conflicts yourself. |
 | `set_sleep_ignored(host, ignored)` | Controls exclusion from the sleep count. |
+| `disconnect(host, reason)` | Disconnects the player with a `Text` reason, as `/kick` does, also inside their own hook or a payload handler (the connection closes after it). Answers `false` for a stale or unavailable handle, a fake player, the single-player owner and a player already being disconnected (the first reason stands). A reason the `Text` form checks refuse returns `TextFormError` before anything changes. |
 | `hide(host, permission)` | Hides the player from players below the supplied permission level, starting next tick; `None` restores visibility. Hidden players disappear from the world and Tab list, and their join and leave messages are suppressed for those viewers. |
 
 Nickname and sleep settings require an online player. These settings survive
@@ -82,5 +83,7 @@ Reads accept `Host`; writes accept `ServerHost`.
 | `sleep_ignored(host)` | Reads the sleep-count exclusion setting. |
 | `counts_for_sleep(host)` | Reports whether the player counts toward the night skip. |
 | `sleep_timer(host)` / `set_sleep_timer(host, ticks)` | Reads or writes `Player.sleepCounter`, from 0 to 109; 100 means slept long enough. The write refuses larger values, fake players, guests in another level and stale players. |
+
+A second disconnect on a guest already leaving is a no-op and keeps the first reason.
 
 Vetoing a player's movement: the `player_move` hook hears each validated movement report whose position or rotation differs from the accepted one, after the server's own checks and before the report is committed, with the exact `from`, `to` and both rotations. Set `cancel` and the report is not applied; the client is sent back to the accepted position and rotation, and the veto never counts against the player in the anticheat. The engine applies no threshold, so a mod that wants to ignore small moves compares the two positions itself (`(to - from).length() < 1.0 / 16.0` skips anything under 1/16 of a block). While a report waits for the mods, that player's later reports wait behind it in order; a report no mod has ruled on within 20 ticks is dropped with the correction, and a disconnect, teleport or level change drops it cleanly. Not heard: a player's first move after joining, a player riding something (`vehicle_moved` hears the vehicle) and any teleport, the veto's own correction included. With no listener nothing is held or copied; with one, the cost is a held report for each moving player a tick.

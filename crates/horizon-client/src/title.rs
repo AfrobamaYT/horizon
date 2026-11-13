@@ -35,10 +35,12 @@ mod splash;
 mod tests;
 mod world_folder;
 pub mod world_management;
+mod world_toast;
 pub use buffet::State as BuffetEditor;
 pub use create_world::{DIFFICULTIES, WorldOptions};
 pub use flat::{FlatLayer, FlatSettings, State as FlatEditor};
 pub use onboarding::Onboarding;
+use world_toast::WorldToast;
 
 /// SelectWorldScreen's `HeaderAndFooterLayout(8 + 9 + 8 + 20 + 4, 60)`.
 const LIST_TOP: f32 = 49.0;
@@ -156,37 +158,6 @@ fn translate(key: &str, fallback: &str, args: &[&dyn std::fmt::Display]) -> Stri
         .map(|arg| Text::literal(arg.to_string()))
         .collect();
     format_translation(&lang::get_or(key, fallback), &args).plain()
-}
-
-enum WorldToast {
-    Created {
-        folder: String,
-        bytes: u64,
-    },
-    Failed(String),
-    /// `SystemToast.onWorldAccessFailure`: the folder of a world that couldn't be locked.
-    AccessFailure(String),
-}
-impl WorldToast {
-    fn text(&self) -> (Text, Text) {
-        match self {
-            Self::Created { folder, bytes } => (
-                Text::tr("selectWorld.edit.backupCreated", &[folder]),
-                Text::tr(
-                    "selectWorld.edit.backupSize",
-                    &[&((*bytes as f64 / 1_048_576.0).ceil() as u64)],
-                ),
-            ),
-            Self::Failed(error) => (
-                Text::translate("selectWorld.edit.backupFailed", &[]),
-                Text::literal(error),
-            ),
-            Self::AccessFailure(folder) => (
-                Text::translate("selectWorld.access_failure", &[]),
-                Text::literal(folder),
-            ),
-        }
-    }
 }
 
 /// Why `WorldOpenFlows.askForBackup` asks before a world opens.

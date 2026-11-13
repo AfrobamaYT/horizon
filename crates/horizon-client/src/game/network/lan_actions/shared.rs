@@ -13,9 +13,8 @@ pub(super) struct GuestPlay {
     mining: Option<Mining>,
     destroy_delay: u32,
     using: Option<(usize, u32)>,
-    use_item: Option<ItemStack>,
     use_duration: i32,
-    use_ticks_set: bool,
+    use_start: super::using_item::UseStart,
     use_delay: u32,
     /// The shield's ItemCooldowns entry: an axe disabled it for this many ticks.
     pub(super) shield_cooldown: u32,
@@ -173,9 +172,8 @@ pub(super) struct GuestSwap {
     mining: Option<Mining>,
     destroy_delay: u32,
     using: Option<(usize, u32)>,
-    use_item: Option<ItemStack>,
     use_duration: i32,
-    use_ticks_set: bool,
+    use_start: super::using_item::UseStart,
     use_delay: u32,
     pub(super) shield_cooldown: u32,
     /// The guest's item cooldowns (`Game::cooldowns` for its turn).
@@ -283,6 +281,7 @@ impl GuestPlay {
 struct ItemRules<'a>(
     &'a horizon_client::items::Items,
     &'a horizon_client::enchant::Enchantments,
+    Option<&'a dyn horizon_client::menu::SlotRules>,
 );
 impl Rules for ItemRules<'_> {
     fn items(&self) -> &horizon_client::items::Items {
@@ -293,6 +292,9 @@ impl Rules for ItemRules<'_> {
     }
     fn max_stack(&self, item: &str) -> u32 {
         self.0.get(item).map_or(64, |i| i.max_stack)
+    }
+    fn slot_rules(&self) -> Option<&dyn horizon_client::menu::SlotRules> {
+        self.2
     }
 }
 
@@ -531,11 +533,7 @@ mod tests {
         struct Part;
         #[mod_api::horizon_part]
         impl MenuPart for Part {
-            fn menu_slot_rules(
-                &self,
-                _: &dyn mod_api::LoopContext,
-                event: &mut MenuSlotRulesEvent<'_>,
-            ) {
+            fn menu_slot_rules(&self, _: &dyn mod_api::Host, event: &mut MenuSlotRulesEvent<'_>) {
                 if mod_api::__private::item_key_id(event.stack.item()).unwrap()
                     == "minecraft:granite"
                     && event.stack.count() < 8

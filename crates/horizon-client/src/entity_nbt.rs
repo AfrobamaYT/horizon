@@ -975,11 +975,11 @@ pub fn mob_to_nbt(
             }
         }
         "minecraft:piglin" | "minecraft:piglin_brute" | "minecraft:hoglin" => {
-            // Only Piglin.addAdditionalSaveData writes CannotHunt, always.
             if id == "minecraft:piglin_brute" {
                 map.remove(&"CannotHunt".into());
             } else if id == "minecraft:piglin" {
-                map.entry("CannotHunt".into()).or_insert(Tag::Byte(0));
+                let hunt = m.extra.piglin.cannot_hunt as i8;
+                map.insert("CannotHunt".into(), Tag::Byte(hunt));
             }
             map.insert(
                 "IsImmuneToZombification".into(),
@@ -1788,8 +1788,8 @@ fn mob_from_nbt_at(
             let (Some(id), Some(v)) = (text(a.get("id")), float(a.get("base"))) else {
                 continue;
             };
-            // A mount's rolled health and speed stay attribute bases, which
-            // the server syncs (its hearts over the rider's hotbar).
+            let v = m.kind.attribute_bounds.loaded_base(&id, v);
+            // A mount's rolled health and speed stay attribute bases, which the server syncs.
             let equine = crate::mobs::equine::is_equine(m.species());
             match id.as_str() {
                 "minecraft:max_health" if equine => crate::mobs::finalize::set_base(
@@ -2967,8 +2967,8 @@ pub fn arrow_to_nbt(
         put(&mut tag, key, value);
     }
     if let Tag::Compound(map) = &mut tag {
-        map.entry("SoundEvent".into())
-            .or_insert_with(|| string("minecraft:entity.arrow.hit"));
+        let sound = a.saved_sound_event(map.get(&"SoundEvent".into()));
+        map.insert("SoundEvent".into(), sound);
         // Projectile: LeftOwner only when set; Owner as the UUID.
         map.remove(&"LeftOwner".into());
         map.remove(&"inBlockState".into());
@@ -3058,7 +3058,7 @@ pub fn arrow_from_nbt(
         a.spectral_duration = number(tag.get("Duration")).unwrap_or(200) as i32;
     }
     a.pickup_item = item;
-    a.fired_from_weapon = tag.get("weapon").and_then(item_from_nbt);
+    a.load_weapon_and_sound(tag, item_from_nbt);
     p.stuck = a.in_ground;
     Some((p, tag.get("inBlockState").cloned()))
 }
