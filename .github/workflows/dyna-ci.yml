@@ -416,7 +416,10 @@ jobs:
             exit 1
           fi
           rustup target add x86_64-pc-windows-gnu
-          check --target x86_64-pc-windows-gnu --features system-allocator
+          # The real build is a dylib, which Cargo never LTOs; a --lib check under the release profile's thin LTO
+          # builds the dependencies for linker-plugin LTO, which rustc refuses with prefer-dynamic on Windows.
+          # A check generates no code, so LTO changes no warning or cfg it reports.
+          check --target x86_64-pc-windows-gnu --features system-allocator --config profile.release.lto=false
       - name: Propagate formatting failure
         if: ${{ always() && steps.formatting.outcome == 'failure' }}
         run: |
