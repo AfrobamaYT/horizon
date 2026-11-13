@@ -2427,6 +2427,7 @@ dependencies = [
  "horizon-client-core",
  "horizon-core",
  "horizon-guest-stack",
+ "horizon-java-properties",
  "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",

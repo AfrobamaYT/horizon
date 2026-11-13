@@ -8,6 +8,7 @@ pub(crate) struct Installed {
     pub(crate) recipe_book_types: HashMap<String, String>,
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,
+    pub(crate) custom_stats: Vec<String>,
     pub(crate) game_rule_slots: Vec<u32>,
     pub(crate) keys: Parts,
     pub(crate) tags: TagParts,

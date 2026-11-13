@@ -25,6 +25,8 @@ pub use replace::own_average;
 pub use shutdown::on_shutdown;
 pub use turn::turn_angle;
 
+mod strict_math_checks;
+
 #[derive(Default)]
 pub struct Mod;
 
@@ -47,6 +49,10 @@ impl Hooks for Mod {
         host: &dyn mod_api::ClientHost,
         event: &mut mod_api::TickTargetMillisEvent,
     ) {
+        if event.millis == -2.0 {
+            event.millis = strict_math_checks::check_vectors() as f32;
+            return;
+        }
         let profile = host.math_profile();
         assert_eq!(profile, host.math_profile());
         event.millis = match profile {
@@ -56,6 +62,27 @@ impl Hooks for Mod {
             mod_api::MathProfile::StrictMath => 4.0,
             _ => panic!("fixture does not support the new math profile"),
         };
+    }
+
+    fn player_stat_award(
+        &self,
+        _: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::PlayerStatAwardEvent<'_>,
+    ) -> mod_api::Flow {
+        // A named acceptance actor keeps this fixture inert for unrelated Game tests.
+        if event.name != "stat_award_fixture" {
+            return mod_api::Flow::Continue;
+        }
+        if event.stat_type.as_str() == "minecraft:mined" && event.stat.as_str() == "minecraft:stone"
+        {
+            event.value *= 2;
+        } else if event.stat_type.as_str() == "minecraft:custom"
+            && event.stat.as_str() == "minecraft:jump"
+        {
+            *event.stat = "wasm_fixture:steps".into();
+            event.value = 3;
+        }
+        mod_api::Flow::Continue
     }
 
     fn server_tick(
@@ -240,6 +267,7 @@ impl Hooks for Mod {
         interaction::register(registrar);
         cauldron::register(registrar);
         tick_reply::register(registrar);
+        registrar.register_custom_stat("steps").unwrap();
         registrar
             .declare_datapack_registry(
                 "spell",
