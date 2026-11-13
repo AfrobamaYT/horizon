@@ -14468,15 +14468,7 @@ fn load_world_rest(
         renderer.add_mod_signs(facts, registry);
         Ok(renderer)
     };
-    let load_animate = || -> Result<_> {
-        let _step = startup::step("rest.animate_fog");
-        let animate = if draws {
-            horizon_client::animate_tick::AnimateTables::load(root, registry)?
-        } else {
-            Default::default()
-        };
-        Ok((animate, horizon_client::fog::FogTables::load(root, biomes)))
-    };
+    let load_animate = || resource_tables::load_animate_tables(root, registry, draws, biomes);
     let load_mobs = || -> Result<_> {
         let _step = startup::step("rest.mobs");
         let catalog = &resources.motion().attributes;
