@@ -27,12 +27,7 @@ impl GameLevel<'_> {
         face_solid: bool,
         vanilla: bool,
     ) -> bool {
-        if !self.native_authoritative
-            || !crate::game::api_values::block_state::block_listens(
-                mod_api::HookId::CanBeConnectedTo,
-                state,
-            )
-        {
+        if !self.native_authoritative {
             return vanilla;
         }
         let mut answer = None;

@@ -141,10 +141,10 @@ mod update;
 mod weather;
 
 #[cfg(test)]
-mod fertile_tests;
-#[cfg(test)]
 #[path = "tests/connections.rs"]
 mod connection_tests;
+#[cfg(test)]
+mod fertile_tests;
 #[cfg(test)]
 mod fire_tests;
 #[cfg(test)]
