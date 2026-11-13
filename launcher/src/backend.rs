@@ -55,6 +55,7 @@ pub struct Release {
     pub nightly: Option<String>,
 }
 
+mod play_log;
 mod release_assets;
 pub use release_assets::PLATFORMS;
 
@@ -4106,12 +4107,7 @@ pub fn spawn(job: Job, cmd: Command, tx: Sender<Msg>) -> Result<Running, String>
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = crate::run_leases::spawn(&mut cmd, true).map_err(|error| {
-        crate::i18n::trf(
-            "Could not complete game launch: {error}",
-            &[("error", &error.to_string())],
-        )
-    })?;
+    let mut child = play_log::spawn(&mut cmd)?;
     let stdin = child.stdin.take();
     let mut readers = Vec::new();
     let out = child
