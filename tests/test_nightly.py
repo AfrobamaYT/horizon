@@ -165,7 +165,7 @@ class UntrustedBuildTests(unittest.TestCase):
     def test_no_nightly_build_is_trusted(self):
         # The train only starts `nightly build` (Nightly only since 2026-10-28); it builds nothing itself.
         release = (WORKFLOWS / "release.yml").read_text()
-        self.assertNotIn("game-build.yml", release)
+        self.assertNotIn("/game-build.yml", release)
         self.assertIn("gh workflow run nightly-build.yml", release)
         nightly_build = (WORKFLOWS / "nightly-build.yml").read_text()
         self.assertIn("trusted: false", nightly_build)

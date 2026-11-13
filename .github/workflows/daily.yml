@@ -183,8 +183,10 @@ jobs:
   nightly:
     needs: [resolve, summary, sdk-publish]
     if: needs.summary.outputs.green == 'true' && needs.resolve.outputs.dry_run == 'false'
+    # What release.yml's jobs ask for, nightly or snapshot alike: GitHub checks every called job's permissions at
+    # startup, skipped ones too (tests/test_ci_call_permissions.py). The nightly's own jobs still get read only.
     permissions:
-      contents: read
+      contents: write  # release.yml's snapshot SDK publish (never runs here: kind nightly)
       issues: read
       actions: write  # release.yml starts `nightly build`
     uses: ./.github/workflows/release.yml

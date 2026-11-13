@@ -16,7 +16,7 @@ class SdkPublishTests(unittest.TestCase):
         self.assertEqual(publishers, ["sdk-publish.yml"])
         callers = sorted(path.name for path in WORKFLOWS.glob("*.yml")
                          if "uses: ./.github/workflows/sdk-publish.yml" in path.read_text())
-        self.assertEqual(callers, ["daily.yml", "prebuilt-game.yml"])
+        self.assertEqual(callers, ["daily.yml", "prebuilt-game.yml", "release.yml"])
 
     def test_one_step_refuses_an_incomplete_set_and_never_replaces_a_release(self):
         workflow = load("sdk-publish.yml")

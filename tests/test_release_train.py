@@ -423,16 +423,35 @@ class ReleaseTrainTests(unittest.TestCase):
                 git("tag", "-d", "daily-green")
                 with self.assertRaisesRegex(SystemExit, "no `daily-green` tag yet"):
                     train.channel_head("nightly", "")
-        green = {"workflow_runs": [dict(head_sha="s", head_branch="main", event="push", id=7)]}
-        gates = [{"jobs": [dict(name=name, status="completed", conclusion="success")
-                           for name in ("lint", "verify", "verify-static", "launcher")]}]
-        with mock.patch.object(train, "REPO", "arismoko/horizon"), \
-                mock.patch.object(train, "gh_json", side_effect=[[green], gates]):
-            self.assertEqual(train.channel_head("snapshot", "s"), "s", "a snapshot needs the gate only")
-        with mock.patch.object(train, "REPO", "arismoko/horizon"), \
-                mock.patch.object(train, "gh_json", side_effect=[[green], [{"jobs": gates[0]["jobs"][:3]}]]):
-            with self.assertRaisesRegex(SystemExit, "a snapshot needs the gate green"):
-                train.channel_head("snapshot", "s")
+                # A snapshot: main's head by default, or any commit of main, with the gate green on it.
+                git("update-ref", "refs/remotes/origin/main", commits[1])
+                head = commits[1]
+                green = {"workflow_runs": [dict(head_sha=head, head_branch="main", event="push", id=7)]}
+                done = dict(status="completed", conclusion="success")
+                gates = [{"jobs": [dict(name=name, **done) for name in ("lint", "verify", "verify-static", "launcher")]}]
+                with mock.patch.object(train, "REPO", "arismoko/horizon"), \
+                        mock.patch.object(train, "gh_json", side_effect=[[green], gates]):
+                    self.assertEqual(train.channel_head("snapshot", ""), head, "a snapshot needs the gate only")
+                with mock.patch.object(train, "REPO", "arismoko/horizon"), \
+                        mock.patch.object(train, "gh_json", side_effect=[[green], [{"jobs": gates[0]["jobs"][:3]}]]):
+                    with self.assertRaisesRegex(SystemExit, "a snapshot needs the gate green"):
+                        train.channel_head("snapshot", head)
+                pending = [{"jobs": gates[0]["jobs"][:3] + [dict(name="launcher", status="in_progress", conclusion=None)]}]
+                with mock.patch.object(train, "REPO", "arismoko/horizon"), \
+                        mock.patch.object(train, "gh_json", side_effect=[[green], pending]):
+                    with self.assertRaisesRegex(SystemExit, "a snapshot needs the gate green"):
+                        train.channel_head("snapshot", head)
+                # Not on main (newer than main's head here), or not a commit: refused before any gate lookup.
+                with mock.patch.object(train, "gh_json", side_effect=AssertionError("no lookup")):
+                    with self.assertRaisesRegex(SystemExit, "is not on main"):
+                        train.channel_head("snapshot", commits[2])
+                    with self.assertRaisesRegex(SystemExit, "not a commit of this repository"):
+                        train.channel_head("snapshot", "f" * 40)
+
+    def test_a_snapshot_is_tagged_by_kind_date_and_commit(self):
+        sha = "0c02067" + "a" * 33
+        self.assertEqual(train.build_tag("snapshot", "2026-11-13", sha), "snapshot-2026-11-13-0c02067")
+        self.assertEqual(train.build_tag("nightly", "2026-11-13", sha), "nightly-2026-11-13-0c02067")
 
     def test_a_release_is_published_only_after_its_smoke_test_and_with_no_blocker(self):
         drew = {"error": None, "frames": 12710, "chunks": 81, "meshed_sections": 550, "player": [160.5, 71.0, 156.5]}
