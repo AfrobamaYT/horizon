@@ -3411,11 +3411,11 @@ impl Game<'_> {
                 d.on_ground = on_ground;
                 return;
             }
-            if let Some(i) = self.falling.iter().position(|f| f.id == id as u32) {
+            if let Some(i) = self.falling.iter().rposition(|f| f.id == id as u32) {
                 self.falling.update(i, |f| f.position = at);
                 return;
             }
-            if let Some(t) = self.tnts.iter_mut().find(|t| t.id == id as u32) {
+            if let Some(t) = self.tnts.iter_mut().rev().find(|t| t.id == id as u32) {
                 t.position = at;
                 t.on_ground = on_ground;
                 return;
@@ -3849,20 +3849,7 @@ impl Game<'_> {
                 }
             }
             C::PlayerPosition(p) => self.remote_teleport(&p)?,
-            C::PlayerRotation(p) => {
-                self.yaw = if p.relative_yaw {
-                    self.yaw + p.yaw
-                } else {
-                    p.yaw
-                };
-                self.pitch = (if p.relative_pitch {
-                    self.pitch + p.pitch
-                } else {
-                    p.pitch
-                })
-                .clamp(-90.0, 90.0);
-                self.snap_player_model_pitch();
-            }
+            C::PlayerRotation(p) => self.remote_rotation(&p),
             C::PlayerLookAt(p) => self.remote_look_at(&p),
             // ClientCommonPacketListenerImpl.handlePostEffects.
             C::PostEffects(p) => self.post_effects = p.effects,
@@ -4013,6 +4000,7 @@ impl Game<'_> {
                     Holder::Entity(p.id as u32)
                 };
                 self.initialize_entity(holder, &kind);
+                let replace = self.tracks_remote_entity(p.id);
                 self.spawn_entity(p.id, &kind, p.position, rotation);
                 if let Some(r) = self.remote.as_mut() {
                     r.cart_lerps.remove(&p.id);
@@ -4025,7 +4013,7 @@ impl Game<'_> {
                     (rotation[0], rotation[1]),
                     p.data,
                 ) {
-                    self.spawn_remote_projectile(&kind, &p, (rotation[0], rotation[1]));
+                    self.spawn_added_projectile(&p, &kind, (rotation[0], rotation[1]), replace);
                 }
                 // Entity.recreateFromPacket: objects must exist before applying motion.
                 self.remote_motion(p.id, p.velocity);
@@ -6299,14 +6287,16 @@ impl Game<'_> {
     fn remote_motion(&mut self, id: i32, velocity: [f64; 3]) {
         self.remote_dragon_motion(id, velocity);
         let v = Vec3::new(velocity[0], velocity[1], velocity[2]);
+        // `falling` and `tnts` are searched from the back: AddEntity calls this right after
+        // appending the block or TNT, so a spawn doesn't walk the whole list.
         if let Some(m) = self.mob_index.get_mut(&mut self.mobs, id as u32) {
             // Squid.aiStep derives its body pitch and roll from network motion.
             m.velocity = v;
         } else if let Some(d) = self.dropped.iter_mut().find(|d| d.id == id as u32) {
             d.velocity = v;
-        } else if let Some(i) = self.falling.iter().position(|f| f.id == id as u32) {
+        } else if let Some(i) = self.falling.iter().rposition(|f| f.id == id as u32) {
             self.falling.update(i, |f| f.velocity = v);
-        } else if let Some(t) = self.tnts.iter_mut().find(|t| t.id == id as u32) {
+        } else if let Some(t) = self.tnts.iter_mut().rev().find(|t| t.id == id as u32) {
             t.velocity = v;
         } else if let Some(o) = self.orbs.iter_mut().find(|o| o.id == id as u32) {
             o.velocity = v;

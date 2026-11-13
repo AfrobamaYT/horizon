@@ -9,6 +9,9 @@ use horizon_core::random::{LegacyRandom, LevelRandom};
 use horizon_world::registry::BlockStateId;
 use std::sync::Arc;
 
+mod pending_entity;
+pub use pending_entity::{EntityLoadReason, PendingEntity};
+
 mod modified;
 pub use modified::ModifiedChunks;
 
@@ -95,7 +98,7 @@ pub struct World {
     /// set. An index that no longer holds its position (drained, rolled back) is ignored.
     pub light_checks: crate::fast_hash::FxHashMap<(i32, i32, i32), usize>,
     /// Saved entities of chunks that just loaded, spawned by the game.
-    pub loaded_entities: Vec<((i32, i32), Vec<horizon_core::nbt::Tag>)>,
+    pub loaded_entities: Vec<((i32, i32), Vec<PendingEntity>)>,
     /// Chunks loaded since the level's last pass, their entity sections not
     /// ready yet (`PersistentEntitySectionManager`'s PENDING), empty ones too:
     /// the pass ends by readying them (`processPendingLoads`).
@@ -255,6 +258,11 @@ impl World {
                 .unload(|p| (p.0 >> 4, p.2 >> 4) == chunk && !incoming.contains(p));
         }
         self.block_entities.load_chunk(entities);
+    }
+    /// Queue ordinary NBT; transient transfer state is never decoded from it.
+    pub fn queue_entity_nbt(&mut self, key: (i32, i32), tags: Vec<horizon_core::nbt::Tag>) {
+        self.loaded_entities
+            .push((key, tags.into_iter().map(PendingEntity::from).collect()));
     }
 
     pub fn new(air: BlockStateId, seed: i64) -> Self {

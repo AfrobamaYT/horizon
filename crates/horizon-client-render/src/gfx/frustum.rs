@@ -86,6 +86,24 @@ impl JoinedFrusta {
     pub fn contains(&self, min: Vec3, max: Vec3) -> bool {
         self.camera.contains(min, max) || self.views().iter().any(|f| f.contains(min, max))
     }
+    /// `Frustum::contains_point` for the camera's frustum or a view's.
+    pub fn contains_point(&self, point: Vec3) -> bool {
+        self.camera.contains_point(point) || self.views().iter().any(|f| f.contains_point(point))
+    }
+    /// Each of them seen from a camera moved `blocks` back (`Frustum::pulled_back`).
+    pub fn pulled_back(&self, blocks: f32) -> Self {
+        Self {
+            camera: self.camera.pulled_back(blocks),
+            views: self.views.map(|f| f.pulled_back(blocks)),
+            len: self.len,
+        }
+    }
+}
+/// The camera's frustum alone, with no world views.
+impl From<Frustum> for JoinedFrusta {
+    fn from(camera: Frustum) -> Self {
+        Self::new(camera, [])
+    }
 }
 impl Cull for JoinedFrusta {
     fn intersects(&self, min: Vec3, max: Vec3) -> bool {

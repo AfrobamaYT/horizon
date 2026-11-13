@@ -1449,6 +1449,7 @@ mod tests {
                             ticks: 0,
                             playing: false,
                             song_clock_present: false,
+                            loaded_clock: false,
                         },
                     ),
                 );

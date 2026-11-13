@@ -232,19 +232,19 @@ pub fn vanilla_sea_level(level: LevelKey) -> i32 {
     }
 }
 
-/// The sea levels of the levels a mod registered, from the noise settings their stems name, by
-/// level key: set at each world's load (`set_sea_levels`), as the dimension types' facts are.
+/// The sea level each level's generator builds with (`ChunkGenerator.getSeaLevel`), by level key.
+/// Filled when a world opens from the noise settings its data packs replace (`set_sea_levels`),
+/// and by each level's generator as it opens (`register_sea_level`).
 static SEA_LEVELS: std::sync::LazyLock<RwLock<HashMap<LevelKey, i32>>> =
     std::sync::LazyLock::new(Default::default);
 
-/// Replaces the registered levels' sea levels, at a world's load.
+/// Replaces every registered sea level, as a world opens.
 pub fn set_sea_levels(levels: Vec<(LevelKey, i32)>) {
     *SEA_LEVELS.write().unwrap_or_else(|e| e.into_inner()) = levels.into_iter().collect();
 }
 
-/// Registers one level's sea level, as a server told a client the level of a mod or a data pack
-/// has (`CommonPlayerSpawnInfo.seaLevel`); the levels of a world's own load are set by
-/// `set_sea_levels`.
+/// Registers one level's sea level: its generator's, or the one a server sent
+/// (`CommonPlayerSpawnInfo.seaLevel`).
 pub fn register_sea_level(level: LevelKey, sea_level: i32) {
     SEA_LEVELS
         .write()
