@@ -231,7 +231,12 @@ fn creator_flags_remain_cloexec_until_child_callback() {
                     0
                 };
                 let mut record = [0u8; 16];
-                for (slot, value) in record.chunks_exact_mut(4).zip([fd, before, after, errno]) {
+                for (slot, value) in record
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .zip([fd, before, after, errno])
+                {
                     slot.copy_from_slice(&value.to_ne_bytes());
                 }
                 if libc::write(
@@ -255,11 +260,15 @@ fn creator_flags_remain_cloexec_until_child_callback() {
     let mut bytes = Vec::new();
     observations.read_to_end(&mut bytes).unwrap();
     let records: Vec<Vec<i32>> = bytes
-        .chunks_exact(16)
+        .as_chunks::<16>()
+        .0
+        .iter()
         .map(|record| {
             record
-                .chunks_exact(4)
-                .map(|word| i32::from_ne_bytes(word.try_into().unwrap()))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|word| i32::from_ne_bytes(*word))
                 .collect()
         })
         .collect();
