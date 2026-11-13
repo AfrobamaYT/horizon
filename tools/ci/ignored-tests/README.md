@@ -30,3 +30,10 @@ longer runs fails. Its package's shard runs it when that shard builds its target
 every other one; verify-static fails a row no leg runs. `python3 tools/ci/move_to_daily.py apply LIST` writes the
 attribute and the row (its docstring has the list format). The attribute is the source's mark and the row is the
 daily run's list of what must run: an attribute without a row in a package no shard covers would run nowhere.
+verify-static also checks both directions statically: a `#[ignore = "daily"]` function with no row, or a row with no
+such function, fails (`check_ignored_test_rows.py`; matched by package and function name).
+
+`verify` times its test binaries (`tools/ci/run_test_binaries.py --time-limits 2,5`): a test over 5 s fails by name,
+one over 2 s only warns, so it stays until someone moves it. The times are wall time with three binaries and their
+test threads running at once, not isolated measurements. Documentation examples and `verify`'s Python steps are not
+timed.
