@@ -77,6 +77,8 @@ pub fn sin(x: f64) -> f64 {
         return sin_kernel(x, 0.0, false);
     }
     if ix >= 0x7ff0_0000 {
+        // The reference uses self-subtraction to propagate NaNs and invalidate infinity.
+        #[allow(clippy::eq_op)]
         return x - x;
     }
     let (n, y0, y1) = rem_pio2(x);
@@ -95,6 +97,8 @@ pub fn cos(x: f64) -> f64 {
         return cos_kernel(x, 0.0);
     }
     if ix >= 0x7ff0_0000 {
+        // The reference uses self-subtraction to propagate NaNs and invalidate infinity.
+        #[allow(clippy::eq_op)]
         return x - x;
     }
     let (n, y0, y1) = rem_pio2(x);
@@ -113,6 +117,8 @@ pub fn tan(x: f64) -> f64 {
         return tan_kernel(x, 0.0, 1);
     }
     if ix >= 0x7ff0_0000 {
+        // The reference uses self-subtraction to propagate NaNs and invalidate infinity.
+        #[allow(clippy::eq_op)]
         return x - x;
     }
     let (n, y0, y1) = rem_pio2(x);
@@ -269,6 +275,8 @@ fn rem_pio2(x: f64) -> (i32, f64, f64) {
         return if hx < 0 { (-n, -y0, -y1) } else { (n, y0, y1) };
     }
     if ix >= 0x7ff0_0000 {
+        // The reference uses self-subtraction to propagate NaNs and invalidate infinity.
+        #[allow(clippy::eq_op)]
         return (0, x - x, x - x);
     }
 
