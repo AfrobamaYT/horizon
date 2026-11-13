@@ -234,7 +234,7 @@ mod section_fade;
 #[cfg(test)]
 mod sprite_arrays_tests;
 mod terrain_model;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) mod test_gpu;
 mod weather;
 mod world_text;
