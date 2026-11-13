@@ -107,12 +107,23 @@ fn sided_composter_transactions_preserve_literal_chance_and_defer_all_effects() 
                 let output = level
                     .capability(game, &mod_api::ITEMS, POS, Some(Direction::Down))
                     .unwrap();
+                let storage_input = level
+                    .capability(game, &mod_api::STORAGE, POS, Some(Direction::Up))
+                    .unwrap();
+                let storage_output = level
+                    .capability(game, &mod_api::STORAGE, POS, Some(Direction::Down))
+                    .unwrap();
                 for face in [
                     Direction::North,
                     Direction::South,
                     Direction::West,
                     Direction::East,
                 ] {
+                    assert!(
+                        level
+                            .capability(game, &mod_api::STORAGE, POS, Some(face))
+                            .is_none()
+                    );
                     assert!(
                         level
                             .capability(game, &mod_api::ITEMS, POS, Some(face))
@@ -124,6 +135,11 @@ fn sided_composter_transactions_preserve_literal_chance_and_defer_all_effects() 
                 game.options.dedicated = Some(Vec::new());
                 let bone = resource("minecraft:bone_meal");
                 let stone = resource("minecraft:stone");
+                assert_eq!(storage_input.amount(game, &seeds), Ok(0));
+                assert_eq!(storage_input.space_for(game, &seeds), Ok(1));
+                assert_eq!(storage_input.space_for(game, &stone), Ok(0));
+                assert_eq!(storage_output.amount(game, &bone), Ok(0));
+                assert_eq!(storage_output.space_for(game, &seeds), Ok(0));
                 assert_eq!(input.size(game), 1);
                 assert_eq!(unsided.size(game), 1);
                 assert_eq!(output.size(game), 1);
@@ -141,6 +157,10 @@ fn sided_composter_transactions_preserve_literal_chance_and_defer_all_effects() 
                     assert_eq!(output.insert(game, tx, 0, &seeds, 64), 0);
                     assert_eq!(input.extract(game, tx, 0, &seeds, 64), 0);
                     assert!(!input.set_max_stack_size(game, tx, 64));
+                    assert_eq!(storage_input.insert(game, tx, &stone, 64), 0);
+                    assert_eq!(storage_input.insert(game, tx, &seeds, 0), 0);
+                    assert_eq!(storage_output.insert(game, tx, &seeds, 64), 0);
+                    assert_eq!(storage_input.extract(game, tx, &seeds, 64), 0);
                     Ok::<_, ()>(())
                 })
                 .unwrap();
@@ -175,7 +195,7 @@ fn sided_composter_transactions_preserve_literal_chance_and_defer_all_effects() 
                 let aborted = run_transaction(game, |game, tx| {
                     assert_eq!(source.extract(game, tx, 0, &cake, 1), 1);
                     run_transaction(game, |game, tx| {
-                        assert_eq!(input.insert(game, tx, 0, &cake, 64), 1);
+                        assert_eq!(storage_input.insert(game, tx, &cake, 64), 1);
                         Ok::<_, ()>(())
                     })?;
                     assert_eq!(game.composter_level(POS), Some(7));
@@ -255,12 +275,15 @@ fn sided_composter_transactions_preserve_literal_chance_and_defer_all_effects() 
                 assert_eq!(unsided.amount(game, 0), 0);
                 assert_eq!(output.amount(game, 0), 1);
                 assert_eq!(output.resource(game, 0), Some(bone.clone()));
+                assert_eq!(storage_input.amount(game, &bone), Ok(0));
+                assert_eq!(storage_output.amount(game, &bone), Ok(1));
+                assert_eq!(storage_output.space_for(game, &bone), Ok(0));
 
                 quiet(game, &heard);
                 let aborted = run_transaction(game, |game, tx| {
                     assert_eq!(output.extract(game, tx, 0, &cake, 1), 0);
                     assert_eq!(output.extract(game, tx, 0, &bone, 0), 0);
-                    assert_eq!(output.extract(game, tx, 0, &bone, 64), 1);
+                    assert_eq!(storage_output.extract(game, tx, &bone, 64), 1);
                     assert_eq!(output.extract(game, tx, 0, &bone, 64), 0);
                     assert_eq!(game.composter_level(POS), Some(0));
                     assert_quiet(game, &heard);
@@ -327,6 +350,9 @@ fn sided_composter_transactions_preserve_literal_chance_and_defer_all_effects() 
                 // after a first aborted insertion and a different seed in the level stream.
                 game.world.random.set_seed(0);
                 unrelated_world.set_seed(0);
+                game.enter_level(crate::game::Dim::Nether).unwrap();
+                game.enter_level(crate::game::Dim::Overworld).unwrap();
+                assert!(game.level("minecraft:the_nether").is_some());
                 game.native_chunk_unload("minecraft:the_nether", [0, 0]);
 
                 // A nested abort rewinds only this composter's chance owner. An unrelated
@@ -460,6 +486,7 @@ fn a_client_copy_never_answers_composter_items() {
         let level = mod_api::LevelRef::new(epoch, game.dim.key());
         for side in [None, Some(Direction::Up), Some(Direction::Down)] {
             assert!(level.capability(game, &mod_api::ITEMS, POS, side).is_none());
+            assert!(level.capability(game, &mod_api::STORAGE, POS, side).is_none());
         }
     });
 }
