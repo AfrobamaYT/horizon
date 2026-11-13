@@ -1649,7 +1649,7 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
             .get("minecraft:kinetic_weapon")
             .cloned()
             .map(crate::kinetic_weapon::KineticComponent::new),
-        map_id: c.get("minecraft:map_id").and_then(int).map(|v| v as i32),
+        map_id: seen.map_id.and_then(crate::properties::component_int),
         banner_patterns: crate::banner_layer::layers_from_nbt(c.get("minecraft:banner_patterns")),
         base_color: c
             .get("minecraft:base_color")

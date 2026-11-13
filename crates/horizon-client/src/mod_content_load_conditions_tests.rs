@@ -24,7 +24,7 @@ fn registered_conditions_select_content_root_tags_and_structure_modifiers() {
     };
     let inventory = horizon_mod_package::enabled::EnabledMods::new([(
         "testmod".into(),
-        horizon_mod_package::Side::Both,
+        mod_api::Side::Both,
     )]);
     let package = folder_mod(
         &scratch.path().join("mod"),
