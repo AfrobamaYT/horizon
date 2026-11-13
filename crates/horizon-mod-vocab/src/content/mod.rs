@@ -2,6 +2,7 @@
 
 pub(crate) mod config_files;
 pub(crate) mod content_declarations;
+pub(crate) mod attached_storage;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod crash;
@@ -13,7 +14,6 @@ pub(crate) mod package_side;
 pub(crate) mod packets;
 pub(crate) mod payload_codec;
 pub(crate) mod registry_keys;
-pub(crate) mod attached_storage;
 pub(crate) mod resource;
 
 pub(crate) mod professions;
