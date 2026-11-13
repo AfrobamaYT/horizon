@@ -9,7 +9,9 @@
 use super::{Game, Options, lan::LanSettings, world_loading::WorldRequest};
 use horizon_client::{
     Result,
-    lan::{LoginGate, NetConfig, NetLog, OnlineMode, hub::HubConfig},
+    lan::{
+        LoginGate, NetConfig, NetLog, OnlineMode, hub::HubConfig, viewed_levels::areas as viewed,
+    },
     server::{
         eula, profiles,
         properties::{GAME_MODES, ServerProperties, SystemEntropy},
@@ -1332,6 +1334,19 @@ impl Game<'_> {
             }
             host.hub.set_anticheat(anticheat);
             host.hub.set_chat_filter(chat_filter);
+            // The viewed areas' chunk caps (#3716): server.toml's `max_viewed_*` settings.
+            let (caps, clamped) = viewed::ViewedCaps::from_properties(|key| props.raw.get(key));
+            if let Some(asked) = clamped {
+                let max = viewed::MAX_LOADED_PER_PLAYER;
+                log(
+                    "WARN",
+                    &format!(
+                        "max_viewed_loaded_chunks is {asked}, but it is fixed at {max} for this \
+                         protocol revision of viewed levels: using {max}"
+                    ),
+                );
+            }
+            host.hub.viewed.caps = caps;
             host.hub.spawn_protection = props.spawn_protection;
             host.hub.chat_spam_threshold = props.chat_spam_threshold_seconds.wrapping_mul(20);
             host.hub.command_spam_threshold = props.command_spam_threshold_seconds.wrapping_mul(20);

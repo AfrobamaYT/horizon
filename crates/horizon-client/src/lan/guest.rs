@@ -458,6 +458,9 @@ pub struct Guest {
     /// receiving the world, but not placed, so no one else sees, hears or
     /// hurts it until the hand-over finishes.
     pub held: bool,
+    /// Its areas in any level and the other levels its client views (#3716): apart from what
+    /// makes it one of a level's players (`placed_in`, `watches_level`).
+    pub viewed: super::viewed_levels::Viewed,
     /// The hub tick at which it was held, to drop it if its hand-over never comes.
     pub held_since: u64,
     /// A held player whose record has been applied but that is not yet let into the world
@@ -616,6 +619,14 @@ impl Guest {
     /// looks at it without being part of it.
     pub fn watches_level(&self, dimension: &str) -> bool {
         self.participates_online() && (self.placed || self.held) && self.dimension == dimension
+    }
+    /// Whether the guest's client views level `dimension` besides its own (#3716): its areas
+    /// name it, or its client holds chunks of it still. It is not one of that level's players.
+    pub fn views_level(&self, dimension: &str) -> bool {
+        self.participates_online()
+            && self.placed
+            && self.dimension != dimension
+            && self.viewed.in_level(dimension)
     }
     /// `ChunkMap.isChunkTracked`: whether the guest watches chunk `(x, z)` of
     /// level `dimension`, inside its view (`ChunkTrackingView.contains`) and
@@ -778,6 +789,7 @@ impl Guest {
             handover: None,
             expected: j.expected,
             held: false,
+            viewed: Default::default(),
             held_since: 0,
             imported: false,
             arrival_announce: true,
