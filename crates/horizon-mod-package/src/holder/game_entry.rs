@@ -108,18 +108,14 @@ fn acquire_standalone(
     }))
 }
 
-/// The installation a program in `folder` belongs to: `folder`, or, for a program inside a macOS
-/// app bundle (`<installation>/<Name>.app/Contents/MacOS`, where the launcher starts the game from
-/// on macOS), the folder holding the bundle, which has the installation's `.installed` marker.
+/// Only the launcher's macOS game bundle relocates the image below its installation.
+/// Snapshot capture requires the returned installation's `.installed` marker.
+#[cfg(target_os = "macos")]
 fn installation(folder: &Path) -> &Path {
-    let mut up = folder.ancestors();
-    let names = [up.next(), up.next(), up.next()].map(|path| path.and_then(Path::file_name));
-    let bundled = names[0].is_some_and(|name| name == "MacOS")
-        && names[1].is_some_and(|name| name == "Contents")
-        && names[2].is_some_and(|name| Path::new(name).extension().is_some_and(|e| e == "app"));
-    match (bundled, up.next()) {
-        (true, Some(parent)) => parent,
-        _ => folder,
+    if folder.ends_with("Horizon.app/Contents/MacOS") {
+        folder.ancestors().nth(3).unwrap_or(folder)
+    } else {
+        folder
     }
 }
 
@@ -138,7 +134,10 @@ pub fn lease_paths(
         .parent()
         .ok_or(io::ErrorKind::InvalidInput)?
         .canonicalize()?;
+    #[cfg(target_os = "macos")]
     let install = installation(&program);
+    #[cfg(not(target_os = "macos"))]
+    let install = program.as_path();
     if install.ancestors().any(|path| {
         path.file_name()
             .is_some_and(|name| name.to_string_lossy().starts_with(".trash-"))
@@ -353,6 +352,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn managed_launch_from_a_macos_app_bundle_leases_the_installation() {
         // The launcher starts the game on macOS from <version>/Horizon.app/Contents/MacOS, whose
@@ -385,6 +385,53 @@ mod tests {
             raw_windows: None,
         };
         let _prepared = Prepared::new(data, trees, program, &selection.context).unwrap();
+    }
+
+    #[test]
+    fn flat_and_lookalike_layouts_require_completion_beside_the_image() {
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().canonicalize().unwrap();
+        let mut layouts = vec![
+            "flat",
+            "Other.app/Contents/MacOS",
+            "Horizon.app/Contents/extra/MacOS",
+        ];
+        if !cfg!(target_os = "macos") {
+            layouts.push("Horizon.app/Contents/MacOS");
+        }
+        for layout in layouts {
+            let version = data.join("versions").join(layout.replace('/', "-"));
+            let folder = version.join(layout);
+            let game = data.join("instance");
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::create_dir_all(&game).unwrap();
+            // An unrelated enclosing marker must not make this image complete.
+            std::fs::write(version.join(".installed"), "").unwrap();
+            let executable = folder.join("game");
+            std::fs::write(&executable, "test image").unwrap();
+            let mut command = Command::new(&executable);
+            command.current_dir(&game).env("HORIZON_HOME", &game);
+            let selection = LaunchArguments::for_command(&command).unwrap();
+            let trees = managed_lease_paths(&executable, &selection, &data, &game).unwrap();
+            assert_eq!(trees[0], (folder.clone(), true), "{layout}");
+            let program = || Program {
+                executable: executable.clone().into_os_string(),
+                arguments: vec![],
+                environment: vec![],
+                directory: game.clone(),
+                raw_windows: None,
+            };
+            let error = Prepared::new(data.clone(), trees.clone(), program(), &selection.context)
+                .err()
+                .unwrap();
+            assert_eq!(error.kind(), io::ErrorKind::NotFound, "{layout}");
+            std::fs::write(folder.join(".installed"), "").unwrap();
+            assert_eq!(
+                managed_lease_paths(&executable, &selection, &data, &game).unwrap(),
+                trees
+            );
+            Prepared::new(data.clone(), trees, program(), &selection.context).unwrap();
+        }
     }
 
     #[test]
