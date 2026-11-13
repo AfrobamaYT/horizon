@@ -53,7 +53,7 @@ fn viewed_level_sound(&self, _: &mut dyn ClientHost, e: &mut ViewedLevelSoundEve
     // Through the nearest portal: where it opens in the player's level, and quieter with distance.
     if let Some((opening, distance)) = self.portal_towards(e.level, e.position) {
         *e.play_at = Some(opening);
-        *e.volume = (*e.volume - distance as f32 / 16.0).max(0.0);
+        e.volume = (e.volume - distance as f32 / 16.0).max(0.0);
     }
 }
 ```
