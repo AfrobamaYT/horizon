@@ -667,6 +667,91 @@ mod tests {
         });
     }
 
+    /// What a mod's `game_rule_changed` and `time_skip` listeners were told.
+    #[derive(Default)]
+    struct Told {
+        rules: Mutex<Vec<(String, bool)>>,
+        skips: Mutex<Vec<(String, i64, i64, String)>>,
+    }
+    struct Teller(Arc<Told>, bool);
+    #[mod_api::__subscriptions]
+    impl Hooks for Teller {
+        fn game_rule_changed(&self, _: &mut dyn ServerHost, event: &mut GameRuleChangedEvent<'_>) {
+            self.0
+                .rules
+                .lock()
+                .unwrap()
+                .push((event.rule.to_owned(), event.actor.is_some()));
+        }
+        fn time_skip(
+            &self,
+            _: &mut dyn ServerHost,
+            event: &mut mod_api::TimeSkipEvent<'_>,
+        ) -> mod_api::Flow {
+            self.0.skips.lock().unwrap().push((
+                event.dimension.to_owned(),
+                event.from,
+                event.to,
+                event.cause.to_owned(),
+            ));
+            if self.1 {
+                mod_api::Flow::Cancel
+            } else {
+                mod_api::Flow::Continue
+            }
+        }
+    }
+
+    /// A rule a mod sets reaches `game_rule_changed` once, with no actor; the same value again
+    /// reaches nothing.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_set_game_rule_has_no_actor() {
+        let told = Arc::new(Told::default());
+        let mods: mod_api::Mods = vec![ModEntry::new(
+            "teller",
+            Box::new(Teller(told.clone(), false)),
+        )]
+        .into();
+        with_mods(mods, || {
+            with_game(|game| {
+                let level = game.level(game.dim.id()).unwrap();
+                assert!(level.set_game_rule(game, "keep_inventory", GameRuleValue::Bool(true)));
+                assert!(level.set_game_rule(game, "keep_inventory", GameRuleValue::Bool(true)));
+            });
+        });
+        assert_eq!(
+            *told.rules.lock().unwrap(),
+            [("minecraft:keep_inventory".to_owned(), false)]
+        );
+    }
+
+    /// A `time_skip` listener that cancels keeps the old time: the call says `false`, the
+    /// listener heard the jump with cause `mod`, and the clock has not moved.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_canceled_time_skip_keeps_the_clock() {
+        let told = Arc::new(Told::default());
+        let mods: mod_api::Mods = vec![ModEntry::new(
+            "teller",
+            Box::new(Teller(told.clone(), true)),
+        )]
+        .into();
+        with_mods(mods, || {
+            with_game(|game| {
+                let level = game.level(game.dim.id()).unwrap();
+                let start = game.level_clock_time(level).unwrap();
+                assert_ne!(start, 13_000);
+                assert!(!game.level_set_clock_time(level, 13_000));
+                assert_eq!(game.level_clock_time(level), Some(start));
+                assert_eq!(
+                    *told.skips.lock().unwrap(),
+                    [(game.dim.id().to_owned(), start, 13_000, "mod".to_owned())]
+                );
+            });
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn rule_reads_distinguish_unknown_stale_and_unavailable_and_snapshot_values() {

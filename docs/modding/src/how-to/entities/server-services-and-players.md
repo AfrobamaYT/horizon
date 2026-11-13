@@ -90,8 +90,9 @@ A second disconnect on a guest already leaving is a no-op and keeps the first re
 
 `host.text_from_json(json)` reads one JSON or SNBT component the way `/tellraw`
 does and returns `Result<Option<Text>, TextFormError>`: `Ok(None)` when the
-input is not a single component, `Err` when the text is over the size or
-nesting limits. `host.text_from_legacy("§cRed")` reads `§` formatting codes as
+input is not a single component (an object with no content key such as `{}` or
+`{"color":"red"}`, a content value of the wrong kind, an empty list, a bad
+`extra` entry), `Err` when the text is over the size or nesting limits. `host.text_from_legacy("§cRed")` reads `§` formatting codes as
 the font draws them; `&` codes are not read, so replace `&` with `§` first.
 Both work on either side.
 

@@ -44,7 +44,14 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_mod_reads_and_sets_the_servers_distances() {
         with_guests(|game| {
-            assert_eq!(game.tick_times().len(), 100);
+            game.clock = crate::clock::FixedStep::default();
+            for took in [40_000_000, 51_000_000, 62_000_000] {
+                game.clock.record(std::time::Duration::from_nanos(took));
+            }
+            let host: &dyn mod_api::ServerHost = game;
+            let times = host.tick_times();
+            assert_eq!(times.len(), 100);
+            assert_eq!(times[..4], [40_000_000, 51_000_000, 62_000_000, 0]);
             assert_eq!(game.server_view_distance(), Some(2));
             assert_eq!(game.server_simulation_distance(), Some(2));
             assert!(!game.server_set_view_distance(6), "an integrated server");
