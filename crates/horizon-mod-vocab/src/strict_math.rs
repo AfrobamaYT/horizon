@@ -10,5 +10,5 @@ pub use horizon_core::jmath::{acos, asin, atan, atan2};
 mod tests;
 
 #[cfg(test)]
-#[path = "../../horizon-mod-wasm/tests/fixture/src/strict_math_checks.rs"]
+#[path = "strict_math_checks.rs"]
 mod vector_tests;
