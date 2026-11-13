@@ -31,7 +31,7 @@ fn render_id(mob_id: u32, local: bool, own_id: i32) -> u32 {
 
 /// The render state of `m` at `partial` (`LivingEntityRenderer.extractRenderState`),
 /// told as entity `id`.
-fn mob_render<'a>(m: &'a Mob, id: u32, partial: f32) -> MobRender<'a> {
+pub(super) fn mob_render<'a>(m: &'a Mob, id: u32, partial: f32) -> MobRender<'a> {
     let body = anim::body_rot(m, partial);
     // The walk cycle, head turn and age as the vanilla models read them:
     // no walking while riding or dead, a baby's legs three times as far

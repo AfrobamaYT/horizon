@@ -221,7 +221,7 @@ impl Game<'_> {
         light: u32,
         out: &mut Vec<Vertex>,
     ) {
-        let render = mob_render(mob, partial);
+        let render = mob_render(mob, id, partial);
         let entity: mod_api::EntityRenderState = mod_api::__private::built::EntityRenderState {
             id,
             partial,
