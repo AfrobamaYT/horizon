@@ -92,8 +92,54 @@ pub struct VanillaTerrain {
 }
 /// A proto chunk, or the position of one whose generation failed.
 enum VanillaProto {
-    Ready(Box<ProtoChunk>),
+    Ready(Box<ResidentProto>),
     Failed(i32, i32),
+}
+/// Generator terrain plus the resident biome cells read from disk. The cells use
+/// the world's shared biome table, so even names absent from generator data survive.
+struct ResidentProto {
+    terrain_chunk: ProtoChunk,
+    saved_biomes: Option<SavedBiomeCells>,
+}
+struct SavedBiomeCells {
+    min_y: i32,
+    sections: Vec<PalettedContainer>,
+}
+impl SavedBiomeCells {
+    fn capture(column: &Chunk) -> Self {
+        Self {
+            min_y: column.min_y(),
+            sections: column.sections.iter().map(|s| s.biomes.clone()).collect(),
+        }
+    }
+    fn apply(&self, column: &mut Chunk) {
+        for (index, biomes) in self.sections.iter().enumerate() {
+            let y = self.min_y + index as i32 * 16;
+            if let Some(target) = column.layout().section_index(y) {
+                Arc::make_mut(&mut column.sections[target]).biomes = biomes.clone();
+            }
+        }
+    }
+}
+impl std::ops::Deref for ResidentProto {
+    type Target = ProtoChunk;
+    fn deref(&self) -> &ProtoChunk {
+        &self.terrain_chunk
+    }
+}
+impl std::ops::DerefMut for ResidentProto {
+    fn deref_mut(&mut self) -> &mut ProtoChunk {
+        &mut self.terrain_chunk
+    }
+}
+impl ResidentProto {
+    fn column(&self, terrain: &VanillaTerrain) -> Chunk {
+        let mut column = terrain.column(self);
+        if let Some(saved) = &self.saved_biomes {
+            saved.apply(&mut column);
+        }
+        column
+    }
 }
 /// WorldGenRegion.setBlock gives every block with a block entity a new
 /// one: the blocks nothing placed data for (a sculk patch's sensors) get
@@ -917,7 +963,10 @@ impl ChunkGenerator for VanillaTerrain {
             std::sync::atomic::Ordering::Relaxed,
         );
         match worker.generate_proto(ChunkPos::new(x, z)) {
-            Ok(chunk) => Box::new(VanillaProto::Ready(Box::new(chunk))),
+            Ok(chunk) => Box::new(VanillaProto::Ready(Box::new(ResidentProto {
+                terrain_chunk: chunk,
+                saved_biomes: None,
+            }))),
             Err(e) => {
                 log::warn!("Horizon: generating chunk {x} {z} failed: {e}");
                 Box::new(VanillaProto::Failed(x, z))
@@ -1007,13 +1056,13 @@ impl ChunkGenerator for VanillaTerrain {
             .collect();
         let all_ready = taken.iter().all(|p| matches!(**p, VanillaProto::Ready(_)));
         if all_ready {
-            let chunks: Vec<ProtoChunk> = taken
+            let (chunks, saved_biomes): (Vec<ProtoChunk>, Vec<Option<SavedBiomeCells>>) = taken
                 .into_iter()
                 .map(|p| match *p {
-                    VanillaProto::Ready(c) => *c,
+                    VanillaProto::Ready(c) => (c.terrain_chunk, c.saved_biomes),
                     VanillaProto::Failed(..) => unreachable!(),
                 })
-                .collect();
+                .unzip();
             let mut array: [ProtoChunk; 9] = match chunks.try_into() {
                 Ok(a) => a,
                 Err(_) => unreachable!(),
@@ -1021,8 +1070,11 @@ impl ChunkGenerator for VanillaTerrain {
             if let Err(e) = worker.decorate(&mut array) {
                 log::warn!("Horizon: decorating chunk failed: {e}");
             }
-            for (slot, chunk) in region.iter_mut().zip(array) {
-                *slot = Box::new(VanillaProto::Ready(Box::new(chunk)));
+            for ((slot, chunk), saved_biomes) in region.iter_mut().zip(array).zip(saved_biomes) {
+                *slot = Box::new(VanillaProto::Ready(Box::new(ResidentProto {
+                    terrain_chunk: chunk,
+                    saved_biomes,
+                })));
             }
         } else {
             for (slot, p) in region.iter_mut().zip(taken) {
@@ -1120,19 +1172,20 @@ impl ChunkGenerator for VanillaTerrain {
             })
             .collect();
         Some(SavedProto {
-            column: self.column(chunk),
+            column: chunk.column(self),
             decorated: chunk.is_decorated(),
             block_entities,
             entities: chunk.entities.iter().cloned().map(Tag::Compound).collect(),
         })
     }
-    /// Restore saved blocks and decoration state. Biomes and structure lookups use the current
-    /// generator, including an adopted region layout; completed Features decoration stays done.
+    /// Restore saved blocks, biome cells and decoration state. Structure lookups
+    /// use the current generator; completed Features decoration stays done.
     fn restore_proto(&self, proto: &mut Proto, saved: SavedProto) {
         let Some(VanillaProto::Ready(chunk)) = proto.downcast_mut::<VanillaProto>() else {
             return;
         };
         let column = &saved.column;
+        chunk.saved_biomes = Some(SavedBiomeCells::capture(column));
         let (bx, bz) = (column.x * 16, column.z * 16);
         let (lo, hi) = (
             chunk.terrain.min_y().max(column.min_y()),
@@ -1213,7 +1266,7 @@ impl ChunkGenerator for VanillaTerrain {
             VanillaProto::Ready(c) => c,
             VanillaProto::Failed(x, z) => return Chunk::with_layout(x, z, self.layout()),
         };
-        let mut out = self.column(&chunk);
+        let mut out = chunk.column(self);
         let loot = self.loot.get();
         let (block_entities, rolled_loot) =
             crate::structure_blocks::block_entities(&chunk, loot.as_deref());
@@ -1298,3 +1351,6 @@ mod default_block_entity_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod saved_biome_tests;
