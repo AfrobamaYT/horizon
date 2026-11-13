@@ -33,13 +33,14 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import prebuilt_game  # noqa: E402  (beside this file; also when imported as `tools.sdk_api_source`)
+# Beside this file: a module of the `tools` package when imported, a plain module when run as a script.
+if __package__:
+    from . import prebuilt_game
+else:
+    import prebuilt_game
 
 ROOT = Path(__file__).resolve().parent.parent
 API = "horizon-mod-api"
-# The crate the prebuilt game is built from: the features its build resolves are the ones players compile with.
-GAME = "horizon-mod-host"
 WASM = "wasm32-unknown-unknown"
 GENERATED = "generated"
 ROOT_TOKEN = "{horizon-api-source-root}"
@@ -364,8 +365,9 @@ def lock_disagreements(slice_lock: dict, game_lock: dict) -> list[str]:
                   if (package["name"], package["version"], package.get("source"), package.get("checksum")) not in game)
 
 
-def build_messages(arguments: list[str]) -> list[dict]:
-    output = run(["cargo", "check", "--locked", "-p", API, "--message-format", "json", *arguments], cwd=ROOT)
+def build_messages(arguments: list[str], target_dir: Path) -> list[dict]:
+    output = run(["cargo", "check", "--locked", "-p", API, "--message-format", "json", *arguments], cwd=ROOT,
+                 env={**os.environ, "CARGO_TARGET_DIR": str(target_dir)})
     return [json.loads(line) for line in output.splitlines() if line.startswith("{")]
 
 
@@ -377,45 +379,60 @@ def collect(crates: list[Crate], features: dict[str, dict], workspace_root: Path
     builds = {"host": [], WASM: ["--target", WASM], "host, all features": ["--features", ",".join(every)]}
     files: dict[str, bytes] = {}
     generated: dict[str, tuple[str, dict[str, bytes]]] = {}
-    for label, arguments in builds.items():
-        messages = build_messages(arguments)
-        out_dirs = {}
-        for message in messages:
-            if message["reason"] != "build-script-executed" or not message["package_id"].startswith("path+"):
-                continue
-            if any(message[key] for key in ("cfgs", "env", "linked_libs", "linked_paths")):
-                raise Refusal("E_BUILD_SCRIPT", f"{message['package_id']} sets more than generated files")
-            out_dirs[message["package_id"]] = Path(message["out_dir"])
-        for message in messages:
-            if message["reason"] != "compiler-artifact" or "custom-build" in message["target"]["kind"]:
-                continue
-            crate = by_directory.get(Path(message["manifest_path"]).resolve().parent)
-            if crate is None:
-                continue
-            out_dir = out_dirs.get(message["package_id"])
-            if crate.generated:
-                outputs = {path.name: relocate(path.read_text(), root_forms([workspace_root, ROOT], crate)).encode()
-                           for path in sorted(out_dir.iterdir())}
-                first = generated.setdefault(crate.name, (label, outputs))
-                if first[1] != outputs:
-                    differing = sorted(name for name in first[1].keys() | outputs.keys()
-                                       if first[1].get(name) != outputs.get(name))
-                    raise Refusal("E_TARGET_DEPENDENT", f"{crate.name}: {', '.join(differing)} differ between "
-                                                        f"{first[0]} and {label}")
-                for name, data in outputs.items():
-                    files[f"{crate.directory}/{GENERATED}/{name}"] = data
-            artifact = Path(message["filenames"][0])
-            digest = artifact.name.split(".")[0].rsplit("-", 1)[1]
-            info = artifact.parent / f"{message['target']['name'].replace('-', '_')}-{digest}.d"
-            for read in dep_info(info):
-                path = Path(os.path.normpath(workspace_root / read))
-                if out_dir is not None and path.parent == out_dir:
-                    continue
-                if not path.is_relative_to(workspace_root / crate.directory):
-                    raise Refusal("E_SOURCE_OUTSIDE_CRATE", f"{crate.name} reads {path}")
-                files[path.relative_to(workspace_root).as_posix()] = path.read_bytes()
-        print(f"{label}: {len(files)} files so far", flush=True)
+    # A target folder of its own, fresh: no build script output folder holds a file an older generator wrote.
+    target_root = Path(os.environ.get("CARGO_TARGET_DIR", workspace_root / "target"))
+    target_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=target_root, prefix="sdk-api-source-build.") as target_dir:
+        for label, arguments in builds.items():
+            collect_build(build_messages(arguments, Path(target_dir)), label, by_directory, workspace_root,
+                          files, generated)
     return files
+
+
+def collect_build(messages: list[dict], label: str, by_directory: dict[Path, Crate], workspace_root: Path,
+                  files: dict[str, bytes], generated: dict[str, tuple[str, dict[str, bytes]]]) -> None:
+    """One build's generated files and reads, added to `files`; `generated` keeps the first build's outputs."""
+    out_dirs = {}
+    for message in messages:
+        if message["reason"] != "build-script-executed" or not message["package_id"].startswith("path+"):
+            continue
+        if any(message[key] for key in ("cfgs", "env", "linked_libs", "linked_paths")):
+            raise Refusal("E_BUILD_SCRIPT", f"{message['package_id']} sets more than generated files")
+        out_dirs[message["package_id"]] = Path(message["out_dir"])
+    for message in messages:
+        if message["reason"] != "compiler-artifact" or "custom-build" in message["target"]["kind"]:
+            continue
+        crate = by_directory.get(Path(message["manifest_path"]).resolve().parent)
+        if crate is None:
+            continue
+        out_dir = out_dirs.get(message["package_id"])
+        if crate.generated:
+            stray = [path.name for path in out_dir.iterdir()
+                     if not path.is_file() or not re.fullmatch(r"[\w.-]+\.rs", path.name)]
+            if stray:
+                raise Refusal("E_GENERATED_ENTRY", f"{crate.name}'s build script wrote {', '.join(sorted(stray))}, "
+                                                   "not a Rust file")
+            outputs = {path.name: relocate(path.read_text(), root_forms([workspace_root, ROOT], crate)).encode()
+                       for path in sorted(out_dir.iterdir())}
+            first = generated.setdefault(crate.name, (label, outputs))
+            if first[1] != outputs:
+                differing = sorted(name for name in first[1].keys() | outputs.keys()
+                                   if first[1].get(name) != outputs.get(name))
+                raise Refusal("E_TARGET_DEPENDENT", f"{crate.name}: {', '.join(differing)} differ between "
+                                                    f"{first[0]} and {label}")
+            for name, data in outputs.items():
+                files[f"{crate.directory}/{GENERATED}/{name}"] = data
+        artifact = Path(message["filenames"][0])
+        digest = artifact.name.split(".")[0].rsplit("-", 1)[1]
+        info = artifact.parent / f"{message['target']['name'].replace('-', '_')}-{digest}.d"
+        for read in dep_info(info):
+            path = Path(os.path.normpath(workspace_root / read))
+            if out_dir is not None and path.parent == out_dir:
+                continue
+            if not path.is_relative_to(workspace_root / crate.directory):
+                raise Refusal("E_SOURCE_OUTSIDE_CRATE", f"{crate.name} reads {path}")
+            files[path.relative_to(workspace_root).as_posix()] = path.read_bytes()
+    print(f"{label}: {len(files)} files so far", flush=True)
 
 
 def build(out: Path) -> dict[str, bytes]:
@@ -431,7 +448,7 @@ def build(out: Path) -> dict[str, bytes]:
     manifests = {crate.name: tomllib.loads((workspace_root / crate.directory / "Cargo.toml").read_text())
                  for crate in crates}
     features = kept_features(manifests)
-    game = target_features(tree(workspace_root, GAME))
+    game = target_features(tree(workspace_root, prebuilt_game.GAME))
     files = collect(crates, features, workspace_root)
     tracked = set(filter(None, run(["git", "ls-files", "-z"], cwd=workspace_root).split("\0")))
     for crate in crates:
@@ -556,7 +573,7 @@ def check(api: Path, scratch: Path) -> None:
         raise Refusal("E_CLOSURE", f"the prebuilt game's API closure {sorted(api_closure(game) - api_closure(ours))} "
                                    f"against the API source's {sorted(api_closure(ours) - api_closure(game))}")
     closure_keys = {f"{name} {version}" for name, version in api_closure(game)}
-    differing = feature_disagreements(target_features(tree(ROOT, GAME)),
+    differing = feature_disagreements(target_features(tree(ROOT, prebuilt_game.GAME)),
                                       target_features(tree(mod, "mod-starter", environment)), closure_keys)
     if differing:
         raise Refusal("E_FEATURES", "the starter compiles the API with other features than the game: "

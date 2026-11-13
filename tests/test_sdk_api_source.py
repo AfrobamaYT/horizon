@@ -1,3 +1,4 @@
+import os
 import tempfile
 import tomllib
 import unittest
@@ -61,6 +62,13 @@ class ClosureTests(unittest.TestCase):
             Crate("vocab", "crates/nested/vocab", False),
         ])
 
+    def test_a_generated_crate_not_two_folders_below_the_root_is_refused(self):
+        data = metadata()
+        data["packages"][0]["manifest_path"] = "/w/crates/mod/horizon-mod-api/Cargo.toml"
+        with self.assertRaises(Refusal) as refused:
+            api_source.closure(data)
+        self.assertEqual(refused.exception.code, "E_LAYOUT")
+
     def test_a_build_script_that_is_not_the_generator_is_refused(self):
         data = metadata()
         data["packages"][3]["targets"][0]["kind"].append("custom-build")
@@ -100,6 +108,12 @@ class ManifestTests(unittest.TestCase):
     def test_features_naming_a_dropped_dependency_go_everywhere_they_reach(self):
         kept = api_source.kept_features({"horizon-mod-api": self.API, "vocab": self.VOCAB})
         self.assertEqual(kept, {"horizon-mod-api": {"testing": ["vocab/testing"]}, "vocab": {"testing": []}})
+
+    def test_a_feature_naming_an_optional_dependency_stays(self):
+        manifest = {"package": {"name": "core", "version": "0.1.0"},
+                    "dependencies": {"libm": {"version": "0.2", "optional": True}},
+                    "features": {"fast-math": ["libm"]}}
+        self.assertEqual(api_source.kept_features({"core": manifest}), {"core": {"fast-math": ["libm"]}})
 
     def test_manifest_keeps_the_library_and_its_normal_dependencies(self):
         crate = Crate("horizon-mod-api", "crates/horizon-mod-api", True)
@@ -208,7 +222,8 @@ class CollectTests(unittest.TestCase):
         ]
 
     def collect(self, *builds):
-        with patch.object(api_source, "build_messages", side_effect=list(builds)):
+        with (patch.object(api_source, "build_messages", side_effect=list(builds)),
+              patch.dict(os.environ, {"CARGO_TARGET_DIR": str(self.root / "target")})):
             return api_source.collect(self.crates, {"api": {}}, self.root)
 
     def refusal(self, *builds):
@@ -229,6 +244,17 @@ class CollectTests(unittest.TestCase):
     def test_a_file_read_outside_the_crate_is_refused(self):
         outside = self.messages("a", "", reads=("crates/api/src/lib.rs", "crates/horizon-client/src/game.rs"))
         self.assertEqual(self.refusal(outside), "E_SOURCE_OUTSIDE_CRATE")
+
+    def test_a_folder_or_other_file_in_the_build_scripts_output_is_refused(self):
+        for entry, folder in (("nested", True), ("hooks.json", False)):
+            with self.subTest(entry):
+                messages = self.messages(entry.split(".")[0], "")
+                out = Path(messages[0]["out_dir"])
+                if folder:
+                    (out / entry).mkdir()
+                else:
+                    (out / entry).write_text("{}")
+                self.assertEqual(self.refusal(messages), "E_GENERATED_ENTRY")
 
     def test_a_build_script_that_sets_cfgs_is_refused(self):
         self.assertEqual(self.refusal(self.messages("a", "", cfgs=("generated_hooks",))), "E_BUILD_SCRIPT")
@@ -270,12 +296,30 @@ class PackingTests(unittest.TestCase):
         files["crates/horizon-mod-api/generated/hooks.rs"] = b'#[path = "/home/dev/horizon/crates/x.rs"] mod x;\n'
         self.assertEqual(self.refusal(files), "E_ABSOLUTE_PATH")
 
+    def test_a_folder_that_only_starts_like_a_local_one_is_no_path_to_it(self):
+        files = self.files()
+        files["crates/core/src/lib.rs"] = b'// see /home/dev/horizon-site and /home/dev/horizons\n'
+        self.assertEqual(len(self.check(files)), len(files))
+        for named in (b'"/home/dev/horizon"', b"/home/dev/horizon/crates/x.rs", b"/home/dev/horizon\n"):
+            with self.subTest(named):
+                self.assertEqual(self.refusal({**files, "crates/core/src/lib.rs": named}), "E_ABSOLUTE_PATH")
+
     def test_stray_files_are_refused(self):
         for stray in (".local/minecraft/client.jar", "crates/core/src/untracked.rs", "crates/core/build.rs",
                       "crates/core/generated/hooks.rs", "crates/horizon-mod-api/generated/sub/hooks.rs",
                       "crates/other/src/lib.rs", "/etc/passwd", "crates/core/../../secret"):
             with self.subTest(stray):
                 self.assertIn(self.refusal({**self.files(), stray: b""}), ("E_STRAY_FILE", "E_PATH"))
+
+
+class ScratchTests(unittest.TestCase):
+    def test_a_folder_check_did_not_make_is_never_emptied(self):
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "notes.txt").write_text("keep")
+            with self.assertRaises(Refusal) as refused:
+                api_source.check(Path(folder) / "api", Path(folder))
+            self.assertEqual(refused.exception.code, "E_SCRATCH")
+            self.assertEqual((Path(folder) / "notes.txt").read_text(), "keep")
 
 
 class RelocationTests(unittest.TestCase):
