@@ -13,6 +13,7 @@ pub mod matrix;
 pub mod projectile_owner;
 pub mod replace;
 pub mod selector_command;
+pub mod tick_reply;
 pub mod turn;
 pub use matrix::{mirrors, sum_return};
 pub mod shutdown;
@@ -168,6 +169,7 @@ impl Hooks for Mod {
     fn register(&self, registrar: &mut dyn mod_api::Registrar, cx: &mod_api::RegistrationContext) {
         game_payload::register(registrar);
         interaction::register(registrar);
+        tick_reply::register(registrar);
         registrar
             .declare_datapack_registry(
                 "spell",

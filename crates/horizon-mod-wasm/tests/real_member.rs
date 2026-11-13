@@ -217,14 +217,24 @@ fn real_member() {
             );
             let mut entity =
                 mod_api::ModBlockEntity::new("wasm_fixture:counter".into(), Default::default());
-            mod_api::dispatch_block_entity_tick(&mut Quiet, [0, 64, 0], &mut entity);
+            mod_api::dispatch_block_entity_tick(
+                &mut Quiet,
+                &mut mod_api::BlockEntityTickReply::Changed,
+                [0, 64, 0],
+                &mut entity,
+            );
             assert_eq!(entity.data, [23]);
             mod_api::__private::resolve_items(["minecraft:snowball"]).unwrap();
             let mut launch = mod_api::ModBlockEntity::new(
                 "wasm_fixture:owner_launch".into(),
                 Default::default(),
             );
-            mod_api::dispatch_block_entity_tick(&mut Quiet, [0, 64, 0], &mut launch);
+            mod_api::dispatch_block_entity_tick(
+                &mut Quiet,
+                &mut mod_api::BlockEntityTickReply::Changed,
+                [0, 64, 0],
+                &mut launch,
+            );
             assert_eq!(
                 launch.data,
                 [2],

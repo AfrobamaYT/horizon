@@ -743,6 +743,11 @@ pub(super) fn emit<'a>(
             },
             inits.join(", "),
         );
+        let build = if name == "block_entity_tick" {
+            format!("{build} let mut tick_changed = false;")
+        } else {
+            build
+        };
         // A trait mod's call is marked with the mod for a panic to name.
         let each = match &hook.owner {
             Some(owner) => format!("super::entered_owned(HookId::{hook_id}, \"{name}\", {owner})"),
@@ -753,6 +758,9 @@ pub(super) fn emit<'a>(
         };
         // One callee's call: a mod's, or a scoped hook's part's.
         let call = |callee: &str, exit: &str| match contract {
+            _ if name == "block_entity_tick" => format!(
+                "*{event}.reply = BlockEntityTickReply::Changed; {event}.entity.__begin_tick_listener(); {callee}.{name}({invoke}); let listener_reply = *{event}.reply; {event}.entity.__finish_tick_listener(listener_reply); tick_changed |= listener_reply == BlockEntityTickReply::Changed;"
+            ),
             Contract::Cancel => format!(
                 "if matches!({callee}.{name}({invoke}), Flow::Cancel) {{ *{o} = true; {exit}; }}",
                 o = out.unwrap()
@@ -818,6 +826,13 @@ pub(super) fn emit<'a>(
                     call(&part_item, "break"),
                 ),
             ),
+        };
+        let write_back = if name == "block_entity_tick" {
+            format!(
+                "*{event}.reply = if tick_changed {{ BlockEntityTickReply::Changed }} else {{ BlockEntityTickReply::Unchanged }}; {write_back}"
+            )
+        } else {
+            write_back
         };
         let body = match contract {
             Contract::Cancel if mod_cancel => format!(

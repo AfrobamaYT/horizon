@@ -14,10 +14,10 @@ pub use backend::{
     backend_mut_of, backend_of, client_backend_mut_of,
 };
 pub use block::types::{
-    BlockClick, BlockEntityDataSource, BlockEntityError, BlockEntityRef, BlockEntityTypeKey,
-    BlockFace, BlockHit, BlockInteraction, BlockKey, BlockPlacement, BlockRim, BlockShapeKind,
-    BlockStateId, BlockTransformPreview, BlockUpdateFlags, BonemealSource, FakeEffect,
-    ModBlockEntityView, Placement, SupportType,
+    BlockClick, BlockEntityDataSource, BlockEntityError, BlockEntityRef, BlockEntityTickReply,
+    BlockEntityTypeKey, BlockFace, BlockHit, BlockInteraction, BlockKey, BlockPlacement, BlockRim,
+    BlockShapeKind, BlockStateId, BlockTransformPreview, BlockUpdateFlags, BonemealSource,
+    FakeEffect, ModBlockEntityView, Placement, SupportType,
 };
 pub use client::types::{
     Answered, BossBarColor, BossBarOverlay, BossBarRef, Camera, ClientAudioOptions, ClientBossBar,

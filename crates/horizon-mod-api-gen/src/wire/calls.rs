@@ -738,6 +738,9 @@ pub(super) fn writeback_fields(
         }
     }
     own.extend(refs);
+    if types.defs[def].rust.ends_with("BlockEntityTickEvent") {
+        own.sort_by_key(|leaf| !leaf.path.ends_with(".reply"));
+    }
     Some(own)
 }
 
@@ -845,7 +848,11 @@ fn borrowed(
         } else if leaf.optional {
             write!(back, "out.put_opt({}.as_deref());", leaf.path).unwrap();
         } else if leaf.view {
-            write!(back, "{}.__wire_put_snapshot(out);", leaf.path).unwrap();
+            if d.rust.ends_with("BlockEntityTickEvent") {
+                write!(back, "if *{name}.reply == crate::BlockEntityTickReply::Changed {{ {}.__wire_put_snapshot(out); }}", leaf.path).unwrap();
+            } else {
+                write!(back, "{}.__wire_put_snapshot(out);", leaf.path).unwrap();
+            }
         } else {
             write!(
                 back,
