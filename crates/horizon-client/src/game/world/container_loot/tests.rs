@@ -933,3 +933,51 @@ fn explicit_seed_is_position_independent() {
         assert_eq!(contents, g.world.block_entities[&other].slots());
     });
 }
+
+#[test]
+#[ignore = "requires prepared resources"]
+fn saved_carts_keep_a_loot_table_only_when_they_hold_a_container() {
+    with_game(|game| {
+        let keys: std::collections::HashSet<_> = [(0, 0)].into();
+        let cases = [
+            (
+                "minecraft:minecart",
+                "minecraft:chests/simple_dungeon",
+                None,
+            ),
+            (
+                "minecraft:tnt_minecart",
+                "minecraft:chests/simple_dungeon",
+                None,
+            ),
+            (
+                "minecraft:chest_minecart",
+                "minecraft:chests/simple_dungeon",
+                Some("minecraft:chests/simple_dungeon"),
+            ),
+            ("minecraft:hopper_minecart", "", Some("minecraft:")),
+            // readChestVehicleSaveData: a table that is not an identifier reads as none, so
+            // neither it nor the seed is saved.
+            ("minecraft:chest_minecart", "Bad Name!", None),
+        ];
+        for (i, (kind, table, kept)) in cases.into_iter().enumerate() {
+            let source =
+                format!(r#"{{Pos:[8.5d,64d,8.5d],LootTable:"{table}",LootTableSeed:73L}}"#);
+            let (tag, _) = horizon_core::nbt::parse_snbt(&source).unwrap();
+            game.load_cart(tag, Some([61, 0, 0, i as i32 + 1]), kind);
+            // The entity chunk's own writer, as a save writes it to disk.
+            let (_, saved) = game.save_cart(game.carts.len() - 1, &keys).unwrap();
+            assert_eq!(
+                (
+                    saved.get("LootTable").cloned(),
+                    saved.get("LootTableSeed").cloned()
+                ),
+                (
+                    kept.map(|table| Tag::String(table.into())),
+                    kept.map(|_| Tag::Long(73))
+                ),
+                "{kind}"
+            );
+        }
+    });
+}
