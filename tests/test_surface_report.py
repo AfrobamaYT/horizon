@@ -97,13 +97,30 @@ exit {diff_exit}
 
 
 class SummaryTests(unittest.TestCase):
-    def test_a_long_report_is_cut_for_the_summary(self):
+    def size(self, out: str) -> int:
+        return len(out.encode())
+
+    def test_a_long_report_is_cut_at_a_line_end(self):
         text = "".join(f"- fn:item{i} (added)\n" for i in range(20_000))
         out = surface_report.summary(text)
-        self.assertLess(len(out), surface_report.SUMMARY_LIMIT + 200)
-        self.assertRegex(out, r"… \d+ more lines in the step log\n```\n$")
+        self.assertLessEqual(self.size(out), surface_report.SUMMARY_LIMIT)
+        self.assertRegex(out, r"\(added\)\n… cut here; \d+ more lines in the step log\n```\n$")
         self.assertEqual(surface_report.summary("short\n"), "### Mod API surface\n\n```text\nshort\n```\n")
 
+    def test_a_cut_inside_a_multi_byte_character_keeps_whole_characters(self):
+        # "é" is two bytes, so the byte budget is half the characters and lands inside one.
+        for pad in ("", "x"):
+            out = surface_report.summary(pad + "é" * 200_000 + "\nnext\n")
+            self.assertLessEqual(self.size(out), surface_report.SUMMARY_LIMIT)
+            self.assertGreater(self.size(out), surface_report.SUMMARY_LIMIT - 200)
+            self.assertNotIn("\ufffd", out)
+            self.assertIn("é\n… cut here; 2 more lines in the step log\n", out)
+
+    def test_one_line_longer_than_the_cap_is_cut(self):
+        out = surface_report.summary("a" * 300_000 + "\n")
+        self.assertLessEqual(self.size(out), surface_report.SUMMARY_LIMIT)
+        self.assertGreater(out.count("a"), 199_000)
+        self.assertTrue(out.endswith("a\n… cut here; 1 more lines in the step log\n```\n"))
 
 if __name__ == "__main__":
     unittest.main()

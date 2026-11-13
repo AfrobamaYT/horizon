@@ -25,6 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 NOTES = "crates/horizon-mod-vocab/changes"
 # GitHub refuses a step summary over 1 MiB; the full report stays in the step log.
+# Counted in bytes of UTF-8, frame included.
 SUMMARY_LIMIT = 200_000
 
 
@@ -98,11 +99,20 @@ def report(tool: str, base: Path, head: Path, work: Path, gate_on: bool) -> tupl
 
 
 def summary(text: str) -> str:
-    if len(text) > SUMMARY_LIMIT:
-        cut = text.rfind("\n", 0, SUMMARY_LIMIT)
-        rest = text[cut:].count("\n")
-        text = text[:cut] + f"\n… {rest} more lines in the step log\n"
-    return f"### Mod API surface\n\n```text\n{text}```\n"
+    """The report for the job summary, at most SUMMARY_LIMIT bytes of UTF-8 in all."""
+    head, foot = "### Mod API surface\n\n```text\n", "```\n"
+    # Room for the frame and for the line saying what was cut.
+    budget = SUMMARY_LIMIT - len((head + foot).encode()) - 64
+    data = text.encode()
+    if len(data) > budget:
+        kept = data[:budget]
+        line_end = kept.rfind(b"\n")
+        # A line longer than the budget is cut inside itself, on a character boundary.
+        kept = kept[: line_end + 1] if line_end >= 0 else kept
+        shown = kept.decode(errors="ignore")
+        rest = text[len(shown) :].count("\n")
+        text = shown.rstrip("\n") + f"\n… cut here; {rest} more lines in the step log\n"
+    return head + text + foot
 
 
 def main() -> int:
