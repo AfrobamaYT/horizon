@@ -550,12 +550,13 @@ impl Manifest {
     }
 }
 
+/// Folders of a mod's project that are never part of its package: Git's, Cargo's build output
+/// and the pinned SDK the mod tool fetches into `.horizon/`.
+pub const NOT_PACKAGED: [&str; 3] = [".git", "target", ".horizon"];
+
 /// A source file that belongs to the flat Cargo project, not its resource packs.
 pub fn source_file(name: &str) -> bool {
-    if name
-        .split('/')
-        .any(|part| matches!(part, ".git" | "target"))
-    {
+    if name.split('/').any(|part| NOT_PACKAGED.contains(&part)) {
         return false;
     }
     name == "Cargo.toml"
@@ -938,7 +939,10 @@ impl Package {
                         .replace('\\', "/");
                     let kind = entry.file_type().map_err(|e| e.to_string())?;
                     if kind.is_dir() {
-                        if matches!(entry.file_name().to_str(), Some(".git" | "target"))
+                        if entry
+                            .file_name()
+                            .to_str()
+                            .is_some_and(|name| NOT_PACKAGED.contains(&name))
                             || matches!(name.as_str(), "assets" | "data")
                         {
                             continue;
@@ -1489,6 +1493,11 @@ capabilities = ["registries"]
         std::fs::write(root.join("Cargo.lock"), registry_lock).unwrap();
         std::fs::write(root.join(".git/hooks/pre-commit"), "#!/bin/sh\n").unwrap();
         std::fs::write(root.join("target/generated/bad.rs"), "#!/bin/sh\n").unwrap();
+        // The SDK the mod tool fetched: the API's own crate, which is never the mod's.
+        let sdk = root.join(".horizon/sdk/api/crates/horizon-mod-api/src");
+        std::fs::create_dir_all(&sdk).unwrap();
+        std::fs::write(sdk.join("lib.rs"), "pub fn api() {}\n").unwrap();
+        std::fs::write(root.join(".horizon/sdk/sdk.json"), "{}").unwrap();
         let bytes = Package::pack_directory(&root).unwrap();
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         assert_eq!(Package::read_zip(&mut zip).unwrap().manifest.id, "ruby");
@@ -1500,6 +1509,14 @@ capabilities = ["registries"]
         assert_eq!(packed_lock, registry_lock);
         assert!(zip.by_name(".git/hooks/pre-commit").is_err());
         assert!(zip.by_name("target/generated/bad.rs").is_err());
+        assert!(
+            zip.file_names().all(|name| !name.starts_with(".horizon")),
+            "{:?}",
+            zip.file_names().collect::<Vec<_>>()
+        );
+        assert!(!source_file(
+            ".horizon/sdk/api/crates/horizon-mod-api/src/lib.rs"
+        ));
         std::fs::write(root.join("src/lib.rs"), b"MZ executable").unwrap();
         assert!(
             Package::pack_directory(&root)
