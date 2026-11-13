@@ -202,6 +202,40 @@ decided, which builds, signs and publishes it. On the fork it runs only when the
 with a fully green commit, or by hand (`kind`: `nightly` or `snapshot`); it has no schedule and no `workflow_run`
 trigger since 2026-11-13.
 
+Three kinds of game build (CI tiers, owner 2026-11-13):
+
+| Build | Who starts it | What it needs | Published as |
+|---|---|---|---|
+| [Snapshot](#snapshot) | root, by dispatching `release.yml -f kind=snapshot -f dry_run=false` on main | the gate (`lint`, `verify`, `verify-static`, `launcher`) green on that commit | pre-release `snapshot-<date>-<short>`; no launcher offers it |
+| Nightly | the [daily run](#daily-run), when every leg is green | `daily-green` on that commit, with its SDK | pre-release `nightly`, every launcher's update |
+| Release (`v*`) | by hand, from a Nightly | | the release |
+
+### Snapshot
+
+A snapshot is how a change to packages or platform legs is tested after it merges: none of those jobs runs on a pull
+request. Root dispatches `release.yml` with `kind=snapshot` on main, for main's head or `-f commit=<sha>` of a
+commit on main. In order:
+
+1. `decide` (`tools/release_train.py decide --channel snapshot`) refuses a commit that is not on main, or whose
+   newest dyna-checks main-push run did not pass every gate job (a pending job is not passed). Nothing else holds
+   it: no daily tests, no `daily-green`, no batch rules, no daily cap, no pause, no release-blocker.
+2. `snapshot-sdk` builds the commit's prebuilt SDK on every OS (`prebuilt-game-build.yml`; skipped when
+   `prebuilt-<sha>` already exists) and `snapshot-sdk-publish` publishes it from this run's artifacts through
+   `sdk-publish.yml`, the one workflow that publishes an SDK (the daily run and `prebuilt-game.yml` call it too).
+3. `snapshot` starts `nightly build` with `kind=snapshot` and that commit. It re-checks the gate and the SDK, builds
+   the commit alone (no picked pull requests, no build branch, no nightly-state), as `HORIZON_VERSION`
+   `snapshot-<date>` so the game calls itself "Snapshot <date> · <short>", signs it for the `snapshot` channel and
+   for `snapshot-<date>-<short>` (`SHA256SUMS.sig`, `SHA256SUMS.v2.sig`, the Nightly's key), checks the smoke test
+   and publishes the pre-release `snapshot-<date>-<short>` titled "Snapshot <date> · <short>". A snapshot of a
+   commit already published that day is skipped. Snapshots older than 7 days are deleted, never the newest one,
+   and never a `prebuilt-<sha>` SDK.
+
+It never touches the `nightly` tag or channel, its rotation, its `nightly-source/` tags or `daily-green`. A dry run
+(the default for a dispatch, and any run off main) builds the SDK and the game (a `nightly build` dry run, signed with
+a throwaway key) and publishes nothing; its summary names what a real run would publish. No launcher lists a
+snapshot or updates to one; a developer installs one with `horizon-launcher install snapshot-<date>-<short>`, which
+looks the tag up on its own and checks its signature for exactly that version.
+
 ### Daily run
 
 `.github/workflows/daily.yml` runs the in-game legs once a day, at 09:00 UTC on main's head, and when root
@@ -211,7 +245,7 @@ a hand dispatch never does, so it retries a run whose tag move, issues or nightl
 the ignored-tests data shards (`ignored-tests.yml`), the wasm fixture and guest stacks (`wasm-mods.yml`),
 `fn-replace-check.yml`, the native linkage probe (`native-dylib-probe.yml`), the launcher's Windows runtime-lease
 tests (`launcher-windows-check.yml`) and the prebuilt SDK of the commit
-(`prebuilt-game-build.yml`; its archives are published as `prebuilt-<sha>` by `sdk-publish` only after a green summary on a real run on main, before the Nightly that needs them), each called
+(`prebuilt-game-build.yml`; its archives are published as `prebuilt-<sha>` by `sdk-publish` (`sdk-publish.yml`) only after a green summary on a real run on main, before the Nightly that needs them), each called
 with the commit. Its
 summary (`tools/ci/daily_summary.py`) reads each leg's result and its sanitised verdict file, never a log:
 
@@ -224,8 +258,7 @@ summary (`tools/ci/daily_summary.py`) reads each leg's result and its sanitised 
 
 Only a run on `main` with `dry_run` false moves the tag, files issues or publishes; any other run prints what it
 would do. A Nightly ships only the commit `daily-green` points to, with its SDK (`release.yml`, `nightly build`).
-A snapshot (`release.yml -f kind=snapshot`) needs only dyna-checks' gate on main's head; publishing it under its own
-tag and channel is not built yet, so it checks and stops.
+A [snapshot](#snapshot) (`release.yml -f kind=snapshot`) needs only dyna-checks' gate on its commit of main.
 
 ```mermaid
 flowchart LR
@@ -435,7 +468,7 @@ The fork's [Nightly workflow](../.github/workflows/nightly-build.yml) selects an
 [`tools/ci/nightly.py`](../tools/ci/nightly.py), then calls `require-sdk` before rotation and again before
 publication. A complete pair currently means a published, non-draft `prebuilt-<40 lowercase hex SHA>` release
 with `SHA256SUMS` and the four v4 archives (Linux client, Linux server, Windows GNU and macOS ARM64).
-The daily run (`sdk-publish` in [daily.yml](../.github/workflows/daily.yml)) and the [SDK workflow](../.github/workflows/prebuilt-game.yml)'s hand dispatch publish those exact-SHA releases without pruning.
+[`sdk-publish.yml`](../.github/workflows/sdk-publish.yml), called by the daily run, a [snapshot](#snapshot) and the [SDK workflow](../.github/workflows/prebuilt-game.yml)'s hand dispatch, publishes those exact-SHA releases without pruning.
 These workflows currently have separate concurrency groups (`nightly-build` and `prebuilt-game`): the two
 publication-time checks alone would not make concurrent deletion safe.
 
