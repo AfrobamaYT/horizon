@@ -11,6 +11,7 @@ pub trait Hooks {
     /// fire at vanilla's award point; inside a transaction, the award and this hook wait until
     /// the outermost successful commit, after tentative world and inventory writes.
     #[hook(
+        version = 2,
         side = "server",
         contract = "cancel",
         out = "cancel",
