@@ -75,7 +75,7 @@ pub struct VanillaStages {
 /// kept by the game; deterministic and stateless.
 pub trait ChunkGenerator: Send + Sync + 'static {
     /// `ChunkGenerator.buildTerrain`: write the terrain of `chunk`, which
-    /// starts as air. The same seed and chunk give the same blocks.
+    /// starts as air. The same level id, seed and chunk give the same blocks.
     fn build_terrain(&self, chunk: &mut dyn ChunkAccess);
     /// The vanilla stages the level runs after [`build_terrain`](Self::build_terrain),
     /// asked once, at registration. None by default.

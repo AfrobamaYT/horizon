@@ -221,7 +221,7 @@ or from a data pack's level stem as `"generator": {"type": "mymod:void"}`:
 
 There is no `Host` in world generation: chunks fill on the worker threads, so a generator sees only
 the `ChunkAccess` of the chunk it fills, is `Send + Sync`, and keeps no mutable state, because two
-workers can fill neighbouring chunks at once. The same seed and chunk give the same blocks.
+workers can fill neighbouring chunks at once. The same level id, seed and chunk give the same blocks.
 `ChunkAccess` has the chunk's `pos`, the id of its level (`level()`, such as `mymod:pocket`, so
 one generator can serve several levels and tell them apart), the level's `seed` (the world's seed),
 the level's `min_y` and `height`, and borrowed immutable `metadata()`. Resolve `BlockKey`s at registration, then use `state` or
