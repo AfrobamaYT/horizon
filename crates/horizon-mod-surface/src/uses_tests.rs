@@ -1242,10 +1242,8 @@ fn a_sub_host_trait_leaving_the_host_the_mod_calls_through_is_named() {
     let source = "fn f(host: &mut dyn ServerHost, id: u128) { host.player(id); }";
     let uses = scan_on(hosts(vec![player_method("Option<PlayerRef>")], &[]), source);
     assert_eq!(
-        entry(&uses, "method:PlayersHost::player")
-            .reached_from
-            .as_deref(),
-        Some("trait:ServerHost")
+        entry(&uses, "method:PlayersHost::player").reached_from,
+        ["trait:ServerHost"]
     );
     // `PlayersHost` moves out of `Host`, unchanged.
     let mut moved = hosts(vec![player_method("Option<PlayerRef>")], &[]);
@@ -1265,9 +1263,10 @@ fn a_sub_host_trait_leaving_the_host_the_mod_calls_through_is_named() {
         hosts(vec![player_method("Option<PlayerRef>")], &[]),
         "fn f(host: &mut dyn ServerHost) { host.give_item(p, s); }",
     );
-    assert_eq!(
-        entry(&direct, "method:ServerHost::give_item").reached_from,
-        None
+    assert!(
+        entry(&direct, "method:ServerHost::give_item")
+            .reached_from
+            .is_empty()
     );
 }
 
@@ -1508,4 +1507,219 @@ fn a_path_through_a_renamed_crate_is_recorded() {
         &[("src/lib.rs", "use mod_api as api;\nfn f(b: api::Biome) {}")],
     );
     assert_eq!(entry(&uses, "type:world::Biome").paths, ["Biome"]);
+}
+
+/// `hosts` with a `ClientHost: Host` beside `ServerHost`, and `PlayersHost` a supertrait of `Host`
+/// or, with `client_only`, of `ClientHost` alone.
+fn two_sides(client_only: bool) -> Pieces {
+    let mut pieces = hosts(vec![player_method("Option<PlayerRef>")], &[]);
+    let client_bounds: &[&str] = if client_only {
+        pieces.traits[0] = api_trait("trait:Host", Role::Call, &[], vec![]);
+        &["trait:Host", "trait:PlayersHost"]
+    } else {
+        &["trait:Host"]
+    };
+    pieces.traits.push(api_trait(
+        "trait:ClientHost",
+        Role::Call,
+        client_bounds,
+        vec![],
+    ));
+    pieces
+}
+
+#[test]
+fn every_counted_host_that_leads_to_a_called_methods_trait_must_still_lead_there() {
+    // A client and a server hook; the call goes through `ServerHost`, which the scan cannot tell.
+    let hooks = "fn tick(host: &mut dyn ClientHost) {}\nfn f(host: &mut dyn ServerHost, id: u128) { host.player(id); }";
+    let uses = scan_on(two_sides(false), hooks);
+    assert_eq!(
+        entry(&uses, "method:PlayersHost::player").reached_from,
+        ["trait:ClientHost", "trait:ServerHost"]
+    );
+    let moved = ["`ServerHost` no longer includes `PlayersHost`, which this mod calls `player` on"];
+    assert_eq!(words(fits(uses.entries(), &two_sides(true).build())), moved);
+    // The mod also names the sub-host trait and upcasts the host to it.
+    let upcast = format!(
+        "{hooks}\nfn show(p: &dyn PlayersHost) {{}}\nfn g(host: &mut dyn ServerHost) {{ show(host); }}"
+    );
+    let uses = scan_on(two_sides(false), &upcast);
+    assert_eq!(words(fits(uses.entries(), &two_sides(true).build())), moved);
+    assert_eq!(fits(uses.entries(), &two_sides(false).build()), Fit::Fits);
+}
+
+fn dims(extra: &[&str]) -> Type {
+    let mut names = vec!["min_y", "height", "logical_height"];
+    names.extend(extra);
+    api_type(
+        "type:DimensionSettings",
+        "",
+        true,
+        names
+            .iter()
+            .map(|name| {
+                field(
+                    &format!("type:DimensionSettings.{name}"),
+                    "i32",
+                    &["type:DimensionSettings"],
+                )
+            })
+            .collect(),
+    )
+}
+
+/// Whether the mod made of `files` still fits once the API's `DimensionSettings` gains a field.
+fn fits_a_new_dims_field(files: &[(&str, &str)]) -> Fit {
+    let mut made_for = base();
+    made_for.types.push(dims(&[]));
+    let uses = scan_files(made_for, files);
+    let mut target = base();
+    target.types.push(dims(&["ultrawarm"]));
+    fits(uses.entries(), &target.build())
+}
+
+const DIMS_LITERAL: &str = "DimensionSettings { min_y: 0, height: 256, logical_height: 256 }";
+
+fn refused_for_the_new_field(fit: Fit) {
+    match fit {
+        Fit::DoesNotFit(misfits) => assert!(
+            misfits.iter().any(|m| m.id == "type:DimensionSettings"
+                && matches!(&m.change, Change::Fields { gained, .. } if gained == &["ultrawarm"])),
+            "{misfits:?}"
+        ),
+        Fit::Fits => panic!("fits, though the mod builds the API's struct field by field"),
+    }
+}
+
+#[test]
+fn a_type_alias_of_an_api_struct_is_not_the_mods_own() {
+    let one_file = format!(
+        "pub type DimensionSettings = mod_api::DimensionSettings;\nfn f() -> DimensionSettings {{ {DIMS_LITERAL} }}"
+    );
+    refused_for_the_new_field(fits_a_new_dims_field(&[("src/lib.rs", &one_file)]));
+    let world = format!(
+        "use crate::types::DimensionSettings;\nfn f() -> DimensionSettings {{ {DIMS_LITERAL} }}"
+    );
+    refused_for_the_new_field(fits_a_new_dims_field(&[
+        (
+            "src/types.rs",
+            "pub type DimensionSettings = mod_api::DimensionSettings;",
+        ),
+        ("src/world.rs", &world),
+    ]));
+    // Through a chain of the mod's aliases, or a renamed import.
+    let chained = format!(
+        "type Api = mod_api::DimensionSettings;\npub type DimensionSettings = Api;\nfn f() -> DimensionSettings {{ {DIMS_LITERAL} }}"
+    );
+    refused_for_the_new_field(fits_a_new_dims_field(&[("src/lib.rs", &chained)]));
+    let renamed = format!(
+        "use mod_api::DimensionSettings as Api;\npub type DimensionSettings = Api;\nfn f() -> DimensionSettings {{ {DIMS_LITERAL} }}"
+    );
+    refused_for_the_new_field(fits_a_new_dims_field(&[("src/lib.rs", &renamed)]));
+    // An alias of the mod's own struct stays its own, in its file and through a path.
+    let own_types = (
+        "src/types.rs",
+        "pub struct Mine { pub a: u8 }\npub type DimensionSettings = Mine;",
+    );
+    let own_world = (
+        "src/world.rs",
+        "use crate::types::DimensionSettings;\nfn f() { let d = DimensionSettings { a: 1 }; }",
+    );
+    assert_eq!(fits_a_new_dims_field(&[own_types, own_world]), Fit::Fits);
+    let own_alias = format!(
+        "struct Mine {{ a: u8 }}\ntype DimensionSettings = Mine;\nfn f() {{ let d = DimensionSettings {{ a: 1 }}; }}"
+    );
+    assert_eq!(
+        fits_a_new_dims_field(&[("src/lib.rs", &own_alias)]),
+        Fit::Fits
+    );
+}
+
+#[test]
+fn a_path_inside_the_mod_to_an_imported_api_struct_is_the_apis() {
+    let own = (
+        "src/own.rs",
+        "pub struct DimensionSettings { pub mine: u8 }",
+    );
+    let parent = (
+        "src/world/mod.rs",
+        "use mod_api::DimensionSettings;\nmod gen;",
+    );
+    let imported = format!("use super::DimensionSettings;\nfn f() {{ let d = {DIMS_LITERAL}; }}");
+    refused_for_the_new_field(fits_a_new_dims_field(&[
+        own,
+        parent,
+        ("src/world/gen.rs", &imported),
+    ]));
+    let written = format!("fn f() {{ let d = super::{DIMS_LITERAL}; }}");
+    refused_for_the_new_field(fits_a_new_dims_field(&[
+        own,
+        parent,
+        ("src/world/gen.rs", &written),
+    ]));
+    // An API glob that exports the name has the same effect.
+    let glob_parent = ("src/world/mod.rs", "use mod_api::*;\nmod gen;");
+    refused_for_the_new_field(fits_a_new_dims_field(&[
+        own,
+        glob_parent,
+        ("src/world/gen.rs", &written),
+    ]));
+    // A glob of an API module that does not export the name hands nothing over.
+    let mut made_for = base();
+    let mut record = dims(&[]);
+    record.paths = vec![
+        "DimensionSettings".into(),
+        "world::DimensionSettings".into(),
+    ];
+    made_for.types.push(record);
+    let other_glob = (
+        "src/world/mod.rs",
+        "use mod_api::items::*;\npub use crate::own::DimensionSettings;\nmod gen;",
+    );
+    let own_written = (
+        "src/world/gen.rs",
+        "fn f() { let d = super::DimensionSettings { mine: 1 }; }",
+    );
+    let uses = scan_files(made_for, &[own, other_glob, own_written]);
+    assert_eq!(
+        entry(&uses, "type:DimensionSettings").built,
+        Some(Built::None)
+    );
+    // With nothing in the mod that hands it the API's, the path leads to the mod's own.
+    let own_built = (
+        "src/world/gen.rs",
+        "fn f() { let d = crate::own::DimensionSettings { mine: 1 }; }",
+    );
+    assert_eq!(fits_a_new_dims_field(&[own, own_built]), Fit::Fits);
+}
+
+#[test]
+fn self_in_an_impl_for_a_qualified_api_struct_is_the_apis() {
+    let source = format!(
+        "struct DimensionSettings {{ mine: u8 }}\ntrait Make {{ fn make() -> Self; }}\nimpl Make for mod_api::DimensionSettings {{ fn make() -> Self {{ Self {{ min_y: 0, height: 256, logical_height: 256 }} }} }}"
+    );
+    refused_for_the_new_field(fits_a_new_dims_field(&[("src/lib.rs", &source)]));
+    // An impl for an alias of the API's, beside the file's own struct of that name.
+    let aliased = format!(
+        "struct DimensionSettings {{ mine: u8 }}\ntype Dims = mod_api::DimensionSettings;\ntrait Make {{ fn make() -> Self; }}\nimpl Make for Dims {{ fn make() -> Self {{ Self {{ min_y: 0, height: 256, logical_height: 256 }} }} }}"
+    );
+    refused_for_the_new_field(fits_a_new_dims_field(&[("src/lib.rs", &aliased)]));
+    // An impl for a path inside the mod that leads to the API's.
+    let through_parent = format!(
+        "trait Make {{ fn make() -> Self; }}\nimpl Make for super::DimensionSettings {{ fn make() -> Self {{ Self {{ min_y: 0, height: 256, logical_height: 256 }} }} }}"
+    );
+    refused_for_the_new_field(fits_a_new_dims_field(&[
+        (
+            "src/own.rs",
+            "pub struct DimensionSettings { pub mine: u8 }",
+        ),
+        (
+            "src/world/mod.rs",
+            "use mod_api::DimensionSettings;\nmod gen;",
+        ),
+        ("src/world/gen.rs", &through_parent),
+    ]));
+    // `Self` in an impl for the file's own struct stays its own.
+    let own = "struct DimensionSettings { mine: u8 }\nimpl DimensionSettings { fn new() -> Self { Self { mine: 1 } } }";
+    assert_eq!(fits_a_new_dims_field(&[("src/lib.rs", own)]), Fit::Fits);
 }
