@@ -44,12 +44,9 @@ mod block_changes;
 pub mod chat;
 pub mod chat_filter;
 mod item_particles;
-<<<<<<< HEAD
-mod pending_move;
-=======
 mod move_collision;
 mod moves;
->>>>>>> arismoko/main
+mod pending_move;
 mod raw_inbox;
 mod spawn_info;
 use advancements::AdvancementOwners;
