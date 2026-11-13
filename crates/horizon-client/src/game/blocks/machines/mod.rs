@@ -187,9 +187,6 @@ impl View {
             Slots::Range(0..self.len())
         }
     }
-    fn slots_for_face(&self, face: Option<Direction>) -> Vec<usize> {
-        self.slots_for_face_iter(face).collect()
-    }
     #[cfg(test)]
     fn slots_to_add(&self, face: Option<Direction>) -> Vec<usize> {
         self.slots_to_add_iter(face).collect()
