@@ -84,24 +84,41 @@ impl<R: StackedResource> AttachedStacks<R> {
     ) -> Self {
         Self::new(attachment, holder, 1, capacity, valid)
     }
-    /// What is held, `size` long; empty where the holder has none or is gone.
-    fn held(&self, host: &mut dyn ServerHost) -> StackList<R> {
+    /// What index `index` holds; none past the handler's `size`, or where the holder has none
+    /// or is gone. One borrowed read of the stored list: only the entry is cloned.
+    fn at(&self, host: &mut dyn ServerHost, index: usize) -> Option<(R, u32)> {
+        if index >= self.size {
+            return None;
+        }
+        let borrowed = self.attachment.with_decoded(host, self.holder, |list| {
+            list.map(|list| list.get(index).and_then(|held| held.as_ref()).cloned())
+        });
+        match borrowed {
+            // The holder keeps a decoded list: the entry is read without a clone.
+            Ok(Some(held)) => held,
+            // Nothing decoded yet: `get_existing` decodes a saved value once, and the store
+            // keeps its decoded copy for the borrowed reads after it.
+            _ => self
+                .attachment
+                .get_existing(host, self.holder)
+                .ok()
+                .flatten()
+                .and_then(|list| list.into_iter().nth(index).flatten()),
+        }
+    }
+    /// Index `index` set to `now`: whether the write went through. Indices past the handler's
+    /// `size` that the holder keeps are preserved, so a write through a smaller view never
+    /// deletes them.
+    fn write(&self, host: &mut dyn ServerHost, index: usize, now: Option<(R, u32)>) -> bool {
         let mut list = self
             .attachment
             .get_existing(host, self.holder)
             .ok()
             .flatten()
             .unwrap_or_default();
-        list.resize(self.size, None);
-        list
-    }
-    /// What index `index` holds.
-    fn at(&self, host: &mut dyn ServerHost, index: usize) -> Option<(R, u32)> {
-        self.held(host).into_iter().nth(index).flatten()
-    }
-    /// Index `index` set to `now`: whether the write went through.
-    fn write(&self, host: &mut dyn ServerHost, index: usize, now: Option<(R, u32)>) -> bool {
-        let mut list = self.held(host);
+        if list.len() <= index {
+            list.resize(index + 1, None);
+        }
         list[index] = now.filter(|(_, amount)| *amount > 0);
         if list.iter().all(Option::is_none) {
             self.attachment.remove(host, self.holder).is_ok()
@@ -122,11 +139,16 @@ impl<R: StackedResource> ResourceHandler<R> for AttachedStacks<R> {
         self.at(host, index).map_or(0, |(_, amount)| amount)
     }
     fn capacity(&self, host: &mut dyn ServerHost, index: usize, resource: &R) -> u32 {
-        if index < self.size && (self.valid)(resource) {
+        // The physical limit of an in-range index; capacity is not permission to insert
+        // (`is_valid` is), and extraction does not look at it.
+        if index < self.size {
             resource.limit(host, self.capacity)
         } else {
             0
         }
+    }
+    fn is_valid(&self, _: &mut dyn ServerHost, index: usize, resource: &R) -> bool {
+        index < self.size && (self.valid)(resource)
     }
     fn insert(
         &self,
@@ -136,6 +158,9 @@ impl<R: StackedResource> ResourceHandler<R> for AttachedStacks<R> {
         resource: &R,
         amount: u32,
     ) -> u32 {
+        if !self.is_valid(host, index, resource) {
+            return 0;
+        }
         let room = self.capacity(host, index, resource);
         let have = match self.at(host, index) {
             Some((held, _)) if held != *resource => return 0,
@@ -237,7 +262,9 @@ impl EnergyHandler for AttachedEnergy {
 }
 
 /// The codec of an [`AttachedItems`] attachment: `{stacks: [{Slot, id, count, components}]}`,
-/// each held index as vanilla saves a container's items.
+/// each held index as vanilla saves a container's items. An amount past what a signed `Int`
+/// saves (`i32::MAX`) fails the encode rather than wrapping; the handler's capacity is far
+/// below it.
 pub const ITEM_STACKS: AttachmentCodec<StackList<ItemResource>> = AttachmentCodec {
     encode: |list| {
         encode_stacks(list, |item, amount| {
@@ -278,6 +305,9 @@ pub const ITEM_STACKS: AttachmentCodec<StackList<ItemResource>> = AttachmentCode
 };
 
 /// The codec of an [`AttachedFluids`] attachment: `{stacks: [{Slot, id, amount, components}]}`.
+/// An amount past what a signed `Int` saves (`i32::MAX`) fails the encode, as the items codec
+/// does; a fluid tank that can hold more carries it in a mod's own codec (NeoForge saves the
+/// same `Int`).
 pub const FLUID_STACKS: AttachmentCodec<StackList<FluidResource>> = AttachmentCodec {
     encode: |list| {
         encode_stacks(list, |fluid, amount| {
@@ -340,7 +370,13 @@ fn encode_stacks<R>(
     Ok(saved)
 }
 
-/// The list `saved` holds, each index read by `entry`; one it can't read fails the decode.
+/// The most indices one saved stack list may span. A handler's `size` a mod picks is bounded by
+/// this at the codec: a saved `Slot` past it is hostile, and a hostile save must not drive the
+/// allocation of the list it names.
+const MAX_SLOTS: usize = 4096;
+
+/// The list `saved` holds, each index read by `entry`; one it can't read fails the decode. A
+/// `Slot` past [`MAX_SLOTS`] fails the decode before anything is allocated to its size.
 fn decode_stacks<R: Clone>(
     saved: &Compound,
     entry: impl Fn(&Compound) -> Option<(R, u32)>,
@@ -357,6 +393,9 @@ fn decode_stacks<R: Clone>(
             return Err(AttachmentError::Decode);
         };
         let slot = usize::try_from(slot).map_err(|_| AttachmentError::Decode)?;
+        if slot >= MAX_SLOTS {
+            return Err(AttachmentError::Decode);
+        }
         let held = entry(stack).ok_or(AttachmentError::Decode)?;
         if list.len() <= slot {
             list.resize(slot + 1, None);
@@ -365,3 +404,7 @@ fn decode_stacks<R: Clone>(
     }
     Ok(list)
 }
+
+#[cfg(test)]
+#[path = "attached_storage_tests.rs"]
+mod tests;
