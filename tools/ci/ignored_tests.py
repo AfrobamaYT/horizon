@@ -26,6 +26,10 @@ the runner has a Vulkan driver (an ICD file), and must pass there.
 `--needs VARIABLE --one-process-each` runs the tests marked `needs VARIABLE`, each alone in its own process
 (`--list` prints those commands instead), and fails unless every run reports exactly one test passed: a
 renamed test would otherwise match nothing and pass. Every test runs, then the step fails if any did.
+`--report FILE` also writes the run's verdict as JSON for the daily run's summary (tools/ci/daily_summary.py): each
+problem's package, test identity, kind, panic location and policy file, the tests that passed, and the shards that
+did not complete. It holds only what this script prints anyway, never test output.
+
 Every reader refuses a malformed row, a test listed twice, a folder with no rows or with a file other than `*.txt`
 and README.md, and a file at the retired single-list path (tools/ci/check_ignored_test_rows.py checks this alone).
 
@@ -34,6 +38,7 @@ payloads: the prepared data is Mojang's. Compile/list failures expose bounded co
 """
 
 import argparse
+import json
 import os
 import errno
 import io
@@ -221,12 +226,21 @@ def needs_commands(variable, jobs=None):
     return commands
 
 
-def run_one_process_each(variable, jobs=None):
+def write_report(path, report):
+    """The daily summary's hand-off (--report): identities, locations and policy only."""
+    if path:
+        Path(path).write_text(json.dumps(report, indent=1, sort_keys=True) + "\n")
+
+
+def run_one_process_each(variable, jobs=None, report=None):
     """Run each test that needs `variable` in its own process; 1 unless every run reports exactly one passed test."""
     if not os.environ.get(variable):
         sys.exit(f"{variable} is unset: these tests need it")
     failed = []
+    verdict = {"needs": variable, "problems": [], "passed": [], "incomplete": []}
     for command in needs_commands(variable, jobs):
+        # needs_commands ends each command with the test's exact name, after `-p PACKAGE`.
+        entry = {"package": command[command.index("-p") + 1], "test": safe_identity(command[-1])}
         print(f"$ {shlex.join(command)}", flush=True)
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
         passed = False
@@ -236,6 +250,10 @@ def run_one_process_each(variable, jobs=None):
         if process.wait() or not passed:
             print(f"::error::expected 1 passing test from: {shlex.join(command)}", flush=True)
             failed.append(command)
+            verdict["problems"].append({**entry, "kind": "failed", "panic": None, "policy": None})
+        else:
+            verdict["passed"].append(entry)
+    write_report(report, verdict)
     print(f"{variable}: {len(failed)} of the runs failed" if failed else f"{variable}: every run passed its one test")
     return 1 if failed else 0
 
@@ -247,6 +265,8 @@ DIAGNOSTIC_LINES = 100_000
 DIAGNOSTIC_LINE_CHARS = 4096
 DIAGNOSTIC_CONTEXTS = 4096
 _active_budget = None
+# Each failed test's tracked panic location (`path:line:col`) from the last failure_diagnostics, for --report.
+_panic_locations = {}
 
 
 def thread_identity(name):
@@ -448,6 +468,8 @@ def failure_diagnostics(output):
         locations_withheld += any("panic location withheld" in item for item in details)
         payloads_withheld += any("payload withheld" in item for item in details)
         reasons_shown += any(item.startswith("  panic reason:") for item in details)
+        _panic_locations[name] = next((item.removeprefix("  panicked at ") for item in details
+                                       if item.startswith("  panicked at ")), None)
         record = f"  failed test: {identity}\n" + "\n".join(details) + "\n"
         emitted, cut = bounded_record(record, remaining)
         shown += emitted
@@ -721,9 +743,15 @@ def run(package, skip, number=None, count=None):
     return results
 
 
-def main(shards):
+def main(shards, report=None):
     global _active_budget
     _active_budget = [FAILURE_TOTAL_BYTES]
+    _panic_locations.clear()
+    verdict = {"shards": list(shards), "problems": [], "passed": [], "incomplete": []}
+
+    def problem(package, test, kind, policy=None):
+        verdict["problems"].append({"package": package, "test": safe_identity(test), "kind": kind,
+                                    "panic": _panic_locations.get(test), "policy": policy})
     known = known_failures()
     inputs = harness_inputs()
     files = {(row.package, row.test): row.file for row in listed_entries()}
@@ -753,6 +781,7 @@ def main(shards):
         results = run(package, skip, number, count) if number is not None else run(package, skip)
         if results is None:
             problems.append(f"{shard}: the test run did not complete")
+            verdict["incomplete"].append(shard)
             continue
         for test, passed in sorted(results.items()):
             listed = (package, test) in known
@@ -763,15 +792,22 @@ def main(shards):
                     f"{package} {test}: accepted failure policy={files.get((package, policy_test), POLICY_PATH)} "
                     f"mark={known[(package, policy_test)] or 'known'}\n", _active_budget)
                 accepted_unshown += not emitted
+            policy = files.get((package, policy_test), POLICY_PATH) if listed else None
             if not passed and not listed:
                 problems.append(f"{package} {test}: failed, and isn't a known failure")
+                problem(package, policy_test, "failed")
             elif not passed and known[(package, policy_test)] == "gpu":
                 problems.append(f"{package} {test}: failed with a Vulkan driver present")
+                problem(package, policy_test, "gpu", policy)
             elif passed and listed and known[(package, policy_test)] is None:
-                problems.append(f"{package} {test}: passes now; take it off {files.get((package, policy_test), POLICY_PATH)}")
+                problems.append(f"{package} {test}: passes now; take it off {policy}")
+                problem(package, policy_test, "passes-now", policy)
+            elif passed:
+                verdict["passed"].append({"package": package, "test": test})
         for (listed, test), mark in known.items():
             if listed == package and mark not in skipped and in_leg(test, number, count) and test not in results:
                 problems.append(f"{package} {safe_identity(test)}: listed in {files.get((package, test), POLICY_PATH)} but no longer runs")
+                problem(package, test, "no-longer-runs", files.get((package, test), POLICY_PATH))
     shown = 0
     for problem in problems:
         emitted, _ = bounded_record(f"::error::{problem}\n", _active_budget)
@@ -781,6 +817,7 @@ def main(shards):
     if accepted_unshown:
         print(f"{accepted_unshown} accepted policy records not shown (shared total byte budget)")
     _active_budget = None
+    write_report(report, verdict)
     return 1 if problems else 0
 
 
@@ -792,12 +829,13 @@ if __name__ == "__main__":
     each.add_argument("--one-process-each", action="store_true", help="run them, each alone in its own process")
     each.add_argument("--list", action="store_true", help="print their commands")
     parser.add_argument("--jobs", type=int, help="cargo's -j for --needs")
+    parser.add_argument("--report", metavar="FILE", help="also write the verdict as JSON for the daily summary")
     args = parser.parse_args()
     if args.needs and args.list:
         print("\n".join(shlex.join(command) for command in needs_commands(args.needs, args.jobs)))
     elif args.needs and args.one_process_each:
-        sys.exit(run_one_process_each(args.needs, args.jobs))
+        sys.exit(run_one_process_each(args.needs, args.jobs, args.report))
     elif args.needs or args.one_process_each or args.list:
         parser.error("--needs takes --one-process-each or --list, and they take --needs")
     else:
-        sys.exit(main(args.shards))
+        sys.exit(main(args.shards, args.report))
