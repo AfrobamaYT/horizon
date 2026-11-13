@@ -89,4 +89,13 @@ fn the_noise_generators_codec_reads_a_registered_source() {
             .to_string(),
         "biome source test:bands names the unknown biome minecraft:badlands"
     );
+
+    // A source nobody registered is refused naming its id.
+    assert_eq!(
+        catalog
+            .decode(r#"{"type":"test:gone"}"#)
+            .unwrap_err()
+            .to_string(),
+        "unknown biome source test:gone"
+    );
 }

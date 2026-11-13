@@ -181,7 +181,7 @@ impl BiomeSourceCatalog {
                 LevelBiomeSource::resolve(&kind, mod_biome_sources(), 0, |name| {
                     self.biomes.contains(name).then_some(())
                 })
-                .ok_or(DecodeError::Field("unknown biome source"))?
+                .ok_or_else(|| DecodeError::Registry(format!("unknown biome source {kind}")))?
                 .map_err(DecodeError::Registry)?;
                 BiomeSourceDefinition::Registered(kind)
             }

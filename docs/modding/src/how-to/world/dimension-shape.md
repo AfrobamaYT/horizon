@@ -96,9 +96,9 @@ data pack: a pack with `data/mymod/dimension/pocket.json` or `data/mymod/dimensi
 replaces that half of it, in the worlds that have the pack.
 
 `register_dimension` is the same call in a mod built to `mod.wasm`, as the settings are plain
-data. A wasm mod's dimension can name only the game's own generator, `minecraft:noise`, and only a
-biome source a native mod registered: a chunk generator and a biome source are code, and
-`register_chunk_generator` and `register_biome_source` are native only.
+data. A wasm mod's dimension can name only the game's own generator, `minecraft:noise`, with a
+vanilla biome source or one a native mod registered: a chunk generator and a biome source are code,
+and `register_chunk_generator` and `register_biome_source` are native only.
 
 ## Sending a player to a dimension
 
