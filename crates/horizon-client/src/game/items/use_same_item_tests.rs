@@ -98,3 +98,17 @@ fn releasing_right_after_a_bow_replaced_the_apple_fires_nothing() {
     });
     assert_eq!(lines, [FINISH]);
 }
+
+#[test]
+#[ignore = "requires prepared resources"]
+fn a_command_putting_the_apple_back_keeps_the_use() {
+    let lines = eating(5, |game| {
+        // A mod's raw write puts a bow in; the command puts an apple back
+        // before the next tick: `useItem` is still the apple, so the use goes on.
+        *game.held_mut() = Some(ItemStack::new("minecraft:bow", 1));
+        assert!(game.run_command("item replace entity @s weapon.mainhand with golden_apple"));
+        game.tick_using();
+        assert_eq!(game.using, Some((game.selected, 6)));
+    });
+    assert!(lines.is_empty(), "{lines:?}");
+}

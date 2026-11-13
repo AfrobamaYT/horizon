@@ -263,10 +263,17 @@ impl Game<'_> {
     /// mod's slot write). When that slot's item is in use and `stack` isn't the
     /// same item, `useItem` keeps the old stack, so the use stops with its
     /// vibration, even for air: an emptied hand alone reads as used up.
+    /// The stop is for the stack the use began with, whatever the slot holds now.
     pub(in crate::game) fn stop_use_replaced(&mut self, slot: usize, stack: Option<&ItemStack>) {
-        let in_use = self.using.is_some_and(|(used, _)| used == slot);
-        let item = self.stack_in(slot).map(|s| &s.item);
-        if in_use && item.is_some() && item != stack.map(|s| &s.item) {
+        if !self.using.is_some_and(|(used, _)| used == slot) {
+            return;
+        }
+        let new = stack.map(|s| &s.item);
+        if let Some(item) = self.use_item.take_if(|item| Some(&item.item) != new) {
+            self.stop_using_item(&item);
+        } else if self.use_item.is_none()
+            && self.stack_in(slot).is_some_and(|s| Some(&s.item) != new)
+        {
             self.stop_active_item_use();
         }
     }
