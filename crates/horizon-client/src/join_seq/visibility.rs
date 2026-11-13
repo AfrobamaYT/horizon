@@ -112,6 +112,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn unbound_passes_block_until_restore_consumption_and_unwind() {
         // The admission signal is process-wide. Isolate this test from other
         // tests legitimately lifting owners concurrently in the same runner.

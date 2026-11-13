@@ -2890,6 +2890,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn console_logging_survives_closed_stdout() {
         if let Some(home) = std::env::var_os(CHILD_HOME) {
             horizon_client::logging::init(std::path::Path::new(&home), "Server thread");

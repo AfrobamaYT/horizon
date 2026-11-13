@@ -414,6 +414,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn overflow_tokens_do_not_alias_records_or_lose_crash_owners() {
         if !isolated("overflow_tokens_do_not_alias_records_or_lose_crash_owners") {
             return;
@@ -449,6 +450,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn profiler_guards_and_threads() {
         if !isolated("profiler_guards_and_threads") {
             return;
@@ -518,6 +520,7 @@ mod tests {
         assert!(super::summary().contains("fresh:"));
     }
     #[test]
+    #[ignore = "daily"]
     fn profiler_drains_in_flight_and_reports_overflow() {
         if !isolated("profiler_drains_in_flight_and_reports_overflow") {
             return;
@@ -555,6 +558,7 @@ mod tests {
         assert!(report.dropped >= 1);
     }
     #[test]
+    #[ignore = "daily"]
     fn profiler_stale_epoch_is_rejected() {
         if !isolated("profiler_stale_epoch_is_rejected") {
             return;
@@ -603,6 +607,7 @@ mod tests {
         true
     }
     #[test]
+    #[ignore = "daily"]
     fn profiler_empty_session_replaces_previous_report() {
         if !isolated("profiler_empty_session_replaces_previous_report") {
             return;
@@ -663,10 +668,12 @@ mod tests {
         assert_eq!(report.dropped, threads.saturating_sub(THREADS) * calls);
     }
     #[test]
+    #[ignore = "daily"]
     fn profiler_two_full_threads() {
         capacity(2, CALLS, "profiler_two_full_threads");
     }
     #[test]
+    #[ignore = "daily"]
     fn profiler_thread_exhaustion() {
         capacity(THREADS + 1, 1, "profiler_thread_exhaustion");
     }

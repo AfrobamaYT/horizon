@@ -229,6 +229,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn missing_registration_is_displayed_and_information_does_not_register() {
         const ACTOR: &str = "HORIZON_MISSING_LEASE_ACTOR";
         if let Some(mode) = std::env::var_os(ACTOR) {
@@ -435,6 +436,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn direct_entry_blocks_cleanup_and_refuses_busy_or_deleted_install() {
         if crate::runtime_leases::isolated_test() {
             return;
@@ -483,6 +485,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn unpublished_enclosing_unit_refuses_and_target_build_needs_no_install_marker() {
         if crate::runtime_leases::isolated_test() {
             return;
@@ -523,6 +526,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    #[ignore = "daily"]
     fn symlinked_resources_are_leased_by_canonical_identity() {
         if crate::runtime_leases::isolated_test() {
             return;
@@ -558,6 +562,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn acquired_snapshot_rechecks_completion_and_directory_identity() {
         if crate::runtime_leases::isolated_test() {
             return;

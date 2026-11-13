@@ -11,6 +11,7 @@ fn tool(bin: &Path, name: &str) -> std::path::PathBuf {
 }
 
 #[test]
+#[ignore = "daily"]
 fn selects_a_compatible_compiler_and_runtime() {
     if let Ok(scenario) = env::var(CHILD) {
         let root = std::path::PathBuf::from(env::var_os(ROOT).unwrap());

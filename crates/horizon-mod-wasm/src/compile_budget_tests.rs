@@ -25,6 +25,7 @@ fn command(input: &Path, key: &str) -> Command {
     command
 }
 #[test]
+#[ignore = "daily"]
 fn actual_child_timeout_then_same_module_succeeds_and_is_cached() {
     let dir = tempfile::tempdir().unwrap();
     let mut cache = ModuleCache::new(dir.path().join(".horizon-cache/wasm"));
@@ -79,6 +80,7 @@ fn actual_child_timeout_then_same_module_succeeds_and_is_cached() {
 }
 
 #[test]
+#[ignore = "daily"]
 fn unavailable_or_untrusted_cache_refuses_applied_unix_budget() {
     use std::{fs, os::unix::fs::PermissionsExt};
     for untrusted in [false, true] {
@@ -150,6 +152,7 @@ fn installed_settings_refusal_worker() {
 }
 
 #[test]
+#[ignore = "daily"]
 fn invalid_startup_settings_publish_and_report_refusals_on_both_sides() {
     use std::fs;
     for side in ["client", "server"] {

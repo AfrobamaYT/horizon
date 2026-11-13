@@ -7253,6 +7253,7 @@ mod tests {
         assert_eq!(again.update_tag(), spawner.update_tag());
     }
     #[test]
+    #[ignore = "daily"]
     fn native_saved_ids_must_match_the_declared_block_membership() {
         // The production registry is immutable. Exercise its real readers in a fresh process.
         const CHILD: &str = "HORIZON_TEST_NATIVE_SAVED_MEMBERSHIP";

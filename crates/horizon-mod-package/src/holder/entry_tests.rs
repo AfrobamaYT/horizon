@@ -81,6 +81,7 @@ fn bounded_record_authentication_roots_and_file_replacement_are_enforced() {
 }
 #[cfg(unix)]
 #[test]
+#[ignore = "daily"]
 fn every_fresh_lease_and_retained_metadata_fd_survives_closed_stdio() {
     use std::os::fd::AsRawFd;
     const MASK: &str = "HORIZON_ENTRY_TEST_CLOSED_STDIO";

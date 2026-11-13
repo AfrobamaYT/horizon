@@ -618,6 +618,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn a_mod_block_entity_rides_its_item() {
         // The declared types are frozen once per process: install them in a fresh one.
         const CHILD: &str = "HORIZON_TEST_MOD_BLOCK_ENTITY_ITEM";

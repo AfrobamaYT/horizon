@@ -486,6 +486,7 @@ fn missing(_: &Path, _: &str) -> std::process::Command {
 }
 
 #[test]
+#[ignore = "daily"]
 fn child_success_avoids_in_process_compile() {
     let (_dir, cache, _, bytes) = fixture();
     let engine = crate::runtime::engine().unwrap();

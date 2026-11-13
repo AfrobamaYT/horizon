@@ -256,6 +256,7 @@ impl log::Log for Capture {
 static LOG: Capture = Capture(Mutex::new(Vec::new()));
 
 #[test]
+#[ignore = "daily"]
 fn structure_transform_placement_rotations_mirrors_unset_and_refusal() {
     // The logger is process-global; isolate this assertion from other log-capture tests.
     if std::env::var_os("HORIZON_STRUCTURE_TRANSFORM_LOG_CHILD").is_none() {

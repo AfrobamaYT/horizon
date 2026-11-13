@@ -87,6 +87,7 @@ fn process_probe() {
 }
 
 #[test]
+#[ignore = "daily"]
 fn processes_serialize_the_entire_manifest_transaction() {
     let home = scratch("process");
     let guard = lock_home(&home).unwrap();
