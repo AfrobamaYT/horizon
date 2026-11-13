@@ -105,7 +105,19 @@ pub fn install(checkout: &Path, program: &Path, trusted: bool) -> Result<String,
     {
         return Err(tr("Choose a real horizon-client executable built for this computer.").into());
     }
-    preflight(&checkout, &program)?;
+    let mut missing = Vec::new();
+    for name in ["horizon-ctl", "horizon-prepare", "horizon-server"] {
+        let name = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+        if !program.with_file_name(&name).is_file() {
+            missing.push(name);
+        }
+    }
+    if !checkout.join("exporters/manifest.json").is_file() {
+        missing.push("exporters/manifest.json".into());
+    }
+    if !missing.is_empty() {
+        return Err(trf("Missing developer packaging inputs: {files}. Build companions with cargo build -p horizon-client-lib --bin horizon-ctl -p horizon-prepare -p horizon-server. Run horizon-prepare compile-exporters --root CHECKOUT, then copy its server, client and manifest.json into CHECKOUT/exporters/.", &[("files", &missing.join(", "))]));
+    }
     let (revision, snapshot) = committed_snapshot(&checkout)?;
     let _publication =
         crate::run_leases::installation().map_err(crate::native_mods::cache_error)?;
@@ -148,19 +160,6 @@ pub fn install(checkout: &Path, program: &Path, trusted: bool) -> Result<String,
         fs::rename(package, destination).map_err(|e| e.to_string())?;
     }
     Ok(tag)
-}
-
-/// Every file the checkout's packager needs (the SDK's one list, route `package`), named
-/// together with how to make each, before the packager runs.
-fn preflight(checkout: &Path, program: &Path) -> Result<(), String> {
-    match horizon_mod_package::sdk::inputs().check("package", program, checkout) {
-        Ok(()) => Ok(()),
-        Err(horizon_mod_package::sdk::Refusal::MissingInputs { missing, how }) => Err(trf(
-            "Missing developer packaging inputs: {files}. Make them first:\n{how}",
-            &[("files", &missing.join(", ")), ("how", &how.join("\n"))],
-        )),
-        Err(other) => Err(other.to_string()),
-    }
 }
 
 pub(crate) fn committed_snapshot(checkout: &Path) -> Result<(String, Vec<u8>), String> {
@@ -248,31 +247,6 @@ mod tests {
         assert!(committed_snapshot(folder.path())
             .unwrap_err()
             .contains("Commit your changes first"));
-    }
-    #[test]
-    fn preflight_names_each_missing_input_from_the_one_list() {
-        let folder = tempfile::tempdir().unwrap();
-        let checkout = folder.path().join("checkout");
-        let program = folder.path().join("bin").join(backend::CLIENT);
-        let route = horizon_mod_package::sdk::inputs().route("package").clone();
-        let files: Vec<std::path::PathBuf> = route
-            .program_files(&program)
-            .into_iter()
-            .chain(route.checkout.iter().map(|name| checkout.join(name)))
-            .collect();
-        assert!(files.iter().any(|f| f.ends_with("horizon-wasm-std.wasm")));
-        for file in &files {
-            fs::create_dir_all(file.parent().unwrap()).unwrap();
-            fs::write(file, b"").unwrap();
-        }
-        preflight(&checkout, &program).unwrap();
-        for file in &files {
-            fs::remove_file(file).unwrap();
-            let error = preflight(&checkout, &program).unwrap_err();
-            let name = file.file_name().unwrap().to_string_lossy();
-            assert!(error.contains(&*name), "{name}: {error}");
-            fs::write(file, b"").unwrap();
-        }
     }
     #[test]
     fn consent_precedes_checkout_access() {
