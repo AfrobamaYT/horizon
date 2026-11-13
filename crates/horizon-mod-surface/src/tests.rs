@@ -144,8 +144,12 @@ fn leaves_are_what_a_mod_writes() {
 #[test]
 fn the_reader_refuses_with_a_typed_error() {
     let text = sample().to_json();
-    let newer = text.replacen("\"schema\": 1", "\"schema\": 2", 1);
-    assert_eq!(Surface::read(newer.as_bytes()), Err(ReadError::Schema(2)));
+    let older = text.replacen("\"schema\": 2", "\"schema\": 1", 1);
+    assert_eq!(Surface::read(older.as_bytes()), Err(ReadError::Schema(1)));
+    assert_eq!(
+        ReadError::Schema(1).to_string(),
+        "surface schema 1, this tool reads 2"
+    );
     assert!(matches!(
         Surface::read(&text.as_bytes()[..text.len() / 2]),
         Err(ReadError::Json(_))
@@ -204,7 +208,7 @@ fn the_contract_hash_leaves_out_doc_and_info_fields() {
 #[test]
 fn deeply_nested_json_neither_overflows_nor_passes_as_records() {
     let deep = |field: &str| {
-        let mut text = format!("{{\"schema\": 1, \"hash\": \"\", \"{field}\": ");
+        let mut text = format!("{{\"schema\": {SCHEMA}, \"hash\": \"\", \"{field}\": ");
         text.push_str(&"[".repeat(100_000));
         text.push_str(&"]".repeat(100_000));
         text.push('}');

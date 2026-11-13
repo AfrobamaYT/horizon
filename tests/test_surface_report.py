@@ -64,7 +64,7 @@ class GateTests(unittest.TestCase):
 class ReportTests(unittest.TestCase):
     """report() against a stub horizon-stage whose behaviour each test sets."""
 
-    def run_report(self, base_export=0, diff_exit=0, gate_on=False, head_export=0):
+    def run_report(self, base_export=0, diff_exit=0, gate_on=False, head_export=0, diff_err=""):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
             tool = work / "horizon-stage"
@@ -75,7 +75,8 @@ if [ "$1" = surface ]; then
   case "$2" in *head) [ {head_export} = 0 ] || {{ echo 'horizon-stage surface: a.rs: parse error' >&2; exit 1; }};; esac
   echo '{{}}' > "$3"; exit 0
 fi
-echo "Surface: report"; [ {diff_exit} = 0 ] || echo "breaking change without a change note: fn:a" >&2
+echo "Surface: report"; [ -z "{diff_err}" ] && [ {diff_exit} != 0 ] && echo "breaking change without a change note: fn:a" >&2
+[ -n "{diff_err}" ] && echo "horizon-stage: $2: {diff_err}" >&2
 exit {diff_exit}
 """)
             tool.chmod(0o755)
@@ -89,6 +90,12 @@ exit {diff_exit}
         self.assertEqual(text, "No surface report: the head's horizon-stage cannot read the base tree "
                                "(horizon-stage surface: unknown key `access`).\n")
         self.assertNotIn("surface-diff", calls)
+
+    def test_a_base_surface_of_another_schema_passes_with_one_line(self):
+        code, text, _ = self.run_report(diff_exit=2, diff_err="surface schema 1, this tool reads 2")
+        self.assertEqual(code, 0)
+        self.assertTrue(text.startswith("No surface report: the head's horizon-stage cannot read the base surface "), text)
+        self.assertIn("surface schema 1, this tool reads 2", text)
 
     def test_this_tree_failing_to_export_fails_the_step(self):
         for base_export in (0, 1):
