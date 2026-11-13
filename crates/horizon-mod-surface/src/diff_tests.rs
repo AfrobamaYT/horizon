@@ -612,3 +612,28 @@ fn the_diff_round_trips_as_json() {
     assert!(text.contains(r#""class":"breaking""#), "{text}");
     assert_eq!(serde_json::from_str::<Diff>(&text).unwrap(), d);
 }
+
+#[test]
+fn a_folded_member_can_make_its_container_breaking() {
+    // The trait's own change only widens it, but a member folded into it was removed.
+    let old = traits(vec![implemented(
+        "Part",
+        vec![method("Part", "tick", true), method("Part", "save", false)],
+        &["tick"],
+    )]);
+    let new = traits(vec![implemented(
+        "Part",
+        vec![method("Part", "tick", false)],
+        &[],
+    )]);
+    assert_eq!(
+        only(&diff(&old, &new)),
+        (
+            "trait:Part",
+            ChangeKind::Changed,
+            Class::Breaking,
+            vec!["`tick` is no longer required"],
+            vec!["method:Part::save", "method:Part::tick"]
+        )
+    );
+}
