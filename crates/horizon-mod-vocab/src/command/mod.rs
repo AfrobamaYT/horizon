@@ -91,8 +91,6 @@ pub enum CommandArgumentValue {
     /// A `block_pos` argument resolved from world, relative or local coordinates.
     /// Resolution does not load chunks or require the block to be loaded.
     BlockPos([i32; 3]),
-    /// A `resource:<registry>` argument: an id present in that registry (static or data pack).
-    Id(Identifier),
     /// A custom argument type's canonical value: the registered type's id
     /// (`mymod:machine`) and what its parser returned for the typed text.
     Custom {
@@ -101,6 +99,8 @@ pub enum CommandArgumentValue {
         /// The value `CommandArgumentType::parse` returned.
         value: String,
     },
+    /// A `resource:<registry>` argument: an id present in that registry (static or data pack).
+    Id(Identifier),
 }
 
 /// An argument's registered name and its validated value.
