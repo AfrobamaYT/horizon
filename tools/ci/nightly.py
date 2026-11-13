@@ -7,6 +7,7 @@
     nightly.py prune-builds [--days 7]   deletes the nightly/build-<date>-<n> branches older than that, but the
                                    newest and any a published nightly points to (Ludovic, 2026-10-27)
     nightly.py keep-source <sha> <date>  tags the nightly's commit nightly-source/<date>-<short>, for good
+    nightly.py sdk-archives        the archives a complete prebuilt-<sha> release holds, one per line
 
 A nightly builds main plus the pull requests the trusted reviewers picked (the set: tools/ci/nightly_set.py), merged
 in their order and pushed as nightly/build-<date>-<n>; with no set, main alone. Main is its newest commit where
@@ -227,14 +228,17 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
           + "".join(f" + #{e['number']}" for e in kept))
 
 
+# The archives a complete prebuilt-<sha> release holds, beside SHA256SUMS: what a nightly requires, and what the
+# daily run's sdk-publish refuses to release without (`nightly.py sdk-archives`).
+SDK_ARCHIVES = tuple(f"horizon-prebuilt-v5-{target}.tar.gz" for target in (
+    "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu-server", "x86_64-pc-windows-gnu", "aarch64-apple-darwin"))
+
+
 def ready_sdk_shas() -> set[str]:
     """Snapshot complete published v4 pairs; API failures fail closed."""
     releases = train.gh_json("api", "--paginate", "--slurp",
                              f"repos/arismoko/horizon/releases?per_page=100")
-    required = {"SHA256SUMS"} | {
-        f"horizon-prebuilt-v5-{target}.tar.gz" for target in (
-            "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu-server",
-            "x86_64-pc-windows-gnu", "aarch64-apple-darwin")}
+    required = {"SHA256SUMS", *SDK_ARCHIVES}
     return {release["tag_name"].removeprefix("prebuilt-")
             for page in releases for release in page
             if not release["draft"] and re.fullmatch(r"prebuilt-[0-9a-f]{40}", release["tag_name"])
@@ -401,6 +405,7 @@ def main() -> None:
     sub.add_parser("pick").add_argument("--force", action="store_true")
     sub.add_parser("rotate")
     sub.add_parser("require-sdk").add_argument("sha")
+    sub.add_parser("sdk-archives")
     sub.add_parser("prune").add_argument("--days", type=int, default=7)
     sub.add_parser("prune-builds").add_argument("--days", type=int, default=7)
     keep = sub.add_parser("keep-source")
@@ -411,6 +416,8 @@ def main() -> None:
         pick(args.force)
     elif args.cmd == "require-sdk":
         require_sdk(args.sha)
+    elif args.cmd == "sdk-archives":
+        print("\n".join(SDK_ARCHIVES))
     elif args.cmd == "rotate":
         rotate()
     elif args.cmd == "prune-builds":

@@ -360,8 +360,29 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertEqual(publish["env"]["TAG"], "${{ needs.sdk.outputs.tag }}")
         self.assertEqual([step.get("name") for step in publish["steps"]][-1], "Release prebuilt-<sha>")
         self.assertIn("sdk-publish", jobs["nightly"]["needs"])
+        steps = {step.get("name") or step.get("uses"): step for step in publish["steps"]}
+        self.assertEqual(steps["Is prebuilt-<sha> published"]["id"], "published")
+        download = steps["actions/download-artifact@v4"]
+        self.assertNotIn("continue-on-error", download, "a failed download stops the publish")
+        release = steps["Release prebuilt-<sha>"]
+        for step in (download, release):
+            self.assertEqual(step["if"], "steps.published.outputs.published == 'false'")
+        self.assertLess(release["run"].index("python3 tools/ci/nightly.py sdk-archives"),
+                        release["run"].index("gh release create"), "refuses unless exactly the four archives are there")
+
         self.assertEqual(jobs["nightly"]["with"]["daily"], "true")
         self.assertTrue(jobs["summary"]["name"].startswith("summary ${{ needs.resolve.outputs.commit }}"))
+
+    def test_the_sdk_build_uploads_exactly_the_archives_a_release_needs(self):
+        from tests.test_ci_concurrency import ROOT, yaml
+        from tools.ci import nightly
+        build = yaml.load((ROOT / ".github/workflows/prebuilt-game-build.yml").read_text(),
+                          Loader=yaml.BaseLoader)["jobs"]["build"]
+        names = {f"horizon-prebuilt-v5-{entry['target']}{'-server' if entry.get('server') == 'true' else ''}.tar.gz"
+                 for entry in build["strategy"]["matrix"]["include"]}
+        self.assertEqual(build["env"]["ARCHIVE"],
+                         "horizon-prebuilt-v5-${{ matrix.target }}${{ matrix.server && '-server' || '' }}.tar.gz")
+        self.assertEqual(names, set(nightly.SDK_ARCHIVES))
 
     def test_every_leg_is_a_called_workflow_with_the_commit(self):
         jobs = self.workflow["jobs"]
