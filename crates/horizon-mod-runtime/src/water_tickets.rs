@@ -229,6 +229,24 @@ mod tests {
     }
 
     #[test]
+    fn a_box_of_exactly_the_column_limit_is_accepted_and_one_column_over_is_refused() {
+        // 256 x 256 chunk columns, 4096 x 4096 blocks: exactly MAX_CHUNKS.
+        let mut level = WaterTickets::default();
+        assert_eq!(MAX_CHUNKS, 256 * 256);
+        let id = level.add("limit", [0, 64, 0], [4096, 65, 4096], || true);
+        assert!(id.is_some());
+        assert!(level.contains([4095, 64, 4095]));
+        assert!(!level.contains([4096, 64, 4095]));
+        // One block further east is a 257th column of chunks: 257 x 256 columns.
+        let mut over = WaterTickets::default();
+        assert!(
+            over.add("limit", [0, 64, 0], [4097, 65, 4096], || true)
+                .is_none()
+        );
+        assert!(over.shared.is_none());
+    }
+
+    #[test]
     fn invalid_boxes_do_not_create_an_index() {
         let mut level = WaterTickets::default();
         assert!(
