@@ -2,8 +2,7 @@
 
 pub trait Hooks {
     /// A sound of a level the server opened for viewing (#3716) reached this client, and the
-    /// client asks where in the player's own level to play it, as Immersive Portals'
-    /// `CrossPortalSound` replays a far level's sound at a portal. `level` is the viewed level's
+    /// client asks where in the player's own level to play it. `level` is the viewed level's
     /// handle (what `host.level` gives for it) and `position` the sound's position there; `sound`,
     /// `source` and `seed` are the server's. `play_at` starts as None, and a sound left None is not
     /// played. Set it to a position in the player's level and the sound plays there, as the
@@ -19,7 +18,7 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "none (NeoForge has no viewed levels; Immersive Portals' CrossPortalSound)"
+        neoforge = "none (NeoForge has no viewed levels)"
     )]
     fn viewed_level_sound(
         level: LevelRef,

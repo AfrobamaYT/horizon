@@ -1,8 +1,7 @@
 //! A viewed level's sounds (#3983, gap 12). Besides vanilla's broadcast in their own level, the
-//! sounds at a position go wrapped to the players whose clients view that level, as Immersive
-//! Portals' `PlayerList.broadcast` also sends a packet to the players a chunk loader shows its
-//! chunk to, within the broadcast distance plus 16 blocks of the loader
-//! (`isPlayerWatchingChunkWithinRadius`). The client asks its mods where in its own level to play
+//! sounds at a position go wrapped to the players whose clients view that level and hold its
+//! chunk, within the broadcast distance plus 16 blocks of the view's centre chunk. The client
+//! asks its mods where in its own level to play
 //! each one (`viewed_level_sound`). Only a client that answered revision 3 is sent them
 //! (`Answer::sounds`); one of revision 1 or 2 still views the level and hears none of it. A sound
 //! bound to an entity goes, by the same rule, only to a view that tracks the entity (9d), as its
@@ -10,8 +9,7 @@
 use super::super::hub::Hub;
 use super::send::Runs;
 
-/// Blocks past a sound's broadcast distance an area's centre chunk may be: one chunk, as Immersive
-/// Portals adds 16 to `PlayerList.broadcast`'s distance.
+/// Blocks past a sound's broadcast distance an area's centre chunk may be: one chunk.
 const PAST_RANGE: f64 = 16.0;
 
 impl Hub {
