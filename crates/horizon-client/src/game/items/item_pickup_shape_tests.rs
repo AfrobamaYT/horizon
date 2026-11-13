@@ -232,7 +232,7 @@ fn indexed_pickup_keeps_bound_survivors_and_processes_shifted_tail() {
                 game.tick_dropped_items(&mut round);
                 assert_eq!(
                     heard.lock().unwrap()[..1],
-                    [1],
+                    [ids[1]],
                     "the pre hook let it through"
                 );
                 assert!(posts.lock().unwrap().is_empty());
