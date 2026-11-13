@@ -1397,7 +1397,17 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_world_saved_with_other_mod_versions_fires_mod_mismatch() {
-        use super::super::native_entity_refs::tests::with_game;
+        use super::super::native_entity_refs::tests::{run_fresh_cases, with_game};
+        // The warning is read back from the process's logger and its last 50 lines. In the shared
+        // test process another test may own the global logger, or flood those lines: this runs
+        // in a process of its own.
+        if run_fresh_cases(
+            "game::world_loading::tests::a_world_saved_with_other_mod_versions_fires_mod_mismatch",
+            "HORIZON_MOD_MISMATCH_CHILD",
+            &["alone"],
+        ) {
+            return;
+        }
         use horizon_client::save::{
             Level,
             level_mods::{ModRecord, set_loaded},
