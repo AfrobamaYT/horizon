@@ -201,7 +201,7 @@ impl Game<'_> {
             // Player.tick: a different main-hand item resets the attack
             // strength, and detectEquipmentUpdates gives the guest its modifiers.
             let g = &host.hub.guests[gi];
-            let held = crate::game::held::held_attack_item(&g.inventory, g.selected);
+            let held = crate::game::held_items::held_attack_item(&g.inventory, g.selected);
             let play = host.play.entry(conn).or_default();
             if play.attack_item.as_ref() != held {
                 play.attack_ticks = 0;
