@@ -11,9 +11,12 @@ Use the `server_tick` hook to count ticks:
 {{#include ../../examples/wasm-hello/src/lib.rs:mod}}
 ```
 
-Ordinary wasm calls refuse with busy after five seconds of contention, or
-immediately during lending. Worker calls wait instead. Same-thread reentry shares
-the enclosing call's remaining deadline rather than starting a new budget.
+Ordinary wasm calls wait up to five seconds for the group, including while the
+group is lending its store to a host import. Nested calls refuse immediately if
+they would have to wait on a lent store, which can form a lock cycle. Worker
+calls wait without this bound. Same-thread reentry shares the enclosing call's
+remaining deadline. A contended prepared release invalidates the token
+immediately and runs the guest cleanup on the next call into that mod.
 
 ## Owned values and `Wire`
 

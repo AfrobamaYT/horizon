@@ -1078,6 +1078,7 @@ fn a_fishing_catch_keeps_the_mods_rod_damage_and_its_cancel() {
             &mut rod_damage,
             &mut cancel,
             &mut drops,
+            &mut |_: &Vec<crate::ItemStack>| -> Result<(), crate::StackWriteError> { Ok(()) },
         );
         (rod_damage, cancel)
     };
@@ -1099,6 +1100,7 @@ fn a_fishing_catch_keeps_the_mods_rod_damage_and_its_cancel() {
         &mut rod_damage,
         &mut cancel,
         &mut drops,
+        &mut |_: &Vec<crate::ItemStack>| -> Result<(), crate::StackWriteError> { Ok(()) },
     );
     assert_eq!((rod_damage, cancel), (4, false));
 }
