@@ -305,27 +305,33 @@ fn spins() {
 
 #[test]
 fn a_wall_session_also_records_cpu_samples_without_mixing_them() {
-    let (profile, _) = profiled("p-wall-spin", config(true), spins);
-    let agg = &profile.agg;
-    let (cpu, running, waiting) = (
-        agg.total(State::Cpu, false),
-        agg.total(State::Running, false),
-        agg.total(State::Waiting, false),
-    );
-    let share = SPIN_SHARE.load(std::sync::atomic::Ordering::Relaxed);
-    assert!(
-        cpu > cpu_count(100) && running + waiting > 100,
-        "cpu {cpu} running {running} waiting {waiting}"
-    );
-    // A preempted spinner is rightly waiting: running follows the CPU it received, give or take
-    // a fifth. Wall samples filed as CPU ones, or the other way round, break this or the line above.
-    assert!(
-        share >= 333,
-        "the spinning thread ran only {share}/1000 of the time"
-    );
-    assert!(
-        running * 1000 >= (running + waiting) * (share - 200),
-        "{waiting} waiting vs {running} running, with {share}/1000 of the CPU"
+    // The spinner must get the CPU for the shares to mean anything: on a loaded runner it can run a
+    // third of its wall time or less, and take few samples. Such a run is measured again, up to five
+    // times; the mixing check is judged on the first run where it ran. Wall samples filed as CPU ones
+    // (or the other way round) leave one of the counts near zero, so no run qualifies and it fails.
+    let mut runs = Vec::new();
+    for _ in 0..5 {
+        let (profile, _) = profiled("p-wall-spin", config(true), spins);
+        let agg = &profile.agg;
+        let (cpu, running, waiting) = (
+            agg.total(State::Cpu, false),
+            agg.total(State::Running, false),
+            agg.total(State::Waiting, false),
+        );
+        let share = SPIN_SHARE.load(std::sync::atomic::Ordering::Relaxed);
+        if share >= 333 && cpu > cpu_count(100) && running + waiting > 100 {
+            // A preempted spinner is rightly waiting: running follows the CPU it received, give
+            // or take a fifth.
+            assert!(
+                running * 1000 >= (running + waiting) * (share - 200),
+                "{waiting} waiting vs {running} running, with {share}/1000 of the CPU"
+            );
+            return;
+        }
+        runs.push((share, cpu, running, waiting));
+    }
+    panic!(
+        "no run with the CPU and samples to judge (share/1000, cpu, running, waiting): {runs:?}"
     );
 }
 

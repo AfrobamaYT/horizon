@@ -24,7 +24,7 @@ arguments itself. **Data** means a content declaration in `crates/horizon-mod-pa
 the game through `crates/horizon-items/src/blocks.rs`. **Handle** means a value or reference type in
 `crates/horizon-mod-vocab/src/` (`ItemStack`, `ItemResource`, `AttachmentStore`).
 
-`EntityPart` exists today with goal and behavior registration, `spawn_cluster_size`, and `is_shearable` / `on_sheared` (`docs/modding/src/concepts/trait-mods/023-entity-parts-and-mob-goals.md`).
+`EntityPart` exists today with goal and behavior registration, `spawn_cluster_size`, and `is_shearable` / `on_sheared` (`docs/modding/src/concepts/parts/entity-parts-and-mob-goals.md`).
 It does not answer `IEntityExtension` methods; those are covered only where a global hook or a handle does.
 
 ## Counts
@@ -72,13 +72,16 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `isFertile(state, level, pos)` | Missing | — | No fertile-block query; bonemeal hooks fire later. |
 | `getExpDrop(state, level, pos, blockEntity, breaker, tool)` | Partial | `break_block.exp_to_drop` (`hooks/base.rs`) | Replaces the XP sample for a player break; global, not per-block, and the block entity/tool/breaker are not arguments. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `rotate(state, level, pos, rotation)` | Missing | — | Structure rotation is engine behaviour; no callback. |
-| `getEnchantPowerBonus(state, level, pos)` | Missing | — | Bookshelf enchanting power is a hard-coded block rule. |
+| `getEnchantPowerBonus(state, level, pos)` | Partial | `BlockPart::enchant_power_bonus` (`hooks/enchant_power_bonus.rs`) | Asked for each bookshelf offset with a clear transmitter as a single-player world or a LAN host makes the table's offers, with the table's position; the sum is truncated as NeoForge does and a negative one counts as 0. The table's enchant particles still read `#minecraft:enchantment_power_provider`: they are drawn inside the particle pass, which can lend no host. |
 | `onNeighborChange(state, level, pos, fromPos)` | Missing | — | `neighbor_changed` is `Block.neighborChanged`, a different callback. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `shouldCheckWeakPower(state, level, pos, direction)` | Covered | `BlockPart::should_check_weak_power` (`hooks/should_check_weak_power.rs`) | The argument direction is the input side, as NeoForge's. |
 | `getWeakChanges(state, level, pos)` | Missing | — | No weak-change observer query. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `getSoundType(state, level, pos, entity)` | Covered | `BlockPart::sound_type` (`hooks/sound_type.rs`) | Asked with the position, the entity (nullable: the stepping, landing, placing or digging one, none for a break or a dispenser's placement) and the sound about to play, on NeoForge's paths only: the step and combination step, a horse's step (at the block below a snow layer), a mob's fall, a block item's placement, the break event and a sniffer's digging. Not for the mining hit sound (its own client hook, `BlockPart::play_hit_sound`, below) or sculk growth; an answer with a volume or pitch that is not finite and at least 0, or an event that is not a `namespace:path` id, is dropped. The part answers from its inputs, without the level; `host.block_states().sound(state)` still reads the static type. |
-| `getBeaconColorMultiplier(state, level, pos, beaconPos)` | Missing | — | Beacon beam colour is engine-owned. |
+| `getBeaconColorMultiplier(state, level, pos, beaconPos)` | Covered | `BlockPart::beacon_color_multiplier` (`hooks/beacon_color_multiplier.rs`) | Asked on both sides as a beacon builds its beam, with the beacon's position, starting from the stained glass or beacon colour; the beam keeps the answer's RGB and ignores alpha. |
 | `getStateAtViewpoint(state, level, pos, viewpoint)` | Missing | — | No viewpoint-state query. |
+
+| `getBeaconColorMultiplier(state, level, pos, beaconPos)` | Missing | — | Beacon beam colour is engine-owned. |
+| `getStateAtViewpoint(state, level, pos, viewpoint)` | Covered | `BlockPart::state_at_viewpoint` (`hooks/state_at_viewpoint.rs`) | Asked on the client for each block `Camera.getFluidInCamera` reads (the eye, the block above it, the near plane's centre and corners); the fluid and powder snow tests read the answer, so the fog, the fluid field of view and water vision follow it. |
 | `getBlockPathType(state, level, pos, mob)` | Partial | `BlockPart::is_pathfindable` (`hooks/is_pathfindable.rs`) | Answers whether a `PathComputationType` may pass, once per state and type; not a `PathType` per mob or position. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `getAdjacentBlockPathType(state, level, pos, mob, pathType)` | Missing | — | No adjacent-path-type query. |
 | `isSlimeBlock(state)` | Covered | `BlockPart::is_slime_block` (`hooks/block_sticky.rs`) | Server only, asked by the piston structure resolver for its slime-beside-honey rule. A piston moving a slime block still bounces the entities it pushes off vanilla's slime block alone. |
@@ -136,7 +139,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | Method | Verdict | Horizon | Notes |
 | --- | --- | --- | --- |
 | `getDefaultAttributeModifiers(stack)` | Partial | `item_attribute_modifier` (`hooks/item_attribute_modifier.rs`) | Global `ItemAttributeModifierEvent` edits the stack's modifiers; the stack filters it, but it is not a Part method. |
-| `onDroppedByPlayer(stack, player)` | Partial | `item_toss` (`hooks/item_toss.rs`) | Global `ItemTossEvent`, cancellable; the item is not a Part attachment. |
+| `onDroppedByPlayer(stack, player)` | Covered | `ItemPart::on_dropped_by_player` (`hooks/on_dropped_by_player.rs`) | Runs on the server where `ServerPlayer.drop(boolean)` starts, for the drop key, with the whole selected stack and whether all of it goes; a cancel keeps the stack in the slot (no item entity, no statistic, no `item_toss`) and sends a server's player the slot back. A menu's throw is not asked, as in NeoForge; the global `item_toss` still hears every toss the part allows. |
 | `getHighlightTip(stack, name)` | Missing | — | No highlight-name hook. |
 | `onItemUseFirst(stack, context)` | Covered | `ItemPart::on_item_use_first` (`hooks/on_item_use_first.rs`) | Runs after `use_item_on_block` let it through, before the block's own use. |
 | `isPiglinCurrency(stack)` | Covered | `ItemPart::is_piglin_currency` (`hooks/is_piglin_currency.rs`) | Starts from vanilla's answer, which is the item `minecraft:gold_ingot` (`PiglinAi.BARTERING_ITEM`; 26.3 has no currency tag), and is asked where vanilla asks: a piglin wanting a stack on the ground, an adult taking one from the hand (and the client's prediction of that click), and the end of the admiring, where currency is bartered or lost to a hit. A ground stack is admired only when it is also `#piglin_loved`. Both sides. [#3226](https://github.com/arismoko/horizon/issues/3226). |
@@ -151,7 +154,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `createEntity(level, entity, stack)` | Missing | — | Same. |
 | `onEntityItemUpdate(stack, itemEntity)` | Missing | — | No per-item dropped-entity tick. [#1039](https://github.com/arismoko/horizon/issues/1039). |
 | `doesSneakBypassUse(stack, level, pos, player)` | Missing | — | No sneak-bypass query. |
-| `canEquip(stack, slot, entity)` | Covered | `ItemPart::can_equip` (`hooks/can_equip.rs`) | Starts as the stack's own `equippable` component's answer (slot and `allowed_entities`); the part sets it either way, with a read-only `Host` and the entity as a `LivingRef`. Asked for the player's armour slots (both menus), a dispenser's equip and a mob's pickup. A wasm mod is given a copy of the stack on each call (#3549 tracks the prepared path). |
+| `canEquip(stack, slot, entity)` | Covered | `ItemPart::can_equip` (`hooks/can_equip.rs`) | Starts as the stack's own `equippable` component's answer (slot and `allowed_entities`); the part sets it either way, with a read-only `Host` and the entity as a `LivingRef`. Asked for the player's armour slots (both menus), a dispenser's equip and a mob's pickup. The wasm generator supports a retained stack per guest instance and token-based borrowed asks; missing prepared exports refuse at load/registration. Gameplay still prepares each callback separately: operation-wide reuse and mutation barriers remain the follow-up to #3549. |
 | `getEquipmentSlot(stack)` | Covered | `ItemResource::equippable_slot`, `host.item_equippable_slot` | Read from the effective `equippable` component. |
 | `onEntitySwing(stack, entity, hand)` | Covered | `ItemPart::on_entity_swing` (`hooks/item_attack.rs`) | Runs where `LivingEntity.swing` starts, on both sides; a cancel starts no swing (no animation, no packet). |
 | `getDamage(stack)` | Covered | `ItemStack::damage` | The stack's numeric damage override. |
@@ -169,7 +172,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `canContinueUsing(stack, otherStack)` | Missing | — | No continue-use query. |
 | `getCreatorModId(registries, stack)` | Covered | `ItemPart::creator_mod_id` (`hooks/creator_mod_id.rs`), read by `ItemResource::creator_mod_id` | Both sides, from the stack alone. The answer arrives as the item id's namespace; a part sets another mod or none. An item without a part costs one table lookup. |
 | `onAnimalArmorTick(stack, level, mob)` | Missing | — | No per-item animal-armour tick. |
-| `damageItem(stack, amount, entity, onBreak)` | Covered | `ItemPart::damage_item` (`hooks/damage_item.rs`) | Runs on the server for the parts of the worn item, after Unbreaking, on every wear path (a player's tools, armour and shield, a dispenser's tool, a mob's armour). The part gets the stack and the amount about to be lost, and changes it (0 or less leaves the item whole) or cancels the wear. It is not given the wearing entity (`host.players().acting_player()` names the player on a player's paths) and has no `onBreak` consumer: the break is `player_destroy_item`. |
+| `damageItem(stack, amount, entity, onBreak)` | Covered | `ItemPart::damage_item` (`hooks/damage_item.rs`) | Runs on the server for the parts of the worn item, after Unbreaking, on every wear path (a player's tools, armour and shield, a dispenser's tool, a mob's armour). The part gets the stack, the wearing or using entity (`None` for a dispenser's tool) and the amount about to be lost, and changes it (0 or less leaves the item whole), cancels the wear, or sets `break_now` to break the item whatever durability is left, the Horizon form of calling `onBroken`. |
 | `onDestroyed(itemEntity, source)` | Missing | — | `item_despawn` is lifetime removal, not damage destruction. |
 | `isGazeDisguise(stack, player, target)` | Missing | — | No gaze-disguise query. |
 | `canWalkOnPowderedSnow(stack, entity)` | Missing | — | Powder-snow walking is engine-owned. |
@@ -249,7 +252,7 @@ are reachable through `BlockEntityRef`.
 | `onLoad()` | Partial | `BlockEntityPart::block_entity` (`hooks/base.rs`) | Initial saved data is set at creation, before the saved NBT is applied; no after-load notice. |
 | `requestModelDataUpdate()` | Missing | — | No model-data invalidation API. |
 | `getModelData()` | Missing | — | No `ModelData`; drawing uses `block_entity_submit` and the model path. |
-| `invalidateCapabilities()` | Partial | `BlockCapabilityCache::invalidate` (`crates/horizon-mod-vocab/src/item/capability_cache.rs`) | Providers are queried per lookup; a `BlockCapabilityCache` keeps one and checks it by polling. When a provider's answer changes with nothing the cache compares, the cache's owner calls `invalidate`; there is no broadcast to every cache. |
+| `invalidateCapabilities()` | Covered | `LevelRef::invalidate_capabilities` (`crates/horizon-mod-vocab/src/host/levels.rs`) | `level.invalidate_capabilities(host, pos)` with the block entity's position, as NeoForge's calls `Level.invalidateCapabilities(worldPosition)`: it moves the capability generation there on; every `BlockCapabilityCache` there compares it and looks up again at its next `get`. At the root commit inside a transaction; nothing when it aborts. |
 | `applyStructureRotation(mirror, rotation)` | Missing | — | Structure rotation is engine-owned; no callback. |
 
 ## `IFluidExtension`
@@ -355,3 +358,14 @@ shearing when no part answers. Entity parts are native-only, so wasm mods do not
 | Method | Verdict | Horizon route |
 | --- | --- | --- |
 | `IFallableExtension.fallingTick(level, currentPosition, entity)` | **Partial** | Server `BlockPart::falling_tick` (`hooks/falling_tick.rs`) on the falling block's state, with its block position and entity handle and a `&mut dyn ServerHost`, for each tick that ends with it still in the air; not the landing, drop or removal tick. It is delivered after the ordered pass that ticked the falling block, so a write lands on the stored entity. NeoForge also calls it on the client; Horizon calls it only on the server. |
+
+## IBaseRailBlockExtension: rail track
+
+| Method | Verdict | Horizon route |
+| --- | --- | --- |
+| `getRailDirection(state, level, pos, cart)` | **Covered** | `BlockPart::rail_direction` (`hooks/rail_direction.rs`), on both sides with a `LevelSide`, starting from the `shape` property: the cart's movement asks with the cart wherever it reads the track under it, and `RailState` and a minecart item's placement ask with none. |
+| `canMakeSlopes(state, level, pos)` | **Covered** | Server `BlockPart::rail_can_make_slopes` (`hooks/rail_can_make_slopes.rs`), asked as `RailState` would make the rail climb. |
+| `isFlexibleRail(state, level, pos)` | **Covered** | Server `BlockPart::rail_flexible` (`hooks/rail_flexible.rs`), read into `RailState`'s straightness. |
+| `isValidRailShape(shape)` | **Covered** | Server `BlockPart::rail_valid_shape` (`hooks/rail_valid_shape.rs`), with the rail's state, asked before `RailState` writes a shape; a refused shape keeps the current one. It starts false for a value the rail's `shape` property lacks, as NeoForge's default answers. |
+
+A minecart now treats any block in `#minecraft:rails` built on `BaseRailBlock` as track (`BaseRailBlock.isRail`), where it used to accept only the four vanilla rail names.

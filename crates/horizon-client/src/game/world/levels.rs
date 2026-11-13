@@ -138,7 +138,7 @@ const IDLE_TICKS: u32 = 300;
 
 /// A level that is not in place: every per-level field of `Game`.
 pub(super) struct Parked {
-    world: World,
+    pub(super) world: World,
     streaming: Streaming,
     locator: Option<Arc<VanillaTerrain>>,
     save: Arc<SaveDir>,
@@ -650,13 +650,17 @@ impl Game<'_> {
             self.level_shapes.get(dim.id()),
             self.level.seed,
             &self.level.enabled_features,
-            self.server_loot.clone(),
+            self.world_biomes
+                .as_ref()
+                .unwrap_or_else(|| self.res.biomes())
+                .clone(),
         )?;
         save.install_profession_snapshot(self.stations().professions.clone());
         let mut world = Game::world_for_mods(self.res.facts().air, self.level.seed);
         world.attachments = save.load_attachments();
         world.shape = self.level_shapes.get(dim.id());
         world.fast_lava = self.dimension_type_of(dim).fast_lava;
+        world.infiniburn = Some(self.resolve_level_infiniburn(self.dimension_type_of(dim)));
         let tickets = ChunkTickets::with_saved_portal(save.load_portal_tickets());
         Ok(Parked {
             world,

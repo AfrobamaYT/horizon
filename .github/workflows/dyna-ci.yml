@@ -455,12 +455,14 @@ jobs:
             echo '::error::Existing target path does not point to CARGO_TARGET_DIR; refusing to replace it.'
             exit 1
           fi
-      # Same rule as lint: the runner's CPU quota within its memory on Dyna, four on boat, Cargo's default elsewhere.
+      # The runner's CPU quota within its memory on Dyna, four on boat, Cargo's default elsewhere. 4 GiB a rustc, not
+      # lint's 3: this job compiles gameplay twice with code generation (the lib and the executable test targets), and
+      # at five a 16 GiB runner's compile was killed for memory (signal 9).
       - name: Choose build parallelism
         if: needs.changes.outputs.rust_required != 'false'
         run: |
           case "$RUNNER_KIND" in
-            dyna) jobs="-j$(python3 tools/ci/cargo_jobs.py --job-mib 3072)" ;;
+            dyna) jobs="-j$(python3 tools/ci/cargo_jobs.py --job-mib 4096)" ;;
             boat) jobs=-j4 ;;
             *) jobs= ;;
           esac
@@ -470,7 +472,7 @@ jobs:
       - name: Restore unchanged source timestamps
         if: needs.changes.outputs.rust_required != 'false'
         run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes.json | tee -a "$GITHUB_STEP_SUMMARY"
-      # horizon-client rustc processes take about 2.6 GB each; $JOBS (chosen above) fits them in the runner's
+      # horizon-client rustc processes take several GB each; $JOBS (chosen above) fits them in the runner's
       # memory. Formatting and lint run in parallel (the lint job), so this job only tests.
       # Libraries, binaries and integration tests, then doc tests: not the ~275 examples, which the lint job already
       # type-checks and the parity job builds and runs (they were most of this step's build and link time).

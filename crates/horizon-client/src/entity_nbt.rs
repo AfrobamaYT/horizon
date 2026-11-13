@@ -625,11 +625,11 @@ pub fn mob_to_nbt(
     if let Some(table) = &m.extra.death_loot_table {
         put(&mut tag, "DeathLootTable", string(table));
     }
-    if m.extra.death_loot_seed != 0 {
+    if m.extra.death_table_seed != 0 {
         put(
             &mut tag,
             "DeathLootTableSeed",
-            Tag::Long(m.extra.death_loot_seed),
+            Tag::Long(m.extra.death_table_seed),
         );
     }
     // `NeutralMob.addPersistentAngerSaveData`: the anger ends at an
@@ -1917,7 +1917,7 @@ fn mob_from_nbt_at(
     m.persistent = flag(tag, "PersistenceRequired");
     m.extra.death_loot_table = text(tag.get("DeathLootTable"))
         .and_then(|t| horizon_client_core::identifier::normalize_id(&t));
-    m.extra.death_loot_seed = number(tag.get("DeathLootTableSeed")).unwrap_or(0);
+    m.extra.death_table_seed = number(tag.get("DeathLootTableSeed")).unwrap_or(0);
     refs::read_last_hurt_by(&mut m, tag);
     // `NeutralMob.readPersistentAngerSaveData`: the anger end time and the
     // target come back with the mob.
@@ -7137,13 +7137,13 @@ mod sheep_nbt_tests {
         let raw = hoglin(Some(1));
         let protected = mob_from_nbt(&raw, &types, 1, None).unwrap();
         assert!(protected.extra.cannot_be_hunted);
-        assert!(!protected.seen(None).huntable);
+        assert!(!protected.seen(None, &crate::items::Items::empty()).huntable);
         let saved = mob_to_nbt(&protected, [0; 4], Some(&raw), None, |_| None);
         assert_eq!(saved.get("CannotBeHunted"), Some(&Tag::Byte(1)));
         for raw in [hoglin(None), hoglin(Some(0))] {
             let prey = mob_from_nbt(&raw, &types, 2, None).unwrap();
             assert!(!prey.extra.cannot_be_hunted);
-            assert!(prey.seen(None).huntable);
+            assert!(prey.seen(None, &crate::items::Items::empty()).huntable);
             let saved = mob_to_nbt(&prey, [0; 4], Some(&raw), None, |_| None);
             assert_eq!(saved.get("CannotBeHunted"), Some(&Tag::Byte(0)));
         }
@@ -7176,7 +7176,7 @@ mod sheep_nbt_tests {
             m.extra.death_loot_table.as_deref(),
             Some("mymod:entities/boss")
         );
-        assert_eq!(m.extra.death_loot_seed, 42);
+        assert_eq!(m.extra.death_table_seed, 42);
         let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None, |_| None);
         assert_eq!(
             text(tag.get("DeathLootTable")).as_deref(),

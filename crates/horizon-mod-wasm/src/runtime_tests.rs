@@ -69,6 +69,9 @@ impl<F: FnMut() -> i64> mod_api::StructureRandom for Random<F> {
 }
 
 fn guest(layout: u64, body: &str) -> Vec<u8> {
+    guest_with_exports(layout, body, "")
+}
+fn guest_with_exports(layout: u64, body: &str, exports: &str) -> Vec<u8> {
     wat::parse_str(format!(
         r#"(module
       (@custom "dylink.0" "\01\04\00\00\00\00")
@@ -83,7 +86,8 @@ fn guest(layout: u64, body: &str) -> Vec<u8> {
         else local.get $depth i32.const 1 i32.sub call $recurse i32.const 1 i32.add end)
       (global $in_len (mut i32) (i32.const 0))
       (func (export "horizon_in") (param i32) (result i32) local.get 0 global.set $in_len i32.const 512)
-      (func (export "horizon_hook") (param i32) (result i64) (local i32 i32)
+      {exports}
+      (func $hook (export "horizon_hook") (param i32) (result i64) (local i32 i32)
         i32.const 512 local.set 1 global.get $in_len local.set 2 {body})
     )"#
     ))
@@ -577,7 +581,15 @@ fn linker_heap_symbols_follow_all_members_static_data() {
 #[test]
 fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
     crate::test_stack::on_guest_stack(|| {
-        let bytes = guest(*mod_api::wire::LAYOUT, "i64.const 0");
+        let bytes = guest_with_exports(
+            *mod_api::wire::LAYOUT,
+            "i64.const 0",
+            r#"
+            (func (export "prepare_can_equip") (result i64) i64.const 2199023255560)
+            (func (export "ask_can_equip") (result i64) i64.const 0)
+            (func (export "release_can_equip") (result i64) i64.const 0)
+        "#,
+        );
         let engine = engine().unwrap();
         let modules = WasmMod::instantiate(
             &engine,
@@ -596,6 +608,15 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
         )
         .unwrap();
         assert_eq!(modules.len(), 2);
+        for i in 0..2 {
+            let owner = modules[i].downgrade();
+            let other = modules[1 - i].downgrade();
+            let token = owner.prepare(&[]).unwrap();
+            assert!(owner.check(token.0, token.1));
+            assert!(!other.check(token.0, token.1));
+            owner.release(token.0, token.1);
+        }
+
         let bytes = wat::parse_str(
         r#"(module (@custom "dylink.0" "\01\04\00\00\00\00") (func (export "horizon_shared")))"#,
     )
@@ -747,7 +768,7 @@ fn layout_mismatch_is_a_mods_page_refusal() {
         assert!(matches!(refusal, Refusal::Layout { .. }));
         assert_eq!(
             refusal.to_string(),
-            "built for another version of the mod API"
+            "built for another version of the mod API (including the prepared can_equip ABI)"
         );
     })
 }
@@ -1960,6 +1981,69 @@ fn a_guest_call_that_answers_nothing_names_why() {
     assert_eq!(take_refusal(), "refused");
 }
 
+#[cfg(feature = "test-copy-probe")]
+#[test]
+fn prepared_runtime_writes_payload_once_for_eight_scalar_asks() {
+    crate::test_stack::on_guest_stack(|| {
+        // Protocol-only guest: slice B supplies the owned-stack slot dispatcher.
+        let bytes = guest_with_exports(
+            *mod_api::wire::LAYOUT,
+            "i64.const 0",
+            r#"
+            (func (export "prepare_can_equip") (result i64) i64.const 2199023255560)
+            (func (export "ask_can_equip") (result i64) i64.const 0)
+            (func (export "release_can_equip") (result i64) i64.const 0)
+        "#,
+        );
+        let engine = engine().unwrap();
+        let module = WasmMod::instantiate(
+            &engine,
+            DEFAULT_GROUP_MEMORY_MIB,
+            &[Member {
+                name: "test",
+                module: &bytes,
+            }],
+            None,
+        )
+        .unwrap()
+        .remove(0);
+        let weak = module.downgrade();
+        let other_module = self::module("i64.const 0");
+        let other = other_module.downgrade();
+        for size in [16, 4112] {
+            let bytes = vec![42u8; size];
+            let (token, setup) = crate::copy_probe::measure(|| weak.prepare(&bytes).unwrap());
+            assert_eq!(setup.to_guest_bytes, size + 8);
+            assert_eq!(setup.from_guest_bytes, 8);
+            assert!(weak.check(token.0, token.1));
+            assert!(!weak.check(token.0, token.1 + 1));
+            assert!(!other.check(token.0, token.1));
+            let (_, asks) = crate::copy_probe::measure(|| {
+                for _ in 0..8 {
+                    assert_eq!(
+                        module.call(
+                            CallClass::Hook,
+                            Frame::default(),
+                            0,
+                            None,
+                            |w| {
+                                w.put(&token.0);
+                                w.put(&token.1);
+                            },
+                            |r| r.take::<()>()
+                        ),
+                        Some(())
+                    );
+                }
+            });
+            assert_eq!(asks.to_guest_bytes, 8 * 8);
+            assert_eq!(asks.from_guest_bytes, 0);
+            weak.release(token.0, token.1);
+            assert!(!weak.check(token.0, token.1));
+        }
+    });
+}
+
 /// Grows the group's memory a page at a time until `memory.grow` answers -1, then writes and reads
 /// its last byte: the guest goes on at the limit. Answers the pages it reached.
 fn grow_until_refused(memory_mib: u32) -> i32 {
@@ -2012,4 +2096,94 @@ fn a_group_grows_past_256_mib_to_its_default_limit_and_goes_on_there() {
 #[test]
 fn a_lowered_limit_refuses_growth_inside_the_guest() {
     assert_eq!(grow_until_refused(64), 1_024);
+}
+
+#[test]
+fn old_unprepared_can_equip_fingerprint_is_refused_at_load() {
+    crate::test_stack::on_guest_stack(|| {
+        let old = mod_api::wire_core_layout();
+        assert_ne!(old, *mod_api::wire::LAYOUT);
+        let bytes = guest(old, "unreachable");
+        let refusal = WasmMod::instantiate(
+            &engine().unwrap(),
+            DEFAULT_GROUP_MEMORY_MIB,
+            &[Member {
+                name: "old_can_equip",
+                module: &bytes,
+            }],
+            None,
+        )
+        .err()
+        .unwrap();
+        assert!(
+            refusal
+                .to_string()
+                .contains("prepared can_equip ABI layout mismatch"),
+            "{refusal}"
+        );
+        assert!(refusal.to_string().contains("old unprepared layout"));
+    });
+}
+
+#[test]
+fn refused_prepared_release_stops_group_before_another_stack_can_be_prepared() {
+    crate::test_stack::on_guest_stack(|| {
+        let refusal = (1024u64 << 32) | u64::from(u32::MAX);
+        let exports = format!(
+            r#"
+            (func (export "prepare_can_equip") (result i64)
+                (memory.copy (i32.const 2048) (i32.const 512) (global.get $in_len))
+                (i32.store (i32.const 4000) (i32.add (i32.load (i32.const 4000)) (i32.const 1)))
+                i64.const 2199023255560)
+            (func (export "ask_can_equip") (result i64)
+                (i32.store (i32.const 4004) (i32.const 1)) i64.const 0)
+            (func (export "release_can_equip") (result i64)
+                (i32.store (i32.const 1024) (i32.const 0)) i64.const {refusal})
+        "#
+        );
+        let bytes = guest_with_exports(*mod_api::wire::LAYOUT, "unreachable", &exports);
+        let module = WasmMod::instantiate(
+            &engine().unwrap(),
+            DEFAULT_GROUP_MEMORY_MIB,
+            &[Member {
+                name: "refusing_release",
+                module: &bytes,
+            }],
+            None,
+        )
+        .unwrap()
+        .remove(0);
+        let owner = module.downgrade();
+        let token = owner.prepare(b"first-stack-payload").unwrap();
+        owner.release(token.0, token.1);
+        assert!(module.is_stopped());
+        assert!(!owner.check(token.0, token.1));
+        assert!(owner.prepare(b"second-stack-payload").is_none());
+        let ask = crate::boundary::export_id("ItemPart", "ask_can_equip").unwrap();
+        assert_eq!(
+            module.call(
+                CallClass::Hook,
+                Frame::default(),
+                ask,
+                None,
+                |_| {},
+                |r| r.take::<()>()
+            ),
+            None
+        );
+        let group = module.running.group.lock().unwrap();
+        let memory = group.memory.data(&group.store);
+        assert_eq!(
+            &memory[2056..2056 + b"first-stack-payload".len()],
+            b"first-stack-payload"
+        );
+        assert_eq!(
+            u32::from_le_bytes(memory[4000..4004].try_into().unwrap()),
+            1
+        );
+        assert_eq!(
+            u32::from_le_bytes(memory[4004..4008].try_into().unwrap()),
+            0
+        );
+    });
 }

@@ -66,14 +66,14 @@ class CargoJobsTests(unittest.TestCase):
                                env=dict(PATH=f"{stubs}:/usr/bin:/bin", GITHUB_ENV=str(receipt), ARGS=str(args), **env))
                 return receipt.read_text(), args.read_text().strip()
 
-            for job in ("lint", "verify"):
+            for job, mib in (("lint", 3072), ("verify", 4096)):
                 script = steps("dyna-ci.yml", job)["Choose build parallelism"]["run"]
                 for kind, expected in (("dyna", "JOBS=-j6\n"), ("boat", "JOBS=-j4\n"),
                                        ("github", "JOBS=\n"), ("other", "JOBS=\n")):
                     with self.subTest(job=job, kind=kind):
                         written, called = run(script, RUNNER_KIND=kind)
                         self.assertEqual(written, expected)
-                        self.assertEqual(called, "tools/ci/cargo_jobs.py --job-mib 3072" if kind == "dyna" else "")
+                        self.assertEqual(called, f"tools/ci/cargo_jobs.py --job-mib {mib}" if kind == "dyna" else "")
 
             script = steps("fn-replace-check.yml", "fn-replace-check")["Choose build parallelism"]["run"]
             for environment, expected in (("github-hosted", "CARGO_BUILD_JOBS=2\n"), ("self-hosted", "CARGO_BUILD_JOBS=6\n")):

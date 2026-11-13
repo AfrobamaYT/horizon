@@ -59,6 +59,8 @@ impl DirtySections {
     }
 }
 pub struct World {
+    /// The dimension type's fire-source tag, resolved at entry and data reload.
+    pub infiniburn: Option<Arc<horizon_world::level::data::BlockSet>>,
     /// Server-owned mod data attached to this dimension.
     pub attachments: horizon_mod_runtime::attachments::Attachments,
     /// The holders lent to mods since the last flush, whose synced changes
@@ -67,6 +69,9 @@ pub struct World {
     /// Block entities a moving piston landed since the last flush, whose
     /// synced attachments `flush_attachment_sync` sends whole (#3184).
     pub attachment_landings: FxHashSet<horizon_mod_runtime::attachments::Holder>,
+    /// The capability generations mods' providers advanced here
+    /// (`level_invalidate_capabilities`), which kept capabilities compare.
+    pub capability_generations: horizon_mod_runtime::capability_generations::CapabilityGenerations,
     /// The level's build range and skylight (its dimension type); its
     /// chunks hold `shape.column()`.
     pub shape: LevelShape,
@@ -252,6 +257,7 @@ impl World {
 
     pub fn new(air: BlockStateId, seed: i64) -> Self {
         Self {
+            infiniburn: None,
             shape: LevelShape::OVERWORLD,
             chunks: Default::default(),
             random: LevelRandom::for_level(LegacyRandom::new(seed)),
@@ -270,6 +276,7 @@ impl World {
             attachments: Default::default(),
             attachment_syncs: FxHashSet::default(),
             attachment_landings: FxHashSet::default(),
+            capability_generations: Default::default(),
             block_entities: Default::default(),
             carrier_fences: Default::default(),
             carrier_data_existed_at_open: false,
@@ -548,6 +555,12 @@ impl World {
     pub fn loaded(&self, x: i32, z: i32) -> bool {
         self.chunks.contains_key(&(x >> 4, z >> 4))
     }
+    /// Takes chunk `key` out of the level as it unloads, with the capability generations its
+    /// positions held.
+    pub fn unload_chunk(&mut self, key: (i32, i32)) -> Option<Arc<Chunk>> {
+        self.capability_generations.unload_chunk(key);
+        self.chunks.remove(&key)
+    }
     /// `Level.isLoaded`: `y` is inside the build height and the chunk of `(x, z)` is loaded.
     /// Never loads a chunk.
     pub fn is_loaded_at(&self, x: i32, y: i32, z: i32) -> bool {
@@ -600,6 +613,11 @@ impl World {
             Tag::Compound(_) => Some(lock.clone()),
             _ => None,
         });
+        let mut tag = tag.clone();
+        if let Tag::Compound(map) = &mut tag {
+            map.remove(&"LootTable".into());
+            map.remove(&"LootTableSeed".into());
+        }
         self.with_chunk_extras(key, |extras| {
             let at = extras
                 .block_entity_sources
@@ -627,7 +645,7 @@ impl World {
         });
     }
     /// The fields Horizon keeps beside a block entity's model, for a journal: the tag it was
-    /// loaded or set with (its `lock`) and its loot table roll.
+    /// loaded or set with (its `lock`) and its pending loot metadata.
     pub fn block_entity_extras(&self, key: (i32, i32, i32)) -> BlockEntityExtras {
         let saved = self
             .chunks
@@ -640,7 +658,7 @@ impl World {
                     .find(|(p, _)| *p == key)
                     .map(|(_, tag)| tag.clone())
             }),
-            rolled_loot: saved.and_then(|s| s.rolled_loot.iter().find(|r| r.pos == key).cloned()),
+            pending_loot: saved.and_then(|s| s.pending_loot.get(&key).cloned()),
         }
     }
     /// Puts back what [`World::block_entity_extras`] kept.
@@ -650,8 +668,10 @@ impl World {
             extras
                 .block_entity_sources
                 .extend(kept.source.map(|tag| (key, tag)));
-            extras.rolled_loot.retain(|r| r.pos != key);
-            extras.rolled_loot.extend(kept.rolled_loot);
+            extras.pending_loot.remove(&key);
+            extras
+                .pending_loot
+                .extend(kept.pending_loot.map(|loot| (key, loot)));
         });
     }
     /// `LevelChunk.removeBlockEntity`: the tag a block entity was loaded or set
@@ -659,12 +679,13 @@ impl World {
     pub fn forget_block_entity_source(&mut self, key: (i32, i32, i32)) {
         self.with_chunk_extras(key, |extras| {
             extras.block_entity_sources.retain(|(p, _)| *p != key);
+            extras.pending_loot.remove(&key);
         });
     }
     /// Run `f` on the keep-as-loaded data of the chunk holding `key`, put back
     /// for the next save (`block_entity_sources` is where Horizon restores the
     /// block entity fields its model does not hold).
-    fn with_chunk_extras(
+    pub fn with_chunk_extras(
         &mut self,
         key: (i32, i32, i32),
         f: impl FnOnce(&mut crate::chunk::ChunkExtras),
@@ -871,5 +892,5 @@ mod tests {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BlockEntityExtras {
     pub source: Option<horizon_core::nbt::Tag>,
-    pub rolled_loot: Option<crate::chunk::RolledLoot>,
+    pub pending_loot: Option<crate::chunk::PendingContainerLoot>,
 }

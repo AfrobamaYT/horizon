@@ -74,11 +74,11 @@ use mod_api::{
     ClientGuiOptions, ClientInputOptions, ClientMiningPrediction, ClientModifiers,
     ClientReloadListeners, ColorResolvers, CommandInvocation, EnchantmentDamageEffects,
     EnchantmentInfo, EntityRef, EntityRenderers, GameRuleActor, HandRender, InsideEffects,
-    InteractionAttempt, InteractionKey, JsonAnimationType, LayerDefinition, LifecycleContext,
-    LivingRef, LoadConditions, NoteBlockChange, ParticleProviders, PathComputationType, Placement,
-    PlayerRef, PoiTypeExtensions, RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage,
-    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, VillagerProfessions,
-    WorldPhase,
+    InteractionAttempt, InteractionKey, ItemEntityRef, JsonAnimationType, LayerDefinition,
+    LifecycleContext, LivingRef, LoadConditions, NoteBlockChange, ParticleProviders,
+    PathComputationType, Placement, PlayerRef, PoiTypeExtensions, RecipeBookCategory, ScreenId,
+    ScreenOpening, ScreenshotImage, ServerReloadListeners, ServerTickPhase, TicketController,
+    ToolUse, VillagerProfessions, WorldPhase,
 };
 use mod_api::{
     ActiveEffect, AttachmentStore, BlockClick, BlockUpdateFlags, BonemealSource, ChunkRef,
@@ -87,13 +87,15 @@ use mod_api::{
 };
 use mod_api::{
     BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, HiddenParts, MapDecorationType,
-    ParticleGroup, PosedParts, RuntimeSprite, TaskId, TextureAtlasRegistration,
+    ParticleGroup, PosedParts, RuntimeSprite, SkullModel, TaskId, TextureAtlasRegistration,
 };
 pub(crate) use mod_api::{
     BlockRim, ClientPacket, ClientPayload, ColoredLight, ExplosionStart, ItemFished, LootDrops,
     PanelEvent, PortalShape, ScreenView,
 };
-use mod_api::{CameraType, Despawn, Identifier, MobRef, PermissionLevel, SoundPlay, SoundRef};
+use mod_api::{
+    CameraType, Despawn, Identifier, MobRef, PermissionLevel, RailShape, SoundPlay, SoundRef,
+};
 use std::{
     collections::HashMap,
     fs,

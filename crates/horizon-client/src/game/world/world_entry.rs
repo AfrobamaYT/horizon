@@ -209,18 +209,6 @@ impl Game<'_> {
         }
     }
 
-    /// The world's packs' content files, none without packs.
-    /// The biome table the world plays with, `None` before a world opens.
-    pub(super) fn packed_biomes(&self) -> Option<Arc<Biomes>> {
-        let table = world_loading::packed_biomes(
-            &self.world_root,
-            &self.options.resources,
-            self.res.biomes(),
-            &self.level.enabled_features,
-            &self.pack.additional_data,
-        );
-        (!Arc::ptr_eq(&table, self.res.biomes())).then_some(table)
-    }
     /// What the chunk and far-terrain workers mesh with: the pack's context,
     /// over the world's biomes when it has its own.
     pub(super) fn worker_context(&self) -> Arc<WorkerContext> {
@@ -340,7 +328,7 @@ impl Game<'_> {
                 conditions,
                 suffocation,
                 files,
-                items,
+                items: Arc::new(items),
                 recipes,
                 stations,
                 reload_sources: reload.then_some(sources),
@@ -478,6 +466,7 @@ impl Game<'_> {
         self.structure_spawns = structure_spawns;
         self.health_resources = health;
         self.server_items = None;
+        self.refresh_infiniburn();
         self.install_parts(parts);
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         self.forget_book();

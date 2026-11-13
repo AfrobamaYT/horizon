@@ -259,6 +259,7 @@ pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<(
                 packages.ids(),
             ),
             directory,
+            crate::entry::runtime_environment::get().clone(),
         ),
     );
     Ok(())
@@ -412,14 +413,19 @@ pub(super) fn collect_key_mappings<'declared>(
 }
 
 /// The native mods' entity model layers (`native_register_layer_definitions`), kept
-/// once at start for `bake_layer`.
-pub(super) fn register_layer_definitions(role: ExecutionRole) {
+/// once at start for `bake_layer`, then their skull types (`native_create_skull_models`), baked
+/// once from those layers (or vanilla's under `vanilla_root`), so `minecraft:head` item models may
+/// name their kinds.
+pub(super) fn register_layer_definitions(role: ExecutionRole, vanilla_root: &std::path::Path) {
     if !role.is_client() {
         return;
     }
     let mut layers = Vec::new();
     Game::native_register_layer_definitions(&RegistrationContext::new(), &mut layers);
     horizon_client::mobs::model_layers::register(layers);
+    let mut models = Vec::new();
+    Game::native_create_skull_models(&RegistrationContext::new(), &mut models);
+    horizon_client::skull_models::register(models, vanilla_root);
 }
 /// The native mods' F3 debug entries (`native_register_debug_entries`), kept once at start.
 pub(super) fn register_debug_entries(role: ExecutionRole) {
@@ -1669,7 +1675,14 @@ pub(super) fn living_mod_types()
     ));
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("entity-types.json"), table).unwrap();
-    let types = horizon_client::mobs::MobTypes::load_for_server(&root).unwrap();
+    // No attribute catalog: the rows' values stay as written.
+    let attributes = &horizon_world::attributes::entity::Catalog::from_json(&serde_json::json!({
+        "data_version": horizon_world::DATA_VERSION,
+        "attributes": [],
+        "entities": {},
+    }))
+    .unwrap();
+    let types = horizon_client::mobs::MobTypes::load_for_server(&root, attributes).unwrap();
     let _ = std::fs::remove_dir_all(&root);
     types
         .types
