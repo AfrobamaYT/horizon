@@ -34,12 +34,18 @@ fn eligible(base: &str, directory: &std::path::Path, native_revision: Option<&st
 }
 
 pub const REBUILD: &str = "This game cannot enforce offline developer single-player. Rebuild and reinstall the developer game and its native mods.";
-const START_FAILED: &str = "The game failed to start while checking support for offline developer play. Reinstall the developer game and its native mods, then try Play again. If it still fails, report this message.\n{reason}";
+const START_FAILED: &str = "The game failed to start while checking support for offline developer play. Reinstall the developer game and its native mods, then try Play again. If it still fails, report this message on Discord.\nDetails: {reason}";
 pub fn require_capability(tag: &str) -> Result<(), String> {
-    let output = Command::new(crate::backend::client_program(tag))
+    let program = crate::backend::client_program(tag);
+    let output = Command::new(&program)
         .arg("--launch-api")
         .output()
-        .map_err(|e| trf(START_FAILED, &[("reason", &e.to_string())]))?;
+        .map_err(|e| {
+            trf(
+                START_FAILED,
+                &[("reason", &format!("{}: {e}", program.display()))],
+            )
+        })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let reason = stderr
