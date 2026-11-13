@@ -153,13 +153,14 @@ fn files(dir: &Path) -> Result<Vec<(String, Vec<u8>)>, NoteError> {
     Ok(out)
 }
 
-/// The new notes of `dir`: those whose file name is not in `base`. A note already merged is an
-/// earlier change's, so editing it is neither read nor checked.
+/// The new notes of `dir`: those whose file name is not in `base`, and whose bytes are not
+/// either. A note already merged is an earlier change's, so editing or renaming it is neither
+/// read nor checked.
 pub fn read(dir: &Path, base: &Path) -> Result<Vec<NoteFile>, NoteError> {
-    let old: Vec<String> = files(base)?.into_iter().map(|(name, _)| name).collect();
+    let old = files(base)?;
     files(dir)?
         .into_iter()
-        .filter(|(name, _)| !old.contains(name))
+        .filter(|(name, bytes)| !old.iter().any(|(n, b)| n == name || b == bytes))
         .map(|(name, bytes)| {
             let text = String::from_utf8(bytes).map_err(|_| NoteError::Toml {
                 file: name.clone(),
@@ -267,6 +268,9 @@ mod tests {
         std::fs::write(head.join("edited.toml"), note("b", "now")).unwrap();
         std::fs::write(base.join("edited.toml"), note("b", "before")).unwrap();
         std::fs::write(head.join("added.toml"), note("c", "new")).unwrap();
+        // Renamed with its text unchanged: still the earlier change's.
+        std::fs::write(head.join("renamed.toml"), note("e", "moved")).unwrap();
+        std::fs::write(base.join("before-rename.toml"), note("e", "moved")).unwrap();
         std::fs::write(head.join("README.md"), "not a note").unwrap();
         let names = |found: Vec<NoteFile>| -> Vec<String> {
             found.into_iter().map(|n| n.note.file).collect()
@@ -279,7 +283,7 @@ mod tests {
         std::fs::remove_file(head.join("broken.toml")).unwrap();
         assert_eq!(
             names(read(&head, &dir.path().join("none")).unwrap()),
-            ["added.toml", "edited.toml", "old.toml"]
+            ["added.toml", "edited.toml", "old.toml", "renamed.toml"]
         );
         // An absent folder holds no notes, on either side.
         assert!(
