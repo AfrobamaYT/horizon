@@ -5,6 +5,7 @@ static ENTITY_PRE_CALLS: AtomicU32 = AtomicU32::new(0);
 static ENTITY_POST_CALLS: AtomicU32 = AtomicU32::new(0);
 
 pub mod area_macros;
+pub mod capability_registration;
 pub mod cauldron;
 pub mod datapack;
 pub mod game_payload;
@@ -179,6 +180,7 @@ impl Hooks for Mod {
         _: &mut mod_api::ServerStartedEvent,
     ) {
         runtime_environment::started(host);
+        capability_registration::started(host);
         if host.is_loaded("datapack_fixture") {
             datapack::read(host);
         }
@@ -196,6 +198,7 @@ impl Hooks for Mod {
 
     fn register(&self, registrar: &mut dyn mod_api::Registrar, cx: &mod_api::RegistrationContext) {
         runtime_environment::register(cx);
+        capability_registration::register(registrar, cx);
         game_payload::register(registrar);
         interaction::register(registrar);
         cauldron::register(registrar);

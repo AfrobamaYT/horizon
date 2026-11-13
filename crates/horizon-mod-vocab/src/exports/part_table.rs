@@ -6,6 +6,8 @@ pub use parts::{
     EntityProviders, GeneralEntityCategory, GeneralEntityRegistrationError, GeneralSavePolicy,
     ItemCapabilityProvider, ItemProvider, ItemProviderOf, OwnProvider, Parts, ProvidedBy,
     Registrar, block_providers, entity_providers, has_entity_providers,
+    block_capability_names, block_capability_proxyable, block_capability_proxyable_names,
+    ItemContainerProvider,
 };
 pub(crate) use parts::{
     InstalledProviders, answered, ask_providers, has_part_hook, parts, worldgen_parts,

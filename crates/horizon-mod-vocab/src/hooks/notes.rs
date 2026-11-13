@@ -1602,7 +1602,7 @@ one, where vanilla gives the `by` one.
   `EntityLeaveLevelEvent`, vanilla's `onTrackingEnd`): removed for any reason or its chunk unloading, not the entities
   still loaded when the server stops. It only hears. It tells item entities, experience orbs and mobs (`kind` is the mob type) so far; check `kind`.
 
-- Fluid tanks on a mod block's block entity, in millibuckets (a bucket is a thousand). `block_entity_fluids` declares the tanks, as `block_entity_container` declares the slots: each tank's capacity, the
+- Fluid tanks on a mod block's block entity, in millibuckets (a bucket is a thousand). `r.block_fluids(&block, tanks)` registers `ModFluidTanks`, as `r.block_container(&block, container)` registers slots: each tank's capacity, the
   tanks each face reaches, and which a fill may reach and a drain may take; the tanks' contents live in the entity's saved compound under
   `fluids`, so they survive restarts, and the block's own tick reads them there. Other blocks and mods reach them, and a
   cauldron's, through the [`FLUIDS` capability](../concepts/capabilities/block-fluids.md).
@@ -2280,7 +2280,7 @@ registration path.
 
 - A player's client starting and stopping tracking an entity, on the single player server thread and on a dedicated server: `player_start_tracking(player, name, entity, uuid, kind)` when the entity is sent to the player (NeoForge's `PlayerEvent.StartTracking`, vanilla's `ServerEntity.addPairing`) and `player_stop_tracking(...)` when it stops (`PlayerEvent.StopTracking`, `removePairing`): out of range, gone from the level, or the player left, changed level or respawned. They name the entity by ID, UUID and type and run with no player's state swapped in, so a mod sends what the player needs with `PlayerRef::send_payload`. Each start has one stop.
 
-- An energy buffer on a mod block's block entity. `block_entity_energy` declares the buffer as `SimpleEnergyHandler` is built: its capacity, the most one insert and one extract moves, and the faces a fill may come through and a drain may leave by. The amount lives in the entity's saved compound as the int `energy`, so it survives restarts and the block's own tick reads it there. The game's own energy capability answers it (see "A block's energy").
+- An energy buffer on a mod block's block entity. `r.block_energy(&block, buffer)` registers a `ModEnergyBuffer` as `SimpleEnergyHandler` is built: its capacity, the most one insert and one extract moves, and the faces a fill may come through and a drain may leave by. The amount lives in the entity's saved compound as the int `energy`, so it survives restarts and the block's own tick reads it there. The game's own energy capability and registration-time type coverage share that declaration (see "A block's energy").
 
 - Data maps (`RegisterDataMapTypesEvent`). `data_map_types(types)` pushes the types a mod registers: an `id` (`mod_id:name`, not in `minecraft`) for a `registry`, `minecraft:item` or `minecraft:block` so far; asked once per load of the server's data (a world's first open and every `/reload`). The values come from `data/<mod_id>/data_maps/<registry path>/<name>.json` in the world's data packs and from files a mod pushes through `data_pack_files` under the key `data_maps/<mod_id>:<registry path>/<name>`: `{"replace": false, "values": {"minecraft:coal": ..., "#minecraft:logs": ...}, "remove": [...]}`, an entry's value being the data itself or `{"value": ..., "replace": false}`; `replace` clears what earlier files set, a tag gives every entry in it the value, `remove` applies after the file's own values, and a newer value overrides an older one. A typed map (`DataMap`: its id, its entries' registry and how a value decodes) is pushed with `DataMap::ty`, and `ItemKey::data(host, &map)` and `BlockKey::data(host, &map)` read an entry's merged value, `Ok(None)` where it has none and a `DataMapError` where no maps are loaded, no mod registered the map or the value does not decode. Server side only and not synced to clients; mergers, conditions, other registries and mod datapack registries are not here yet. `data_maps_updated(registry, cause)` (NeoForge's `DataMapsUpdatedEvent`) fires once for each registry that has a type, right after `tags_updated`'s `ServerDataLoad`, on a world's first open and after every `/reload`, with `DataMapsUpdateCause::ServerReload`: the place to build caches from the new values. `DataMapsUpdateCause::ClientSync` is for a client applying synced data maps, which is not represented.
 
@@ -2865,7 +2865,7 @@ registration path.
   `entity.id()` reads its type identity, fixed at construction; mutable events give a `ModBlockEntityView` whose
   payload contains `nbt`, `items` and `data`. A mod cannot replace the view or access its private entity handle.
 
-- Item slots for those block entities (`block_entity_container`): hoppers, comparators and breaking the
+- Item slots for those block entities (`r.block_container(&block, container)`): hoppers, comparators and breaking the
   block use them as they use vanilla's containers, and `block_entity_tick` also gets the slots.
 
 - Menus for mod containers: the container names one of vanilla's slot-grid or furnace menus, which opens when the block is used,

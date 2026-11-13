@@ -2,7 +2,7 @@
 //! Mods in the game (`docs/modding/src/how-to/content-mods.md`): content mods' blocks, items, data and
 //! assets (`content_root`), and the Mods page's rows. Code mods are native (`native_hooks.rs`)
 //! or wasm (`horizon-mod-wasm`, loaded at startup); any other executable file is refused.
-use super::{Game, execution_role::ExecutionRole};
+use super::{Game, execution_role::ExecutionRole, registration_capability_coverage as coverage};
 mod menu_books;
 use horizon_client::{
     lang,
@@ -236,8 +236,7 @@ fn builtin_registry_names(root: &Path) -> horizon_client::Result<BTreeMap<String
     Ok(registries)
 }
 
-/// Capture what registration reads (registries and settings) before the first registration
-/// hook runs, so every step sees the same values.
+/// Capture registration's stable registries, settings and stock capability type owners.
 pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<()> {
     let packages = mod_api::__private::loaded_mods();
     let directory = Game::game_dir();
@@ -260,7 +259,8 @@ pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<(
             ),
             directory,
             crate::entry::runtime_environment::get().clone(),
-        ),
+        )
+        .with_capability_coverage(coverage::builtin, coverage::block_entity),
     );
     Ok(())
 }
