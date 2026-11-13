@@ -241,3 +241,86 @@ fn recipe_book_and_placement_use_component_ingredient_item_lists() {
         ["minecraft:diamond_sword"]
     );
 }
+
+#[test]
+fn components_enchantable_decodes_positive_records_and_matches_values() {
+    let mut items = Items::empty();
+    items.component_defaults = std::sync::Arc::new(std::collections::HashMap::from([(
+        "minecraft:diamond_sword".into(),
+        horizon_core::nbt::Compound::from([(
+            "minecraft:enchantable".into(),
+            Tag::compound([
+                ("value", Tag::Short(15)),
+                ("ignored", Tag::String("prototype".into())),
+            ]),
+        )]),
+    )]));
+    let ingredient = parse(
+        r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:enchantable":{"value":15}}}"#,
+        &items,
+    );
+    let normalized = horizon_command::item::decoded_component_value(
+        "minecraft:enchantable",
+        &Tag::compound([
+            ("value", Tag::Double(15.9f64.to_bits())),
+            ("ignored", Tag::String("not part of the record".into())),
+        ]),
+        &items.component_registry,
+    )
+    .unwrap();
+    assert_eq!(normalized, Tag::compound([("value", Tag::Int(15))]));
+
+    for source in [
+        r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:enchantable":{"value":0}}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:enchantable":{"value":-1}}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:enchantable":{}}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:enchantable":{"value":"15"}}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:enchantable":15}}"#,
+    ] {
+        let json: Value = serde_json::from_str(source).unwrap();
+        assert!(Ingredient::parse(&json, &items).is_none(), "{source}");
+        let rule = IngredientRule::Components {
+            patch: crate::json_nbt::json_to_compound(json["components"].as_object().unwrap())
+                .unwrap(),
+            removed: Vec::new(),
+            strict: false,
+        };
+        let error = components::validate(&rule, &items).unwrap_err();
+        assert!(error.contains("minecraft:enchantable"), "{error}");
+    }
+
+    let load = load();
+    let context = load.loop_context(LoopSide::Server, []);
+    let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
+    assert!(
+        ingredient.test_in(&context, &sword),
+        "borrowed item default"
+    );
+    for value in [
+        Tag::Byte(15),
+        Tag::Short(15),
+        Tag::Int(15),
+        Tag::Long(4_294_967_311),
+        Tag::Float(15.9f32.to_bits()),
+        Tag::Double(15.9f64.to_bits()),
+    ] {
+        sword.data_mut().set_other(
+            "minecraft:enchantable",
+            Some(Tag::compound([
+                ("value", value),
+                ("ignored", Tag::String("live".into())),
+            ])),
+        );
+        assert!(ingredient.test_in(&context, &sword));
+    }
+    sword.data_mut().set_other(
+        "minecraft:enchantable",
+        Some(Tag::compound([("value", Tag::Int(16))])),
+    );
+    assert!(!ingredient.test_in(&context, &sword));
+    sword.data_mut().set_other(
+        "minecraft:enchantable",
+        Some(Tag::compound([("value", Tag::Int(0))])),
+    );
+    assert!(!ingredient.test_in(&context, &sword));
+}

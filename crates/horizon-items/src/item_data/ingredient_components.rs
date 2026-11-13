@@ -64,6 +64,18 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
                     .and_then(|d| d.other(id))
                     .and_then(crate::properties::component_int)
         }
+        // Enchantable.CODEC ignores other record fields and converts boxed numbers.
+        "minecraft:enchantable" => {
+            let value = |stack: &ItemStack| {
+                stack
+                    .data()
+                    .and_then(|data| data.other(id))
+                    .and_then(|tag| tag.get("value"))
+                    .and_then(crate::properties::component_int)
+                    .filter(|value| *value > 0)
+            };
+            value(a) == value(b)
+        }
         "minecraft:block_entity_data" => block_entity_equal(
             a.data().and_then(|d| d.other(id)),
             b.data().and_then(|d| d.other(id)),
