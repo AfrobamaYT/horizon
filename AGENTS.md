@@ -184,6 +184,12 @@ python3 tools/lang_coverage.py --summary   # one line per language: how many key
 python3 tools/lang_coverage.py --summary --show-keys   # the same, then the keys behind the counts
 ```
 
+- GPU tests share `gfx::test_gpu::lock()`: bind the guard before creating GPU objects so it outlives
+  every resource, queue, device and instance, including GPU-owning workers (join them before unlocking).
+  Helpers returning GPU objects leave the guard with their caller; helpers returning only CPU data may
+  own it themselves, without another outer guard. CPU-only tests need no guard. Run renderer coverage
+  with `cargo test -p horizon-client-render --lib -- gfx:: --test-threads=12`; no global serial-test flag.
+
 - For a player-facing change, drive the game once with `horizon-ctl` (launch, the action, a `state` or `screenshot`)
   and report the result in the PR's "Tried in game" line; never claim it when it was not run.
 - Harnesses and the game need the vanilla data in `.local/` (`minecraft/`, `horizon-client/26.3`, `datagen/`,
