@@ -1131,8 +1131,8 @@ pub(super) fn make_streaming(
     if flat.is_some() || flat_vanilla.is_some() {
         register_sea_level(-63);
     }
-    let mut streaming = if let Some(generate) = runtime
-        .filter(|generate| !matches!(generate, super::runtime_levels::Generate::Stem(_)))
+    let mut streaming = if let Some(generate) =
+        runtime.filter(|generate| !matches!(generate, super::runtime_levels::Generate::Stem(_)))
     {
         // A level a mod opened with the default layers or with air alone.
         let flat = matches!(generate, super::runtime_levels::Generate::Flat);

@@ -253,9 +253,7 @@ impl Game<'_> {
         min: [f64; 3],
         max: [f64; 3],
     ) -> Option<Vec<EntityRef>> {
-        if !self.level_handle_current(level)
-            || !min.iter().chain(&max).all(|v| v.is_finite())
-        {
+        if !self.level_handle_current(level) || !min.iter().chain(&max).all(|v| v.is_finite()) {
             return None;
         }
         let bounds = Aabb::new(
