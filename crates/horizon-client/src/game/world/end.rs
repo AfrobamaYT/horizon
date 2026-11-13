@@ -1577,6 +1577,19 @@ impl Game<'_> {
         self.end.gateways.get(&id).map_or(0, |t| t.cooldown())
     }
 
+    /// `Entity.setPortalCooldown` of an ender pearl: the cooldown of its End
+    /// gateway traveller, the value `pearl_portal_cooldown` reads. A pearl
+    /// with no traveller yet gets one holding only the cooldown, which the
+    /// End's portal pass ticks down.
+    pub(super) fn set_pearl_portal_cooldown(&mut self, id: u32, cooldown: i32) -> bool {
+        self.end
+            .gateways
+            .entry(id)
+            .or_default()
+            .set_cooldown(cooldown);
+        true
+    }
+
     /// `Entity.handlePortal` for the entities in an End gateway: they go
     /// through to the gateway's exit, where they wait for its chunks.
     pub(super) fn handle_end_gateway_portals(&mut self) {

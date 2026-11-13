@@ -184,6 +184,66 @@ impl Game<'_> {
         };
         Some(self.portals.entities.get(&id).map_or(0, |p| p.cooldown))
     }
+    /// `Entity.setPortalCooldown`: writes the value `entity_portal_cooldown`
+    /// reads, where that read keeps it. Server-only; a negative value or a
+    /// client-side write is refused. A positive value blocks portal entry on
+    /// the next tick (and is refilled while the entity stands in a portal);
+    /// 0 lets it enter at once. False for a kind the read refuses or a stale
+    /// handle.
+    pub(super) fn entity_set_portal_cooldown(&mut self, entity: EntityRef, ticks: i32) -> bool {
+        if ticks < 0 || !self.is_logical_server() {
+            return false;
+        }
+        match self.native_entity_target(entity) {
+            Some(Target::Player) => {
+                self.portals.player.cooldown = ticks;
+                true
+            }
+            Some(Target::Guest(conn)) => self.lan.as_mut().is_some_and(|lan| {
+                lan.play.entry(conn).or_default().portal.cooldown = ticks;
+                true
+            }),
+            Some(Target::Falling(id)) => self
+                .falling
+                .iter()
+                .position(|f| f.id == id)
+                .is_some_and(|index| {
+                    self.falling.update(index, |f| f.portal.cooldown = ticks);
+                    true
+                }),
+            Some(Target::Projectile(id)) => {
+                let Some(projectile) = self.creatures.projectiles.iter().find(|p| p.id == id)
+                else {
+                    return false;
+                };
+                if matches!(
+                    projectile.kind,
+                    horizon_client::projectiles::ProjectileKind::EnderPearl
+                ) {
+                    return self.set_pearl_portal_cooldown(id, ticks);
+                }
+                if !super::nether_portal::is_arrow(projectile)
+                    && !super::nether_portal::is_portal_projectile(projectile)
+                {
+                    return false;
+                }
+                self.portals.entities.entry(id).or_default().cooldown = ticks;
+                true
+            }
+            Some(Target::Mob(id))
+            | Some(Target::Item(id))
+            | Some(Target::Orb(id))
+            | Some(Target::Boat(id))
+            | Some(Target::Cart(id))
+            | Some(Target::Tnt(id))
+            | Some(Target::Rocket(id))
+            | Some(Target::Trident(id)) => {
+                self.portals.entities.entry(id).or_default().cooldown = ticks;
+                true
+            }
+            _ => false,
+        }
+    }
     /// Sets the remaining fire ticks (`Entity.setRemainingFireTicks`).
     pub(super) fn entity_set_remaining_fire_ticks(
         &mut self,
@@ -812,6 +872,110 @@ mod tests {
             assert_eq!(mob.portal_cooldown(game), None);
             game.enter_level(Dim::Overworld).unwrap();
             assert_eq!(mob.portal_cooldown(game), Some(299));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn portal_cooldown_write_blocks_entry_and_counts_down() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::chunk::Chunk;
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::geometry::Vec3;
+        use std::sync::Arc;
+
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.settings.simulation_distance = 4;
+            game.settings.render_distance = 12;
+            let registry = game.pack.assets.registry;
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let portal = registry
+                .default_state("minecraft:nether_portal")
+                .unwrap();
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.player = Some(
+                PlayerMotion::new(game.motion, Vec3::new(8.5, 65.0, 8.5)).unwrap(),
+            );
+            for z in [8, 12] {
+                game.world.set(0, 63, z, stone).unwrap();
+            }
+            game.world.set(0, 64, 8, portal).unwrap();
+            game.world.set(0, 65, 8, portal).unwrap();
+            game.mobs
+                .push(Mob::new(40, zombie, Vec3::new(0.5, 64.0, 8.5), 0.0));
+            game.load_ticking_neighbourhood(0, 0);
+            game.update_chunk_tickets();
+            assert!(
+                game.entity_ticking_area()(0, 8),
+                "the mob's chunk ticks entities"
+            );
+            let mob = game.entity(40).unwrap();
+
+            // A written positive value blocks the portal: the mob stays, and
+            // standing in the portal refills the countdown.
+            assert!(mob.set_portal_cooldown(game, 40));
+            assert_eq!(mob.portal_cooldown(game), Some(40));
+            game.find_entity_portals();
+            game.handle_entity_portals();
+            assert!(
+                game.mobs.iter().any(|m| m.id == 40),
+                "the mob stays in its portal"
+            );
+            let held = mob.portal_cooldown(game).unwrap();
+            assert_eq!(
+                held,
+                horizon_client::nether_portal::ENTITY_DELAY - 1,
+                "standing in the portal refills the cooldown before the tick"
+            );
+
+            // Out of the portal, the value counts down one per tick.
+            game.mobs
+                .iter_mut()
+                .find(|m| m.id == 40)
+                .unwrap()
+                .position = Vec3::new(0.5, 64.0, 12.5);
+            game.handle_entity_portals();
+            assert_eq!(mob.portal_cooldown(game), Some(held - 1));
+
+            // A negative value is refused and leaves the value alone.
+            assert!(!mob.set_portal_cooldown(game, -1));
+            assert_eq!(mob.portal_cooldown(game), Some(held - 1));
+
+            // 0 lets it enter on the next tick.
+            game.mobs
+                .iter_mut()
+                .find(|m| m.id == 40)
+                .unwrap()
+                .position = Vec3::new(0.5, 64.0, 8.5);
+            assert!(mob.set_portal_cooldown(game, 0));
+            assert_eq!(mob.portal_cooldown(game), Some(0));
+            game.find_entity_portals();
+            game.handle_entity_portals();
+            assert!(
+                !game.mobs.iter().any(|m| m.id == 40),
+                "0 lets the mob through"
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn portal_cooldown_write_is_refused_on_a_client() {
+        use super::super::native_entity_refs::tests::with_client_game;
+        use mod_api::WorldEpoch;
+
+        with_client_game(|game| {
+            let entity = EntityRef::new(WorldEpoch::new(0), 1);
+            assert!(!entity.set_portal_cooldown(game, 5));
+            assert!(!entity.set_portal_cooldown(game, 0));
         });
     }
 
