@@ -47,10 +47,12 @@ pub mod advancements;
 pub mod chat;
 pub mod chat_filter;
 mod item_particles;
+mod pending_move;
 mod raw_inbox;
 mod spawn_info;
 use advancements::AdvancementOwners;
 use chat::yellow_names;
+pub use pending_move::{Accepted, PendingMove};
 use raw_inbox::{PacketDrain, yield_raw};
 pub mod game_event {
     pub const NO_RESPAWN_BLOCK_AVAILABLE: u8 = 0;
@@ -169,6 +171,8 @@ pub enum HostEvent {
         Box<horizon_protocol::packets::configuration::ClientInformation>,
         Box<horizon_protocol::packets::configuration::ClientInformation>,
     ),
+    /// A changed movement report is held for the game to rule on ([`Hub::resolve_move`]).
+    PlayerMove(u32),
     /// An accepted position started a jump, before later gameplay packets.
     Jump {
         conn: u32,
@@ -331,6 +335,8 @@ pub struct Hub {
     pub chunk_watches: ChunkWatchLog,
     /// Kicks waiting for the game thread to notify native mods.
     pending_kicks: Vec<HostEvent>,
+    /// A native mod listens to `player_move`: a changed report waits for the game ([`pending_move`]).
+    pub moves_listened: bool,
     /// `[transfer]` on (a dedicated server's `--transfers`): the players a proxy
     /// said would arrive (`player-expect`). None while it is off.
     pub transfers: Option<super::arrivals::Transfers>,
@@ -826,6 +832,7 @@ impl Hub {
             chunk_watches: ChunkWatchLog::default(),
             packet_drain: None,
             pending_kicks: Vec::new(),
+            moves_listened: false,
             transfers: None,
             native_tracking: Vec::new(),
             attachment_snapshots: Vec::new(),
@@ -2134,6 +2141,7 @@ impl Hub {
         let ticks = self.ticks;
         self.guests.update(i, |g| {
             g.teleport_tick = ticks;
+            g.pending_move = None;
             if let Some(p) = position {
                 g.position = p;
                 g.previous_position = p;
@@ -4274,7 +4282,7 @@ impl Hub {
         // the action is still handled with it, as vanilla handles both in this tick
         // (the swing starts the attack strength again, #7817).
         loop {
-            if self.discard_closed_input(i) {
+            if self.discard_closed_input(i) || self.holds_for_move(i) {
                 break;
             }
             if *held
@@ -4826,34 +4834,15 @@ impl Hub {
         if flags & 1 != 0 && !self.guests[i].rests_on_ground {
             self.force_send_player_support_blocks(i, ctx);
         }
-        self.guests.update(i, |g| {
-            g.client_is_floating = floating;
-            // Entity.move's verticalCollisionBelow, which the check above reads of the last move.
-            g.rests_on_ground = stands;
-            g.previous_position = g.position;
-            g.position = to;
-            // ServerChunkCache.move: its pairs are checked again.
-            g.moved = true;
-            let moved = [0, 1, 2].map(|k| g.position[k] - g.previous_position[k]);
-            if g.moves.is_empty() {
-                g.moves_from_ground = g.on_ground;
-            }
-            let on_ground = flags & 1 != 0;
-            if g.on_ground && !on_ground && moved[1] > 0.0 && !g.spectator() {
-                events.push(HostEvent::Jump {
-                    conn: g.conn,
-                    from: g.previous_position,
-                    yaw: g.yaw,
-                });
-            }
-            g.moves.push((moved, on_ground));
-            g.known_movement = moved;
-            g.yaw = yaw;
-            g.pitch = pitch.clamp(-90.0, 90.0);
-            g.head_yaw = g.yaw;
-            g.on_ground = flags & 1 != 0;
-            g.ticks = g.ticks.max(1);
-        });
+        let accepted = Accepted {
+            to,
+            yaw,
+            pitch,
+            flags,
+            stands,
+            floating,
+        };
+        self.accept_move(i, accepted, events);
     }
 
     /// `ServerGamePacketListenerImpl.noBlocksAround`: every block of the
@@ -5613,6 +5602,7 @@ mod tests {
     #[path = "../far_tests.rs"]
     mod far_tests;
     mod ordered_inbox_tests;
+    mod pending_move_tests;
     mod sound_tests;
     use super::*;
     use crate::fast_hash::FxHashSet;

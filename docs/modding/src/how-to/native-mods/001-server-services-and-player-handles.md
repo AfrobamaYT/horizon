@@ -61,6 +61,20 @@ the player is counted, and `sleep_timer(host)` / `set_sleep_timer(host, ticks)` 
 `Player.sleepCounter` (0 to 109; 100 is slept long enough). Reads take a `Host`, writes a
 `ServerHost`.
 
+Vetoing a player's movement: the `player_move` hook hears each validated movement report whose
+position or rotation differs from the accepted one, after the server's own checks and before the
+report is committed, with the exact `from`, `to` and both rotations. Set `cancel` and the report is
+not applied; the client is sent back to the accepted position and rotation, and the veto never
+counts against the player in the anticheat. The engine applies no threshold, so a mod that wants
+to ignore small moves compares the two positions itself (`(to - from).length() < 1.0 / 16.0`
+skips anything under 1/16 of a block). The player's state is swapped in for the call. While a
+report waits for the mods, that player's later reports wait behind it in order; a report no mod
+has ruled on within 20 ticks is dropped with the correction, and a disconnect, teleport or level
+change drops it cleanly. Not heard: a player's first move after joining, a player riding something
+(`vehicle_moved` hears the vehicle) and any teleport, the veto's own correction included. With no
+listener nothing is held or copied: the report is committed in place, and the cost with one is a
+held report for each moving player a tick.
+
 These small services exist only on `ServerHost`, not `Host`, `ClientHost` or a
 restricted level host. Native and wasm mods use the same calls: service methods
 are generated imports, and acquiring a service just reborrows the current call's

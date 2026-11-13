@@ -2,6 +2,7 @@
 //! server threads and the play-state hub, feeds it the world's entities each
 //! tick and turns what the guests do into gameplay. A world that is not open
 //! costs one `Option` check per tick.
+mod event_kind;
 mod event_timings;
 #[cfg(test)]
 mod level_event_targets;
@@ -16,6 +17,7 @@ use super::{
     shield::OFFHAND_SLOT,
 };
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
+use event_kind::{EventKind, event_kind};
 use event_timings::EventTimings;
 use horizon_client::crafting::ResolvedSources;
 use horizon_client::{
@@ -2796,6 +2798,7 @@ impl Game<'_> {
                         self.native_player_kicked(player, &name, &reason);
                     }
                 }
+                HostEvent::PlayerMove(conn) => self.lan_player_move(conn),
                 HostEvent::Input { conn, flags } => {
                     if !mod_api::__private::listened(mod_api::HookId::PlayerInput) {
                         continue;
@@ -2901,7 +2904,7 @@ impl Game<'_> {
                     .rules
                     .bool_at(horizon_client::gamerules::vanilla::ELYTRA_MOVEMENT_CHECK),
             );
-            host.hub.mods_loaded = !mod_api::__private::mods().is_empty();
+            Self::sync_hub_mod_flags(&mut host.hub);
             let pass = self.level_pass;
             let mut events = if pass.first {
                 horizon_client::spans::time("lan_poll", || host.hub.poll(&mut ctx))
@@ -3272,7 +3275,7 @@ impl Game<'_> {
                 // (`tick_server`): the network is read once, before the first.
                 // Player packets may already have been drained before
                 // scheduled block ticks (`tick_lan_packets`).
-                host.hub.mods_loaded = !mod_api::__private::mods().is_empty();
+                Self::sync_hub_mod_flags(&mut host.hub);
                 let pass = self.level_pass;
                 // Even paused worlds completed their ordered input segments at
                 // entry, before world sync/physics or any scheduled work.
@@ -3999,36 +4002,6 @@ fn equipment_slot_name(slot: horizon_core::equipment_slot::EquipmentSlot) -> &'s
         EquipmentSlot::Feet => "feet",
         EquipmentSlot::Body => "body",
         EquipmentSlot::Saddle => "saddle",
-    }
-}
-
-/// What a hub event is, whose connection, and the name of a player who left (no longer in the
-/// hub once it is handled): for a slow tick's notes.
-type EventKind = (&'static str, Option<u32>, Option<String>);
-
-fn event_kind(event: &HostEvent) -> EventKind {
-    match event {
-        HostEvent::Joined(c) => ("join", Some(*c), None),
-        HostEvent::Left(g) => ("leave", None, Some(g.name.clone())),
-        HostEvent::Packet(c, p) => (p.name(), Some(*c), None),
-        HostEvent::InputCredits(_) => ("input credits", None, None),
-        HostEvent::RawPayload(_) => ("raw payload", None, None),
-        HostEvent::ClientInformation(c, _, _) => ("client settings", Some(*c), None),
-        HostEvent::ChatSubmitted { .. } => ("chat submitted", None, None),
-        HostEvent::ChatSessionStarted(_) => ("chat session", None, None),
-        HostEvent::Jump { conn, .. } => ("jump", Some(*conn), None),
-        HostEvent::PlayerLoaded(c) => ("loaded", Some(*c), None),
-        HostEvent::RecipeBookSettings { conn, .. } => ("recipe book", Some(*conn), None),
-        HostEvent::Sneak { conn, .. } => ("sneak", Some(*conn), None),
-        HostEvent::Input { conn, .. } => ("input", Some(*conn), None),
-        HostEvent::Kicked { name, .. } => ("kick", None, Some(name.clone())),
-        HostEvent::Flight { conn, .. } => ("flight", Some(*conn), None),
-        HostEvent::Chat { .. } => ("chat line", None, None),
-        HostEvent::PlayerChat { .. } => ("chat", None, None),
-        HostEvent::ChatFiltered { name, .. } => ("filtered chat", None, Some(name.clone())),
-        HostEvent::Warn(_) => ("warning", None, None),
-        HostEvent::Error(_) => ("error", None, None),
-        HostEvent::Ban { name, .. } => ("ban", None, Some(name.clone())),
     }
 }
 

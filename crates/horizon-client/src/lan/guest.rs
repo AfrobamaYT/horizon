@@ -181,6 +181,8 @@ pub struct Guest {
     pub center_sent: Option<(i32, i32)>,
     /// Why the connection closed (the console's "lost connection").
     pub left_reason: String,
+    /// A validated movement report the mods have not ruled on yet (`player_move`).
+    pub pending_move: Option<super::hub::PendingMove>,
     pub uuid: u128,
     pub name: String,
     /// The profile's properties, for the player list (skins).
@@ -644,6 +646,7 @@ impl Guest {
             placed_at: 0,
             center_sent: None,
             left_reason: String::new(),
+            pending_move: None,
             uuid: j.uuid,
             name: j.name,
             properties: j.properties,
