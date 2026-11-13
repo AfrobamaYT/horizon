@@ -545,7 +545,7 @@ def smoke(out: Path) -> None:
         template = (out / TEMPLATE).read_text()
         main = template.replace("/* MOD_ENTRIES */", '        "smoke" => mod_0::hooks,\n').replace(
             "/* BUILT_MODS */",
-            '    horizon_mod_package::runtime::BuiltMod { id: "smoke", version: "0.1.0", side: horizon_mod_package::Side::Both },\n',
+            '    mod_api::__private::native::BuiltMod { id: "smoke", version: "0.1.0", side: mod_api::Side::Both },\n',
         )
         (scratch / "main.rs").write_text(main)
         link_args = json.loads((out / IDENTITY).read_text())["link_args"]

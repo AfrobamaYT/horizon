@@ -2518,7 +2518,7 @@ mod item_model_snapshot_tests {
     }
 }
 
-impl TryIntoApi for horizon_mod_package::Side {
+impl TryIntoApi for mod_api::Side {
     type Api = mod_api::Side;
     type Error = std::convert::Infallible;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {

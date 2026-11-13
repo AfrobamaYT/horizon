@@ -665,11 +665,11 @@ mod tests {
         let mut base = horizon_mod_package::Package::read(&dir).unwrap().manifest;
         base.id = "base".into();
         base.version = "1.2.3".into();
-        base.side = horizon_mod_package::Side::Both;
+        base.side = mod_vocab::Side::Both;
         let mut extra = base.clone();
         extra.id = "extra".into();
         extra.version = "2.0.0".into();
-        extra.side = horizon_mod_package::Side::Client;
+        extra.side = mod_vocab::Side::Client;
         let mods = [&base, &extra];
         for count in 0..=2 {
             let text = main_rs(template, &mods[..count], &internals::Catalog::default());

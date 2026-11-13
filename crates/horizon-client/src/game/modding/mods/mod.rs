@@ -1147,9 +1147,9 @@ fn register_block_entity_types(
 fn announced_entry(
     id: &str,
     version: &str,
-    side: horizon_mod_package::Side,
+    side: mod_api::Side,
 ) -> horizon_protocol::mod_list::Entry {
-    use horizon_mod_package::Side;
+    use mod_api::Side;
     use horizon_protocol::mod_list;
     mod_list::Entry {
         id: id.to_owned(),
@@ -1254,7 +1254,7 @@ fn register_menu_types(
 }
 
 /// The embedded inventory, formatted for the crash report.
-fn native_mods_detail(built: &[horizon_mod_package::runtime::BuiltMod]) -> Option<String> {
+fn native_mods_detail(built: &[mod_api::__private::native::BuiltMod]) -> Option<String> {
     let list = built
         .iter()
         .map(|m| format!("{} {}", m.id, m.version))
@@ -1339,7 +1339,7 @@ fn live_switch_of(
 /// Installed native mods not compiled into this executable get an explanatory row.
 fn not_built(
     dir: &std::path::Path,
-    built: &[horizon_mod_package::runtime::BuiltMod],
+    built: &[mod_api::__private::native::BuiltMod],
     rows: &[Installed],
 ) -> Vec<Installed> {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
@@ -1904,7 +1904,7 @@ mod tests {
     const BUILT: &[BuiltMod] = &[BuiltMod {
         id: "machine_sample",
         version: "0.3.0",
-        side: horizon_mod_package::Side::Both,
+        side: mod_api::Side::Both,
     }];
 
     struct Fixture(PathBuf);
@@ -2841,7 +2841,7 @@ mod tests {
             BuiltMod {
                 id: "pipes",
                 version: "2.0",
-                side: horizon_mod_package::Side::Client,
+                side: mod_api::Side::Client,
             },
         ];
         assert_eq!(

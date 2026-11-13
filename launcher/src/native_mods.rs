@@ -3237,10 +3237,10 @@ mod tests {
         eprintln!("NATIVE_SERVER_EXPORT_STEP=load_runtime");
         let runtime = horizon_mod_package::runtime::Runtime::load(
             &output.join(Target::Server.binary()),
-            &[horizon_mod_package::runtime::BuiltMod {
+            &[mod_vocab::__private::native::BuiltMod {
                 id: "exported",
                 version: "0.1.0",
-                side: horizon_mod_package::Side::Client,
+                side: mod_vocab::Side::Client,
             }],
         )
         .unwrap();
