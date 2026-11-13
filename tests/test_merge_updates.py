@@ -56,6 +56,7 @@ class Payload(unittest.TestCase):
                              "## Summary\n" + ("p" * 2000 + "\n\n") * 3)
         embed = message["embeds"][0]
         self.assertEqual(message["allowed_mentions"], {"parse": []})
+        self.assertEqual(message["flags"], 4096)
         self.assertEqual(embed["color"], 0x3498DB)
         self.assertEqual(embed["footer"], {"text": "Rollup opened"})
         self.assertTrue(embed["title"].startswith("Opened: ttt"), embed["title"])
