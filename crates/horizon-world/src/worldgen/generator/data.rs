@@ -68,7 +68,7 @@ pub struct GeneratorData {
     pub(super) old_chunk_facts: OnceLock<OldChunkFacts>,
 }
 /// `BlendingData.isGround` and `SURFACE_BLOCKS`, by block state id.
-struct OldChunkFacts {
+pub(super) struct OldChunkFacts {
     ground: Vec<bool>,
     surface: Vec<bool>,
 }
