@@ -45,6 +45,7 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
         "minecraft:repair_cost" => {
             a.data().map_or(0, |d| d.repair_cost) == b.data().map_or(0, |d| d.repair_cost)
         }
+        "minecraft:dyed_color" => dyed_color(a).is_some_and(|color| Some(color) == dyed_color(b)),
         "minecraft:enchantments" => levels_equal(
             a.data().map_or(&[], |d| d.enchantments.as_slice()),
             b.data().map_or(&[], |d| d.enchantments.as_slice()),
@@ -129,6 +130,14 @@ fn map_id(stack: &ItemStack) -> Option<i32> {
     match data.other("minecraft:map_id") {
         Some(value) => crate::properties::component_int(value),
         None => data.map_id,
+    }
+}
+
+fn dyed_color(stack: &ItemStack) -> Option<i32> {
+    let data = stack.data()?;
+    match data.other("minecraft:dyed_color") {
+        Some(raw) => horizon_core::color::rgb_color_from_tag(raw),
+        None => data.dyed_color,
     }
 }
 

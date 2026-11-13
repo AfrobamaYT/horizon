@@ -41,6 +41,7 @@ pub const DECODED_COMPONENTS: &[&str] = &[
     "minecraft:ominous_bottle_amplifier",
     "minecraft:potion_duration_scale",
     "minecraft:minimum_attack_charge",
+    "minecraft:dyed_color",
 ];
 
 /// Validate and decode a component into the value representation shared with stacks.
@@ -90,6 +91,9 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
         "minecraft:enchantment_glint_override" => Tag::Byte(i8::from(
             horizon_items::item_data::component_bool(value).expect("validated boolean component"),
         )),
+        "minecraft:dyed_color" => {
+            Tag::Int(horizon_core::color::rgb_color_from_tag(value).expect("validated RGB color"))
+        }
         "minecraft:enchantments" | "minecraft:stored_enchantments" => {
             let Tag::Compound(entries) = value else {
                 unreachable!("validated enchantment map")
@@ -117,6 +121,9 @@ pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), Strin
     match id {
         // MapId.CODEC is Codec.INT, without a non-negative constraint.
         "minecraft:map_id" => int_of(t).map(|_| ()).ok_or_else(|| "Not a number".into()),
+        "minecraft:dyed_color" => horizon_core::color::rgb_color_from_tag(t)
+            .map(|_| ())
+            .ok_or_else(|| "Expected a number or a list of three numeric RGB channels".into()),
         "minecraft:damage" | "minecraft:repair_cost" => {
             let v = int_of(t).ok_or("Not a number")?;
             if v < 0 {
