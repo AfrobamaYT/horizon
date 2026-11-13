@@ -92,6 +92,13 @@ mod player_bed_leave_tests {
             .update_guest(conn, |g| {
                 g.bed = Some([5, 64, 5]);
                 g.sleeping = true;
+                g.sleep_timer = 10;
+                g.dead = false;
+                g.health = 20.0;
+                g.death_time = 0;
+                if let Some(motion) = g.motion.as_mut() {
+                    motion.health.dead = false;
+                }
             })
             .unwrap();
     }
@@ -99,7 +106,7 @@ mod player_bed_leave_tests {
     /// The morning wake is `(false, false)` and the Leave Bed packet
     /// `(false, true)`; both are heard while the guest still sleeps there.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn bed_leave_carries_the_wake_flags_before_the_sleep_clears() {
         let heard = Heard::default();
         let mods: mod_api::Mods =
@@ -132,7 +139,7 @@ mod player_bed_leave_tests {
     /// A listener that wakes the player itself (`stop_sleeping`) inside the
     /// event is not told again, and the guest wakes once, by its call.
     #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    #[ignore = "daily"]
     fn a_listener_waking_the_player_again_is_told_once() {
         let heard = Heard::default();
         let mods: mod_api::Mods =
@@ -161,6 +168,174 @@ mod player_bed_leave_tests {
                 );
                 assert!(!game.command_guest(12).unwrap().sleeping);
             });
+        });
+    }
+    #[test]
+    #[ignore = "daily"]
+    fn guest_missing_bed_death_and_bed_rule_keep_their_distinct_literal_pairs() {
+        let heard = Heard::default();
+        let mods: mod_api::Mods =
+            vec![ModEntry::new("wake", Box::new(Wake(heard.clone(), false)))].into();
+        mod_platform::testing::with_mods(mods, || {
+            crate::game::native_guest_turn_tests::with_guests(|game| {
+                let air = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:air")
+                    .unwrap();
+                let bed = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:red_bed")
+                    .unwrap();
+                game.world.day_time = 13000;
+                assert!(game.bed_can_sleep_now());
+                game.world.set(5, 64, 5, air).unwrap();
+                in_bed(game, 12);
+                game.guest_sleep_tick(game.guest_index(12).unwrap());
+                assert_eq!(
+                    std::mem::take(&mut *heard.lock().unwrap()),
+                    [(true, true, Some([5, 64, 5]))]
+                );
+                assert_eq!(game.command_guest(12).unwrap().sleep_timer, 0);
+                assert!(!game.command_guest(12).unwrap().sleeping);
+
+                game.world.set(5, 64, 5, bed).unwrap();
+                in_bed(game, 12);
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .update_guest(12, |g| {
+                        g.dead = true;
+                        g.health = 0.0;
+                    })
+                    .unwrap();
+                game.guest_sleep_tick(game.guest_index(12).unwrap());
+                assert_eq!(
+                    std::mem::take(&mut *heard.lock().unwrap()),
+                    [(true, true, Some([5, 64, 5]))]
+                );
+                assert_eq!(game.command_guest(12).unwrap().sleep_timer, 0);
+
+                game.world.day_time = 6000;
+                assert!(!game.bed_can_sleep_now());
+                in_bed(game, 12);
+                game.guest_sleep_tick(game.guest_index(12).unwrap());
+                assert_eq!(
+                    std::mem::take(&mut *heard.lock().unwrap()),
+                    [(false, true, Some([5, 64, 5]))]
+                );
+                assert_eq!(game.command_guest(12).unwrap().sleep_timer, 100);
+                // A missing bed at daytime is still a generic wake, not a
+                // bed-rule refusal just because sleeping would be disallowed.
+                game.world.set(5, 64, 5, air).unwrap();
+                in_bed(game, 12);
+                game.guest_sleep_tick(game.guest_index(12).unwrap());
+                assert_eq!(
+                    std::mem::take(&mut *heard.lock().unwrap()),
+                    [(true, true, Some([5, 64, 5]))]
+                );
+                assert_eq!(game.command_guest(12).unwrap().sleep_timer, 0);
+            })
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn acting_missing_bed_death_and_generic_stop_are_immediate_before_clear() {
+        let heard = Heard::default();
+        let mods: mod_api::Mods =
+            vec![ModEntry::new("wake", Box::new(Wake(heard.clone(), false)))].into();
+        mod_platform::testing::with_mods(mods, || {
+            crate::game::native_guest_turn_tests::with_guests(|game| {
+                let air = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:air")
+                    .unwrap();
+                let bed = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:red_bed")
+                    .unwrap();
+                game.world.day_time = 13000;
+                game.world.set(5, 64, 5, air).unwrap();
+                in_bed(game, 12);
+                game.as_guest(12, |game| game.tick_sleep());
+                assert_eq!(
+                    std::mem::take(&mut *heard.lock().unwrap()),
+                    [(true, true, Some([5, 64, 5]))]
+                );
+                assert_eq!(game.command_guest(12).unwrap().sleep_timer, 0);
+
+                game.world.set(5, 64, 5, bed).unwrap();
+                in_bed(game, 12);
+                game.as_guest(12, |game| {
+                    game.player
+                        .as_mut()
+                        .unwrap()
+                        .set_health(0.0, false)
+                        .unwrap();
+                    game.tick_sleep();
+                });
+                assert_eq!(
+                    std::mem::take(&mut *heard.lock().unwrap()),
+                    [(true, true, Some([5, 64, 5]))]
+                );
+                assert_eq!(game.command_guest(12).unwrap().sleep_timer, 0);
+
+                for acting in [false, true] {
+                    in_bed(game, 12);
+                    let id = game.command_guest(12).unwrap().entity_id as u32;
+                    let epoch = game.native_lifecycle.epoch().unwrap();
+                    let living = game.living(mod_api::EntityRef::new(epoch, id)).unwrap();
+                    if acting {
+                        game.as_guest(12, |game| assert!(game.living_stop_sleeping(living)));
+                    } else {
+                        assert!(game.living_stop_sleeping(living));
+                    }
+                    assert_eq!(
+                        std::mem::take(&mut *heard.lock().unwrap()),
+                        [(true, true, Some([5, 64, 5]))]
+                    );
+                    assert_eq!(game.command_guest(12).unwrap().sleep_timer, 0);
+                    assert!(!game.command_guest(12).unwrap().sleeping);
+                }
+            })
+        });
+    }
+    #[test]
+    #[ignore = "daily"]
+    fn guest_wake_counters_match_the_same_reasons_without_listeners() {
+        mod_platform::testing::with_mods(Vec::new().into(), || {
+            crate::game::native_guest_turn_tests::with_guests(|game| {
+                let air = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:air")
+                    .unwrap();
+                let bed = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:red_bed")
+                    .unwrap();
+                for (state, time, expected) in [(air, 13000, 0), (air, 6000, 0), (bed, 6000, 100)] {
+                    game.world.set(5, 64, 5, state).unwrap();
+                    game.world.day_time = time;
+                    in_bed(game, 12);
+                    game.guest_sleep_tick(game.guest_index(12).unwrap());
+                    let guest = game.command_guest(12).unwrap();
+                    assert!(!guest.sleeping);
+                    assert_eq!(guest.sleep_timer, expected);
+                }
+            })
         });
     }
 }

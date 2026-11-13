@@ -7860,7 +7860,7 @@ impl Game<'_> {
         let Some(head) = self.sleeping.take() else {
             return;
         };
-        self.sleep_timer = 100;
+        self.sleep_timer = if wake_immediately { 0 } else { 100 };
         // The active guest's live body wakes here; the hub owns its wake
         // animation and sleeping metadata, not the suspended outer actor.
         if let Some(i) = self.lan_acting.and_then(|conn| self.guest_index(conn))
@@ -7868,7 +7868,7 @@ impl Game<'_> {
         {
             // The live turn may have changed its bed since entry.
             host.hub.guests.update(i, |guest| guest.bed = Some(head));
-            host.hub.wake(i);
+            host.hub.wake(i, wake_immediately);
             // This live body applies the stand-up pose below, not the later
             // wake_woken_guests pass over stored guest bodies.
             host.hub.guests.update(i, |guest| guest.woke_from = None);

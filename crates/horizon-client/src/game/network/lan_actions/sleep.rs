@@ -80,7 +80,7 @@ impl Game<'_> {
         let Some(gi) = host.hub.guests.iter().position(|g| g.uuid == player) else {
             return;
         };
-        host.hub.wake(gi);
+        host.hub.wake(gi, wake_immediately);
         if host.hub.here(&host.hub.guests[gi])
             && let Some(head) = host.hub.guests.update(gi, |g| g.woke_from.take())
         {
@@ -115,7 +115,7 @@ impl Game<'_> {
             let mut keep_sleeping = !gone;
             let mut wake_immediately = gone;
             // Player.tick's bed-rule check precedes living-entity continuation.
-            if keep_sleeping {
+            if keep_sleeping && bed_exists {
                 let problem = self.sleep_problem(true, true);
                 let mut may_continue = None;
                 if let Some(name) = name.as_deref() {

@@ -3441,7 +3441,7 @@ impl Hub {
     /// ServerPlayer.stopSleepInBed: the wake-up animation goes to the player
     /// and those around, the pose is standing again and the sleep counter
     /// starts the wake-up fade (100).
-    pub fn wake(&mut self, i: usize) {
+    pub fn wake(&mut self, i: usize, wake_immediately: bool) {
         let Some((id, at)) = self.guests.update(i, |g| {
             let head = g.bed.take();
             if head.is_none() && !g.sleeping {
@@ -3451,7 +3451,7 @@ impl Hub {
                 g.woke_from = Some(head);
             }
             g.sleeping = false;
-            g.sleep_timer = 100;
+            g.sleep_timer = if wake_immediately { 0 } else { 100 };
             if g.sent_bed.take().is_some() {
                 g.sent_pose = crate::pose::Pose::Standing;
                 g.send(&C::SetEntityData(play::SetEntityData {
@@ -5388,7 +5388,7 @@ mod tests {
             ]]
         );
         assert_eq!(hub.guests[0].sent_pose, Pose::Sleeping);
-        hub.wake(0);
+        hub.wake(0, false);
         assert_eq!(
             drain(&rx).0,
             [vec![
