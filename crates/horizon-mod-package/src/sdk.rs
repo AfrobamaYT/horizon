@@ -368,6 +368,8 @@ pub enum Refusal {
     Route(String),
     /// Another unpack to the same folder holds its lock.
     Busy(String),
+    /// The file system holding this folder does not support file locks (some network shares).
+    NoLocks(String),
     /// The folder an asset would unpack into already exists.
     Exists(String),
     /// The unpacked folder could not be moved into place.
@@ -419,6 +421,11 @@ impl fmt::Display for Refusal {
             Self::Route(route) => write!(f, "the SDK's input list has no route {route}"),
             Self::Exists(path) => write!(f, "{path} already exists"),
             Self::Busy(path) => write!(f, "another program is unpacking into {path}; try again"),
+            Self::NoLocks(path) => write!(
+                f,
+                "{path}: this folder's file system does not support file locks: move the \
+                 launcher's cache to a local disk"
+            ),
             Self::Rename { to, why } => write!(f, "could not move the unpacked SDK to {to}: {why}"),
             Self::MissingInputs { missing, how } => {
                 write!(f, "missing required inputs: {}", missing.join(", "))?;
@@ -721,7 +728,7 @@ pub fn unpack(
         let path = path.display().to_string();
         move |error: std::io::Error| Refusal::Io(format!("{path}: {error}"))
     };
-    let _lock = lock(into)?;
+    let _lock = lock(into, std::fs::File::try_lock)?;
     if into.symlink_metadata().is_ok() {
         return Err(Refusal::Exists(into.display().to_string()));
     }
@@ -752,9 +759,15 @@ pub fn unpack(
 /// The exclusive lock on `<into>.lock` ([`LOCK_SUFFIX`]), held by the returned file until it
 /// drops: a second unpack to the same destination waits up to a second, then is refused as
 /// [`Refusal::Busy`]. It is an OS file lock, so a crashed unpack never leaves it held. It guards
-/// only this unpack's folders; PR 6's cache lock wraps it for the whole download and stamp.
+/// only this unpack's folders; PR 6's cache lock wraps it for the whole download and stamp. The
+/// lock file is left in place: delete it only while holding that outer cache lock, since another
+/// unpack may hold it. A file system without file locks is refused as [`Refusal::NoLocks`].
+/// `try_lock` is `File::try_lock`, passed in so tests can inject its errors.
 #[cfg(feature = "prebuilt")]
-fn lock(into: &Path) -> Result<std::fs::File, Refusal> {
+fn lock(
+    into: &Path,
+    try_lock: impl Fn(&std::fs::File) -> Result<(), std::fs::TryLockError>,
+) -> Result<std::fs::File, Refusal> {
     let mut path = into.as_os_str().to_owned();
     path.push(LOCK_SUFFIX);
     let path = PathBuf::from(path);
@@ -765,10 +778,13 @@ fn lock(into: &Path) -> Result<std::fs::File, Refusal> {
         .open(&path)
         .map_err(|error| Refusal::Io(format!("{}: {error}", path.display())))?;
     for _ in 0..20 {
-        match file.try_lock() {
+        match try_lock(&file) {
             Ok(()) => return Ok(file),
             Err(std::fs::TryLockError::WouldBlock) => {
                 std::thread::sleep(std::time::Duration::from_millis(50))
+            }
+            Err(std::fs::TryLockError::Error(error)) if no_locks(&error) => {
+                return Err(Refusal::NoLocks(into.display().to_string()));
             }
             Err(std::fs::TryLockError::Error(error)) => {
                 return Err(Refusal::Io(format!("{}: {error}", path.display())));
@@ -776,6 +792,24 @@ fn lock(into: &Path) -> Result<std::fs::File, Refusal> {
         }
     }
     Err(Refusal::Busy(into.display().to_string()))
+}
+
+/// Whether a failed lock means the file system has no file locks: `ENOTSUP`/`EOPNOTSUPP` or
+/// `ENOLCK` on Unix, `ERROR_NOT_SUPPORTED` or `ERROR_INVALID_FUNCTION` on Windows, or the
+/// standard library's own "unsupported".
+#[cfg(feature = "prebuilt")]
+fn no_locks(error: &std::io::Error) -> bool {
+    let codes: &[i32] = if cfg!(windows) {
+        &[1, 50]
+    } else if cfg!(target_vendor = "apple") {
+        &[45, 102, 77]
+    } else {
+        &[95, 37]
+    };
+    error.kind() == std::io::ErrorKind::Unsupported
+        || error
+            .raw_os_error()
+            .is_some_and(|code| codes.contains(&code))
 }
 
 /// Rename `from` to `to`, retrying while [`busy`] (Windows, while a scanner or indexer holds a file
@@ -960,16 +994,25 @@ fn entry_target(into: &Path, path: &[u8]) -> Option<PathBuf> {
         .filter(|part| !part.is_empty() && *part != ".")
     {
         let stem = part.split('.').next().unwrap_or("").to_ascii_uppercase();
-        let device = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-            || (stem.len() == 4
-                && (stem.starts_with("COM") || stem.starts_with("LPT"))
-                && matches!(stem.as_bytes()[3], b'1'..=b'9'));
+        let device = matches!(
+            stem.as_str(),
+            "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+        ) || stem.split_at_checked(3).is_some_and(|(port, number)| {
+            matches!(port, "COM" | "LPT")
+                && matches!(
+                    number,
+                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                )
+        });
         if part == ".." || part.contains([':', '\\', '\0']) || device || part.ends_with(['.', ' '])
         {
             return None;
         }
         target.push(part);
     }
+    // The backstop: every component was checked above, but this check alone would have caught
+    // round 3's bug (`deps/C:x` passing as plain on Linux and escaping on Windows), had the
+    // component rules missed it. It keeps any future gap in them from writing outside `into`.
     let inside = target.strip_prefix(into).ok()?;
     inside
         .components()

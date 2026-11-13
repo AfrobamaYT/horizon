@@ -628,7 +628,7 @@ mod unpack {
         std::fs::write(&file, FIXTURE).unwrap();
         let listed = index(&[(ENGINE, FIXTURE)]);
         let into = folder.path().join("sdk");
-        let held = lock(&into).unwrap();
+        let held = lock(&into, std::fs::File::try_lock).unwrap();
         assert_eq!(
             unpack(&listed, ENGINE, &file, &into, 1 << 20).unwrap_err(),
             Refusal::Busy(into.display().to_string())
@@ -636,6 +636,34 @@ mod unpack {
         assert!(!into.exists());
         drop(held);
         unpack(&listed, ENGINE, &file, &into, 1 << 20).unwrap();
+    }
+
+    #[test]
+    fn a_file_system_without_locks_is_refused_naming_the_cause() {
+        let folder = tempfile::tempdir().unwrap();
+        let into = folder.path().join("sdk");
+        let code = if cfg!(windows) {
+            50
+        } else if cfg!(target_vendor = "apple") {
+            45
+        } else {
+            37
+        };
+        let refused = lock(&into, |_| {
+            Err(std::fs::TryLockError::Error(
+                std::io::Error::from_raw_os_error(code),
+            ))
+        })
+        .unwrap_err();
+        assert_eq!(refused, Refusal::NoLocks(into.display().to_string()));
+        assert!(refused.to_string().contains("does not support file locks"));
+        let other = lock(&into, |_| {
+            Err(std::fs::TryLockError::Error(std::io::Error::from(
+                std::io::ErrorKind::PermissionDenied,
+            )))
+        })
+        .unwrap_err();
+        assert!(matches!(other, Refusal::Io(_)), "{other:?}");
     }
 
     /// A tar of one file entry named `path`, written plain, as a GNU long name, or behind a PAX
@@ -715,6 +743,8 @@ mod unpack {
             "./deps/a",
             "host/lib-x_1.so",
             "com10",
+            "com⁴",
+            "CONINX",
             "deps/CONSOLE",
         ] {
             assert!(entry_target(into, path.as_bytes()).is_some(), "{path}");
@@ -732,6 +762,10 @@ mod unpack {
             "NUL",
             "COM1",
             "lpt9.dll",
+            "CONIN$",
+            "conout$.txt",
+            "COM¹",
+            "lpt³.x",
             "a/b ",
             "a/b.",
         ] {
