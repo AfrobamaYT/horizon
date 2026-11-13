@@ -991,21 +991,14 @@ impl Game<'_> {
     ) {
         Self::fire_items(context, items);
     }
-    /// Models no blockstate names that this client bakes beside the block
-    /// models (NeoForge's `ModelEvent.RegisterStandalone`): push their ids
-    /// (`mymod:block/shaft_half`, the model at
-    /// `assets/mymod/models/block/shaft_half.json`). Parts a block entity or
-    /// a mob draws, with `native_draw_model`, so that no block is registered
-    /// only to bake its model. Asked once at start, before the resources
-    /// load; every resource load, a pack reload included, bakes them again
-    /// from that pack's files. A model that doesn't read is logged and left
-    /// out; an id without a namespace is dropped. Only the client asks it,
-    /// as NeoForge's ModelEvent.RegisterStandalone is a client mod-bus event.
+    /// File-backed standalone models and bake-time forms, registered before resource loading.
+    /// Every resource load rebakes them; dispatch attributes each form to its owning mod.
     pub(in crate::game) fn native_standalone_models(
         context: &mod_api::RegistrationContext,
         models: &mut Vec<String>,
+        forms: &mut Vec<mod_api::Answered<mod_api::StandaloneModelForm>>,
     ) {
-        Self::fire_standalone_models(context, models);
+        Self::fire_standalone_models(context, models, forms);
     }
     /// The player changed setting `key` of mod `mod_id` on its page in Options > Mods; the new
     /// value is kept already.
@@ -1089,23 +1082,6 @@ impl Game<'_> {
         energy: &mut Option<ModEnergyBuffer>,
     ) {
         self.fire_block_entity_energy(block, energy);
-    }
-    /// A server tick of the block entity at `pos`, in vanilla's order among
-    /// the others (`Level.tickBlockEntities`), when its `id` is yours: read
-    /// and change its saved compound `nbt`, its item slots `items` (keep
-    /// their count: as many as its container has, none without one) and the
-    /// data slots its menu shows (`data`). It is out of the world during the
-    /// call (the block entity at `pos` reads as a `Mod` with an empty id, and
-    /// a save leaves it out); if the call removes or replaces it, `entity` is
-    /// dropped. Clients, the window's own in single player included, get
-    /// what `native_block_entity_update_tag` gives when its chunk is sent or
-    /// its block changes.
-    pub(in crate::game) fn native_block_entity_tick(
-        &mut self,
-        pos: [i32; 3],
-        entity: &mut ModBlockEntity,
-    ) {
-        self.fire_block_entity_tick(pos, entity);
     }
     /// A consumable's effect of a mod's own kind: the item's `on_consume_effects`
     /// entry is of a type in a namespace of its own, and the loader kept it

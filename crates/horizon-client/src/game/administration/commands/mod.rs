@@ -10,6 +10,7 @@ pub(super) use data::place_summoned;
 mod effects;
 pub(super) mod execute;
 pub(super) mod extra;
+mod give;
 mod item_count;
 pub(in crate::game) mod items;
 mod misc;
@@ -1361,36 +1362,15 @@ impl Game<'_> {
                 while remaining > 0 {
                     let size = remaining.min(max_stack);
                     remaining -= size;
-                    let left = g.add_stack_to_inventory(ItemStack {
-                        item: id.as_str().into(),
-                        count: size as u32,
-                        damage,
-                        extra: extra.clone(),
-                    });
-                    // At the player who gets them.
-                    let p = g
-                        .target_position(Target::Player)
-                        .unwrap_or(g.source_position());
-                    if let Some(rest) = left {
-                        // Inventory full: Player.createItemStackToDrop (thrown from
-                        // the eyes), then setNoPickUpDelay and setTarget(player).
-                        let eye = g.eye_position().unwrap_or([
-                            p[0],
-                            p[1] + g.target_eye_height(Target::Player),
-                            p[2],
-                        ]);
-                        g.throw_from_eyes(rest, eye, false, false);
-                        if let Some(item) = g.just_spawned_item() {
-                            item.thrower = None;
-                            item.pickup_delay = 0;
-                            item.target = uuid;
-                        }
-                    } else {
-                        let r = &mut g.world.random;
-                        let pitch = ((r.next_float() - r.next_float()) * 0.7 + 1.0) * 2.0;
-                        g.audio
-                            .play("minecraft:entity.item.pickup", Some(p), 0.2, pitch);
-                    }
+                    g.give_acting_stack(
+                        ItemStack {
+                            item: id.as_str().into(),
+                            count: size as u32,
+                            damage,
+                            extra: extra.clone(),
+                        },
+                        uuid,
+                    );
                 }
                 // containerMenu.broadcastChanges: InventoryChangeTrigger
                 // (and its announcement) comes before the command's message.

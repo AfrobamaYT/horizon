@@ -1012,9 +1012,14 @@ impl PendingContainerLoot {
     pub fn seed_value(&self) -> Option<i64> {
         horizon_client_core::nbt_value::number(self.seed.as_ref())
     }
-    /// Overlay pending metadata without manufacturing an Items list.
+    /// Overlay pending metadata without manufacturing an Items list. The table is written as the
+    /// identifier it reads as (`RandomizableContainer.trySaveLootTable`,
+    /// `ContainerEntity.addChestVehicleSaveData`): an empty string is `minecraft:`.
     pub fn write_tags(&self, map: &mut Compound) {
-        map.insert("LootTable".into(), self.table.clone());
+        map.insert(
+            "LootTable".into(),
+            Tag::String(self.table_id().as_str().into()),
+        );
         map.remove(&"LootTableSeed".into());
         if let Some(seed) = &self.seed {
             map.insert("LootTableSeed".into(), seed.clone());

@@ -21,10 +21,7 @@ use crate::{
     text::Text,
     world::World,
 };
-use horizon_core::{
-    geometry::{Aabb, ShapeOp, Vec3, VoxelShape},
-    random::LegacyRandom,
-};
+use horizon_core::random::LegacyRandom;
 use horizon_protocol::ids::play::clientbound as ids;
 use horizon_protocol::{
     entity_data::{Particle, ParticleData, Value, serializer},
@@ -36,8 +33,7 @@ use {
     horizon_core::nbt::{JavaString, Tag},
     horizon_mod_runtime::attachments::Holder,
     horizon_world::{
-        block_collision::BlockCollisionRegistry, block_collision_scan::BlockCollisionScan,
-        collision_context::CollisionContext, native_load_context::LoopContext,
+        block_collision::BlockCollisionRegistry, native_load_context::LoopContext,
         world_movement::in_range_of_ground,
     },
 };
@@ -47,6 +43,7 @@ pub mod advancements;
 pub mod chat;
 pub mod chat_filter;
 mod item_particles;
+mod move_collision;
 mod moves;
 mod raw_inbox;
 mod spawn_info;
@@ -4032,8 +4029,7 @@ impl Hub {
         let sync = self.sync.clone();
         // broadcastAll(ClientboundUpdateTagsPacket).
         self.broadcast(&C::UpdateTags(sync.tags.clone()));
-        // For each player: ClientboundUpdateRecipesPacket, then
-        // sendInitialRecipeBook.
+        // For each player: ClientboundUpdateRecipesPacket, then sendInitialRecipeBook.
         for i in 0..self.guests.len() {
             if !self.guests[i].placed {
                 continue;
@@ -5090,6 +5086,8 @@ impl Hub {
             super::chunk_watch::unwatch_all(&mut self.chunk_watches, g);
             // PlayerList.respawn: into the level in place (the respawn level).
             g.dimension = self.config.dimension.clone();
+            // A new player: a mod's collision exclusions were the dead one's (#3717).
+            g.collision_exclusions.clear();
             // restartClientLoadTimerAfterRespawn: the client loads a whole new level before it
             // reports it loaded.
             g.load_timeout = super::guest::CLIENT_LOADED_TIMEOUT;
@@ -5242,6 +5240,8 @@ impl Hub {
             // Out of the old level with its chunks (ChunkMap.removeEntity).
             super::chunk_watch::unwatch_all(&mut self.chunk_watches, g);
             g.dimension = self.config.dimension.clone();
+            // A mod's collision exclusions were the old level's (#3717).
+            g.collision_exclusions.clear();
             // The load timer is not restarted: vanilla resets the client's loaded state on death and
             // respawn only, and covers a level change with its separate `isChangingDimension` term.
             g.tracker.clear();
@@ -5484,6 +5484,7 @@ fn equipment_source(g: &Guest, index: usize) -> Option<&ItemStack> {
 #[cfg(test)]
 mod tests {
     mod cave_air_tests;
+    mod collision_exclusion_tests;
     #[path = "../far_tests.rs"]
     mod far_tests;
     mod ordered_inbox_tests;
