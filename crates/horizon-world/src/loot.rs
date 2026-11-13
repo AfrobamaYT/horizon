@@ -331,8 +331,12 @@ impl Enchantment {
     }
 }
 
+#[path = "loot/holder_sets.rs"]
+mod holder_sets;
+
 /// Loot tables, items, enchantments and the tags they reference.
 pub struct LootData {
+    holder_sets: holder_sets::Binding,
     tables: Arc<LootTables>,
     modifiers: HashMap<String, Value>,
     predicates: HashMap<String, Value>,
@@ -758,7 +762,7 @@ pub fn native_loot_table_load(context: &LoadContext, id: &str, table: &mut Value
 
 #[path = "loot/load_resources.rs"]
 mod load_resources;
-use load_resources::{hash_files, load_dir, load_kind};
+use load_resources::{hash_files, load_kind};
 
 fn cost(v: &Value) -> (i32, i32) {
     (
@@ -777,7 +781,6 @@ impl LootData {
         defaults: &crate::item_defaults::ItemDefaults,
     ) -> io::Result<Self> {
         let all = root.join("data");
-        let data = all.join("minecraft");
         let tables = shared_tables(root, overlay)?;
         let mut modifiers = HashMap::new();
         load_kind(&all, "item_modifier", &mut modifiers)?;
@@ -802,12 +805,7 @@ impl LootData {
             })
             .collect();
         let mut raw_enchantments = HashMap::new();
-        load_dir(
-            &data.join("enchantment"),
-            "minecraft",
-            "",
-            &mut raw_enchantments,
-        )?;
+        load_kind(&all, "enchantment", &mut raw_enchantments)?;
         overlay_map(overlay, "enchantment", &mut raw_enchantments);
         let mut names: Vec<&String> = raw_enchantments.keys().collect();
         names.sort();
@@ -890,7 +888,9 @@ impl LootData {
                 Some((r["ingredient"].clone(), result, count))
             })
             .collect();
-        Ok(Self {
+        let binding = holder_sets::Binding::load(root, overlay, &items, &enchantments)?;
+        let mut loaded = Self {
+            holder_sets: Default::default(),
             tables,
             modifiers,
             predicates,
@@ -899,7 +899,10 @@ impl LootData {
             resolved_item_tags: loot_tags::resolve_items(&tags),
             tags,
             smelting,
-        })
+        };
+        binding.snapshot(&mut loaded)?;
+        loaded.holder_sets = binding;
+        Ok(loaded)
     }
     /// The table snapshot used by this loot data.
     pub fn tables(&self) -> &Arc<LootTables> {
@@ -907,8 +910,9 @@ impl LootData {
     }
 
     /// Apply native load hooks to a private server snapshot, leaving shared raw tables unchanged.
-    /// `context` is the owning server data load's.
-    pub fn apply_native_table_loads(&mut self, context: &LoadContext) {
+    /// `context` is the owning server data load's. Invalid holder-set objects refuse
+    /// the replacement snapshot with a table and field-qualified error.
+    pub fn apply_native_table_loads(&mut self, context: &LoadContext) -> io::Result<()> {
         let mut ids: Vec<_> = self.tables.0.keys().collect();
         ids.sort();
         self.tables = Arc::new(
@@ -916,10 +920,16 @@ impl LootData {
                 .map(|id| {
                     let mut table = self.tables[id.as_str()].clone();
                     native_loot_table_load(context, id, &mut table);
-                    (id.clone(), table)
+                    self.holder_sets.walk(
+                        &format!("native loot_table {id}"),
+                        &mut table,
+                        &self.tags,
+                    )?;
+                    Ok((id.clone(), table))
                 })
-                .collect(),
+                .collect::<io::Result<LootTables>>()?,
         );
+        Ok(())
     }
 
     pub fn has_table(&self, table: &str) -> bool {
@@ -1002,7 +1012,7 @@ impl LootData {
     fn tag(&self, registry: &str, name: &str) -> Vec<String> {
         loot_tags::members(&self.tags, registry, name)
     }
-    /// A HolderSet: "#tag", "id", a list of ids or a NeoForge set object.
+    /// A published HolderSet: "#tag", "id" or resolved IDs. Objects bind at load.
     fn holder_set(&self, registry: &str, v: &Value) -> Vec<String> {
         match v {
             Value::String(s) => match s.strip_prefix('#') {
@@ -1014,7 +1024,7 @@ impl LootData {
                 .filter_map(Value::as_str)
                 .map(str::to_owned)
                 .collect(),
-            _ => loot_tags::holder_set_object(self, registry, v),
+            _ => Vec::new(),
         }
     }
     fn item_in(&self, item: &str, set: &Value) -> bool {

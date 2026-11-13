@@ -30,37 +30,6 @@ impl LootTags for super::LootData {
     }
 }
 
-/// A NeoForge holder-set object (`neoforge:any`, `and`, `or`, `not`) in loot
-/// data, through the shared decoder. `any` and `not` list the item and
-/// enchantment registries; a form the decoder refuses names nothing, as an
-/// unreadable plain form does.
-pub(super) fn holder_set_object(
-    data: &super::LootData,
-    registry: &str,
-    set: &serde_json::Value,
-) -> Vec<String> {
-    let ids = || -> Vec<String> {
-        match registry {
-            "item" => data.items.keys().cloned().collect(),
-            "enchantment" => data.enchantments.iter().map(|e| e.name.clone()).collect(),
-            _ => Vec::new(),
-        }
-    };
-    let lookup = crate::holder_set::StringLookup {
-        what: registry,
-        ids: Some(&ids),
-        tag: &|tag| Ok(data.tag(registry, tag)),
-        entry: &|id| Ok(vec![id.to_owned()]),
-    };
-    match crate::holder_set::resolve(set, &lookup) {
-        Ok(members) => members.into_iter().collect(),
-        Err(error) => {
-            log::debug!("loot {registry} holder set: {error}");
-            Vec::new()
-        }
-    }
-}
-
 /// Resolve item tags once with the owning loot-data load, including pack overlays.
 pub(super) fn resolve_items(
     tags: &std::collections::HashMap<(String, String), Vec<serde_json::Value>>,

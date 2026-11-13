@@ -75,7 +75,7 @@ fn load_hooks_are_noops_before_install_and_use_first_callbacks_after() {
     for _ in 0..2 {
         let mut server =
             loot::LootData::load(&root, &loot::PackOverlay::NONE, item_data.defaults()).unwrap();
-        server.apply_native_table_loads(&server_context);
+        server.apply_native_table_loads(&server_context).unwrap();
         assert_eq!(server.tables()["minecraft:test"], json!(["minecraft:test"]));
         assert_eq!(raw["minecraft:test"], json!([]));
     }

@@ -49,7 +49,7 @@ mod tests {
         let files = vec![(
             "tags/minecraft:item/swords".to_owned(),
             vec![
-                json!({"values": ["minecraft:iron_sword"]})
+                json!({"values": ["test:custom", "minecraft:iron_sword"]})
                     .to_string()
                     .into_bytes(),
             ],
@@ -62,7 +62,9 @@ mod tests {
             (
                 ("test".to_owned(), "sticky".to_owned()),
                 json!({"supported_items": {"type": "neoforge:or",
-                    "values": ["#minecraft:swords", "minecraft:stick"]}}),
+                    "values": ["#minecraft:swords", "minecraft:stick"]},
+                    "primary_items": {"type": "neoforge:any"},
+                    "exclusive_set": {"type": "neoforge:any"}}),
                 true,
             ),
             (
@@ -75,7 +77,15 @@ mod tests {
         expand_enchantments(&mut entries, root.path(), &overlay, &defaults).unwrap();
         assert_eq!(
             entries[0].1["supported_items"],
-            json!(["minecraft:iron_sword", "minecraft:stick"])
+            json!(["test:custom", "minecraft:iron_sword", "minecraft:stick"])
+        );
+        assert_eq!(
+            entries[0].1["primary_items"],
+            json!(["minecraft:iron_sword", "minecraft:stick", "test:custom"])
+        );
+        assert_eq!(
+            entries[0].1["exclusive_set"],
+            json!(["test:plain", "test:sticky"])
         );
         assert_eq!(entries[1].1["supported_items"], json!("#minecraft:swords"));
     }

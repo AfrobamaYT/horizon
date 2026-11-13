@@ -15,8 +15,10 @@ impl HolderSetBinding {
         root: &Path,
         overlay: &horizon_world::loot::PackOverlay,
         defaults: &horizon_world::item_defaults::ItemDefaults,
-        enchantments: Vec<String>,
+        mut enchantments: Vec<String>,
     ) -> crate::Result<Self> {
+        enchantments.sort();
+        enchantments.dedup();
         Ok(Self {
             items: defaults.entries().keys().cloned().collect(),
             enchantments,

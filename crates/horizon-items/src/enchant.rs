@@ -266,9 +266,12 @@ fn parse_entry(
     tags: &HashMap<String, Vec<Arc<str>>>,
     lang: &HashMap<String, String>,
 ) -> crate::Result<Enchantment> {
-    if HolderSetBinding::needed(v) {
+    if let Some(field) = ["supported_items", "primary_items", "exclusive_set"]
+        .into_iter()
+        .find(|field| v[*field].is_object())
+    {
         return Err(format!(
-            "enchantment {id}: holder-set objects must be bound by the owning registry load"
+            "enchantment {id} {field}: holder-set object has no owning registry binding"
         ));
     }
     let native_post_attack = v["effects"]["minecraft:post_attack"]

@@ -1,6 +1,10 @@
 use super::*;
 
-pub(super) fn load_kind(data: &Path, kind: &str, out: &mut HashMap<String, Value>) -> io::Result<()> {
+pub(super) fn load_kind(
+    data: &Path,
+    kind: &str,
+    out: &mut HashMap<String, Value>,
+) -> io::Result<()> {
     let Ok(entries) = fs::read_dir(data) else {
         return Ok(());
     };
