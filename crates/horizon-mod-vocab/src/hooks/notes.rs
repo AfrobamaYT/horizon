@@ -1544,17 +1544,14 @@ mod mixin or use it replaces in its design or PR."#]
   there was to take. A step the hit skips (a source that bypasses armor, no Resistance effect) runs none. They
   last for the hit.
 
-- `living_damage_post` (NeoForge's `LivingDamageEvent.Post`) observes every hit that passed
-  `living_incoming_damage` and the cooldown, at the end of `hurtServer` (after a totem, the hurt sounds and a
-  player's `die`; a mob's `living_death` is settled by the game after its hurt returns, so it follows), including
-  a hit that took no health: its `container.health_damage()` is then 0.
-  Its `container.should_cause_side_effects()` is `hurtServer`'s fresh-hit decision
-  (`shouldCauseSideEffects`), recorded before damage is applied: true for a fresh hit, false for a
-  stronger hit inside the invulnerability window, and true for a source that bypasses the cooldown.
-  A weaker or equal hit refused by the cooldown does not fire Post. The flag is not inferred from
-  final damage or invulnerability ticks, so changing those in a damage listener does not change it.
-  It accompanies the container's reductions, inflicted damage and health damage in native and wasm
-  listeners; it describes the decision to cause fresh-hit effects, not whether every effect occurred.
+- `living_damage_post` (NeoForge's `LivingDamageEvent.Post`) observes every hit that passed `living_incoming_damage`
+  and the cooldown, at the end of `hurtServer` (after a totem, the hurt sounds and a player's `die`; a mob's
+  `living_death` comes after), even one that took no health (`container.health_damage()` 0). Its
+  `container.should_cause_side_effects()` is `hurtServer`'s fresh-hit decision (`shouldCauseSideEffects`), taken
+  before the damage: true for a fresh hit, false for a stronger hit inside the invulnerability window, and true for a
+  source that bypasses the cooldown. The flag is not inferred from final damage or invulnerability ticks, so a damage
+  listener changing those leaves it. Native and wasm listeners get it beside the reductions and damages; it describes
+  the decision to cause fresh-hit effects, not whether every effect occurred.
 
 A player's damage type is the source's own. A mob's and the dragon's come from the kind of damage Horizon keeps for
 the hit, which doesn't tell every vanilla type apart yet:
