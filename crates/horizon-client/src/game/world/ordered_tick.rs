@@ -12,7 +12,7 @@
 use super::{Game, Result};
 use horizon_client::join_seq::{JoinSeq, Joined};
 use horizon_client::random_source;
-use horizon_core::geometry::{Aabb, Vec3};
+use horizon_core::geometry::Vec3;
 use horizon_core::random::RandomSource as _;
 
 /// What this tick has ticked of the three kinds.
