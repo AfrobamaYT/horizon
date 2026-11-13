@@ -48,9 +48,7 @@ impl Game<'_> {
                 if self.level.saved_mods.is_none() {
                     return;
                 }
-                let mismatches = self
-                    .level
-                    .mod_mismatches(&level_mods::Loaded::now().mods());
+                let mismatches = self.level.mod_mismatches(&level_mods::Loaded::now().mods());
                 let mut resolved = Vec::new();
                 self.native_mod_mismatch(&mismatches, &mut resolved);
                 (mismatches, resolved)
@@ -194,7 +192,10 @@ mod tests {
         let before = std::fs::read(dir.join("level.dat")).unwrap();
         super::super::super::native_entity_refs::tests::with_game(|game| {
             let missing = game.ask_missing_mods(&dir);
-            assert_eq!(missing.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["gone"]);
+            assert_eq!(
+                missing.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+                ["gone"]
+            );
         });
         mod_platform::testing::with_mods(
             vec![ModEntry::new("migrator", Box::new(Migrator))].into(),
