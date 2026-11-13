@@ -387,8 +387,9 @@ impl Game<'_> {
     /// A resident column was freed, whichever route freed it — the last
     /// event for it, its data still there. Tells `client_chunk_unload` and,
     /// when the level stays (`level_stays`), `on_chunk_unloaded`: a level that
-    /// goes takes its block entities with it.
+    /// goes takes its block entities with it. Its passages go with it.
     pub(in crate::game) fn client_chunk_unload(&mut self, x: i32, z: i32, level_stays: bool) {
+        self.forget_chunk_passages(x, z);
         if mod_api::__private::listened(mod_api::HookId::ClientChunkUnload)
             && let Some(dimension) = self.client_chunk_dimension()
         {
