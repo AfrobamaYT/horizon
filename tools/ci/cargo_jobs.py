@@ -1,6 +1,6 @@
 """Print how many crates a Dyna runner builds at once: its CPU quota, bounded by its memory.
 
-The runner's cgroup (v2) holds its CPU quota and memory limit. Each concurrent rustc may need
+The runner's cgroup (v2, or v1) holds its CPU quota and memory limit. Each concurrent rustc may need
 `--job-mib` of memory. Four stays the floor: the fixed cap these runners used before.
 
 `--cap` applies the answer to the whole job, so no build or test inside it runs at the host's
@@ -18,12 +18,33 @@ from pathlib import Path
 FLOOR = 4
 
 
+def read(path: Path) -> str | None:
+    """A cgroup file's value; None where this host has no such file (another cgroup layout, or none)."""
+    try:
+        return path.read_text().strip()
+    except OSError:
+        return None
+
+
 def limits(cgroup: Path) -> tuple[int, int]:
-    """The runner's CPUs and memory bytes; an unlimited value falls back to the machine's."""
-    quota, period = (cgroup / "cpu.max").read_text().split()
-    cpus = len(os.sched_getaffinity(0)) if quota == "max" else max(1, int(quota) // int(period))
-    memory = (cgroup / "memory.max").read_text().strip()
-    total = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") if memory == "max" else int(memory)
+    """The runner's CPUs and memory bytes, from its cgroup (v2, else v1); a host with no limit, or no
+    cgroup file at all (a GitHub-hosted job runs in the root cgroup, which has no cpu.max), falls back to
+    the machine's own CPUs and memory."""
+    cpus = len(os.sched_getaffinity(0))
+    v2 = read(cgroup / "cpu.max")
+    if v2 is not None:
+        quota, period = v2.split()
+        if quota != "max":
+            cpus = max(1, int(quota) // int(period))
+    else:
+        quota, period = read(cgroup / "cpu/cpu.cfs_quota_us"), read(cgroup / "cpu/cpu.cfs_period_us")
+        if quota is not None and period is not None and int(quota) > 0:
+            cpus = max(1, int(quota) // int(period))
+    total = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+    memory = read(cgroup / "memory.max") or read(cgroup / "memory/memory.limit_in_bytes")
+    # cgroup v1 writes "no limit" as a huge number; neither layout can grant more than the machine has.
+    if memory is not None and memory != "max":
+        total = min(total, int(memory))
     return cpus, total
 
 
