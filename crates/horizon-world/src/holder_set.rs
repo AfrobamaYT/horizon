@@ -48,7 +48,7 @@ pub fn resolve<L: HolderLookup + ?Sized>(value: &Value, lookup: &L) -> Result<Ve
                     let values = object
                         .get("values")
                         .and_then(Value::as_array)
-                        .ok_or_else(|| format!("{kind}: no values"))?;
+                        .ok_or_else(|| format!("{} holder set {kind}: no values", lookup.what()))?;
                     let mut sets = values.iter().map(|v| resolve(v, lookup));
                     let first = match sets.next() {
                         Some(first) => first?,
@@ -72,7 +72,7 @@ pub fn resolve<L: HolderLookup + ?Sized>(value: &Value, lookup: &L) -> Result<Ve
                 "not" => {
                     let value = object
                         .get("value")
-                        .ok_or_else(|| format!("{kind}: no value"))?;
+                        .ok_or_else(|| format!("{} holder set {kind}: no value", lookup.what()))?;
                     let inner: BTreeSet<_> = resolve(value, lookup)?.into_iter().collect();
                     unique(lookup.all()?)
                         .into_iter()
@@ -159,6 +159,33 @@ mod tests {
 
     fn set(value: Value) -> Result<Vec<&'static str>, String> {
         resolve(&value, &Biomes)
+    }
+
+    #[test]
+    fn unavailable_universes_and_missing_object_fields_name_the_registry() {
+        let lookup = StringLookup {
+            what: "instrument",
+            ids: None,
+            tag: &|_| Ok(Vec::new()),
+            entry: &|id| Ok(vec![id.to_owned()]),
+        };
+        for value in [
+            json!({"type":"neoforge:any"}),
+            json!({"type":"neoforge:not", "value":[]}),
+        ] {
+            let error = resolve(&value, &lookup).unwrap_err();
+            assert!(
+                error.contains("instrument") && error.contains("unavailable"),
+                "{error}"
+            );
+        }
+        for kind in ["neoforge:and", "neoforge:or", "neoforge:not"] {
+            let error = resolve(&json!({"type":kind}), &lookup).unwrap_err();
+            assert!(
+                error.contains("instrument") && error.contains(kind),
+                "{error}"
+            );
+        }
     }
 
     #[test]

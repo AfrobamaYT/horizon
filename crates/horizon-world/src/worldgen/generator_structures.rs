@@ -241,20 +241,25 @@ impl StartCache {
 /// A structure's biome holder set in any form `crate::holder_set` reads. An
 /// absent field, an unknown biome or tag names nothing, and a list may also
 /// hold tags, as this reader always allowed.
-fn biome_set(data: &GeneratorData, value: &Value) -> Result<BTreeSet<BiomeId>, super::DecodeError> {
-    let lookup = StructureBiomes(data);
+fn biome_set(
+    lookup: &impl crate::holder_set::HolderLookup<Id = BiomeId>,
+    value: &Value,
+) -> Result<BTreeSet<BiomeId>, super::DecodeError> {
     let resolve = |set: &Value| {
-        crate::holder_set::resolve(set, &lookup)
+        crate::holder_set::resolve(set, lookup)
             .map(|ids| ids.into_iter().collect::<BTreeSet<_>>())
             .map_err(super::DecodeError::Registry)
     };
     match value {
-        Value::Null => Ok(BTreeSet::new()),
-        Value::Array(list) => list.iter().try_fold(BTreeSet::new(), |mut out, set| {
-            out.extend(resolve(set)?);
-            Ok::<_, super::DecodeError>(out)
-        }),
-        set => resolve(set),
+        Value::Array(list) => list.iter().filter(|value| value.is_string()).try_fold(
+            BTreeSet::new(),
+            |mut out, set| {
+                out.extend(resolve(set)?);
+                Ok::<_, super::DecodeError>(out)
+            },
+        ),
+        set @ (Value::String(_) | Value::Object(_)) => resolve(set),
+        _ => Ok(BTreeSet::new()),
     }
 }
 struct StructureBiomes<'a>(&'a GeneratorData);
@@ -289,7 +294,7 @@ impl StructureState {
             &raw.structures,
             &raw.sets,
             raw.pools.clone(),
-            &|value| biome_set(data, value),
+            &|value| biome_set(&StructureBiomes(data), value),
             super::structure::mod_types::mod_structure_types(),
         )?;
         let possible_sets = registry
@@ -1007,6 +1012,48 @@ pub(crate) fn tag_json(tag: &horizon_core::nbt::Tag) -> Value {
 mod tests {
     use super::*;
     use crate::worldgen::structure::stronghold::{ring_positions, ring_searches};
+
+    #[test]
+    fn structure_biome_plain_lists_and_scalar_fields_keep_their_leniency() {
+        struct Biomes;
+        impl crate::holder_set::HolderLookup for Biomes {
+            type Id = BiomeId;
+            fn what(&self) -> &str {
+                "biome"
+            }
+            fn entry(&self, id: &str) -> Result<Vec<BiomeId>, String> {
+                Ok((id == "minecraft:plains")
+                    .then_some(BiomeId(0))
+                    .into_iter()
+                    .collect())
+            }
+            fn tag(&self, id: &str) -> Result<Vec<BiomeId>, String> {
+                self.entry(id)
+            }
+            fn all(&self) -> Result<Vec<BiomeId>, String> {
+                Ok(vec![BiomeId(0), BiomeId(1)])
+            }
+        }
+        assert_eq!(
+            biome_set(
+                &Biomes,
+                &serde_json::json!(["#minecraft:plains", false, 19, {}])
+            )
+            .unwrap(),
+            BTreeSet::from([BiomeId(0)])
+        );
+        for value in [
+            serde_json::json!(null),
+            serde_json::json!(19),
+            serde_json::json!(false),
+        ] {
+            assert!(biome_set(&Biomes, &value).unwrap().is_empty());
+        }
+        assert_eq!(
+            biome_set(&Biomes, &serde_json::json!({"type":"neoforge:any"})).unwrap(),
+            BTreeSet::from([BiomeId(0), BiomeId(1)])
+        );
+    }
 
     #[test]
     fn saved_jigsaw_round_trip_and_whole_start_fallback() {
