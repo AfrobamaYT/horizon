@@ -963,7 +963,13 @@ impl mod_api::Hooks for FillListener {
                 })
                 .collect(),
         ));
-        if self.mode != 0 {
+        if self.mode == 3 {
+            event.drops.clear();
+            let key = mod_api::__private::item_key("minecraft:diamond").unwrap();
+            event
+                .drops
+                .extend((0..30).map(|_| mod_api::ItemStack::new(key, 1).unwrap()));
+        } else if self.mode != 0 {
             event.drops.clear();
             let id = if self.mode == 1 {
                 "minecraft:emerald"
@@ -1010,6 +1016,33 @@ fn container_fill_listener_contract() {
             )]
             .into()
         };
+        // A subscribed observer must preserve both the seedless roll and RNG state.
+        *g.world.random = LegacyRandom::new(123);
+        place(g, POS, TABLE, 0);
+        open(g, POS, 0.0);
+        let seedless_slots = g.world.block_entities[&POS].slots().to_vec();
+        let seedless_random = g.world.random.state();
+        mod_platform::testing::with_mods(mods(0), || {
+            *g.world.random = LegacyRandom::new(123);
+            place(g, POS, TABLE, 0);
+            open(g, POS, 0.0);
+            assert_eq!(g.world.block_entities[&POS].slots(), seedless_slots);
+            assert_eq!(g.world.random.state(), seedless_random);
+        });
+        seen.lock().unwrap().clear();
+        mod_platform::testing::with_mods(mods(3), || {
+            place(g, POS, TABLE, 37);
+            open(g, POS, 0.0);
+            let slots = g.world.block_entities[&POS].slots();
+            assert_eq!(slots.len(), 27);
+            for slot in slots {
+                let stack = slot.as_ref().unwrap();
+                assert_eq!(&*stack.item, "minecraft:diamond");
+                assert_eq!(stack.count, 1);
+            }
+            assert_eq!(30 - count(g, POS, "minecraft:diamond"), 3);
+        });
+        seen.lock().unwrap().clear();
         mod_platform::testing::with_mods(mods(1), || {
             place(g, POS, TABLE, 37);
             open(g, POS, 0.0);
