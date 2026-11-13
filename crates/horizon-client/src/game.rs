@@ -404,7 +404,7 @@ impl Options {
                 Argument::Switch(arg) => match arg.as_str() {
                     "--help" | "-h" => {
                         println!(
-                            "Horizon — Minecraft Java Edition {} in Rust\n\n  --resources PATH        Prepared resources (horizon-prepare)\n  --render-distance N     Chunks, 2..128 (default 12)\n  --world NAME            World folder under saves/ (default \"New World\")\n  --seed N                World seed for new worlds (default 0)\n  --width N, --height N   Window size (default 1280 x 720)\n  --creative              Creative mode (default survival)\n  --test-terrain          Simple test terrain instead of vanilla generation\n  --frames N              Exit after N frames (testing)\n  --world-frames N        Exit after N frames drawn in the world (testing)\n  --smoke-report PATH     Write a JSON report on exit\n  --benchmark SCENARIO    Run a benchmark (standard, village, forest, ocean, mountain, travel, ab:SWITCH), write its report to benchmarks/ and quit\n  --profile               With --benchmark: also write a performance capture that embeds the report\n  --benchmark-set S=V     With --benchmark travel: set gpu-culling, section-cull, section-sides or section-draws\n  --control               Accept horizon-ctl commands on a local socket\n  --control-socket PATH   Control socket path (default $XDG_RUNTIME_DIR/horizon-control.sock)\n  --server HOST[:PORT]    Join a multiplayer server (offline mode) at start\n  --quickPlaySingleplayer WORLD  Open this world of saves/ at start, only if it exists (vanilla's)\n  --quickPlayMultiplayer HOST[:PORT]  The same as --server (vanilla's name)\n  --name NAME             Player name for multiplayer (default: generated once, kept in horizon-player.txt)\n  --session-file PATH     Signed-in account from the launcher (read once, then deleted)\n  --session-stdin         The same account as JSON on standard input\n  --game-dir DIR          Game folder: saves, options.txt, packs, mods (default: the working directory)\n  --home DIR              Logs and crash reports (default $HORIZON_HOME, else the platform data folder)\n  --player-dir DIR        This player's own files when several play in one game folder: options.txt, logs, horizon-player.txt, servers.dat, screenshots\n  --fullscreen            Open the window fullscreen\n  --launch-api            Print the Launch API version and options as JSON (docs/api/launch.md)\n  --dev-mod PATH          A content mod (.hmod or folder) to develop: always on\n  --pregen                Add Horizon's /pregen command (docs/pregeneration.md)\n\nControls: mouse look, WASD move, Space jump, Left Shift sneak, Left Ctrl sprint,\nleft click break, right click place/use, 1-9/scroll hotbar, E inventory,\nQ drop, F3 debug, Esc pause.",
+                            "Horizon — Minecraft Java Edition {} in Rust\n\n  --resources PATH        Prepared resources (horizon-prepare)\n  --render-distance N     Chunks, 2..128 (default 12)\n  --world NAME            World folder under saves/ (default \"New World\")\n  --seed N                World seed for new worlds (default 0)\n  --width N, --height N   Window size (default 1280 x 720)\n  --creative              Creative mode (default survival)\n  --test-terrain          Simple test terrain instead of vanilla generation\n  --game-tests            Enable test-only mod content (or HORIZON_GAME_TESTS=1/true)\n  --frames N              Exit after N frames (testing)\n  --world-frames N        Exit after N frames drawn in the world (testing)\n  --smoke-report PATH     Write a JSON report on exit\n  --benchmark SCENARIO    Run a benchmark (standard, village, forest, ocean, mountain, travel, ab:SWITCH), write its report to benchmarks/ and quit\n  --profile               With --benchmark: also write a performance capture that embeds the report\n  --benchmark-set S=V     With --benchmark travel: set gpu-culling, section-cull, section-sides or section-draws\n  --control               Accept horizon-ctl commands on a local socket\n  --control-socket PATH   Control socket path (default $XDG_RUNTIME_DIR/horizon-control.sock)\n  --server HOST[:PORT]    Join a multiplayer server (offline mode) at start\n  --quickPlaySingleplayer WORLD  Open this world of saves/ at start, only if it exists (vanilla's)\n  --quickPlayMultiplayer HOST[:PORT]  The same as --server (vanilla's name)\n  --name NAME             Player name for multiplayer (default: generated once, kept in horizon-player.txt)\n  --session-file PATH     Signed-in account from the launcher (read once, then deleted)\n  --session-stdin         The same account as JSON on standard input\n  --game-dir DIR          Game folder: saves, options.txt, packs, mods (default: the working directory)\n  --home DIR              Logs and crash reports (default $HORIZON_HOME, else the platform data folder)\n  --player-dir DIR        This player's own files when several play in one game folder: options.txt, logs, horizon-player.txt, servers.dat, screenshots\n  --fullscreen            Open the window fullscreen\n  --launch-api            Print the Launch API version and options as JSON (docs/api/launch.md)\n  --dev-mod PATH          A content mod (.hmod or folder) to develop: always on\n  --pregen                Add Horizon's /pregen command (docs/pregeneration.md)\n\nControls: mouse look, WASD move, Space jump, Left Shift sneak, Left Ctrl sprint,\nleft click break, right click place/use, 1-9/scroll hotbar, E inventory,\nQ drop, F3 debug, Esc pause.",
                             horizon_core::VANILLA_VERSION
                         );
                         return Ok(None);
@@ -428,7 +428,7 @@ impl Options {
                     "--control" => o.control = Some(horizon_client::control::default_path()),
                     // Single player always runs on its server thread: a launcher's saved arguments
                     // may still name the old switches.
-                    "--server-thread" => {}
+                    "--server-thread" | "--game-tests" => {}
                     "--in-frame" | "--no-server-thread" => eprintln!(
                         "Horizon: {arg} was removed: single player runs on its server thread."
                     ),
@@ -2017,7 +2017,7 @@ struct Game<'a> {
     tnts: horizon_client::join_seq::JoinList<tnt::PrimedTnt>,
     hoppers: HashMap<(i32, i32, i32), machines::HopperState>,
     /// The open `host.transaction`s, innermost last (`transactions.rs`).
-    transactions: Vec<transactions::Level>,
+    transactions: transactions::OpenTransactions,
     /// Backing blocks whose contents notice is on the call stack, innermost last.
     contents_changing: Vec<(mod_api::LevelRef, BlockPos)>,
     /// The screen of a mod block's menu open on this client (`native_screen`).
@@ -2296,8 +2296,8 @@ struct Game<'a> {
     /// `LivingEntity.lastKineticHitFeedbackTime` of the entities that felt a
     /// spear's hit (`spear::OWN` is this window's player), in game time.
     kinetic_feedback: HashMap<i32, i64>,
-    /// Global level events for every guest (`ServerLevel.globalLevelEvent`).
-    lan_global_events: Vec<(i32, [i32; 3], i32)>,
+    /// Global level events for every guest (`ServerLevel.globalLevelEvent`), with their level.
+    lan_global_events: Vec<(&'static str, i32, [i32; 3], i32)>,
     /// `ContainerOpenersCounter`: how many players (the host and the guests)
     /// have each chest open.
     lid_openers: HashMap<(i32, i32, i32), i32>,
@@ -3750,7 +3750,7 @@ impl Game<'_> {
         self.persist.uuids.insert(self.next_entity, random.uuid);
         let (bob, yaw) = (random.bob, random.yaw);
         let velocity = velocity.unwrap_or(random.velocity);
-        self.dropped.push(ItemEntity {
+        self.dropped.push(random.state.apply(ItemEntity {
             attachment_lifetime: Default::default(),
             fall_distance: 0.0,
             rotation: [yaw, 0.0],
@@ -3763,7 +3763,7 @@ impl Game<'_> {
                 Vec3::new(velocity[0], velocity[1], velocity[2]),
                 bob,
             )
-        });
+        }));
         // ServerLevel.addFreshEntity.
         if self.native_joins_flush(false, self.next_entity) {
             self.native_item_spawn(self.next_entity, &item, count, position);
@@ -4268,70 +4268,7 @@ impl Game<'_> {
         );
         let feet = [p.position.x, p.position.y, p.position.z];
         let own = self.level.ensure_player_uuid();
-        // The predicate's Game borrow ends before each yielded row's effects.
-        // This cell is stack-local and never accessible to a native callback.
-        let game = std::cell::RefCell::new(&mut *self);
-        for item in items.extract_if_mut(|item| {
-            let mut game = game.borrow_mut();
-            let b = item.bounds();
-            let touching = b.min_position().x < max[0]
-                && b.max_position().x > min[0]
-                && b.min_position().y < max[1]
-                && b.max_position().y > min[1]
-                && b.min_position().z < max[2]
-                && b.max_position().z > min[2];
-            // ItemEntity.playerTouch: `item_picked_up`, then vanilla's delay and target rule.
-            if touching && game.native_pickup_allowed(item, own) {
-                let before = item.stack.count;
-                let kind = item.stack.item.clone();
-                let thrower = item.thrower;
-                let left = match game.native_pickup_insert(&item.stack) {
-                    Some(rest) => rest,
-                    // ItemEntityPickupEvent.Post: `remaining` is all mods reach of the lifted item.
-                    None => match game.native_pickup_post(&item.stack) {
-                        None => {
-                            game.award_stat("picked_up", &kind, before as i32);
-                            if let Some(thrower) = thrower {
-                                game.trigger_thrown_picked_up_by_player(&item.stack, thrower);
-                            }
-                            return true;
-                        }
-                        Some(raised) => raised,
-                    },
-                };
-                let taken = before.saturating_sub(left.count);
-                if taken > 0 {
-                    game.award_stat("picked_up", &kind, taken as i32);
-                    if let Some(thrower) = thrower {
-                        game.trigger_thrown_picked_up_by_player(&left, thrower);
-                    }
-                    game.add_pickup(
-                        pickups::Taken::Item(Box::new(item.clone())),
-                        pickups::Collector::Player,
-                    );
-                    // handleTakeItemEntity: the random pitch of a full pickup.
-                    let pitch = ((game.world.random.next_float() - game.world.random.next_float())
-                        * 0.7
-                        + 1.0)
-                        * 2.0;
-                    game.audio
-                        .play("minecraft:entity.item.pickup", Some(feet), 0.2, pitch);
-                }
-                item.stack = left;
-            }
-            false
-        }) {
-            let mut game = game.borrow_mut();
-            game.add_pickup(
-                pickups::Taken::Item(Box::new(item)),
-                pickups::Collector::Player,
-            );
-            let pitch = ((game.world.random.next_float() - game.world.random.next_float()) * 0.7
-                + 1.0)
-                * 2.0;
-            game.audio
-                .play("minecraft:entity.item.pickup", Some(feet), 0.2, pitch);
-        }
+        self.native_player_pickups(&mut items, (min, max), feet, own);
         self.put_back_dropped(items);
         self.spawn_destroyed_contents(destroyed);
     }
@@ -10651,7 +10588,7 @@ impl Game<'_> {
         let book = &mut self.level.recipe_book;
         book.recipes.retain(|r| index.contains(r));
         book.to_be_displayed.retain(|r| index.contains(r));
-        self.dim = dim;
+        self.enter_opened_dim(dim);
         self.audio.set_world(dim.id());
         // LevelStorageAccess.getIconFile: this save's icon.png is what the
         // Select World list shows.
@@ -13351,7 +13288,7 @@ impl Game<'_> {
             Err(_) if self.renderer.as_ref().is_some_and(Renderer::device_lost) => false,
             result => result?,
         };
-        self.native_render_frame_post(elapsed);
+        self.finish_render_frame(elapsed);
         if rendered {
             // The submit thread may still hold the frame: a listener hears it after the
             // present, and with none the next frame keeps overlapping it.
@@ -13524,7 +13461,7 @@ impl Game<'_> {
             return Ok(false);
         };
         pr.lap("pr_setup");
-        let alpha = self.clock.fraction();
+        let alpha = self.frame_world_partial_tick();
         // Camera.getCameraEntityPartialTicks: the view, the hand and the
         // player's own model stay smooth while the level is frozen.
         let camera_alpha = self.clock.camera_fraction();
@@ -14125,12 +14062,7 @@ impl Game<'_> {
             },
             title,
             sky_blocked: horizon_client::fog::sky_pass_skipped(
-                horizon_client::fog::fog_type(
-                    &self.world,
-                    self.res.facts(),
-                    [camera.x, camera.y, camera.z],
-                    &self.near_plane(),
-                ),
+                self.camera_fog_type([camera.x, camera.y, camera.z]),
                 self.potions.effects.get("blindness").is_some()
                     || self.potions.effects.get("darkness").is_some(),
                 self.boss_overlay.should_create_world_fog(),
@@ -15260,7 +15192,7 @@ impl<'a> Game<'a> {
             bee_stinger_model: prepared.bee_stinger_model,
             tnts: Default::default(),
             hoppers: HashMap::new(),
-            transactions: Vec::new(),
+            transactions: Default::default(),
             block_entity_tick_key: None,
             block_entity_tick_items: None,
             wasm_dispatch_failures:
@@ -16251,6 +16183,7 @@ pub(crate) fn run_with(
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models(options.execution_role);
     mods::register_layer_definitions(options.execution_role);
+    mods::register_skull_models(options.execution_role, &vanilla_root);
     mods::register_debug_entries(options.execution_role);
     mods::register_gui_layers(options.execution_role);
     mods::register_map_decoration_types();

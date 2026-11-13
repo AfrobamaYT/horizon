@@ -123,6 +123,14 @@ pub(in crate::game) fn resolve_enchantment_registry(
 pub(in crate::game) fn resolve_block_definitions(
     registry: &horizon_world::registry::BlockRegistry,
 ) -> Result<(), String> {
+    // Without installed parts the completed keys land in one process-wide table that keeps the
+    // first registry resolved; in a test process that is whichever test got there first, so a
+    // test that installed no parts gets its own empty installation, as tests do their mods.
+    #[cfg(test)]
+    if !mod_api::__private::parts_installation::parts_installed() {
+        mod_platform::__private::part_tests::install_parts_fixture(&[])
+            .map_err(|errors| errors.join("\n"))?;
+    }
     block_state::clear();
     if mod_api::__private::block_definitions().is_some() {
         return bind_worker_blocks(registry);
@@ -177,6 +185,32 @@ fn bind_worker_blocks(registry: &horizon_world::registry::BlockRegistry) -> Resu
         super::native_worldgen::retain(registry, index).inspect_err(|_| block_state::clear())?;
     block_state::install(retained);
     Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn a_test_without_parts_resolves_its_own_blocks_after_another_resolved_fewer() {
+    // Another test thread, with no parts installed, resolves a registry of air alone first.
+    std::thread::spawn(|| {
+        let air =
+            r#"{"defaults":{"minecraft:air":0},"states":[["air",true,false,"","minecraft:air"]]}"#;
+        let air = horizon_world::registry::BlockRegistry::from_facts_json(air.as_bytes()).unwrap();
+        resolve_block_definitions(&air).unwrap();
+    })
+    .join()
+    .unwrap();
+    // This one, with no parts installed either, still resolves its own block.
+    let own = r#"{"defaults":{"minecraft:air":0,"regression:own_block":1},"states":[
+        ["air",true,false,"","minecraft:air"],
+        ["b",false,false,"","regression:own_block"]
+    ]}"#;
+    let own = horizon_world::registry::BlockRegistry::from_facts_json(own.as_bytes()).unwrap();
+    resolve_block_definitions(&own).unwrap();
+    let state = own
+        .state(horizon_world::registry::BlockStateId(1))
+        .unwrap()
+        .try_into_api();
+    assert!(state.is_ok(), "{state:?}");
 }
 
 #[cfg(test)]
@@ -613,25 +647,20 @@ impl TryIntoApi for super::spill::BlockItemDrop {
     type Api = mod_api::ItemDrop;
     type Error = StackReadError;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
-        Ok(mod_api::ItemDrop::new(
+        Ok(self.state.to_api(mod_api::ItemDrop::new(
             self.stack.try_into_api()?,
             self.position,
             self.velocity,
             self.pickup_delay,
-        ))
+        )))
     }
 }
 impl TryIntoEngine for mod_api::ItemDrop {
     type Engine = super::spill::BlockItemDrop;
     type Error = StackWriteError;
     fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
-        Ok(Self::Engine {
-            random: None,
-            stack: self.stack.try_into_engine(items)?,
-            position: self.position,
-            velocity: self.velocity,
-            pickup_delay: self.pickup_delay,
-        })
+        let stack = self.stack.try_into_engine(items)?;
+        Ok(Self::Engine::from_api(self, stack))
     }
 }
 
@@ -2673,77 +2702,6 @@ impl TryIntoApi for horizon_mod_package::Side {
     }
 }
 
-fn package_snapshot(
-    manifest: &horizon_mod_package::Manifest,
-    kind: mod_api::PackageKind,
-) -> mod_api::PackageInfo {
-    mod_api::PackageInfo::new(
-        manifest.id.clone(),
-        manifest.version.clone(),
-        kind,
-        manifest.side.try_into_api().unwrap(),
-        std::iter::once(&manifest.id)
-            .chain(&manifest.namespaces)
-            .cloned()
-            .collect(),
-        manifest.dependencies.keys().cloned().collect(),
-    )
-}
-impl TryIntoApi for horizon_mod_package::Manifest {
-    type Api = mod_api::PackageInfo;
-    type Error = std::convert::Infallible;
-    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
-        Ok(package_snapshot(
-            self,
-            if self.wasm.is_some() {
-                mod_api::PackageKind::Code
-            } else {
-                mod_api::PackageKind::Content
-            },
-        ))
-    }
-}
-impl TryIntoApi for horizon_mod_package::packages::AdjacentManifest {
-    type Api = mod_api::PackageInfo;
-    type Error = std::convert::Infallible;
-    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
-        Ok(package_snapshot(&self.manifest, mod_api::PackageKind::Code))
-    }
-}
-
-pub(in crate::game) fn install_packages(
-    native: &[horizon_mod_package::packages::AdjacentManifest],
-    content: &[horizon_mod_package::selection::SelectedPackage],
-) -> Result<(), horizon_engine_slots::PlatformRefusal> {
-    let native: Vec<_> = native.iter().map(|p| p.try_into_api().unwrap()).collect();
-    let content: Vec<_> = content
-        .iter()
-        .map(|p| p.package.manifest.try_into_api().unwrap())
-        .collect();
-    (horizon_engine_slots::platform()?.install_packages)(&native, &content);
-    Ok(())
-}
-
-#[cfg(test)]
-mod package_snapshot_tests {
-    use super::*;
-    #[test]
-    fn package_metadata_keeps_declared_side_and_namespace_order() {
-        for (side, expected) in [
-            ("client", mod_api::Side::Client),
-            ("both", mod_api::Side::Both),
-        ] {
-            let manifest = horizon_mod_package::Manifest::parse(&format!(
-                "id='test'\nname='Test'\nversion='1'\napi='0.2'\nside='{side}'\ncapabilities=['registries']\n"
-            )).unwrap();
-            let snapshot = manifest.try_into_api().unwrap();
-            assert_eq!(snapshot.side(), expected);
-            assert_eq!(snapshot.namespaces().collect::<Vec<_>>(), ["test"]);
-            assert_eq!(snapshot.kind(), mod_api::PackageKind::Content);
-        }
-    }
-}
-
 impl TryIntoApi for horizon_client_core::suggestion::Suggestion {
     type Api = mod_api::Suggestion;
     type Error = std::convert::Infallible;
@@ -3279,6 +3237,9 @@ mod loot_values;
 #[path = "api_values/particle_values.rs"]
 mod particle_values;
 pub(crate) use loot_values::{dispatch_loot_condition, dispatch_loot_function};
+#[path = "api_values/package_snapshot.rs"]
+mod package_snapshot;
+pub(in crate::game) use package_snapshot::install_packages;
 #[path = "api_values/phase_values.rs"]
 mod phase_values;
 #[path = "api_values/small_values.rs"]

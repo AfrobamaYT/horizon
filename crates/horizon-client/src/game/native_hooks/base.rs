@@ -794,18 +794,6 @@ impl Game<'_> {
     ) {
         self.fire_health_hud(inputs, wi, hi, draws);
     }
-    /// A real window key event after handling, including repeats and consumed shortcuts
-    /// (`InputEvent.Key`). `key` is vanilla's name for the physical key (`key.keyboard.a`,
-    /// `key.keyboard.unknown` for one it doesn't name), `action` what it did, and the
-    /// modifier bits the screen hooks' GLFW encoding. Not cancellable.
-    pub(in crate::game) fn native_input_key(
-        &mut self,
-        key: &str,
-        action: mod_api::KeyAction,
-        modifiers: u32,
-    ) {
-        self.fire_input_key(key, action, modifiers);
-    }
     /// Raw mouse button input on any screen, before dispatch; cancel skips dispatch and Post.
     /// Button/modifiers use the same GLFW encoding as screen hooks. Synthetic clicks skip it.
     pub(in crate::game) fn native_mouse_button_pre(
@@ -1688,27 +1676,6 @@ impl Game<'_> {
         cancel: &mut bool,
     ) {
         self.fire_creative_slot(player, name, slot, item, count, cancel);
-    }
-    /// A server player's game mode is about to change (NeoForge's
-    /// `PlayerChangeGameModeEvent`): from `from` to `to`, both the shared
-    /// `GameMode` used by commands and `PlayerRef`. `player` is the UUID and
-    /// `name` the name. Heard for
-    /// the `/gamemode` command, the F3+F4 switcher's packet and a hardcore
-    /// world's respawn into spectator, once for each change to a different
-    /// mode; not for the world's default mode a player joins with. Return
-    /// `Flow::Cancel` and the player keeps their mode (nothing is sent, the
-    /// command counts it as no change). For a change the game makes inside
-    /// a player's turn their state is swapped in; for the hardcore respawn
-    /// it is not.
-    pub(in crate::game) fn native_player_game_mode_changed(
-        &mut self,
-        player: u128,
-        name: &str,
-        from: GameMode,
-        to: GameMode,
-        cancel: &mut bool,
-    ) {
-        self.fire_player_game_mode_changed(player, name, from, to, cancel);
     }
     /// `player` (`name`) changed dimension (NeoForge's
     /// `PlayerChangedDimensionEvent`): `from` and `to` are dimension ids

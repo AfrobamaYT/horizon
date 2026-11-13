@@ -1369,14 +1369,14 @@ impl Game<'_> {
             c[2] + f64::from(s[2]) * 1.125,
         );
         let front = offset(pos, facing);
-        let y_offset = if let Some(rail) = self.rail(front.0, front.1, front.2) {
+        let y_offset = if let Some(rail) = self.rail(None, front.0, front.1, front.2) {
             if rail.shape.is_slope() { 0.6 } else { 0.1 }
         } else {
             if !self.res.facts().is_air(self.block_at(front)) {
                 return (self.dispense_default_in_level(pos, facing, stack), CLICK);
             }
             let below = (front.0, front.1 - 1, front.2);
-            let Some(rail) = self.rail(below.0, below.1, below.2) else {
+            let Some(rail) = self.rail(None, below.0, below.1, below.2) else {
                 return (self.dispense_default_in_level(pos, facing, stack), CLICK);
             };
             if facing != Direction::Down && rail.shape.is_slope() {
@@ -2025,7 +2025,7 @@ impl Game<'_> {
         );
     }
     /// `ShearsDispenseItemBehavior.tryShearEntity`: the first live, ready
-    /// `Shearable` in the block is sheared.
+    /// `Shearable` in the block is sheared (an entity part's `IShearable` answer comes first).
     pub(super) fn shear_entity(&mut self, target: Pos) -> Result<bool> {
         let shears = ItemStack::new("minecraft:shears", 1);
         for t in self.targets_at(target) {
@@ -2034,19 +2034,19 @@ impl Game<'_> {
                 return Ok(true);
             }
             let Target::Mob(i) = t else { continue };
+            let part = self.part_shearable(i, None, &shears);
             let m = &self.mobs[i];
-            if !m.alive() {
+            if !m.alive() || part.is_some_and(|(_, shearable)| !shearable) {
                 continue;
             }
-            let at = m.position;
-            let entity_id = m.id;
-            let kind = m.kind.id.clone();
+            let (at, entity_id, kind) = (m.position, m.id, m.kind.id.clone());
             let sound_at = Some([at.x, at.y, at.z]);
             // shear(level, BLOCKS, tool): level.playSound(null, this, sound, BLOCKS, 1, 1).
             let shear_sound = |name: &'static str| {
                 LevelSound::new(name, [at.x, at.y, at.z], 1.0, 1.0).in_source(SoundSource::Blocks)
             };
             match m.species() {
+                _ if let Some((part, _)) = part => self.part_shear(i, part, None, &shears),
                 Species::SulfurCube if sulfur_cube::has_body(m) => {
                     // SulfurCube.shear: the swallowed block comes out at the
                     // passenger attachment, and nothing is swallowed for 5 s.

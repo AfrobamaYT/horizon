@@ -155,6 +155,7 @@ fn remaining_hit_callers_observe_refusals_and_zero_damage() {
                 id: "remaining:zero",
                 item: "minecraft:snowball",
                 damage: 0.0,
+                slot: 0,
             };
             for mode in [GameMode::Survival, GameMode::Creative] {
                 for kind in [

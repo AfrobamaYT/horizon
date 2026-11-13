@@ -505,6 +505,15 @@ fn overworld_timelines(root: &Path) -> (Vec<(String, Option<i64>)>, Vec<(String,
     (timelines, markers)
 }
 
+/// Whether `id` is one of `entity-types.json`'s entity types under `root`: vanilla's and the content
+/// mods' (read once per root, as the command registries read it).
+pub(in crate::game) fn is_entity_type(root: &Path, id: &str) -> bool {
+    resource_ids(root)
+        .entity_types
+        .binary_search_by(|t| t.as_str().cmp(id))
+        .is_ok()
+}
+
 fn resource_ids(root: &Path) -> Arc<ResourceIds> {
     let mut cache = RESOURCE_IDS.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((_, ids)) = cache.iter().find(|(cached, _)| cached == root) {
