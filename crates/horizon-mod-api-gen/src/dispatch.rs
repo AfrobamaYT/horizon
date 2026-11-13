@@ -834,6 +834,18 @@ pub(super) fn emit<'a>(
         } else {
             mod_item.clone()
         };
+        // A listener's stack-list commit follows the cancel statement; with none, the statement
+        // stands alone, so the generated code has no empty block.
+        let cancel_step = {
+            let cancel = format!(
+                "if matches!({mod_item}.{name}({invoke}), Flow::Cancel) {{ {event}.cancelled = true; }}"
+            );
+            if stack_after.is_empty() {
+                cancel
+            } else {
+                format!("{{ {cancel} }} {stack_after}")
+            }
+        };
         let (lookup, calls) = match &scoped {
             None if matches!(name, "blocks" | "items") => (
                 String::new(),
@@ -851,7 +863,7 @@ pub(super) fn emit<'a>(
             None if mod_cancel => (
                 String::new(),
                 format!(
-                    "{{ let mut {entered} = super::runtime::ListenerScope::new(); for ({receives}, {mod_entry}) in super::listening(HookId::{hook_id}) {{ if {event}.cancelled && !{receives} {{ continue; }} let {mod_item} = {entered}.enter({mod_entry}, \"{name}\"); {{ if matches!({mod_item}.{name}({invoke}), Flow::Cancel) {{ {event}.cancelled = true; }} }} {stack_after} }} }} *{o} = {event}.cancelled;",
+                    "{{ let mut {entered} = super::runtime::ListenerScope::new(); for ({receives}, {mod_entry}) in super::listening(HookId::{hook_id}) {{ if {event}.cancelled && !{receives} {{ continue; }} let {mod_item} = {entered}.enter({mod_entry}, \"{name}\"); {cancel_step} }} }} *{o} = {event}.cancelled;",
                     o = cancel_out.unwrap()
                 ),
             ),
