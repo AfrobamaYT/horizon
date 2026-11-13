@@ -239,6 +239,20 @@ def shard_runs(package, target):
     return package in ignored_shards.SHARDS and (target == "lib" or package in INTEGRATION_TESTS)
 
 
+@lru_cache(maxsize=1)
+def workspace_features():
+    """{package: its features as the whole workspace resolves them}: what `verify`'s `--workspace` build compiles.
+
+    `cargo test -p PACKAGE` alone resolves only that package's own needs, which leaves out a test behind a feature
+    another member turns on (or a target's required-features), so a daily-rows run passes these explicitly."""
+    metadata = subprocess.run(["cargo", "metadata", "--format-version", "1"], capture_output=True, text=True,
+                              check=True)
+    data = json.loads(metadata.stdout)
+    names = {package["id"]: package["name"] for package in data["packages"]}
+    members = set(data["workspace_members"])
+    return {names[node["id"]]: sorted(node["features"]) for node in data["resolve"]["nodes"] if node["id"] in members}
+
+
 def daily_rows_groups(rows):
     """The daily rows no package shard runs, as {(package, target): [test, ...]}: the `daily-rows` shard's runs."""
     groups = {}
@@ -628,7 +642,8 @@ def run(package, skip, number=None, count=None, only=None):
         command = ["cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []), "--no-fail-fast"]
         if only:
             target = only[0]
-            command = ["cargo", "test", "-p", package,
+            features = workspace_features().get(package, [])
+            command = ["cargo", "test", "-p", package, *(["--features", ",".join(features)] if features else []),
                        *(["--lib"] if target == "lib" else [f"--{target.split(':')[0]}", target.split(":", 1)[1]])]
         if client_half:
             # The runner's own cap (tools/ci/cargo_jobs.py --cap) when set, else the old fixed one.

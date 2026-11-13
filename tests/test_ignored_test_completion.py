@@ -180,10 +180,13 @@ class IgnoredTests(unittest.TestCase):
     def test_a_daily_rows_run_selects_exactly_its_ignored_tests_of_one_target(self):
         output = target(2, "test a ... ok\ntest b ... ok\n", summary(passed=2))
         with patch.object(ignored_tests.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, output)) as execute, \
+                patch.object(ignored_tests, "workspace_features", return_value={"horizon-relay": ["fixture", "index"]}), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(ignored_tests.run("horizon-relay", [], only=("test:tunnel", ["a", "b"])), {"a": True, "b": True})
         command = execute.call_args.args[0]
-        self.assertEqual(command[:command.index("--")], ["cargo", "test", "-p", "horizon-relay", "--test", "tunnel"])
+        # The features the workspace build turns on, as verify compiled the test.
+        self.assertEqual(command[:command.index("--")],
+                         ["cargo", "test", "-p", "horizon-relay", "--features", "fixture,index", "--test", "tunnel"])
         self.assertEqual(command[command.index("--") + 1:], ["--ignored", "--exact", "--test-threads=4", "a", "b"])
 
     def test_a_parent_that_crashes_after_its_childs_same_count_summary_did_not_complete(self):
