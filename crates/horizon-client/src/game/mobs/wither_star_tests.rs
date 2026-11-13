@@ -207,7 +207,7 @@ fn loot_stack_edits_leave_custom_drop_age_attached() {
             expected.push(("minecraft:nether_star", -6000));
             let api_expected: Vec<_> = expected
                 .iter()
-                .map(|(item, age)| (ItemStack::new(*item, 1).try_into_api().unwrap(), *age))
+                .map(|(item, age)| (ItemStack::new(item, 1).try_into_api().unwrap(), *age))
                 .collect();
             assert_eq!(
                 *captured.lock().unwrap(),
