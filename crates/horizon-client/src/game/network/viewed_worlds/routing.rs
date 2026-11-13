@@ -1,7 +1,7 @@
 //! The `horizon:levels` play payloads, routed: an `open` builds the level's world from the
 //! dimension type the server synced for it, a `run`'s packets go to that world, and a `close`
 //! drops it. A payload the protocol refuses closes the connection with its named reason.
-use super::worlds::ViewedWorld;
+use super::worlds::{MAX_COLUMNS, ViewedWorld};
 use crate::game::Game;
 use horizon_client::{text::Text, viewed_levels_net::MAX_LEVELS, world::World};
 use horizon_protocol::{
@@ -15,25 +15,25 @@ use horizon_world::dimension_type::DimensionFacts;
 pub(in crate::game) enum RouteError {
     /// The payload's bytes, refused by the codec.
     Codec(ViewedLevelsError),
-    /// An `open` of a level that is not the one at its index in the Login packet's `levels`.
-    UnknownLevel { level: i32, dimension: String },
+    /// An `open` of a level that is not the one at its index in the Login packet's `levels`. The
+    /// reason names neither: the dimension is the server's text.
+    UnknownLevel,
     /// An `open` of the player's own level.
     OwnLevel(i32),
     /// An `open` past the levels the client answered it can view.
     OverCap { level: i32, cap: u8 },
     /// A `run` or `close` of a level not open.
     NotOpen(i32),
+    /// A `run`'s chunk of a new column in a world that holds `worlds::MAX_COLUMNS` already.
+    TooManyColumns,
 }
 
 impl std::fmt::Display for RouteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Codec(error) => write!(f, "{error}"),
-            Self::UnknownLevel { level, dimension } => {
-                write!(
-                    f,
-                    "{CHANNEL}: level {level} is not {dimension} in the Login's levels"
-                )
+            Self::UnknownLevel => {
+                write!(f, "{CHANNEL}: open does not match the Login level index")
             }
             Self::OwnLevel(level) => write!(f, "{CHANNEL}: level {level} is the player's own"),
             Self::OverCap { level, cap } => {
@@ -43,6 +43,9 @@ impl std::fmt::Display for RouteError {
                 )
             }
             Self::NotOpen(level) => write!(f, "{CHANNEL}: level {level} is not open"),
+            Self::TooManyColumns => {
+                write!(f, "{CHANNEL}: a viewed level past {MAX_COLUMNS} columns")
+            }
         }
     }
 }
@@ -81,7 +84,7 @@ impl Game<'_> {
                     // The codec read each one exactly already.
                     let packet =
                         C::decode(id, body).map_err(|_| ViewedLevelsError::MalformedPacket(id))?;
-                    world.apply(packet);
+                    world.apply(packet)?;
                 }
                 Ok(())
             }
@@ -101,10 +104,7 @@ impl Game<'_> {
         };
         let named = usize::try_from(level).ok().and_then(|i| r.levels.get(i));
         if named != Some(&spawn.dimension) {
-            return Err(RouteError::UnknownLevel {
-                level,
-                dimension: spawn.dimension.clone(),
-            });
+            return Err(RouteError::UnknownLevel);
         }
         if spawn.dimension == r.level {
             return Err(RouteError::OwnLevel(level));

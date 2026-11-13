@@ -2,11 +2,17 @@
 //! chunk format, shape and facts of the dimension type the server synced for it. A wrapped
 //! packet changes only its own level's world; nothing here reaches the player's level, its
 //! renderer, its sounds or a mod's hooks.
+use super::routing::RouteError;
 use crate::game::remote_chunks::{ChunkFormat, section_blocks};
 use horizon_client::{chunk::known_block_state, fast_hash::FxHashMap, world::World};
 use horizon_protocol::packets::play::Clientbound as C;
 use horizon_world::registry::BlockStateId;
 use std::sync::Arc;
+
+/// The most columns one viewed world holds: the server's own cap on a player's `Loaded` chunks in
+/// one level (`max_viewed_loaded_chunks`, 2048 by default), so that a server cannot fill the
+/// client's memory through one opened level. A server that raises its setting past it is refused.
+pub(in crate::game) const MAX_COLUMNS: usize = 2048;
 
 /// Another level's world, kept while the server sends it.
 pub(in crate::game) struct ViewedWorld {
@@ -37,11 +43,18 @@ impl ViewedWorld {
     /// A wrapped packet of the level, as `ClientPacketListener` handles it with that level
     /// current: what the world keeps of its chunks, light, biomes, blocks, time and weather.
     /// Block events, destruction progress, level events and entities change nothing yet: what
-    /// they show is drawn, and drawing a viewed level is gap 13 (entities are 9d).
-    pub(in crate::game) fn apply(&mut self, packet: C) {
+    /// they show is drawn, and drawing a viewed level is gap 13 (entities are 9d). A chunk of a
+    /// new column past [`MAX_COLUMNS`] is refused before it is decoded.
+    pub(in crate::game) fn apply(&mut self, packet: C) -> Result<(), RouteError> {
         match packet {
             // `handleLevelChunkWithLight`: the column replaces any it held, with the light the
             // server sent.
+            C::LevelChunkWithLight(p)
+                if self.world.chunks.len() >= MAX_COLUMNS
+                    && !self.world.chunks.contains_key(&(p.x, p.z)) =>
+            {
+                return Err(RouteError::TooManyColumns);
+            }
             C::LevelChunkWithLight(p) => match self.format.column(&p) {
                 Ok(chunk) => {
                     self.world.chunks.insert((p.x, p.z), Arc::new(chunk));
@@ -92,6 +105,7 @@ impl ViewedWorld {
             C::GameEvent(p) => self.world.weather.game_event(p.event, p.param),
             _ => {}
         }
+        Ok(())
     }
 
     /// A server's block: a state the client lacks (a server with mods it lacks) reads as air,
@@ -149,4 +163,70 @@ fn free(mut world: ViewedWorld) {
     let chunks = std::mem::take(&mut world.world.chunks);
     let count = chunks.len();
     horizon_client::chunk::free_columns(chunks, count);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use horizon_protocol::{
+        chunk::{ChunkData, LightData, Paletted, Section, Strategy},
+        packets::play,
+        registry::DimensionType,
+    };
+
+    /// A column of stone at `x, 0`, unlit.
+    fn column(x: i32) -> C {
+        let overworld = DimensionType::vanilla("minecraft:overworld");
+        let section = Section {
+            non_empty: 4096,
+            fluids: 0,
+            states: Paletted::from_values(&[1; 4096], Strategy::Blocks, 16),
+            biomes: Paletted::from_values(&[1; 64], Strategy::Biomes, 2),
+        };
+        C::LevelChunkWithLight(play::LevelChunkWithLight {
+            x,
+            z: 0,
+            chunk: ChunkData {
+                heightmaps: Vec::new(),
+                buffer: ChunkData::from_sections(&vec![section; overworld.sections()]),
+                block_entities: Vec::new(),
+            },
+            light: LightData {
+                sky_mask: Vec::new(),
+                block_mask: Vec::new(),
+                empty_sky_mask: Vec::new(),
+                empty_block_mask: Vec::new(),
+                sky: Vec::new(),
+                block: Vec::new(),
+            },
+        })
+    }
+
+    /// A world full at 2048 columns takes a column it holds again, refuses a new one, and takes
+    /// it once the server forgot another.
+    #[test]
+    fn a_viewed_world_holds_at_most_2048_columns() {
+        let overworld = DimensionType::vanilla("minecraft:overworld");
+        let format = Arc::new(ChunkFormat::new(&overworld, vec![0, 7, 9], 2));
+        let mut viewed = ViewedWorld::new(
+            "minecraft:the_nether".into(),
+            format,
+            None,
+            World::new(BlockStateId(0), 1),
+        );
+        for x in 0..2048 {
+            viewed.apply(column(x)).unwrap();
+        }
+        assert_eq!(viewed.world.chunks.len(), 2048);
+        // A replacement is no new column.
+        assert_eq!(viewed.apply(column(17)), Ok(()));
+        assert_eq!(viewed.world.chunks.len(), 2048);
+        assert_eq!(viewed.apply(column(2048)), Err(RouteError::TooManyColumns));
+        assert!(!viewed.world.chunks.contains_key(&(2048, 0)));
+        let forget = C::ForgetLevelChunk(play::ForgetLevelChunk { pos: [5, 0] });
+        viewed.apply(forget).unwrap();
+        assert_eq!(viewed.apply(column(2048)), Ok(()));
+        assert!(viewed.world.chunks.contains_key(&(2048, 0)));
+        assert_eq!(viewed.world.chunks.len(), 2048);
+    }
 }

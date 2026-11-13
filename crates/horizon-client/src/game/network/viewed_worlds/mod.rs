@@ -195,6 +195,25 @@ mod tests {
         assert!(game.remote.is_none());
     }
 
+    /// An `open` naming another level than the Login put at its index closes the connection
+    /// with a fixed reason: the server's text is not shown.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_open_not_at_its_login_index_shows_no_server_text() {
+        let mut resources = None;
+        let mut game = client(&mut resources);
+        let refused = game
+            .route_viewed_levels(data(&open(1, "evil:click_here")))
+            .unwrap_err();
+        assert_eq!(refused, RouteError::UnknownLevel);
+        assert_eq!(
+            refused.to_string(),
+            "horizon:levels: open does not match the Login level index"
+        );
+        assert!(!refused.to_string().contains("evil"));
+        assert!(viewed(&game, 1).is_none());
+    }
+
     /// A viewed level's chunks, time and weather leave the player's level as it was.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
