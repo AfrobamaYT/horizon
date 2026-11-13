@@ -521,7 +521,7 @@ impl SyncData {
                 path,
             );
             if *key == "minecraft:enchantment" {
-                holder_sets::expand_enchantments(&mut entries, resources, overlay)?;
+                holder_sets::expand_enchantments(&mut entries, resources, overlay, defaults)?;
             }
             // A biome the mods' modifiers changed is not the client's own file any more:
             // its data is sent, as a pack's biome is.
