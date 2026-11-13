@@ -302,7 +302,7 @@ impl crate::holder_set::HolderLookup for BiomeSourceCatalog {
             .cloned()
             .ok_or_else(|| format!("unknown biome tag #{tag}"))
     }
-    fn all(&self) -> Vec<String> {
-        self.biomes.iter().cloned().collect()
+    fn all(&self) -> Result<Vec<String>, String> {
+        Ok(self.biomes.iter().cloned().collect())
     }
 }

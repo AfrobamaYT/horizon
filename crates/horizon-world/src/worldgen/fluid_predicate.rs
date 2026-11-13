@@ -93,8 +93,8 @@ impl crate::holder_set::HolderLookup for FluidPredicateBindings {
             .map(|mask| bits(*mask))
             .ok_or_else(|| format!("unknown fluid tag {tag}"))
     }
-    fn all(&self) -> Vec<u8> {
-        bits(u8::MAX)
+    fn all(&self) -> Result<Vec<u8>, String> {
+        Ok(bits(u8::MAX))
     }
 }
 fn bits(mask: u8) -> Vec<u8> {

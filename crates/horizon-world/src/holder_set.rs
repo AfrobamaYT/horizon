@@ -17,7 +17,7 @@ pub trait HolderLookup {
     /// A tag's members; `tag` has no `#`.
     fn tag(&self, tag: &str) -> Result<Vec<Self::Id>, String>;
     /// Every entry: what `any` holds and what `not` takes its value from.
-    fn all(&self) -> Vec<Self::Id>;
+    fn all(&self) -> Result<Vec<Self::Id>, String>;
 }
 
 /// The members `value` names in `lookup`'s registry, in holder-set order
@@ -43,7 +43,7 @@ pub fn resolve<L: HolderLookup + ?Sized>(value: &Value, lookup: &L) -> Result<Ve
         Value::Object(object) => {
             let kind = object.get("type").and_then(Value::as_str).unwrap_or("");
             match kind.strip_prefix("neoforge:").unwrap_or(kind) {
-                "any" => unique(lookup.all()),
+                "any" => unique(lookup.all()?),
                 short @ ("or" | "and") => {
                     let values = object
                         .get("values")
@@ -74,7 +74,7 @@ pub fn resolve<L: HolderLookup + ?Sized>(value: &Value, lookup: &L) -> Result<Ve
                         .get("value")
                         .ok_or_else(|| format!("{kind}: no value"))?;
                     let inner: BTreeSet<_> = resolve(value, lookup)?.into_iter().collect();
-                    unique(lookup.all())
+                    unique(lookup.all()?)
                         .into_iter()
                         .filter(|id| !inner.contains(id))
                         .collect()
@@ -116,8 +116,10 @@ impl HolderLookup for StringLookup<'_> {
     fn tag(&self, tag: &str) -> Result<Vec<String>, String> {
         (self.tag)(tag)
     }
-    fn all(&self) -> Vec<String> {
-        self.ids.map(|ids| ids()).unwrap_or_default()
+    fn all(&self) -> Result<Vec<String>, String> {
+        self.ids
+            .map(|ids| ids())
+            .ok_or_else(|| format!("{} universe is unavailable", self.what))
     }
 }
 
@@ -146,8 +148,12 @@ mod tests {
                 _ => Err(format!("unknown biome tag {tag}")),
             }
         }
-        fn all(&self) -> Vec<&'static str> {
-            vec!["minecraft:plains", "minecraft:ocean", "minecraft:desert"]
+        fn all(&self) -> Result<Vec<&'static str>, String> {
+            Ok(vec![
+                "minecraft:plains",
+                "minecraft:ocean",
+                "minecraft:desert",
+            ])
         }
     }
 

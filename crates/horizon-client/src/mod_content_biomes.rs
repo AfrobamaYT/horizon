@@ -580,8 +580,8 @@ impl horizon_world::holder_set::HolderLookup for Registry<'_> {
         self.expand(&full(tag), &mut out, &mut BTreeSet::new())?;
         Ok(out)
     }
-    fn all(&self) -> Vec<String> {
-        self.ids.iter().cloned().collect()
+    fn all(&self) -> std::result::Result<Vec<String>, String> {
+        Ok(self.ids.iter().cloned().collect())
     }
 }
 

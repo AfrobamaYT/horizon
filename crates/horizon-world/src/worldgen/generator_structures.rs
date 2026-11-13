@@ -270,10 +270,10 @@ impl crate::holder_set::HolderLookup for StructureBiomes<'_> {
         let members = self.0.biome_tags.get(tag).into_iter().flatten();
         Ok(members.filter_map(|biome| self.0.biome_id(biome)).collect())
     }
-    fn all(&self) -> Vec<BiomeId> {
-        (0..self.0.biome_names().len() as u32)
+    fn all(&self) -> Result<Vec<BiomeId>, String> {
+        Ok((0..self.0.biome_names().len() as u32)
             .map(BiomeId)
-            .collect()
+            .collect())
     }
 }
 impl StructureState {

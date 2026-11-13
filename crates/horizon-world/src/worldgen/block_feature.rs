@@ -361,12 +361,13 @@ impl crate::holder_set::HolderLookup for BlockSetLookup<'_, '_> {
             None => Err(format!("unknown block tag {tag}")),
         }
     }
-    fn all(&self) -> Vec<BlockStateId> {
-        self.bindings
+    fn all(&self) -> Result<Vec<BlockStateId>, String> {
+        Ok(self
+            .bindings
             .blocks
             .values()
             .flat_map(|states| states.iter().copied())
-            .collect()
+            .collect())
     }
 }
 #[derive(Clone, Debug)]

@@ -82,8 +82,8 @@ impl crate::holder_set::HolderLookup for BiomePredicateBindings {
             .map(|set| set.iter().copied().collect())
             .map_err(|e| e.to_string())
     }
-    fn all(&self) -> Vec<BiomeId> {
-        self.names.values().copied().collect()
+    fn all(&self) -> Result<Vec<BiomeId>, String> {
+        Ok(self.names.values().copied().collect())
     }
 }
 
