@@ -486,13 +486,65 @@ mod tests {
             .collect()
     }
 
+    /// A structure start as a chunk holds it or refers to it: its structure, start chunk,
+    /// bounding box and piece count.
+    type Start = (String, [i32; 2], [i32; 3], [i32; 3], usize);
+
+    /// What a proto chunk holds: its blocks, the biome of every quart cell, the structure
+    /// starts it owns and those it refers to (sorted, so their order does not matter), its
+    /// status and whether it is decorated.
+    #[derive(PartialEq)]
+    struct Snapshot {
+        blocks: Vec<BlockStateId>,
+        biomes: Vec<BiomeId>,
+        own_starts: Vec<Start>,
+        references: Vec<Start>,
+        stage: PreLightChunkStage,
+        decorated: bool,
+    }
+
+    fn snapshot(chunk: &ProtoChunk) -> Snapshot {
+        let ChunkPos { x, z } = chunk.position();
+        let biomes = (-64..320)
+            .step_by(4)
+            .flat_map(|y| {
+                (0..16)
+                    .step_by(4)
+                    .flat_map(move |dz| (0..16).step_by(4).map(move |dx| [dx, y, dz]))
+            })
+            .map(|[dx, y, dz]| chunk.biome_id_at(x * 16 + dx, y, z * 16 + dz))
+            .collect();
+        let start = |s: &super::super::super::structure::start::StructureStart| {
+            let (min, max) = (s.bounding_box.min, s.bounding_box.max);
+            (
+                s.name.clone(),
+                [s.chunk.x, s.chunk.z],
+                min,
+                max,
+                s.pieces.len(),
+            )
+        };
+        let mut own_starts: Vec<Start> = chunk.own_starts().iter().map(|s| start(s)).collect();
+        let mut references: Vec<Start> = chunk.structure_starts.iter().map(|s| start(s)).collect();
+        own_starts.sort();
+        references.sort();
+        Snapshot {
+            blocks: blocks(chunk),
+            biomes,
+            own_starts,
+            references,
+            stage: chunk.terrain.generation_stage(),
+            decorated: chunk.is_decorated(),
+        }
+    }
+
     /// The region around `center`, its chunks generated in the order of `order` (row-major
-    /// indices), as `blocks` before and after its FEATURES status.
+    /// indices), as snapshots before and after its FEATURES status.
     fn complete(
         worker: &mut GeneratorWorker,
         center: ChunkPos,
         order: impl Iterator<Item = usize>,
-    ) -> [[Vec<BlockStateId>; 9]; 2] {
+    ) -> [[Snapshot; 9]; 2] {
         let mut made: Vec<(usize, ProtoChunk)> = order
             .map(|i| {
                 let (dx, dz) = (i as i32 % 3 - 1, i as i32 / 3 - 1);
@@ -507,19 +559,23 @@ mod tests {
             .collect::<Vec<_>>()
             .try_into()
             .unwrap_or_else(|_| panic!("nine chunks"));
-        let before = std::array::from_fn(|i| blocks(&region[i]));
+        let before = std::array::from_fn(|i| snapshot(&region[i]));
         worker.decorate(&mut region).unwrap();
-        [before, std::array::from_fn(|i| blocks(&region[i]))]
+        [before, std::array::from_fn(|i| snapshot(&region[i]))]
     }
 
-    /// Complete chunks of a staged hilly level are the same whichever order they are generated
+    /// Complete chunks of a staged hilly level over the Overworld's biomes (blocks, biomes,
+    /// structure starts and references, status) are the same whichever order they are generated
     /// in and whichever workers generate them: one worker in order, against two workers at once
-    /// on a second generator, each going backwards. The regions hold a cave crossing a chunk
-    /// border and features written into a neighbour chunk.
+    /// on a second generator, each going backwards. The regions hold more than one biome, a
+    /// structure reference, a cave crossing a chunk border and features written into a
+    /// neighbour chunk.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn complete_chunks_do_not_depend_on_order_or_workers() {
-        let stem = stem(Value::from("minecraft:overworld"));
+        let mut stem = stem(Value::from("minecraft:overworld"));
+        stem["generator"]["biome_source"] =
+            serde_json::json!({"type": "minecraft:multi_noise", "preset": "minecraft:overworld"});
         let open = || OverworldGenerator::for_mod(data(), 12345, &stem, Arc::new(Hills), true);
         let centers = [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(x, z)| ChunkPos::new(x, z));
         let first = open().unwrap();
@@ -546,6 +602,17 @@ mod tests {
         for (c, (_, chunks)) in shuffled.iter().enumerate() {
             assert!(chunks == &ordered[c], "the region around {:?}", centers[c]);
         }
+        let snapshots = || ordered.iter().flatten().flatten();
+        assert!(ordered.iter().all(|[_, after]| {
+            after[4].decorated && after[4].stage == PreLightChunkStage::Features
+        }));
+        let biomes: BTreeSet<BiomeId> =
+            snapshots().flat_map(|c| c.biomes.iter().copied()).collect();
+        assert!(biomes.len() > 1, "{biomes:?}");
+        assert!(
+            snapshots().any(|c| !c.references.is_empty()),
+            "a structure reference"
+        );
         let name = |id: BlockStateId| first.data().registry.state(id).unwrap().name.as_str();
         let carved = |id| {
             matches!(
@@ -560,7 +627,8 @@ mod tests {
             (0..9).filter(|i| i % 3 < 2).any(|i| {
                 (-60..56).any(|y| {
                     (0..16).any(|z| {
-                        carved(before[i][at(15, y, z)]) && carved(before[i + 1][at(0, y, z)])
+                        carved(before[i].blocks[at(15, y, z)])
+                            && carved(before[i + 1].blocks[at(0, y, z)])
                     })
                 })
             })
@@ -568,7 +636,7 @@ mod tests {
         assert!(crosses, "a cave crossing a chunk border");
         let spills = ordered
             .iter()
-            .any(|[before, after]| (0..9).any(|i| i != 4 && before[i] != after[i]));
+            .any(|[before, after]| (0..9).any(|i| i != 4 && before[i].blocks != after[i].blocks));
         assert!(spills, "a feature written into a neighbour chunk");
     }
 }
