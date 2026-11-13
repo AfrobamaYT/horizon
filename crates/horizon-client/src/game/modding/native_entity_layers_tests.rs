@@ -18,18 +18,20 @@ use std::{
     },
 };
 
-/// A load's entity types: a boat, a zombie, an armour stand, the player and a mod's living type.
+/// A load's entity types: a boat, a zombie, an armour stand, the ender dragon, the player and a mod's
+/// living type.
 fn rows() -> EntityTypeRows {
     EntityTypeRows::parse(
         br#"{"minecraft:oak_boat": {"width": 1.375},
              "minecraft:zombie": {"attributes": {}},
              "minecraft:armor_stand": {"attributes": {}},
+             "minecraft:ender_dragon": {"attributes": {}},
              "minecraft:player": {"attributes": {}},
              "ruby:golem": {"template": "minecraft:zombie", "attributes": {}}}"#,
     )
 }
 
-/// The living types drawn as mobs, where layers run: not the armour stand.
+/// The living types drawn as mobs, where layers run: not the armour stand or the ender dragon.
 fn routed(id: &str) -> bool {
     ["minecraft:zombie", "ruby:golem"].contains(&id)
 }
@@ -40,6 +42,8 @@ struct Raised {
     height: f32,
     refuse: u32,
     calls: AtomicU32,
+    /// The entity id of the last call.
+    id: AtomicU32,
 }
 impl Raised {
     fn new(height: f32) -> Arc<Self> {
@@ -50,6 +54,7 @@ impl Raised {
             height,
             refuse,
             calls: AtomicU32::new(0),
+            id: AtomicU32::new(u32::MAX),
         })
     }
     fn calls(&self) -> u32 {
@@ -59,11 +64,12 @@ impl Raised {
 impl EntityRenderLayer for Raised {
     fn submit(
         &self,
-        _: &EntityRenderState,
+        entity: &EntityRenderState,
         _: Option<&PosedParts>,
         draw: &mut dyn BlockEntityDrawContext,
     ) -> Result<(), String> {
         let call = self.calls.fetch_add(1, Ordering::Relaxed);
+        self.id.store(entity.id, Ordering::Relaxed);
         let (low, high) = (self.height, self.height + 1.0);
         let corners = [
             [0.0, high, 0.0],
@@ -100,6 +106,7 @@ fn the_event_tells_the_renderers_this_load_built() {
         event.entity_types(),
         [
             "minecraft:armor_stand",
+            "minecraft:ender_dragon",
             "minecraft:oak_boat",
             "minecraft:zombie",
             "ruby:golem"
@@ -144,6 +151,10 @@ fn a_target_that_is_no_living_entity_type_is_refused_by_name() {
     assert_eq!(
         add("minecraft:armor_stand"),
         Err("the entity layer for minecraft:armor_stand is refused: it draws through a route of its own, which does not run layers yet".into())
+    );
+    assert_eq!(
+        add("minecraft:ender_dragon"),
+        Err("the entity layer for minecraft:ender_dragon is refused: it draws through a route of its own, which does not run layers yet".into())
     );
     assert_eq!(add("minecraft:zombie"), Ok(()));
     assert_eq!(add("ruby:golem"), Ok(()), "a mod's living type");
@@ -332,6 +343,67 @@ fn a_player_draws_the_layers_of_its_model() {
             "the zombie's layers are not a player's"
         );
     });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn this_windows_player_is_told_its_own_entity_id() {
+    in_scene(
+        "this_windows_player_is_told_its_own_entity_id",
+        |game, scene| {
+            // This window's own entity id, as the server gave it.
+            match game.remote.as_mut() {
+                Some(remote) => remote.entity_id = 4321,
+                None => {
+                    let at = horizon_core::geometry::Vec3::ZERO;
+                    let mut player =
+                        horizon_client::motion::PlayerMotion::new(game.motion, at).unwrap();
+                    player.entity_id = 4321;
+                    game.player = Some(player);
+                }
+            }
+            let own = u32::try_from(game.own_entity_id()).unwrap();
+            assert_eq!(own, 4321);
+            // Drawn from a model made for the frame, with id 0, as `tick_player_model` makes it.
+            let mut model = mob(game, "minecraft:player", false);
+            model.id = 0;
+            let who = super::native_mob_draw::PlayerRender {
+                name: "own",
+                local: true,
+            };
+            let layers = game.mod_layers(&model);
+            let mut out = Vec::new();
+            game.mod_layer_geometry(
+                &model,
+                Some(who),
+                None,
+                layers,
+                1.0,
+                CAMERA,
+                LIGHT,
+                &mut out,
+            );
+            assert_eq!(scene.wide.id.load(Ordering::Relaxed), own);
+            // Another player keeps its own mob's id.
+            let other = mob(game, "minecraft:player", false);
+            let layers = game.mod_layers(&other);
+            let who = super::native_mob_draw::PlayerRender {
+                name: "other",
+                local: false,
+            };
+            game.mod_layer_geometry(
+                &other,
+                Some(who),
+                None,
+                layers,
+                1.0,
+                CAMERA,
+                LIGHT,
+                &mut out,
+            );
+            assert_eq!(scene.wide.id.load(Ordering::Relaxed), 90);
+        },
+    );
 }
 
 #[test]

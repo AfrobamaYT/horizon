@@ -206,12 +206,14 @@ impl Game<'_> {
         ANY.store(any, Ordering::Relaxed);
     }
 
-    /// Draws `layers` over `mob`, each from its frame (at the feet, turned with the body), in
-    /// the order they were added; `parts` are its humanoid parts as the vanilla draw posed them.
+    /// Draws `layers` over `mob`, told as the entity `id`, each from its frame (at the feet,
+    /// turned with the body), in the order they were added; `parts` are its humanoid parts as the
+    /// vanilla draw posed them.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::game) fn registered_layer_geometry(
         &self,
         mob: &Mob,
+        id: u32,
         layers: &Layers,
         parts: Option<&PosedParts>,
         partial: f32,
@@ -221,7 +223,7 @@ impl Game<'_> {
     ) {
         let render = mob_render(mob, partial);
         let entity: mod_api::EntityRenderState = mod_api::__private::built::EntityRenderState {
-            id: mob.id,
+            id,
             partial,
             age: render.age,
             yaw: render.body_yaw,

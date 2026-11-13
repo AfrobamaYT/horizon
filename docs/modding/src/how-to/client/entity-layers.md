@@ -24,8 +24,9 @@ impl EntityRenderLayer for Halo {
         _parts: Option<&PosedParts>,
         draw: &mut dyn BlockEntityDrawContext,
     ) -> Result<(), String> {
-        // In the entity's frame: at its feet, turned with its body.
-        let face = Some(CubeFace::new("example:entity/halo"));
+        // In the entity's frame: at its feet, turned with its body. Any atlas sprite will do:
+        // a vanilla one, as here, or one of the mod's own assets.
+        let face = Some(CubeFace::new("block/gold_block"));
         draw.cube([-4.0, 34.0, -4.0], [4.0, 35.0, 4.0], [face; 6], 0xFFFFFF);
         Ok(())
     }
@@ -77,6 +78,8 @@ carry over, so add them each time. The event also tells what renderers this load
   target, and the game logs it too.
 - Several mods may add to one target: the layers draw in the order they were added, after the
   entity's model and its vanilla layers.
+- An entity a mod draws itself (`mob_submit` or `player_submit` setting `drawn`) draws none of its
+  layers, as NeoForge's cancelled `RenderLivingEvent.Pre` skips them.
 - `submit` returns `Ok(())` to keep what it drew. A layer that returns an `Err`, panics, or (in a wasm
   mod) has its call refused or trapped is logged once and asked no more until the next resource load
   adds it again; what it drew that frame is dropped.

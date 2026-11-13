@@ -123,8 +123,14 @@ impl Game<'_> {
         out: &mut Vec<Vertex>,
     ) {
         if let Some(layers) = layers {
+            // This window's player is drawn from a model made for the frame (`Mob::new(0, ..)`):
+            // its layers are told its own network id.
+            let id = match &who {
+                Some(who) if who.local => u32::try_from(self.own_entity_id()).unwrap_or(mob.id),
+                _ => mob.id,
+            };
             let parts = parts.as_ref();
-            self.registered_layer_geometry(mob, &layers, parts, partial, camera, light, out);
+            self.registered_layer_geometry(mob, id, &layers, parts, partial, camera, light, out);
         }
         // Every mob in view each frame: only when a mod listens.
         if !self.mob_render_listened() {
