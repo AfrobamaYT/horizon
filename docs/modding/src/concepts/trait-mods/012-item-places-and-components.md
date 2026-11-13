@@ -21,7 +21,18 @@ an entity's or an item's slot into that container's other slots (`forHandlerInde
 with an `exchange` of one. An exchange inside one of two backpacks is done in one of them: that one is rewritten
 holding the change and splits off, and the other stays as it was.
 
-A stack's components change the same way, where it lives (NeoForge's `ItemResource.with` and `without`). A component
+To change components on the **whole stack**, use `place.edit(host, tx, |stack| { ... })`
+with a server host. It reads the stack, applies the closure and exchanges the entire
+count in the same transaction. Missing stacks and edits that change the item or count
+return `false` without changing the place; successful writes return `true` and a parent
+abort restores them. `stack.set` and `stack.remove` edit typed overrides; `get` then
+`set` covers `update`. `stack.apply_components(&patch)` merges values and `!id`
+removals without losing unrelated components, refusing malformed damage atomically.
+`stack.copy_component_from(&other, id)` copies an own value or removal; when `other`
+inherits that component, it clears the target's override rather than recording removal.
+
+To change **one item** of a stack instead (NeoForge's `ItemResource.with` and `without`),
+use a resource and exchange it as below. A component
 is named by a `ComponentId`, checked once as a namespaced id (`ComponentId::new("minecraft:damage")`, None for
 `Damage` or `!minecraft:food`). `resource.component(&id)` reads the stack's own value in its patch as saved;
 `resource.with_component(host, &id, value)` sets it as vanilla's `PatchedDataComponentMap.set` does, keeping no value
