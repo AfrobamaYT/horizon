@@ -35,6 +35,34 @@
         "type:PingEvent",
         "type:Text",
         "type:entity::EntityRef"
+      ],
+      "fields": [
+        {
+          "id": "hook:ping.who",
+          "hash": "*",
+          "type": "entity::EntityRef",
+          "refs": [
+            "hook:ping",
+            "type:entity::EntityRef"
+          ]
+        },
+        {
+          "id": "hook:ping.lines",
+          "hash": "*",
+          "type": "&'a mut Vec<(Text, u32)>",
+          "refs": [
+            "hook:ping",
+            "type:Text"
+          ]
+        },
+        {
+          "id": "hook:ping.cancelled",
+          "hash": "*",
+          "type": "bool",
+          "refs": [
+            "hook:ping"
+          ]
+        }
       ]
     },
     {
@@ -65,6 +93,17 @@
       "refs": [
         "type:Point",
         "type:TickBlockEvent"
+      ],
+      "fields": [
+        {
+          "id": "hook:tick_block.pos",
+          "hash": "*",
+          "type": "Point",
+          "refs": [
+            "hook:tick_block",
+            "type:Point"
+          ]
+        }
       ]
     }
   ],
@@ -381,14 +420,11 @@
       "paths": [
         "CapabilityKey"
       ],
+      "fields_hash": "*",
       "kind": "struct",
       "generics": "<T: ?Sized>",
       "wire": false,
       "constructible": true,
-      "members": [
-        "name: &'static str",
-        "handler: PhantomData<T>"
-      ],
       "fields": [
         {
           "id": "type:CapabilityKey.name",
@@ -459,6 +495,7 @@
       "paths": [
         "Context"
       ],
+      "fields_hash": "*",
       "kind": "unit_struct",
       "wire": true,
       "wire_form": "manual",
@@ -472,6 +509,7 @@
       "paths": [
         "Ident"
       ],
+      "fields_hash": "*",
       "kind": "struct",
       "wire": true,
       "wire_form": "fields",
@@ -495,6 +533,7 @@
       "paths": [
         "Limits"
       ],
+      "fields_hash": "*",
       "kind": "struct",
       "wire": false,
       "constructible": false,
@@ -557,6 +596,7 @@
       "paths": [
         "Name"
       ],
+      "fields_hash": "*",
       "kind": "tuple_struct",
       "wire": true,
       "wire_form": "via:String",
@@ -584,15 +624,11 @@
       "hash": "*",
       "doc": "The event of `ping`.",
       "shape": null,
+      "fields_hash": "*",
       "kind": "struct",
       "generics": "<'a>",
       "wire": false,
       "constructible": true,
-      "members": [
-        "who: entity::EntityRef",
-        "lines: &'a mut Vec<(Text, u32)>",
-        "cancelled: bool"
-      ],
       "fields": [
         {
           "id": "type:PingEvent.who",
@@ -630,22 +666,16 @@
       "paths": [
         "Point"
       ],
-      "kind": "struct",
-      "derives": [
+      "impls": [
         "Clone",
         "Copy",
-        "Wire"
-      ],
-      "impls": [
         "Default"
       ],
+      "fields_hash": "*",
+      "kind": "struct",
       "wire": true,
       "wire_form": "derive",
       "constructible": true,
-      "members": [
-        "x: i32",
-        "y: i32"
-      ],
       "fields": [
         {
           "id": "type:Point.x",
@@ -673,6 +703,7 @@
       "paths": [
         "SlotKey"
       ],
+      "fields_hash": "*",
       "kind": "tuple_struct",
       "wire": true,
       "wire_form": "fields",
@@ -686,12 +717,12 @@
       "paths": [
         "Text"
       ],
-      "kind": "struct",
-      "derives": [
+      "impls": [
         "Clone",
-        "Debug",
-        "Wire"
+        "Debug"
       ],
+      "fields_hash": "*",
+      "kind": "struct",
       "wire": true,
       "wire_form": "derive",
       "constructible": false,
@@ -711,12 +742,10 @@
       "hash": "*",
       "doc": "The event of `tick_block`.",
       "shape": null,
+      "fields_hash": "*",
       "kind": "struct",
       "wire": false,
       "constructible": true,
-      "members": [
-        "pos: Point"
-      ],
       "fields": [
         {
           "id": "type:TickBlockEvent.pos",
@@ -738,12 +767,12 @@
         "EntityRef",
         "entity::EntityRef"
       ],
-      "kind": "tuple_struct",
-      "derives": [
+      "impls": [
         "Clone",
-        "Copy",
-        "Wire"
+        "Copy"
       ],
+      "fields_hash": "*",
+      "kind": "tuple_struct",
       "wire": true,
       "wire_form": "derive",
       "constructible": false
@@ -772,6 +801,7 @@
         "s8::Thing",
         "shared::Thing"
       ],
+      "fields_hash": "*",
       "kind": "unit_struct",
       "wire": false,
       "constructible": true

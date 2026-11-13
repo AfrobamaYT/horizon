@@ -18,6 +18,7 @@
 //! | Record | Id |
 //! |---|---|
 //! | hook | `hook:<name>` |
+//! | argument or output of a hook | `hook:<name>.<argument>` |
 //! | trait | `trait:<path>` |
 //! | trait method | `method:<trait path>::<name>` |
 //! | associated type or const of a trait | `assoc:<trait path>::<name>` |
@@ -32,8 +33,8 @@
 //! # Hashes
 //!
 //! A record's `hash` is [`contract_hash`] of its contract: every field except `id`, `hash`,
-//! `doc`, `wasm_reason`, `paths`, a hook's `engine` and `counterparts`, a type's `shape`, and its
-//! member records. Each
+//! `doc`, `wasm_reason`, `paths`, a hook's `engine` and `counterparts`, a type's `shape` and
+//! `impls`, and its member records. Each
 //! member (a method, field or variant) has its own hash, so adding a method to `Host`, adding a
 //! hook or adding a field to a type mods cannot build changes no existing record's hash. A
 //! container's hash covers its members only where a new member breaks users: the fields of a
@@ -41,8 +42,13 @@
 //! mods implement. A trait's supertrait bounds and their references are in its hash only when
 //! mods implement it (role `implement`): a trait mods only call is its method set, so gaining or
 //! losing a supertrait (a sub-host trait of `Host`) changes no existing record's hash, and a
-//! method that goes shows as that method removed. A type's `shape` is its full wire layout ([`shape`]) and is not hashed into
-//! its contract. The document's `hash` is [`Surface::document_hash`] over every (id, hash).
+//! method that goes shows as that method removed. A hook's hash covers what every listener
+//! relies on (side, kind, scope, cancellable, context, host, owner, whether it has an output),
+//! not its arguments, which are member records, nor its `version`. A struct's field set is never
+//! in its hash; its `fields_hash` says whether a full literal still builds. A type's `impls` are a set, derived and
+//! hand-written alike, outside its hash: one gained is additive, one lost is a change the fit
+//! test names. A type's `shape` is its full wire layout ([`shape`]) and is not hashed into its
+//! contract. The document's `hash` is [`Surface::document_hash`] over every (id, hash).
 //!
 //! A trait's `role` says whether mods implement it, call it, or neither: the generator takes it
 //! from the WebAssembly boundary's lists of the traits a mod implements (its exports, with the
@@ -134,7 +140,8 @@ pub fn leaf(id: &str) -> &str {
         return id;
     };
     match kind {
-        "capability" | "hook" | "part" => rest,
+        "capability" | "part" => rest,
+        "hook" => rest.rsplit_once('.').map_or(rest, |(_, member)| member),
         "type" => match rest.rsplit_once('.') {
             Some((_, member)) => member,
             None => rest.rsplit("::").next().unwrap_or(rest),
@@ -171,6 +178,8 @@ sealed!(
 );
 
 impl Hook {
+    /// The hook, hashed over what every listener relies on whatever arguments it reads; its
+    /// arguments and output become member records.
     pub fn new(
         id: impl Into<String>,
         doc: impl Into<String>,
@@ -178,15 +187,86 @@ impl Hook {
         counterparts: Counterparts,
         contract: HookContract,
     ) -> Self {
+        #[derive(Serialize)]
+        struct Own<'a> {
+            side: Side,
+            contract: HookKind,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            scope: &'a Option<Scope>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            cancellable: Option<bool>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            context: &'a Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            host: &'a Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            owner: &'a Option<String>,
+            answered_by_mod: bool,
+            output: bool,
+        }
+        let id = id.into();
+        let hash = contract_hash(&Own {
+            side: contract.side,
+            contract: contract.contract,
+            scope: &contract.scope,
+            cancellable: contract.cancellable,
+            context: &contract.context,
+            host: &contract.host,
+            owner: &contract.owner,
+            answered_by_mod: contract.answered_by_mod,
+            output: contract.output.is_some(),
+        });
+        let fields = contract
+            .arguments
+            .iter()
+            .chain(&contract.output)
+            .map(|argument| {
+                let mut refs: Vec<String> = contract
+                    .refs
+                    .iter()
+                    .filter(|r| mentions(&argument.ty, leaf(r)))
+                    .cloned()
+                    .collect();
+                refs.push(id.clone());
+                refs.sort();
+                Field::new(
+                    format!("{id}.{}", argument.name),
+                    "",
+                    FieldContract {
+                        ty: argument.ty.clone(),
+                        refs,
+                    },
+                )
+            })
+            .collect();
         Self {
-            id: id.into(),
-            hash: contract_hash(&contract),
+            id,
+            hash,
             doc: doc.into(),
             engine,
             counterparts,
             contract,
+            fields,
         }
     }
+}
+
+/// Whether the normalised type `ty` names an item whose last segment is `name`.
+fn mentions(ty: &str, name: &str) -> bool {
+    ty.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .any(|word| word == name)
+}
+
+/// The hash of a struct's field set: each public field's `name: type` in declaration order.
+pub fn fields_hash(fields: &[Field]) -> String {
+    let mut text = String::new();
+    for field in fields {
+        text.push_str(leaf(&field.id));
+        text.push_str(": ");
+        text.push_str(&field.contract.ty);
+        text.push('\n');
+    }
+    shape::digest(&text)
 }
 
 impl Trait {
@@ -235,6 +315,12 @@ impl Type {
             doc: doc.into(),
             shape,
             paths: Vec::new(),
+            impls: Vec::new(),
+            fields_hash: matches!(
+                contract.kind,
+                TypeKind::Struct | TypeKind::TupleStruct | TypeKind::UnitStruct | TypeKind::Union
+            )
+            .then(|| fields_hash(&fields)),
             contract,
             fields,
             variants,
@@ -302,7 +388,10 @@ impl Surface {
 
     /// Every record and member record as (id, hash), in no promised order.
     pub fn entries(&self) -> impl Iterator<Item = (&str, &str)> {
-        let hooks = self.hooks.iter().map(|r| (r.id.as_str(), r.hash.as_str()));
+        let hooks = self.hooks.iter().flat_map(|r| {
+            std::iter::once((r.id.as_str(), r.hash.as_str()))
+                .chain(r.fields.iter().map(|f| (f.id.as_str(), f.hash.as_str())))
+        });
         let traits = self.traits.iter().flat_map(|r| {
             std::iter::once((r.id.as_str(), r.hash.as_str()))
                 .chain(r.methods.iter().map(|m| (m.id.as_str(), m.hash.as_str())))
@@ -377,6 +466,12 @@ impl Surface {
                 &hook.id,
                 hook.contract.refs.iter().map(String::as_str).collect(),
             );
+            for field in &hook.fields {
+                refs.insert(
+                    &field.id,
+                    field.contract.refs.iter().map(String::as_str).collect(),
+                );
+            }
         }
         for item in &self.traits {
             // Only a trait mods implement leads to its supertraits: implementing it means
