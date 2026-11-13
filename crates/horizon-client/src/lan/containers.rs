@@ -977,7 +977,7 @@ impl Hub {
                 Some(BlockEntity::Crafter(c)) => c
                     .disabled
                     .iter()
-                    .chain([&c.triggered])
+                    .chain([&c.is_triggered()])
                     .map(|&d| i32::from(d))
                     .collect(),
                 // A mod's menu: the data slots its tick set. A mod menu type's
