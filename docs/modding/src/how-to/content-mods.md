@@ -669,7 +669,7 @@ behaviour, with its own attributes. It saves what its template's class saves und
 table is its own, `<id>:entities/<name>` (vanilla's `EntityType.getDefaultLootTable`). It is not in vanilla's entity type
 tags (`#minecraft:undead`, `#minecraft:zombies`...) unless the mod adds it. Its row in `entity-types.json` is its
 template's, with `template` added and its attributes in place of the template's. To draw a custom model or texture,
-use `mob_submit`; the content declaration inherits the template's goals.
+use `render_living_pre`; the content declaration inherits the template's goals.
 
 #### Menu types
 

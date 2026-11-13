@@ -4356,13 +4356,13 @@ impl Game<'_> {
                 forced: self.streaming.forced.iter().copied().collect(),
                 // Filled from the `PORTAL` tickets by `update`.
                 portal: Vec::new(),
-                // EnderDragonFight.tick: while a player watches the fight, the
-                // arena holds a `DRAGON` ticket of radius 9 at (0, 0), so its
-                // island ticks out to 7 chunks whatever the watcher's
-                // simulation distance. The fight lives where the type has one.
+                // EnderDragonFight.tick: while a player watches the fight, the arena holds a
+                // `DRAGON` ticket of radius 9 at (0, 0), so its island ticks out to 7 chunks
+                // whatever the watcher's simulation distance. The fight is where the type has one.
                 dragon: (self.dimension_type().has_ender_dragon_fight
                     && self.fight.arena_watched())
                 .then_some((0, 0)),
+                viewed: self.viewed_tickets(),
                 view_distance: self.settings.render_distance.clamp(2, 32),
                 simulation_distance: self.settings.simulation_distance.max(2),
             }
@@ -8054,60 +8054,6 @@ impl Game<'_> {
             })
         };
         laps.lap("eg_prep");
-        for m in &self.mobs {
-            // Blaze.isOnFire: a charged blaze burns.
-            let blazing = m.species() == horizon_client::mobs::Species::Blaze && m.extra.flag;
-            if (m.is_on_fire() || blazing) && !m.removed {
-                let at = m.previous.lerp(m.position, alpha);
-                if !fire_visible([at.x, at.y, at.z], m.width(), m.height()) {
-                    continue;
-                }
-                horizon_client::fire_render::flames(
-                    [at.x, at.y, at.z],
-                    m.width(),
-                    m.height(),
-                    camera,
-                    fire_yaw,
-                    &self.gui.atlas.sprites,
-                    self.world.light(
-                        at.x.floor() as i32,
-                        at.y.floor() as i32,
-                        at.z.floor() as i32,
-                    ),
-                    &mut out,
-                );
-            }
-        }
-        if self.own_body_in_view()
-            && let Some(p) = &self.player
-            && p.fire_ticks > 0
-            && !p.spectator
-        {
-            let feet = self
-                .previous_position
-                .lerp(p.position, self.clock.camera_fraction());
-            if fire_visible(
-                [feet.x, feet.y, feet.z],
-                p.dimensions.width,
-                p.dimensions.height,
-            ) {
-                horizon_client::fire_render::flames(
-                    [feet.x, feet.y, feet.z],
-                    p.dimensions.width,
-                    p.dimensions.height,
-                    camera,
-                    fire_yaw,
-                    &self.gui.atlas.sprites,
-                    self.world.light(
-                        feet.x.floor() as i32,
-                        feet.y.floor() as i32,
-                        feet.z.floor() as i32,
-                    ),
-                    &mut out,
-                );
-            }
-        }
-        laps.lap("eg_fire_mobs");
         for item in &self.dropped {
             if item.fire_ticks > 0
                 && self
@@ -8177,6 +8123,31 @@ impl Game<'_> {
         // Mobs and their projectiles (a span each).
         self.mob_geometry(camera, alpha, &mut out);
         self.mark_motion(out.len(), 0);
+        for m in self.drawn_mobs() {
+            // Blaze.isOnFire: a charged blaze burns.
+            let blazing = m.species() == horizon_client::mobs::Species::Blaze && m.extra.flag;
+            if (m.is_on_fire() || blazing) && !m.removed {
+                let at = m.previous.lerp(m.position, alpha);
+                if !fire_visible([at.x, at.y, at.z], m.width(), m.height()) {
+                    continue;
+                }
+                self.mark_entity(out.len(), &m.kind.id);
+                horizon_client::fire_render::flames(
+                    [at.x, at.y, at.z],
+                    m.width(),
+                    m.height(),
+                    camera,
+                    fire_yaw,
+                    &self.gui.atlas.sprites,
+                    self.world.light(
+                        at.x.floor() as i32,
+                        at.y.floor() as i32,
+                        at.z.floor() as i32,
+                    ),
+                    &mut out,
+                );
+            }
+        }
         laps.lap("eg_mobs");
         // In first person only a shader pack's shadow pass draws the player.
         self.mark_player(out.len(), !self.own_body_in_view());
@@ -8184,6 +8155,35 @@ impl Game<'_> {
         self.mark_motion(player_start, Self::MOTION_OWN_PLAYER);
         let player_alpha = self.own_player_alpha();
         self.player_model_geometry(camera, player_alpha, &mut out);
+        if self.own_body_in_view()
+            && let Some(p) = &self.player
+            && p.fire_ticks > 0
+            && !(p.spectator || self.own_render_canceled())
+        {
+            let feet = self
+                .previous_position
+                .lerp(p.position, self.clock.camera_fraction());
+            if fire_visible(
+                [feet.x, feet.y, feet.z],
+                p.dimensions.width,
+                p.dimensions.height,
+            ) {
+                horizon_client::fire_render::flames(
+                    [feet.x, feet.y, feet.z],
+                    p.dimensions.width,
+                    p.dimensions.height,
+                    camera,
+                    fire_yaw,
+                    &self.gui.atlas.sprites,
+                    self.world.light(
+                        feet.x.floor() as i32,
+                        feet.y.floor() as i32,
+                        feet.z.floor() as i32,
+                    ),
+                    &mut out,
+                );
+            }
+        }
         // A native pack's shadow pass alone gets the first-person model (no per-entity draws).
         if self.pack_ids.is_none() && !self.own_body_in_view() {
             self.shadow_only_vertices
@@ -8226,7 +8226,7 @@ impl Game<'_> {
                 )
             };
             let mut casters: Vec<(glam::DVec3, f32, f32)> =
-                horizon_client::shadows::mob_casters(&self.mobs, a).collect();
+                horizon_client::shadows::mob_casters(self.drawn_mobs(), a).collect();
             let item = horizon_client::shadows::shadow_params("minecraft:item");
             casters.extend(
                 self.dropped
