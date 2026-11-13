@@ -31,7 +31,7 @@ pub struct SelectorBase {
     /// Only players are candidates, as for `@a` (`type=minecraft:player`).
     pub players_only: bool,
     /// At most this many results; `None` for no limit. `Some(1)` lets a single-entity
-    /// argument (`entity`, `player`) take the token.
+    /// argument (`entity`, `player`) take the token. Zero refuses registration.
     pub limit: Option<u32>,
     /// How the candidates are ordered before the limit.
     pub sort: SelectorSort,
@@ -61,12 +61,14 @@ impl SelectorBase {
 /// Register it once, from `Hooks::register`, with `Registrar::register_entity_selector`. Its
 /// name is the word after `@`. The server parses `@name[...]` in every entity, entities,
 /// player and players argument, vanilla commands included; selector permission is checked as
-/// for vanilla selectors. A client that does not know the token still sends the command.
+/// for vanilla selectors. Horizon clients receive token metadata beside the command tree;
+/// vanilla clients may still send the command without local token completion.
 ///
 /// The game keeps one value per token and calls it on the server thread: implement it to be
 /// shared, without mutable state.
 pub trait EntitySelectorType: Send + Sync + 'static {
-    /// The base selection, read once when the game builds its command registries.
+    /// The base selection, read once at registration and frozen for the process.
+    /// A panic, zero limit, or a tooltip longer than 32767 UTF-16 units refuses registration.
     fn base(&self) -> SelectorBase;
 
     /// Whether `entity` stays selected, asked for each candidate after the base selection

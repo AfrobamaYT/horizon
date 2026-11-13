@@ -165,6 +165,13 @@ as `@e`. The parser reads the whole word after `@` before vanilla's letter, so `
 is never `@a`, and an unregistered word still fails with
 `argument.entity.selector.unknown`. A name that is empty, not lowercase letters, digits
 and `_`, one of `p a r s e n`, or already registered by any mod refuses the mods at
-startup. The server and single player complete the token with its tooltip. A client
-connected to another server does not know the token: it can still send the command,
-but its chat box marks the token as unknown.
+startup. The base is evaluated once at registration; a panic or zero limit refuses
+registration. Token names and tooltip keys must fit the protocol string boundary
+(32767 ASCII bytes for names, 32767 UTF-16 units for tooltip keys).
+
+The server sends frozen token metadata alongside each command tree to connected Horizon
+clients, including the single-player window. Their command parser and completion use the
+server's names, tooltip keys, base limits and sort order, even without the server's mod
+installed locally. This replaces the previous server's inventory at connection startup.
+Vanilla clients do not receive this Horizon-specific metadata and can still send commands
+containing the token without local completion.

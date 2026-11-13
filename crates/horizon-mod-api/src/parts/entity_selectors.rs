@@ -7,6 +7,7 @@ const VANILLA: [&str; 6] = ["p", "a", "r", "s", "e", "n"];
 impl EntitySelectorsRegistrar for PartRegistrar {
     fn add_entity_selector(&mut self, name: &str, selector: Arc<dyn crate::EntitySelectorType>) {
         let refusal = if name.is_empty()
+            || name.len() > 32767
             || !name
                 .bytes()
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
@@ -39,10 +40,12 @@ impl EntitySelectorsRegistrar for PartRegistrar {
         }
         let base = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| selector.base()))
         {
-            Ok(base) if base.limit != Some(0) => base,
+            Ok(base) if base.limit != Some(0) && base.tooltip.encode_utf16().count() <= 32767 => {
+                base
+            }
             Ok(_) => {
                 self.refused.push(format!(
-                    "{} registered selector @{name} with zero limit",
+                    "{} registered selector @{name} with zero limit or oversized tooltip",
                     self.mod_id
                 ));
                 return;
@@ -76,13 +79,13 @@ pub mod tests {
     #[test]
     pub(crate) fn registration_refuses_vanilla_invalid_and_duplicate_tokens() {
         /// A token that keeps every candidate.
-        struct Everyone;
+        struct Everyone(u32);
 
         impl crate::EntitySelectorType for Everyone {
             fn base(&self) -> crate::SelectorBase {
                 crate::SelectorBase::new(
                     true,
-                    Some(1),
+                    Some(self.0),
                     crate::SelectorSort::Nearest,
                     "test.selector.allies",
                 )
@@ -102,7 +105,7 @@ pub mod tests {
         #[mod_api::__subscriptions]
         impl crate::Hooks for Allies {
             fn register(&self, r: &mut dyn crate::Registrar, _: &crate::RegistrationContext) {
-                r.register_entity_selector("allies", Everyone);
+                r.register_entity_selector("allies", Everyone(1));
             }
         }
 
@@ -110,10 +113,11 @@ pub mod tests {
         #[mod_api::__subscriptions]
         impl crate::Hooks for Invalid {
             fn register(&self, r: &mut dyn crate::Registrar, _: &crate::RegistrationContext) {
-                r.register_entity_selector("allies", Everyone);
-                r.register_entity_selector("allies", Everyone);
-                r.register_entity_selector("a", Everyone);
-                r.register_entity_selector("Bad", Everyone);
+                r.register_entity_selector("allies", Everyone(1));
+                r.register_entity_selector("allies", Everyone(1));
+                r.register_entity_selector("a", Everyone(1));
+                r.register_entity_selector("Bad", Everyone(1));
+                r.register_entity_selector("zero", Everyone(0));
             }
         }
 
@@ -132,9 +136,10 @@ pub mod tests {
             Box::new(Invalid),
         )])
         .unwrap_err();
-        assert_eq!(errors.len(), 3);
+        assert_eq!(errors.len(), 4);
         assert!(errors[0].contains("@allies twice"));
         assert!(errors[1].contains("vanilla's selector @a"));
         assert!(errors[2].contains("invalid selector token @Bad"));
+        assert!(errors[3].contains("@zero with zero limit"));
     }
 }
