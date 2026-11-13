@@ -78,6 +78,11 @@ pub const LEVEL_SCOPED: [i32; 30] = [
 /// THUNDER_LEVEL_CHANGE.
 const WEATHER_EVENTS: [u8; 4] = [1, 2, 7, 8];
 
+/// The most entities one viewed level holds on its client: a server tracks no more for one view,
+/// and a client sent an `AddEntity` of a new one past it closes the connection. A fixed engine
+/// limit of this revision, so that a server cannot fill a client's memory through one level.
+pub const MAX_ENTITIES: usize = 8192;
+
 /// Why a `horizon:levels` payload closes the connection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewedLevelsError {

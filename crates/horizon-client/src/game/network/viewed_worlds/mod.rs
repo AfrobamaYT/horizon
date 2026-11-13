@@ -7,7 +7,9 @@
 //! The client views at most `viewed_levels_net::MAX_LEVELS` levels besides its own, the number
 //! its capability answer gives. A Login, a Respawn or a new configuration phase drops every
 //! viewed world, and the server opens again what it still views. Nothing of a viewed level is
-//! drawn yet: drawing is gap 13's world view, and its entities are 9d.
+//! drawn yet: drawing is gap 13's world view. Its entities live in its world (`entities`), apart
+//! from the player's own.
+mod entities;
 mod routing;
 mod worlds;
 pub(in crate::game) use worlds::ViewedWorlds;
@@ -243,6 +245,61 @@ mod tests {
         assert_eq!(game.world.day_time, day_time);
         assert!(!game.world.weather.raining);
         assert_eq!(game.remote.as_ref().unwrap().level, "minecraft:overworld");
+    }
+
+    /// A wrapped `AddEntity` and its move put the entity in the viewed world, where it moves; the
+    /// player's own world holds nothing of it. A wrapped `RemoveEntities` takes it out.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_wrapped_entity_lives_in_the_viewed_world_not_the_players() {
+        let mut resources = None;
+        let mut game = client(&mut resources);
+        game.handle_packet(open(1, "minecraft:the_nether")).unwrap();
+        let add = C::AddEntity(play::AddEntity {
+            id: 50,
+            uuid: 50,
+            kind: 0,
+            position: [8.5, 70.0, 8.5],
+            velocity: [0.0; 3],
+            pitch: 0,
+            yaw: 64,
+            head_yaw: 0,
+            data: 0,
+        });
+        let step = C::MoveEntityPos(play::MoveEntityPos(play::MoveEntity {
+            id: 50,
+            delta: Some(play::VecDelta::Linear([4096, 0, -2048])),
+            rotation: None,
+            on_ground: true,
+        }));
+        game.handle_packet(run(1, &[add, step])).unwrap();
+        let nether = &game
+            .remote
+            .as_ref()
+            .unwrap()
+            .viewed
+            .get(1)
+            .unwrap()
+            .entities;
+        let pig = nether.get(50).expect("in the viewed world");
+        assert_eq!((pig.uuid, pig.kind, pig.data), (50, 0, 0));
+        assert_eq!(pig.position, [9.5, 70.0, 8.0]);
+        assert_eq!(pig.rotation.0, 90.0);
+        assert!(pig.on_ground);
+        let r = game.remote.as_ref().unwrap();
+        assert!(r.tracked_entity(50).is_none(), "not in the player's world");
+        assert!(game.mobs.iter().all(|m| m.id != 50));
+        let gone = C::RemoveEntities(play::RemoveEntities { ids: vec![50] });
+        game.handle_packet(run(1, &[gone])).unwrap();
+        let nether = &game
+            .remote
+            .as_ref()
+            .unwrap()
+            .viewed
+            .get(1)
+            .unwrap()
+            .entities;
+        assert!(nether.get(50).is_none());
     }
 
     /// A death's Respawn drops the viewed worlds: the server opens again what it still views.
