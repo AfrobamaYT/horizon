@@ -3948,7 +3948,7 @@ mod tests {
             &[[1, 2, 3, 255]],
             None,
         );
-        let atlas = HudAtlas::build(&root).unwrap();
+        let atlas = HudAtlas::build(&ResourceSource::directory(root.clone())).unwrap();
         let _ = fs::remove_dir_all(&root);
         let packed = atlas.sprites["gui/sprites/boss_bar/pink_background"];
         let missing = atlas.sprites[MISSING_SPRITE];
