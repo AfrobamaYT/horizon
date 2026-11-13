@@ -153,9 +153,14 @@ impl Game<'_> {
                 endpoint.disconnect(reason);
             }
         } else if let Some(error) = failure {
+            // The reason goes to the log; the player is told only which mod's handler failed.
+            log::warn!("payload {} failed: {error}", id.0);
             endpoint.disconnect(Text::translate(
                 "disconnect.genericReason",
-                vec![Text::literal(format!("payload {} failed: {error}", id.0))],
+                vec![Text::literal(format!(
+                    "a mod's payload handler failed ({})",
+                    horizon_client::raw_payloads::mod_of(&id)
+                ))],
             ));
         } else if let Some(reason) = reason {
             endpoint.disconnect(reason);
@@ -253,6 +258,9 @@ impl IPayloadContext for MainContext<'_, '_> {
 #[path = "payload_transport/config_tests.rs"]
 mod config_tests;
 #[cfg(test)]
+#[path = "payload_transport/disconnect_tests.rs"]
+mod disconnect_tests;
+#[cfg(test)]
 #[path = "payload_transport/raw_fault_tests.rs"]
 mod raw_fault_tests;
 #[cfg(test)]
@@ -261,6 +269,9 @@ mod sender_tests;
 #[cfg(test)]
 #[path = "payload_transport/tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "payload_transport/wasm_config_tests.rs"]
+mod wasm_config_tests;
 #[cfg(test)]
 #[path = "payload_transport/wasm_tests.rs"]
 mod wasm_tests;
