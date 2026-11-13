@@ -954,18 +954,14 @@ mod tests {
             game.settings.render_distance = 12;
             let registry = game.pack.assets.registry;
             let stone = registry.default_state("minecraft:stone").unwrap();
-            let portal = registry
-                .default_state("minecraft:nether_portal")
-                .unwrap();
+            let portal = registry.default_state("minecraft:nether_portal").unwrap();
             let zombie = game
                 .res
                 .mob_types()
                 .get("minecraft:zombie")
                 .unwrap()
                 .clone();
-            game.player = Some(
-                PlayerMotion::new(game.motion, Vec3::new(8.5, 65.0, 8.5)).unwrap(),
-            );
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(8.5, 65.0, 8.5)).unwrap());
             for z in [8, 12] {
                 game.world.set(0, 63, z, stone).unwrap();
             }
@@ -999,11 +995,8 @@ mod tests {
             );
 
             // Out of the portal, the value counts down one per tick.
-            game.mobs
-                .iter_mut()
-                .find(|m| m.id == 40)
-                .unwrap()
-                .position = Vec3::new(0.5, 64.0, 12.5);
+            game.mobs.iter_mut().find(|m| m.id == 40).unwrap().position =
+                Vec3::new(0.5, 64.0, 12.5);
             game.handle_entity_portals();
             assert_eq!(mob.portal_cooldown(game), Some(held - 1));
 
@@ -1012,11 +1005,7 @@ mod tests {
             assert_eq!(mob.portal_cooldown(game), Some(held - 1));
 
             // 0 lets it enter on the next tick.
-            game.mobs
-                .iter_mut()
-                .find(|m| m.id == 40)
-                .unwrap()
-                .position = Vec3::new(0.5, 64.0, 8.5);
+            game.mobs.iter_mut().find(|m| m.id == 40).unwrap().position = Vec3::new(0.5, 64.0, 8.5);
             assert!(mob.set_portal_cooldown(game, 0));
             assert_eq!(mob.portal_cooldown(game), Some(0));
             game.find_entity_portals();

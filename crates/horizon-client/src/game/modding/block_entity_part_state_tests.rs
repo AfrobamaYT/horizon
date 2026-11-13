@@ -49,7 +49,11 @@ impl BlockPart for Press {}
 impl BlockEntityPart for Press {
     fn block_entity_tick(&self, host: &mut dyn ServerHost, event: &mut BlockEntityTickEvent<'_>) {
         let level = host.level(host.dimension()).unwrap();
-        assert_eq!(host.block_entity(level, event.pos), None, "out for its tick");
+        assert_eq!(
+            host.block_entity(level, event.pos),
+            None,
+            "out for its tick"
+        );
         let entity = host.block_entity_identity(level, event.pos).unwrap();
         Press::edit_state(host, entity, |_, ticks| *ticks += 1).unwrap();
     }
@@ -85,8 +89,7 @@ fn with_state_mod(name: &str, test: impl FnOnce(&mut Game<'_>)) {
     ) {
         return;
     }
-    let mods: mod_api::Mods =
-        vec![mod_api::ModEntry::new("part_state", Box::new(StateMod))].into();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new("part_state", Box::new(StateMod))].into();
     mod_platform::testing::with_mods(mods.clone(), || {
         crate::game::api_values::install_parts(&mods).unwrap();
         mod_api::__private::mark_game_thread();
@@ -160,7 +163,10 @@ fn part_state_is_per_block_entity_through_ticks_transactions_and_replacement() {
         });
         assert_eq!(aborted, Err(()));
         assert_eq!(stored(game, a), Some(9));
-        assert!(!game.world.modified.contains(&(0, 0)), "clean after the abort");
+        assert!(
+            !game.world.modified.contains(&(0, 0)),
+            "clean after the abort"
+        );
 
         // A panic inside an edit leaves no default behind.
         let host: &mut dyn ServerHost = game;
@@ -224,7 +230,10 @@ fn part_state_is_per_block_entity_through_ticks_transactions_and_replacement() {
         game.world.modified.clear();
         assert_eq!(Press::edit_state(game, b, |_, _| ran = true), Err(decode));
         assert!(!ran);
-        assert!(!game.world.modified.contains(&(0, 0)), "a refused edit marks nothing");
+        assert!(
+            !game.world.modified.contains(&(0, 0)),
+            "a refused edit marks nothing"
+        );
         assert_eq!(
             game.world
                 .block_entities
@@ -282,7 +291,10 @@ fn part_state_saves_with_its_chunk_and_reloads_under_a_fresh_handle() {
             game.world.modified.contains(&key),
             "an edit marks its chunk for the unload's save"
         );
-        assert_eq!(edit_part_state(game, entity, &SCRATCH, |_, n| *n = 4), Ok(()));
+        assert_eq!(
+            edit_part_state(game, entity, &SCRATCH, |_, n| *n = 4),
+            Ok(())
+        );
 
         // The ticket goes and the residency owner (`update_world`) unloads the column: it
         // saves it, then drops its block entities and their live bindings. Its sweep runs every
@@ -308,7 +320,11 @@ fn part_state_saves_with_its_chunk_and_reloads_under_a_fresh_handle() {
         assert_ne!(reloaded, entity);
         assert_eq!(Press::state(game, entity), Err(PartStateError::Stale));
         assert_eq!(stored(game, reloaded), Some(7));
-        assert_eq!(read_state(game, reloaded, &SCRATCH), Ok(None), "session only");
+        assert_eq!(
+            read_state(game, reloaded, &SCRATCH),
+            Ok(None),
+            "session only"
+        );
     });
 }
 
@@ -326,7 +342,8 @@ fn indexed(game: &Game<'_>, entity: BlockEntityRef) -> Option<i32> {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
 fn a_removal_retires_its_state_only_at_the_root_commit() {
-    const NAME: &str = "game::block_entity_part_state_tests::a_removal_retires_its_state_only_at_the_root_commit";
+    const NAME: &str =
+        "game::block_entity_part_state_tests::a_removal_retires_its_state_only_at_the_root_commit";
     with_state_mod(NAME, |game| {
         let pos = (1, 64, 1);
         let a = press(game, pos);
@@ -338,7 +355,11 @@ fn a_removal_retires_its_state_only_at_the_root_commit() {
         let seal = game.transaction_open();
         game.journal_remove_block_entity(pos);
         assert_eq!(Press::state(game, a), Err(PartStateError::Stale));
-        assert_eq!(indexed(game, a), Some(7), "still bound until the root commits");
+        assert_eq!(
+            indexed(game, a),
+            Some(7),
+            "still bound until the root commits"
+        );
         let tentative = press(game, pos);
         assert_eq!(Press::edit_state(game, tentative, |_, n| *n = 5), Ok(()));
         game.transaction_close(&seal, false);
@@ -429,10 +450,17 @@ fn one_position_replaced_twice_in_an_aborted_transaction_gets_its_original_back(
         for value in [20, 30] {
             game.journal_remove_block_entity(pos);
             let replacement = press(game, pos);
-            assert_eq!(Press::edit_state(game, replacement, |_, n| *n = value), Ok(()));
+            assert_eq!(
+                Press::edit_state(game, replacement, |_, n| *n = value),
+                Ok(())
+            );
             tentative.push(replacement);
         }
-        assert_eq!(indexed(game, original), Some(7), "bound until the root commits");
+        assert_eq!(
+            indexed(game, original),
+            Some(7),
+            "bound until the root commits"
+        );
         game.transaction_close(&seal, false);
         assert_eq!(Press::state(game, original), Ok(7));
         assert_eq!(indexed(game, original), Some(7));
@@ -511,7 +539,10 @@ fn native_and_compiled_wasm_part_state_count_ticks() {
         let mods: mod_api::Mods = if wasm {
             super::block_entity_tick_reply_tests::wasm_mods()
         } else {
-            vec![mod_api::ModEntry::new("wasm_fixture", Box::new(NativeFixture))]
+            vec![mod_api::ModEntry::new(
+                "wasm_fixture",
+                Box::new(NativeFixture),
+            )]
         }
         .into();
         mod_platform::testing::with_mods(mods.clone(), || {
@@ -569,7 +600,11 @@ fn native_and_compiled_wasm_part_state_count_ticks() {
                 game.world.install_chunk_block_entities(&mut chunk);
                 game.world.chunks.insert(key, Arc::new(chunk));
                 tick_in(game, pos, 0);
-                assert_eq!(saved_value(game, pos, "part_state_count"), Some(4), "reloaded");
+                assert_eq!(
+                    saved_value(game, pos, "part_state_count"),
+                    Some(4),
+                    "reloaded"
+                );
 
                 // An undecodable saved count: refused, bytes kept, and the guest went on.
                 let mut raw = game.world.block_entities.attachments(pos).unwrap().to_nbt();
@@ -615,7 +650,11 @@ fn native_and_compiled_wasm_part_state_count_ticks() {
                     tick_in(game, pos, 2);
                     assert_eq!(saved_value(game, pos, "part_state_count"), Some(1), "kept");
                     tick_in(game, pos, 0);
-                    assert_eq!(saved_value(game, pos, "part_state_count"), Some(1), "poisoned");
+                    assert_eq!(
+                        saved_value(game, pos, "part_state_count"),
+                        Some(1),
+                        "poisoned"
+                    );
                 }
             });
         });
