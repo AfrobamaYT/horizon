@@ -337,6 +337,39 @@ impl Title {
                     .does(crate::widgets::Action::Back),
                 ]
             }
+            Mode::MissingMods { .. } => {
+                let y = confirm_top(h, self.message_lines.get())
+                    + 41.0
+                    + self.message_lines.get() as f32 * 9.0;
+                vec![
+                    // Don't Open is the default: first, and what Escape does.
+                    b(
+                        (w / 2.0).floor() - 75.0,
+                        y,
+                        150.0,
+                        &lang::get("horizon.missing_mods.dont_open"),
+                        true,
+                        101,
+                    )
+                    .does(crate::widgets::Action::Cancel),
+                    b(
+                        (w / 2.0).floor() - 152.0,
+                        y + 24.0,
+                        150.0,
+                        &lang::get("horizon.missing_mods.backup_open"),
+                        true,
+                        102,
+                    ),
+                    b(
+                        (w / 2.0).floor() + 2.0,
+                        y + 24.0,
+                        150.0,
+                        &lang::get("horizon.missing_mods.open"),
+                        true,
+                        103,
+                    ),
+                ]
+            }
             Mode::MissingBiomeRegions { .. } => {
                 let y = confirm_top(h, self.message_lines.get())
                     + 41.0
