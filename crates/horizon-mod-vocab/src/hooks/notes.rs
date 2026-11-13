@@ -51,10 +51,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   with its literal path and named `CommandArgumentValue` values, not raw command text. Integer, number and boolean
   values retain the dispatcher's types; word and greedy text are strings. Player selectors resolve to a single live
   `PlayerRef`, items become component-bearing stacks of one, and block positions resolve source-relative/local
-  coordinates without requiring loaded chunks. A custom argument is `CommandArgumentValue::Custom { kind, value }`,
-  where `kind` is its registered type's id and `value` what its parser returned. Missing optional arguments are
-  absent. Parsing, permission and
-  resolution failures produce feedback without calling listeners. The console resolves from the Overworld spawn's
+  coordinates without requiring loaded chunks. `mod_id` is a loaded package id as a string; `resource:<registry>`
+  is `CommandArgumentValue::Id`, an id that registry holds. A custom argument is `CommandArgumentValue::Custom
+  { kind, value }`: its registered type's id and what its parser returned. Missing optional arguments are absent.
+  Parsing, permission and resolution failures produce feedback without calling listeners. The console resolves from the Overworld spawn's
   block corner with zero rotation and no source entity (`@s` fails). Return `Flow::Cancel` when handled.
 - **`armor_stand_manipulate(player, name, stand_id, slot, cancel)`**: a player takes an item from an armor stand or
   puts one on it, heard after the stand's disabled-slot checks and before anything moves. `slot` is `mainhand`,
@@ -397,10 +397,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`player_jump(player, name)`**: accepted guest movement made the server player jump from the ground, after movement simulation finishes. The guest's state is swapped in.
 - **`player_kicked(player, name, reason)`**: a guest was kicked after the hub recorded the rendered disconnect reason and sent the disconnect. The guest's state is swapped in, unless the guest was already removed in the same poll (a kick and the disconnect arriving together): the hook still fires, without it.
 - **`player_level_change(player, name, from, to)`**: a server player's experience change altered their level, after the new level was applied. The guest's state is swapped in when the player is a guest.
-- **`player_swap_hands(player, name, cancel)`**: a player pressed the swap-hands key (not a spectator), heard
-  before the main and off hand items swap. Set `cancel` and they stay where they are; the player's client, which swapped
-  them at once, gets its slots back. The player's state is swapped in, so `host.players().acting_player`, `PlayerRef::tell` and the item
-  helpers reach them. Not heard: the same swap from an open inventory (hovering a slot and pressing the key) and the host of a LAN world.
+- **`player_swap_hands(player, name, to_main_hand, to_off_hand, cancel)` (version 2)**: a player pressed the swap-hands key (not a spectator), heard
+  before the main and off hand items swap. `to_main_hand` starts as the off hand's stack and `to_off_hand` as the main hand's; the hands get what the listeners leave, and the client gets both slots when they changed. Set `cancel` and they stay where they are; the player's client
+  is sent both slots again. The player's state is swapped in, so `host.players().acting_player`, `PlayerRef::tell` and the item
+  helpers reach them. Heard for a server's players, the single-player owner and a LAN host. Not heard: the same swap from an open inventory (hovering a slot and pressing the key).
 - Services: `host.players().server_players()` returns online player handles in connection order;
   `player.tell(host, text)` sends a system line to one player, also the acting player inside their hook;
   `host.messages().broadcast(text)`, to every player and the server's
@@ -1693,7 +1693,7 @@ one, where vanilla gives the `by` one.
 
 - A block part's `should_redstone_wire_connect_to` adjusts whether redstone wire connects to that block for the given position and optional direction.
 
-- A block part's `connects_to` says whether a fence, a wall, or iron bars or a glass pane of that block connects a side toward a neighbour state. `event.kind` names vanilla's rule and `event.connected` starts with its answer: `ConnectionKind::Fence` is `FenceBlock.connectsTo` (a solid face, a fence of the same kind, a gate across the arm), `Wall` is `WallBlock.connectsTo` (a wall, a solid face, bars or a pane, a gate across the side; a connected side is still low or tall from the block above) and `Bars` is `IronBarsBlock.attachsTo`, for iron bars and panes, which are one block class (a solid face, bars or a pane, a wall). Set it to false to deny a connection as well as to true to make one. `pos` and `state` are the block being shaped, `neighbour` the state beside it, `direction` the way from the block to the neighbour (vanilla's bars rule takes none) and `face_solid` whether the neighbour's face toward it is sturdy. It is asked on placement and on every shape update toward a side, on authoritative servers only, and only the block's own part answers, so vanilla blocks cost nothing. The three rules stay separate in the library; only the question a mod is asked is shared, and `kind` leaves room for fields one kind alone needs. Diverges from upstream: new hook.
+- A block part's `connects_to` says whether a fence, a wall, or iron bars or a glass pane of that block connects a side toward a neighbour state. `event.kind` names vanilla's rule and `event.connected` starts with its answer: `ConnectionKind::Fence` is `FenceBlock.connectsTo` (a solid face, a fence of the same kind, a gate across the arm), `Wall` is `WallBlock.connectsTo` (a wall, a solid face, bars or a pane, a gate across the side; a connected side is still low or tall from the block above) and `Bars` is `IronBarsBlock.attachsTo`, for iron bars and panes, which are one block class (a solid face, bars or a pane, a wall). Set it to false to deny a connection as well as to true to make one. The neighbour answers first, in its own `can_be_connected_to`, and `event.connected` starts from that answer: the connecting block has the last word. `pos` and `state` are the block being shaped, `neighbour` the state beside it, `direction` the way from the block to the neighbour (vanilla's bars rule takes none) and `face_solid` whether the neighbour's face toward it is sturdy. It is asked on placement and on every shape update toward a side, on authoritative servers only, and only the block's own part answers, so vanilla blocks cost nothing. The three rules stay separate in the library; only the question a mod is asked is shared, and `kind` leaves room for fields one kind alone needs. Diverges from upstream: new hook.
 
   **Migration (`fence_connects_to` → `connects_to`, contract version 2):** a part that implemented `fence_connects_to(&self, level, event: &mut FenceConnectsToEvent)` implements `connects_to(&self, level, event: &mut ConnectsToEvent)` instead. The event's fields are the same plus `kind`; a part that only answered for fences returns early unless `event.kind == ConnectionKind::Fence`. The answer, its timing and the fence's own rule are unchanged.
 
@@ -2371,7 +2371,7 @@ registration path.
   number above zero keeps vanilla's. Only the window's clock changes; a server keeps its own rate. Client side; with no
   listener, one branch a frame.
 
-- A player swapping their main and off hand items: `player_swap_hands(player, name, cancel)` is heard before the swap (Bukkit's `PlayerSwapHandItemsEvent`; a swap from an open inventory is not heard), for a player of a server who is not a spectator, with their state swapped in. A mod sets `cancel` to keep the items where they are; the player's client gets its slots back.
+- A player swapping their main and off hand items: version 2 of `player_swap_hands(player, name, to_main_hand, to_off_hand, cancel)` is heard before the swap (a swap from an open inventory is not heard), for a player of a server who is not a spectator, with their state swapped in. A mod may replace the stack each hand gets, or set `cancel` to keep the items where they are; the player's client is sent both slots again. Named injections must request `hook_version = 2`.
 
 - A player's food level changing: `food_level_changed(player, name, from, to, cancel)` is heard for a player of a server when a turn of theirs changed it (eating, hunger and saturation effects, exhaustion, starving; Bukkit's `FoodLevelChangeEvent`), before the new level reaches them. A mod changes `to` or sets `cancel` to leave the level at `from`.
 

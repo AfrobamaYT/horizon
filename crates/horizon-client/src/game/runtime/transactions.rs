@@ -175,6 +175,7 @@ struct KeptPlayerHealth {
 }
 
 struct KeptMobHealth {
+    absorption: f32,
     health: f32,
     needs_sync: bool,
     death_time: i32,
@@ -628,6 +629,7 @@ impl Game<'_> {
         if let Some(mob) = self.mobs.iter().find(|m| m.id == id && !m.removed) {
             level.mob_health.entry(id).or_insert(KeptMobHealth {
                 health: mob.health,
+                absorption: mob.absorption,
                 needs_sync: mob.needs_sync,
                 death_time: mob.death_time,
                 death_canceled: mob.death_canceled,
@@ -992,6 +994,7 @@ impl Game<'_> {
         for (id, kept) in level.mob_health {
             if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) {
                 mob.health = kept.health;
+                mob.absorption = kept.absorption;
                 mob.needs_sync = kept.needs_sync;
                 mob.death_time = kept.death_time;
                 mob.death_canceled = kept.death_canceled;
