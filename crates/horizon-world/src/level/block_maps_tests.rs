@@ -82,7 +82,6 @@ fn the_block_maps_drive_fire_weathering_waxing_and_scraping_until_a_reload_remov
         assert_eq!(sim.copper_next(exposed), Some(weathered));
         assert_eq!(sim.copper_next(copper), Some(exposed_copper));
         assert_eq!(sim.copper_stepped(oxidized, false), Some(weathered));
-        drop(sim);
         assert_eq!(b.mapped_waxed(stairs), None);
         assert_eq!(b.mapped_waxed(copper), None);
         assert_eq!(b.mapped_unwaxed(mossy), None);

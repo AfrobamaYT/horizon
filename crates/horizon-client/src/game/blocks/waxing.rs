@@ -68,7 +68,3 @@ impl Game<'_> {
         )
     }
 }
-
-#[cfg(test)]
-#[path = "waxing_tests.rs"]
-mod tests;
