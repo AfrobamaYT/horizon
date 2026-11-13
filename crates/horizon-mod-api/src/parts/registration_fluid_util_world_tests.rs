@@ -2,8 +2,8 @@
 mod tests {
     use crate::testing::{FakeHost, FakeTank};
     use crate::{
-        Capability, FluidResource, FluidStack, Hand, ITEM_FLUIDS, Identifier, ItemPlace,
-        ItemStack, ResourceHandler, ServerHost, fluid_util,
+        Capability, FluidResource, FluidStack, Hand, HostTransaction, ITEM_FLUIDS, Identifier,
+        ItemPlace, ItemStack, ResourceHandler, ServerHost, fluid_util,
     };
 
     const SOURCE: [i32; 3] = [3, 64, 0];
@@ -26,10 +26,10 @@ mod tests {
             .resolve_fluids(["minecraft:empty", "minecraft:water", "minecraft:lava"])
             .unwrap();
         host.registries.fluid_sounds(
-                "minecraft:lava",
-                "minecraft:item.bucket.fill_lava",
-                "minecraft:item.bucket.empty_lava",
-            );
+            "minecraft:lava",
+            "minecraft:item.bucket.fill_lava",
+            "minecraft:item.bucket.empty_lava",
+        );
         host.level.block_entity(TANK).tanks = vec![FakeTank::new(8000)];
         host.join(PLAYER, 70).slots.insert(0, stack(item, count));
         host
@@ -84,10 +84,17 @@ mod tests {
     fn an_empty_bucket_takes_a_world_source_whole() {
         let mut host = host("minecraft:bucket", 1);
         host.level.set_block(SOURCE, "minecraft:water");
-        assert_eq!(pickup(&mut host, false), Some(fluid("minecraft:water", 1000)));
+        assert_eq!(
+            pickup(&mut host, false),
+            Some(fluid("minecraft:water", 1000))
+        );
         assert_eq!(hand(&host), Some(stack("minecraft:water_bucket", 1)));
         // The source is gone: a second pickup gets nothing.
-        host.players.get_mut(PLAYER).unwrap().slots.insert(0, stack("minecraft:bucket", 1));
+        host.players
+            .get_mut(PLAYER)
+            .unwrap()
+            .slots
+            .insert(0, stack("minecraft:bucket", 1));
         assert_eq!(pickup(&mut host, false), None);
         assert_eq!(hand(&host), Some(stack("minecraft:bucket", 1)));
     }
@@ -99,8 +106,15 @@ mod tests {
         assert_eq!(pickup(&mut host, false), None);
         assert_eq!(hand(&host), Some(stack("minecraft:lava_bucket", 1)));
         // The aborted pickup left the source where it was.
-        host.players.get_mut(PLAYER).unwrap().slots.insert(0, stack("minecraft:bucket", 1));
-        assert_eq!(pickup(&mut host, false), Some(fluid("minecraft:water", 1000)));
+        host.players
+            .get_mut(PLAYER)
+            .unwrap()
+            .slots
+            .insert(0, stack("minecraft:bucket", 1));
+        assert_eq!(
+            pickup(&mut host, false),
+            Some(fluid("minecraft:water", 1000))
+        );
     }
 
     #[test]
@@ -114,6 +128,48 @@ mod tests {
         assert_eq!(host.sounds.len(), 1);
         assert_eq!(host.sounds[0].sound, "minecraft:item.bucket.fill_lava");
         assert_eq!(host.sounds[0].at, [0.5, 64.5, 0.5]);
+        assert_eq!(host.game_events.len(), 1);
+        assert_eq!(host.game_events[0].event, "minecraft:fluid_pickup");
+    }
+
+    #[test]
+    fn a_tank_fallback_in_an_aborted_transaction_leaves_no_sound_or_event() {
+        let mut host = host("minecraft:bucket", 1);
+        host.level.block_entity(TANK).tanks[0].held = Some(fluid("minecraft:lava", 2500));
+        let server: &mut dyn ServerHost = &mut host;
+        let aborted: Result<(), ()> = server.transaction(|host, _| {
+            let player = host.player(PLAYER).unwrap();
+            let level = player.level(host).unwrap();
+            let bucket = held(host);
+            let picked =
+                fluid_util::try_pickup_fluid(host, &bucket, Some(player), level, TANK, None);
+            assert_eq!(picked, Some(fluid("minecraft:lava", 1000)));
+            Err(())
+        });
+        assert!(aborted.is_err());
+        let tank = &host.level.block_entity_at(TANK).unwrap().tanks[0];
+        assert_eq!(tank.held, Some(fluid("minecraft:lava", 2500)));
+        assert_eq!(hand(&host), Some(stack("minecraft:bucket", 1)));
+        assert!(host.sounds.is_empty() && host.game_events.is_empty());
+    }
+
+    #[test]
+    fn a_tank_fallback_in_a_committed_transaction_plays_once_at_the_commit() {
+        let mut host = host("minecraft:bucket", 1);
+        host.level.block_entity(TANK).tanks[0].held = Some(fluid("minecraft:lava", 2500));
+        let server: &mut dyn ServerHost = &mut host;
+        let committed: Result<(), ()> = server.transaction(|host, _| {
+            let player = host.player(PLAYER).unwrap();
+            let level = player.level(host).unwrap();
+            let bucket = held(host);
+            fluid_util::try_pickup_fluid(host, &bucket, Some(player), level, TANK, None)
+                .ok_or(())?;
+            Ok(())
+        });
+        assert!(committed.is_ok());
+        assert_eq!(host.sounds.len(), 1);
+        assert_eq!(host.sounds[0].sound, "minecraft:item.bucket.fill_lava");
+        assert_eq!(host.game_events.len(), 1);
         assert_eq!(host.game_events[0].event, "minecraft:fluid_pickup");
     }
 
@@ -123,7 +179,10 @@ mod tests {
         assert_eq!(put(&mut host), Some(fluid("minecraft:water", 1000)));
         assert_eq!(hand(&host), Some(stack("minecraft:bucket", 1)));
         // What it placed is a source a bucket takes back.
-        assert_eq!(pickup(&mut host, false), Some(fluid("minecraft:water", 1000)));
+        assert_eq!(
+            pickup(&mut host, false),
+            Some(fluid("minecraft:water", 1000))
+        );
     }
 
     #[test]
@@ -145,6 +204,9 @@ mod tests {
             Some(fluid("minecraft:lava", 1000))
         );
         let mut empty = host("minecraft:bucket", 1);
-        assert_eq!(fluid_util::first_stack_contained(&mut empty, &place()), None);
+        assert_eq!(
+            fluid_util::first_stack_contained(&mut empty, &place()),
+            None
+        );
     }
 }

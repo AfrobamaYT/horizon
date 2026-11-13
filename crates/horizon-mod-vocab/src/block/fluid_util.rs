@@ -150,9 +150,11 @@ pub fn trigger_sound_and_game_event(
 
 /// `FluidUtil.tryPickupFluid` with a side: [`try_pickup_world_fluid`] first, and where the
 /// block at `pos` has no fluid to give that way, one move of the first fluid its tanks give at
-/// `side` ([`FLUIDS`]) into `destination`, as much as fits in one go, with the fill sound and
-/// game event as [`interact_with_handler`] plays them (at the block's centre, as it returns).
-/// What moved, or None with nothing changed.
+/// `side` ([`FLUIDS`]) into `destination`, as much as fits in one go, in a transaction of its own
+/// (nested in one the caller has open, which then decides). What moved, or None with nothing
+/// changed. Either way the bucket's fill sound and `minecraft:fluid_pickup` go out at the
+/// block's centre at the outermost commit ([`LevelRef::play_fluid_effects`]), and not at all if
+/// it aborts.
 pub fn try_pickup_fluid(
     host: &mut dyn ServerHost,
     destination: &Capability<dyn ResourceHandler<FluidResource>>,
@@ -165,10 +167,14 @@ pub fn try_pickup_fluid(
         return Some(picked);
     }
     let handler = level.capability(host, &FLUIDS, pos, side)?;
-    let moved = move_first(host, &handler, destination)?;
-    let at = pos.map(|c| f64::from(c) + 0.5);
-    trigger_sound_and_game_event(host, &FluidResource::of(&moved), level, at, player, true);
-    Some(moved)
+    host.transaction(|host, tx| {
+        let moved = move_first(host, &handler, destination).ok_or(())?;
+        if let Some(fluid) = moved.key() {
+            level.play_fluid_effects(host, pos, fluid, true, player, tx);
+        }
+        Ok::<_, ()>(moved)
+    })
+    .ok()
 }
 
 /// `FluidUtil.tryPickupFluid` without a side: the fluid source at `pos` in `level`, a

@@ -17,6 +17,17 @@ use mod_api::{
 /// `FluidType.BUCKET_VOLUME`: what one source block holds.
 const BUCKET: u32 = 1000;
 
+/// A bucket's sound and fluid game event waiting for the outermost commit.
+pub(in crate::game) struct FluidEffects {
+    level: LevelRef,
+    pos: [i32; 3],
+    /// The fluid's world form, whose bucket sounds play; none for a tank-only one.
+    fluid: Option<FluidKind>,
+    /// A fill (`fluid_pickup`), else an empty (`fluid_place`).
+    pickup: bool,
+    player: Option<PlayerRef>,
+}
+
 /// A world pickup or placement decided at the call, its block already set in the transaction:
 /// what the outermost commit still does.
 pub(in crate::game) struct WrittenFluid {
@@ -93,9 +104,12 @@ impl Game<'_> {
     fn creative(&self, player: Option<PlayerRef>) -> bool {
         player.is_some_and(|player| self.player_is_creative(player) == Some(true))
     }
-    /// What `write` does at the call: the broken block's drops are made now, from the block and
-    /// its block entity as they are; a block entity the new block doesn't keep goes, kept by the
-    /// journal; the new block is stored without its updates. The rest waits for the commit.
+    /// What `write` does at the call. The block entity a new block of another kind removes is
+    /// kept whole by the journal and the new block stored, without its updates, before any mod
+    /// code runs; then the broken block's drops are made from the block as it was and the block
+    /// entity still there (the `block_drops` listeners, which only read, see the new block, and
+    /// whatever unpacking its loot changes in the entity an abort puts back); then that block
+    /// entity goes. The rest waits for the commit.
     fn journal_fluid_write(
         &mut self,
         level: LevelRef,
@@ -104,6 +118,18 @@ impl Game<'_> {
         player: Option<PlayerRef>,
     ) {
         let pos = [write.pos.x, write.pos.y, write.pos.z];
+        let key = (pos[0], pos[1], pos[2]);
+        let b = self.res.behaviours();
+        let to = write.to(b);
+        let removes = to != write.from
+            && b.block(to) != b.block(write.from)
+            && self.world.block_entities.get(&key).is_some();
+        if removes {
+            self.journal_block_entity(key);
+        }
+        if to != write.from {
+            self.journal_set_block(pos, to);
+        }
         let drops = match write.broken() {
             Some(broken) => self.with_level(|b, level, ticks| {
                 b.drop_resources(level, ticks, write.pos, broken);
@@ -111,15 +137,8 @@ impl Game<'_> {
             }),
             None => Spill::default(),
         };
-        let b = self.res.behaviours();
-        let to = write.to(b);
-        if to != write.from {
-            let key = (pos[0], pos[1], pos[2]);
-            if b.block(to) != b.block(write.from) && self.world.block_entities.get(&key).is_some()
-            {
-                self.journal_remove_block_entity(key);
-            }
-            self.journal_set_block(pos, to);
+        if removes {
+            self.journal_remove_block_entity(key);
         }
         self.after_commit(After::FluidWrite(Box::new(WrittenFluid {
             level,
@@ -128,6 +147,32 @@ impl Game<'_> {
             pickup,
             player,
         })));
+    }
+    /// `FluidUtil.triggerSoundAndGameEvent` for `fluid` at the centre of `pos` in the level in
+    /// place, at the outermost commit of transaction `tx`.
+    pub(in crate::game) fn level_play_fluid_effects(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        fluid: FluidKey,
+        pickup: bool,
+        player: Option<PlayerRef>,
+        tx: &Transaction,
+    ) -> bool {
+        if !self.transaction_holds(tx) || !self.level_in_place(level) {
+            return false;
+        }
+        let Some(id) = mod_api::__private::fluid_id(fluid) else {
+            return false;
+        };
+        self.after_commit(After::FluidEffects(Box::new(FluidEffects {
+            level,
+            pos,
+            fluid: FluidKind::from_name(id),
+            pickup,
+            player,
+        })));
+        true
     }
     /// The rest of a world pickup or placement at the outermost commit, its block's updates
     /// done already: the fluid tick, the broken block's drops, its particles and
@@ -147,13 +192,31 @@ impl Game<'_> {
         self.flush_spill();
         self.with_level(|b, level, ticks| b.fluid_write_effects(level, ticks, &write));
         let _ = self.process_level_events();
-        if !write.sounds() {
-            return;
+        if write.sounds() {
+            let pos = [write.pos.x, write.pos.y, write.pos.z];
+            self.commit_fluid_effects(FluidEffects {
+                level,
+                pos,
+                fluid: Some(write.fluid),
+                pickup,
+                player,
+            });
         }
-        let at = [write.pos.x, write.pos.y, write.pos.z].map(|c| f64::from(c) + 0.5);
+    }
+    /// The bucket's sound (none for a fluid with no world form) and fluid game event, from the
+    /// player when one is given, at the outermost commit.
+    pub(in crate::game) fn commit_fluid_effects(&mut self, effects: FluidEffects) {
+        let FluidEffects {
+            level,
+            pos,
+            fluid,
+            pickup,
+            player,
+        } = effects;
+        let at = pos.map(|c| f64::from(c) + 0.5);
         let (sound, event) = match pickup {
-            true => (fluid_pickup_sound(write.fluid), "minecraft:fluid_pickup"),
-            false => (fluid_empty_sound(write.fluid), "minecraft:fluid_place"),
+            true => (fluid.and_then(fluid_pickup_sound), "minecraft:fluid_pickup"),
+            false => (fluid.and_then(fluid_empty_sound), "minecraft:fluid_place"),
         };
         if let Some(sound) = sound {
             self.level_play_sound(level, sound, at, SoundSource::Blocks, 1.0, 1.0);

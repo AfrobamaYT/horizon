@@ -14,6 +14,19 @@ pub struct FakeLevel {
     blocks: HashMap<[i32; 3], String>,
     block_entities: BTreeMap<[i32; 3], FakeBlockEntity>,
     entities: BTreeMap<u32, FakeEntity>,
+    /// Bucket sounds and game events queued for the outermost commit
+    /// ([`LevelRef::play_fluid_effects`](crate::LevelRef::play_fluid_effects)): kept with the
+    /// level, so an abort drops them.
+    pub(super) fluid_effects: Vec<QueuedFluidEffects>,
+}
+
+/// A bucket's sound and game event waiting for the outermost commit.
+#[derive(Clone, Debug)]
+pub(super) struct QueuedFluidEffects {
+    pub(super) at: [f64; 3],
+    pub(super) fluid: &'static str,
+    pub(super) pickup: bool,
+    pub(super) player: Option<crate::PlayerRef>,
 }
 
 impl Default for FakeLevel {
@@ -34,6 +47,7 @@ impl FakeLevel {
             blocks: HashMap::new(),
             block_entities: BTreeMap::new(),
             entities: BTreeMap::new(),
+            fluid_effects: Vec::new(),
         }
     }
     /// The handle of this level.
@@ -77,15 +91,19 @@ impl FakeLevel {
             .flatten()
             .map(String::as_str)
     }
-    /// The fluid source block at `pos` taken away: its fluid.
+    /// The fluid source block at `pos` taken away: its fluid (never `minecraft:empty`, which has
+    /// no world form).
     pub(super) fn take_source(&mut self, level: LevelRef, pos: [i32; 3]) -> Option<FluidKey> {
-        let fluid = crate::content::registry_keys::fluid_key(self.block_at(level, pos)?)?;
+        let id = self.block_at(level, pos).filter(|id| *id != "minecraft:empty")?;
+        let fluid = crate::content::registry_keys::fluid_key(id)?;
         self.blocks.remove(&pos);
         Some(fluid)
     }
     /// A source of `fluid` put at `pos`, where no block or block entity is: whether it went.
     pub(super) fn put_source(&mut self, level: LevelRef, pos: [i32; 3], fluid: FluidKey) -> bool {
-        let Some(id) = crate::content::registry_keys::fluid_id(fluid) else {
+        let Some(id) = crate::content::registry_keys::fluid_id(fluid)
+            .filter(|id| *id != "minecraft:empty")
+        else {
             return false;
         };
         if level != self.level

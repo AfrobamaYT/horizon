@@ -125,5 +125,21 @@ pub trait FluidsEnergyBackendMut {
         validate: bool,
         tx: &Transaction,
     ) -> bool;
+    /// Side: server.
+    /// The bucket's sound and game event for `fluid` at the centre of `pos` in the level in
+    /// place, as `FluidUtil.triggerSoundAndGameEvent` plays them (`pickup`: the fill sound and
+    /// `minecraft:fluid_pickup`, else the empty sound and `minecraft:fluid_place`; a tank-only
+    /// fluid has no sound), from `player` when given, at the outermost commit of transaction
+    /// `tx`: nothing if it aborts. False, with nothing queued, in another level or for a
+    /// transaction that isn't open.
+    #[access(WorldOnly)]
+    fn level_play_fluid_effects(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        fluid: FluidKey,
+        pickup: bool,
+        player: Option<PlayerRef>,
+        tx: &Transaction,
+    ) -> bool;
 }
-
