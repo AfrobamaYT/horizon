@@ -144,7 +144,8 @@ impl TerrainBlockStates for GenBlockStates {
     }
 }
 
-mod data;
+/// The seed-independent resources, at the path the internals list names.
+pub mod data;
 pub use data::GeneratorData;
 #[cfg(test)]
 use data::{RING_CACHE_LIMIT, build_tags};
