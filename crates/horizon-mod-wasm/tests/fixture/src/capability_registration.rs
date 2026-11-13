@@ -197,7 +197,7 @@ pub fn started(host: &mut dyn ServerHost) {
     for index in 0..3 {
         let capacity = (index as u32 + 1) * 100;
         let block = level
-            .capability(host, &BLOCK, [index as i32, 64, 0], None)
+            .capability(host, &BLOCK, [index, 64, 0], None)
             .unwrap();
         exercise(host, &*block, capacity);
         let entity = host.entity(index as u32 + 1).unwrap();
@@ -205,7 +205,7 @@ pub fn started(host: &mut dyn ServerHost) {
         exercise(host, &*entity, capacity);
         let item = ItemPlace::PlayerSlot {
             player: 19,
-            slot: index as i32,
+            slot: index,
         };
         let item = item.capability(host, &ITEM).unwrap();
         exercise(host, &*item, capacity);

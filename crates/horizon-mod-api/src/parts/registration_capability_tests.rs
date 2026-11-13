@@ -58,8 +58,10 @@ mod tests {
             let later = r.block_key("later:machine");
             assert!(r.is_block_capability_registered(&ITEMS, &earlier));
             assert!(!r.is_block_capability_registered(&ITEMS, &later));
-            let mut replacement = crate::ModContainer::default();
-            replacement.slots = 9;
+            let replacement = crate::ModContainer {
+                slots: 9,
+                ..Default::default()
+            };
             r.block_container(&earlier, replacement.clone());
             r.block_container(&later, replacement);
             assert!(r.is_block_capability_registered(&ITEMS, &later));

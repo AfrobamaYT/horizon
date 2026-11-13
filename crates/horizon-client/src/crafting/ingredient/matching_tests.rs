@@ -168,7 +168,10 @@ fn empty_ingredient_recipes_retain_predicates_but_not_placement() {
         assert_eq!(entry.is_some(), retained, "{id}");
         assert!(!index.contains(&id));
         assert!(book.entry(&id).is_none());
-        assert_eq!(learned.add_recipes(&index, &[id.clone()]), (0, vec![]));
+        assert_eq!(
+            learned.add_recipes(&index, std::slice::from_ref(&id)),
+            (0, vec![])
+        );
         assert!(!learned.knows(&id));
         assert_eq!(
             recipes.recipe_matches(&context, &id, &[Some(accepted.clone())], 1),
