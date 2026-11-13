@@ -252,3 +252,38 @@ fn nesting_past_the_limit_is_a_typed_error() {
     ));
     assert!(Shapes::new(&defs).shape("T1").is_ok());
 }
+
+#[test]
+fn recursion_is_the_same_type_with_the_same_arguments() {
+    // Pair<T> { a: T, b: Option<Pair<u16>> }, Holder { p: Pair<u8> }: Pair<u16> inside Pair<u8>
+    // is another type, not a back reference.
+    let defs = table(vec![
+        (
+            "Pair",
+            Definition {
+                params: 1,
+                body: Body::Record(vec![
+                    ("a".into(), Shape::Param(0)),
+                    (
+                        "b".into(),
+                        Shape::Option(Box::new(Shape::Named(
+                            "Pair".into(),
+                            vec![Shape::Scalar(Scalar::U16)],
+                        ))),
+                    ),
+                ]),
+            },
+        ),
+        (
+            "Holder",
+            record(&[(
+                "p",
+                Shape::Named("Pair".into(), vec![Shape::Scalar(Scalar::U8)]),
+            )]),
+        ),
+    ]);
+    let pair_u16 = sha("record{1:a:u16,1:b:option(rec(1))}");
+    let pair_u8 = sha(&format!("record{{1:a:u8,1:b:option(type({pair_u16}))}}"));
+    let holder = sha(&format!("record{{1:p:type({pair_u8})}}"));
+    assert_eq!(Shapes::new(&defs).shape("Holder").unwrap(), holder);
+}
