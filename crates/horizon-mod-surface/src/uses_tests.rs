@@ -1866,6 +1866,46 @@ fn a_path_inside_the_mod_is_its_own_only_through_modules_it_declares() {
         mine("mod world;\nmod terrain;\nuse crate::world::*;\nuse super::*;"),
         Some(Built::None)
     );
+    // A path through a binding of the name to itself is a cycle, not certain.
+    assert_eq!(
+        mine("mod world;\nmod terrain;\nmod a;\npub use crate::world::world;"),
+        Some(Built::Full)
+    );
+    // An own module this file neither binds nor declares may be some crate of that name.
+    let mut made_for = base();
+    made_for.types.push(dims(&[]));
+    let unbound = scan_files(
+        made_for,
+        &[
+            ("src/lib.rs", "mod world;\nmod terrain;"),
+            own_world,
+            (
+                "src/terrain.rs",
+                "fn f() { let d = world::DimensionSettings { mine: 1 }; }",
+            ),
+        ],
+    );
+    assert_eq!(
+        entry(&unbound, "type:DimensionSettings").built,
+        Some(Built::Full)
+    );
+    // A crate name never leads to an own module: the API crate, or any `extern crate … as`.
+    for (lib, path) in [
+        (
+            "extern crate horizon_mod_api as world;\nmod terrain;",
+            "world",
+        ),
+        ("mod mod_api;\nmod terrain;", "mod_api"),
+    ] {
+        let source = format!("fn f() {{ let d = crate::{path}::{DIMS_LITERAL}; }}");
+        refused_for_the_new_field(fits_a_new_dims_field(&[
+            ("src/lib.rs", lib),
+            client,
+            ("src/client/mod_api.rs", ""),
+            own,
+            ("src/terrain.rs", &source),
+        ]));
+    }
     // A cycle of bindings is not certain.
     assert_eq!(
         mine(
