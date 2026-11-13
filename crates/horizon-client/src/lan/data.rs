@@ -895,39 +895,50 @@ impl SyncData {
         out: &mut Vec<i32>,
         seen: &mut HashSet<String>,
     ) {
-        if !seen.insert(tag.to_owned()) {
-            return;
-        }
-        let Some(values) = files.get(tag) else {
-            return;
-        };
-        for value in values {
-            let id = value
-                .as_str()
-                .or_else(|| value["id"].as_str())
-                .unwrap_or_default();
-            let removes = value["remove"].as_bool() == Some(true);
-            if let Some(reference) = id.strip_prefix('#') {
-                let mut members = Vec::new();
-                Self::expand_pack_tag(files, &qualified(reference), names, &mut members, seen);
-                if removes {
-                    out.retain(|n| !members.contains(n));
-                } else {
-                    for n in &members {
-                        if !out.contains(n) {
-                            out.push(*n);
-                        }
+        fn resolve(
+            files: &BTreeMap<String, Vec<Value>>,
+            tag: &str,
+            names: &HashMap<&str, i32>,
+            active: &mut HashSet<String>,
+            cache: &mut BTreeMap<String, Vec<i32>>,
+        ) -> Vec<i32> {
+            if let Some(hit) = cache.get(tag) {
+                return hit.clone();
+            }
+            if !active.insert(tag.to_owned()) {
+                return Vec::new();
+            }
+            let mut out = Vec::new();
+            for value in files.get(tag).into_iter().flatten() {
+                let Some(id) = horizon_world::tag_layers::entry_id(value) else {
+                    continue;
+                };
+                let removes = value["remove"].as_bool() == Some(true);
+                let members = match id.strip_prefix('#') {
+                    Some(reference) => resolve(files, &qualified(reference), names, active, cache),
+                    None => names
+                        .get(qualified(id).as_str())
+                        .copied()
+                        .into_iter()
+                        .collect(),
+                };
+                for member in members {
+                    if removes {
+                        out.retain(|kept| *kept != member);
+                    } else if !out.contains(&member) {
+                        out.push(member);
                     }
                 }
-            } else if let Some(&n) = names.get(qualified(id).as_str()) {
-                if removes {
-                    out.retain(|kept| *kept != n);
-                } else if !out.contains(&n) {
-                    out.push(n);
-                }
+            }
+            active.remove(tag);
+            cache.insert(tag.to_owned(), out.clone());
+            out
+        }
+        for id in resolve(files, tag, names, seen, &mut BTreeMap::new()) {
+            if !out.contains(&id) {
+                out.push(id);
             }
         }
-        seen.remove(tag);
     }
 
     fn registry_names<'a>(
