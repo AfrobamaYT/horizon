@@ -795,9 +795,7 @@ pub(super) fn compile(
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
     if route == Route::Api {
         let out = &builds.join("api");
-        fs::create_dir_all(out).map_err(|e| e.to_string())?;
-        crate::storage::mark_used(out).map_err(super::cache_error)?;
-        return super::api_route::compile(
+        let built = super::api_route::compile(
             rust,
             &package.runtime,
             &package.api,
@@ -806,6 +804,11 @@ pub(super) fn compile(
             declared,
             resolution,
         );
+        // Stamped after the route has made its folder again, failed or not.
+        if out.exists() {
+            crate::storage::mark_used(out).map_err(super::cache_error)?;
+        }
+        return built;
     }
     let game = &package.whole(&builds.with_file_name("prebuilt-package"))?;
     if route == Route::Registry {
