@@ -310,6 +310,9 @@ impl Game<'_> {
     /// Then setItemInHand for the off hand, then the main hand. The stacks are
     /// copied only for a listener: `heard` holds the old main and off hands.
     fn own_swap_hands(&mut self) {
+        if self.spectator() {
+            return;
+        }
         let heard = mod_api::__private::listened(mod_api::HookId::PlayerSwapHands)
             .then(|| (self.inventory[self.selected].clone(), self.offhand.clone()));
         if let Some((old_main, old_off)) = &heard {
@@ -367,7 +370,7 @@ mod swap_hands_tests {
         }
     }
 
-    /// `LivingSwapItemsEvent.Hands` for the window's own player: a cancel
+    /// The window's own swap contract: a cancel
     /// keeps both hands, and a listener's stack lands in the off hand.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -383,6 +386,15 @@ mod swap_hands_tests {
                 let selected = game.selected;
                 game.inventory[selected] = Some(ItemStack::new("minecraft:diamond_sword", 1));
                 game.offhand = None;
+                game.set_mode_id(3);
+                game.own_swap_hands();
+                assert_eq!(calls.load(Ordering::SeqCst), 0);
+                assert_eq!(
+                    game.inventory[selected].as_ref().map(|s| &*s.item),
+                    Some("minecraft:diamond_sword")
+                );
+                assert!(game.offhand.is_none());
+                game.set_mode_id(0);
                 game.own_swap_hands();
                 assert_eq!(
                     game.inventory[selected].as_ref().map(|s| &*s.item),
