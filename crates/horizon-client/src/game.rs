@@ -10450,6 +10450,7 @@ impl Game<'_> {
             shapes,
             level,
             world,
+            biomes,
             streaming,
             save,
             session_lock,
@@ -10466,9 +10467,8 @@ impl Game<'_> {
         // final save must not run: the lock below only marks tag tables.
         self.world_adopted = false;
         self.owner_migration = owner_migration;
-        // The world's packs over the game's biomes (`Biomes::with_packs`),
-        // the table its chunks were built with.
-        self.world_biomes = self.packed_biomes();
+        // Saves and chunk readers share the same placeholder IDs.
+        self.world_biomes = Some(biomes);
         self.world_biomes_base = self.world_biomes.clone();
         horizon_client::crash::set_detail(
             "World",
