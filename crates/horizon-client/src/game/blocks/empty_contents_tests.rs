@@ -1,5 +1,6 @@
 //! `ItemPart::empty_contents` on a dispenser and a player's pour: an item with the Part is
 //! emptied as a bucket, the Part placing the contents itself through the host.
+use crate::game::api_values::TryIntoApi;
 use horizon_client::{chunk::Chunk, items::ItemStack};
 use horizon_core::geometry::Direction;
 use mod_api::*;
