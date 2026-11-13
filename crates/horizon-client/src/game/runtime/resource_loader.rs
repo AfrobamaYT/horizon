@@ -62,9 +62,10 @@ impl EntityModels {
 
 impl GameCpuResources {
     pub(super) fn load(
-        root: &std::path::Path,
+        resources: &horizon_assets::resource_source::ResourceRoot,
         document: Option<&horizon_client::mobs::EntityModelDocument>,
     ) -> Result<Self> {
+        let root = resources.prepared();
         let owned_document;
         let document = match document {
             Some(document) => Some(document),
@@ -79,10 +80,7 @@ impl GameCpuResources {
         let model = |key| document.and_then(|document| document.model(key));
         let (
             painting_variants,
-            frame_model,
-            glow_frame_model,
-            map_frame_model,
-            glow_map_frame_model,
+            frames,
             armor_stand_assets,
             waypoint_styles,
             boat_models,
@@ -92,23 +90,14 @@ impl GameCpuResources {
             let painting_variants = named_scope(scope, "game_cpu.paintings", move || {
                 paintings::PaintingVariants::load(root)
             });
-            let frame_model = named_scope(scope, "game_cpu.frame", move || {
-                frames::bake_frame(root, "item_frame")
-            });
-            let glow_frame_model = named_scope(scope, "game_cpu.glow_frame", move || {
-                frames::bake_frame(root, "glow_item_frame")
-            });
-            let map_frame_model = named_scope(scope, "game_cpu.map_frame", move || {
-                frames::bake_frame(root, "item_frame_map")
-            });
-            let glow_map_frame_model = named_scope(scope, "game_cpu.glow_map_frame", move || {
-                frames::bake_frame(root, "glow_item_frame_map")
+            let frames = named_scope(scope, "game_cpu.frames", move || {
+                frames::bake_frames(resources.source())
             });
             let armor_stand_assets = named_scope(scope, "game_cpu.armor_stands", move || {
-                armor_stands::ArmorStandAssets::load(root, document)
+                armor_stands::ArmorStandAssets::load(resources.source(), document)
             });
             let waypoint_styles = named_scope(scope, "game_cpu.waypoints", move || {
-                horizon_client::locator_bar::WaypointStyles::load(root)
+                horizon_client::locator_bar::WaypointStyles::load(resources.source())
             });
             let boat_models = named_scope(scope, "game_cpu.boats", move || {
                 boats::BoatModels::load(document)
@@ -127,16 +116,7 @@ impl GameCpuResources {
                 painting_variants
                     .join()
                     .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
-                frame_model
-                    .join()
-                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
-                glow_frame_model
-                    .join()
-                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
-                map_frame_model
-                    .join()
-                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
-                glow_map_frame_model
+                frames
                     .join()
                     .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
                 armor_stand_assets
@@ -156,6 +136,12 @@ impl GameCpuResources {
                     .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
             )
         });
+        let [
+            frame_model,
+            glow_frame_model,
+            map_frame_model,
+            glow_map_frame_model,
+        ] = frames;
         Ok(Self {
             painting_variants,
             frame_model,
@@ -190,6 +176,9 @@ pub(super) struct Loaded {
     pub(super) pack_error: Option<String>,
     pub(super) resources: Arc<Resources>,
     pub(super) rest_loader: Option<WorldRestLoader>,
+    /// The client reload listeners' prepared applies, staged by the loader
+    /// thread; `start_game` runs them once the game exists.
+    pub(super) client_applies: Vec<client_reload::PreparedClientReload>,
     pub(super) pack: PackResources,
     /// The menu bundle, for the synchronous launch; the loading screen receives
     /// it earlier through its own channel.
@@ -215,7 +204,6 @@ pub(super) enum PendingWorldEntry {
         address: String,
         name: String,
         lan: bool,
-        /// The Realms screen asked for it (`ServerData.isRealm`).
         realm: bool,
         /// A transfer's carried-over server cookies (`TransferState`).
         cookies: Option<horizon_client::net::Cookies>,
