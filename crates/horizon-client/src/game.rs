@@ -3491,23 +3491,6 @@ impl Game<'_> {
         player.burn_from_stepping_immune = burn_immune;
         player.fluids.fast_lava = fast_lava;
     }
-    fn held_slot(&self) -> usize {
-        match self.hand {
-            Hand::Main => self.selected,
-            Hand::Off => shield::OFFHAND_SLOT,
-        }
-    }
-    /// `LivingEntity.getUsedItemHand`: the hand of the item in use.
-    fn used_hand(&self) -> Option<Hand> {
-        item_use::hand_of(self.using)
-    }
-    /// Run `f` with `hand` acting (`held`, `consume_held`, `swing_arm`).
-    fn with_hand<T>(&mut self, hand: Hand, f: impl FnOnce(&mut Self) -> T) -> T {
-        let prior = std::mem::replace(&mut self.hand, hand);
-        let out = f(self);
-        self.hand = prior;
-        out
-    }
     /// Inventory.add: returns the stack that did not fit.
     fn add_stack_to_inventory(&mut self, mut stack: ItemStack) -> Option<ItemStack> {
         let tutorial_item = matches!(
@@ -14999,20 +14982,6 @@ mod escape_tests {
 }
 
 impl Game<'_> {
-    fn held_mut(&mut self) -> &mut Option<ItemStack> {
-        self.stack_in_mut(self.held_slot())
-    }
-    pub(crate) fn wears_freeze_immune(&self) -> bool {
-        let immune = self
-            .res
-            .items()
-            .item_tags
-            .get("minecraft:freeze_immune_wearables");
-        self.armor
-            .iter()
-            .flatten()
-            .any(|s| immune.is_some_and(|t| t.contains(&*s.item)))
-    }
     fn sync_tick_chunks(&mut self) {
         if !self.tick_chunks.synchronize(&self.world.chunks) {
             return;
