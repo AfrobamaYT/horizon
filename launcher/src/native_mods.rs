@@ -1111,6 +1111,7 @@ fn run_checked(
     });
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+    let started = std::time::Instant::now();
     let mut child = cmd
         .stderr(Stdio::piped())
         .spawn()
@@ -1158,6 +1159,19 @@ fn run_checked(
         }
         let status = status.map_err(|e| ran(e.to_string()))?;
         if status.success() {
+            // Every command of a native build says how long it took, so the log accounts for
+            // the whole build and not only the steps that time themselves.
+            let _ = writeln!(
+                log,
+                "{}",
+                trf(
+                    "{step}: {ms} ms",
+                    &[
+                        ("step", what),
+                        ("ms", &started.elapsed().as_millis().to_string()),
+                    ],
+                )
+            );
             return Ok(());
         }
         let tail: Vec<String> = tail.into();
@@ -3741,6 +3755,29 @@ mod tests {
         ]);
         let e = run(cmd, "Compiling the game", |_| {}).unwrap_err();
         assert!(!e.contains("Smart App Control"), "{e}");
+    }
+
+    /// A command that succeeds leaves its time in the build log; one that fails leaves none.
+    #[cfg(unix)]
+    #[test]
+    fn each_command_logs_its_time() {
+        let _guard = TEST_STATE.lock().unwrap();
+        clear_log().unwrap();
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "sleep 0.05"]);
+        run(cmd, "Linking the game", |_| {}).unwrap();
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "exit 1"]);
+        run(cmd, "Compiling fnr_alpha", |_| {}).unwrap_err();
+        let log = fs::read_to_string(log_path()).unwrap();
+        let ms: u64 = log
+            .lines()
+            .find_map(|line| line.strip_prefix("Linking the game: ")?.strip_suffix(" ms"))
+            .unwrap_or_else(|| panic!("no timing line in {log}"))
+            .parse()
+            .unwrap();
+        assert!(ms >= 50, "{log}");
+        assert!(!log.contains("Compiling fnr_alpha: "), "{log}");
     }
 }
 
