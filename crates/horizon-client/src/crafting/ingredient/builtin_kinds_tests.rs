@@ -780,3 +780,154 @@ fn potion_duration_scale_decodes_and_matches_float_values() {
         Tag::Float(0x7f7f_ffff),
     );
 }
+
+#[test]
+fn minimum_attack_charge_recipe_decodes_and_matches_float_values() {
+    const ID: &str = "minecraft:minimum_attack_charge";
+    let mut items = Items::empty();
+    items.component_defaults = std::sync::Arc::new(std::collections::HashMap::from([(
+        "minecraft:diamond_sword".into(),
+        horizon_core::nbt::Compound::from([(ID.into(), Tag::Double(0.35_f64.to_bits()))]),
+    )]));
+    let load = load();
+    let context = load.loop_context(LoopSide::Server, []);
+    let root = tempfile::tempdir().unwrap();
+    let recipe = |ingredient: &Value| {
+        crate::crafting::Recipes::from_sources(
+            root.path(),
+            &items,
+            &horizon_world::loot::PackOverlay::NONE,
+            vec![(
+                "fixture:minimum_attack_charge".into(),
+                serde_json::json!({
+                    "type": "minecraft:crafting_shapeless",
+                    "ingredients": [ingredient],
+                    "result": {"id": "minecraft:diamond"}
+                }),
+            )],
+            &load,
+        )
+        .unwrap()
+    };
+    let stack = |value: Tag| {
+        let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
+        sword.data_mut().set_loot_component(ID, &Some(value));
+        sword
+    };
+    for (source, value, actual) in [
+        (
+            r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:minimum_attack_charge":0}}"#,
+            0.0_f32,
+            Tag::Short(0),
+        ),
+        // JsonOps-to-NBT numeric conversion canonicalizes this exact integer zero.
+        (
+            r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:minimum_attack_charge":-0.0}}"#,
+            0.0,
+            Tag::Byte(0),
+        ),
+        (
+            r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:minimum_attack_charge":1}}"#,
+            1.0,
+            Tag::Long(1),
+        ),
+        (
+            r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:minimum_attack_charge":0.35}}"#,
+            0.35,
+            Tag::Float(0.35_f32.to_bits()),
+        ),
+        (
+            r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:minimum_attack_charge":1.00000001}}"#,
+            1.0,
+            Tag::Int(1),
+        ),
+    ] {
+        let json: Value = serde_json::from_str(source).unwrap();
+        assert_eq!(recipe(&json).crafting.len(), 1, "{source}");
+        let ingredient = Ingredient::parse(&json, &items).unwrap();
+        assert_eq!(
+            ingredient.shown.as_ref().unwrap()[0]
+                .data()
+                .unwrap()
+                .other(ID),
+            Some(&Tag::Float(value.to_bits())),
+            "the published patch must contain the decoded float"
+        );
+        assert!(ingredient.test_in(&context, &stack(actual)), "{source}");
+        assert!(
+            !ingredient.test_in(&context, &stack(Tag::Double(0.75_f64.to_bits()))),
+            "{source}"
+        );
+        assert_eq!(
+            ingredient.test_in(&context, &ItemStack::new("minecraft:diamond_sword", 1)),
+            value == 0.35,
+            "the borrowed double-valued item default has the same float value"
+        );
+        for actual in [
+            Tag::Byte(value as i8),
+            Tag::Short(value as i16),
+            Tag::Int(value as i32),
+            Tag::Long(value as i64),
+            Tag::Float(value.to_bits()),
+            Tag::Double(f64::from(value).to_bits()),
+        ] {
+            if value == 0.0 || value == 1.0 {
+                assert!(ingredient.test_in(&context, &stack(actual)));
+            }
+        }
+    }
+    let interior = parse(
+        r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:minimum_attack_charge":0.35}}"#,
+        &items,
+    );
+    assert!(interior.test_in(&context, &stack(Tag::Double(0.350000001_f64.to_bits()))));
+    assert!(!interior.test_in(&context, &stack(Tag::Double(0.3500001_f64.to_bits()))));
+    let mut removed = ItemStack::new("minecraft:diamond_sword", 1);
+    let patch = Tag::compound([(
+        "!minecraft:minimum_attack_charge",
+        Tag::Compound(Default::default()),
+    )]);
+    (_, removed.extra) = crate::item_data::decode_components(Some(&patch));
+    assert!(!interior.test_in(&context, &removed));
+
+    for source in [
+        r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:minimum_attack_charge":-0.01}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:minimum_attack_charge":1.01}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:minimum_attack_charge":"0.5"}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:minimum_attack_charge":{}}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:minimum_attack_charge":[]}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:minimum_attack_charge":1e300}}"#,
+    ] {
+        let json: Value = serde_json::from_str(source).unwrap();
+        assert!(Ingredient::parse(&json, &items).is_none(), "{source}");
+        assert!(recipe(&json).crafting.is_empty(), "{source}");
+        let rule = IngredientRule::Components {
+            patch: crate::json_nbt::json_to_compound(json["components"].as_object().unwrap())
+                .unwrap(),
+            removed: Vec::new(),
+            strict: false,
+        };
+        let error = components::validate(&rule, &items).unwrap_err();
+        assert!(error.contains(ID), "{error}");
+    }
+    // JSON cannot spell NaN or infinity. The same recipe validator must refuse
+    // these numeric tags, including negative values that narrow to negative zero.
+    for value in [
+        Tag::Float(f32::NAN.to_bits()),
+        Tag::Double(f64::NAN.to_bits()),
+        Tag::Float(f32::INFINITY.to_bits()),
+        Tag::Float(f32::NEG_INFINITY.to_bits()),
+        Tag::Float((-0.0_f32).to_bits()),
+        Tag::Double((-0.0_f64).to_bits()),
+        Tag::Double((-1e-300_f64).to_bits()),
+    ] {
+        let rule = IngredientRule::Components {
+            patch: horizon_core::nbt::Compound::from([(ID.into(), value)]),
+            removed: Vec::new(),
+            strict: false,
+        };
+        let error = components::validate(&rule, &items).unwrap_err();
+        assert!(error.contains(ID), "{error}");
+        assert!(error.contains("within range [0.0;1.0]"), "{error}");
+    }
+}

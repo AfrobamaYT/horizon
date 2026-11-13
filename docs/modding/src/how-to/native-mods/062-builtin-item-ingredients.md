@@ -54,8 +54,8 @@ Native registrations retain their persistent NBT validation contract.
 
 The shared decoder currently covers `damage`, `repair_cost`, `max_damage`,
 `max_stack_size`, `rarity`, `enchantments`, `stored_enchantments`, `custom_name`,
-`item_name`, `block_entity_data`, `enchantable`, `map_id`, and
-`ominous_bottle_amplifier`, and `potion_duration_scale` in the `minecraft` namespace.
+`item_name`, `block_entity_data`, `enchantable`, `map_id`,
+`ominous_bottle_amplifier`, `potion_duration_scale`, and `minimum_attack_charge` in the `minecraft` namespace.
 `enchantable` requires a positive integer `value`; extra record fields are ignored
 and equivalent numeric NBT widths match, including item defaults. Map ids accept
 signed numbers, including negative ids, using Java's integer conversion.
@@ -66,7 +66,11 @@ values are accepted, but negative-zero floating tags, negatives, infinities, NaN
 and nonnumeric values are rejected. JSON's integral `-0.0` becomes zero before
 decoding. Matching compares decoded float values, including item defaults,
 without copying candidate payloads.
-The other 108 registered built-ins use stored-value matching while their shared
+`minimum_attack_charge` converts numbers to 32-bit floats before checking the
+inclusive range 0 to 1; decoded negative zero, NaN and infinities are rejected.
+JSON-to-NBT conversion first canonicalizes literal `-0.0` to integer zero.
+Equivalent numeric representations match live values and item defaults.
+The other 107 registered built-ins use stored-value matching while their shared
 decoders are added incrementally in **#3875**. Their absence is not a load refusal.
 
 Component ingredient displays contain the patch, including removals. Difference

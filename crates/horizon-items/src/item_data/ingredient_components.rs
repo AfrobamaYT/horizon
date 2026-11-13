@@ -94,6 +94,16 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
             };
             bits(a) == bits(b)
         }
+        "minecraft:minimum_attack_charge" => {
+            let bits = |stack: &ItemStack| {
+                stack
+                    .data()
+                    .and_then(|data| data.other(id))
+                    .and_then(crate::properties::component_float)
+                    .map(f32::to_bits)
+            };
+            bits(a) == bits(b)
+        }
         "minecraft:block_entity_data" => block_entity_equal(
             a.data().and_then(|d| d.other(id)),
             b.data().and_then(|d| d.other(id)),
