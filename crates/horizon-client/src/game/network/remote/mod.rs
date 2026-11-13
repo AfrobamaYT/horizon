@@ -731,8 +731,8 @@ pub(super) struct Remote {
     /// `MultiPlayerGameMode.destroyBlockPos`, `.destroyProgress` and the face last sent: the block
     /// the break targets, which outlives the break itself.
     destroying: Option<([i32; 3], u8, f32)>,
-    /// `MultiPlayerGameMode.destroyingItem`: the held item key the break began with.
-    destroying_item: String,
+    /// `MultiPlayerGameMode.destroyingItem`: the main-hand stack the break began with.
+    destroying_item: Option<ItemStack>,
     /// `MultiPlayerGameMode.isDestroying`: a break is running. `destroying` keeps the target after
     /// one ends (`destroyBlockPos` is written only when a break starts), so a dig resumed on the
     /// same block and item sends no new START and the server keeps its clock (#4124).
@@ -1241,7 +1241,7 @@ impl Game<'_> {
             profile: 0,
             profile_name: String::new(),
             destroying: None,
-            destroying_item: String::new(),
+            destroying_item: None,
             is_destroying: false,
             interaction_swing: [true; 2],
             destroy_delay: 0,
@@ -1481,7 +1481,7 @@ impl Game<'_> {
             profile: 0,
             profile_name: String::new(),
             destroying: None,
-            destroying_item: String::new(),
+            destroying_item: None,
             is_destroying: false,
             interaction_swing: [true; 2],
             destroy_delay: 0,
@@ -3047,16 +3047,7 @@ impl Game<'_> {
             && self.world.set(pos[0], pos[1], pos[2], state).is_ok()
         {
             self.sync_block_entity((pos[0], pos[1], pos[2]), Some(previous), state);
-            // LevelChunk.setBlockState removes the block entity of a block
-            // that changes: the moving piston the client's moveBlocks made
-            // stops when the server places what it moved (#3002).
-            let facts = self.res.facts();
-            let moving = |s: BlockStateId| &*facts.get(s).name == "minecraft:moving_piston";
-            if moving(previous) && !moving(state) {
-                let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
-                self.forget_moving_piston(at);
-                self.moving_pistons_stale = true;
-            }
+            self.client_block_written(pos, previous, state);
         }
         // A block we just placed: play its place sound (the server skips the placer).
         if let Some((target, _)) = self.remote.as_ref().and_then(|r| r.placing)
@@ -8114,9 +8105,9 @@ impl Game<'_> {
             return true;
         }
         // sameDestroyTarget: the same block and still the item the break began with.
-        let held = self.main_hand_key();
         let same = self.remote.as_ref().is_some_and(|r| {
-            r.destroying.is_some_and(|(p, _, _)| p == hit.pos) && r.destroying_item == held
+            r.destroying.is_some_and(|(p, _, _)| p == hit.pos)
+                && self.same_destroying_item(&r.destroying_item)
         });
         // startDestroyBlock leaves only a break that is still running alone (`isDestroying &&
         // sameDestroyTarget`); a click on the block a stopped break still names starts it again,
@@ -8171,9 +8162,9 @@ impl Game<'_> {
                 }
                 return true;
             }
+            let held = self.main_hand_key();
             if let Some(r) = self.remote.as_mut() {
-                r.destroying = Some((hit.pos, face, 0.0));
-                r.destroying_item = held;
+                (r.destroying, r.destroying_item) = (Some((hit.pos, face, 0.0)), held);
                 r.is_destroying = true;
             }
             // startDestroyBlock plays the first hit and crack itself; the

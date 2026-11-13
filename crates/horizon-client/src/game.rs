@@ -1752,7 +1752,7 @@ struct Game<'a> {
     hands_replaced: [bool; 2],
     /// `Minecraft`'s attack handling, attack clicks since the last tick and
     /// the attack strength tickers the hand reads.
-    clicks: horizon_client::first_person::Clicks,
+    clicks: horizon_client::first_person::Clicks<Option<ItemStack>>,
     attack_clicks: u32,
     /// Use clicks since the last tick; `handleKeybinds` consumes them after the attack clicks.
     use_clicks: u32,
