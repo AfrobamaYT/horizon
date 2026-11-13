@@ -624,6 +624,20 @@ so a mod's entity set may name its own new attribute. Values sanitize through th
 minimum, everything else clamps), and saves, item modifiers and the sync set carry the attribute by its string
 id.
 
+A code mod can widen the bounds of an attribute that already exists, vanilla's or another mod's, with
+`Registrar::widen_attribute_bounds(id, min, max)` (Java mods use a mixin or an access transformer on
+`RangedAttribute.minValue` / `maxValue`): an RPG mod lets `minecraft:max_health` go past 1024 with
+`widen_attribute_bounds("minecraft:max_health", 1.0, 1e6)`. Every mod's asks join the catalog once, at load, after
+the declared attributes: the bounds become their union (the lowest `min`, the highest `max`, never narrower than the
+attribute's own), whatever the load order, so an ask narrower than another mod's is a silent no-op. The default never
+moves. Every clamp and check of the value reads the catalog, on both sides: the player's and mobs' attributes, the
+LAN record check, the sync. Only both-side packages may widen bounds (`WrongSide` otherwise); a non-finite bound
+(`NotFinite`) or `min > max` (`InvalidBounds`) refuses at registration, and an attribute the catalog does not have or
+a range that leaves the default out refuses the load, naming the mod. A client needs nothing more than the mod-set
+check it already passes at join: a client without the mod cannot join. A save keeps a base past vanilla's bound while
+the mod is there; once it is gone, the load clamps the base into the bounds and logs it, once per attribute in each
+world load.
+
 A code mod can declare a datapack registry of its own with `Registrar::declare_datapack_registry(path, sync,
 fields)` (NeoForge's `DataPackRegistryEvent.NewRegistry`).
 `path` lands in the mod's namespace (`spell` of `example` is `example:spell`), and `fields` is a flat record
@@ -669,7 +683,7 @@ behaviour, with its own attributes. It saves what its template's class saves und
 table is its own, `<id>:entities/<name>` (vanilla's `EntityType.getDefaultLootTable`). It is not in vanilla's entity type
 tags (`#minecraft:undead`, `#minecraft:zombies`...) unless the mod adds it. Its row in `entity-types.json` is its
 template's, with `template` added and its attributes in place of the template's. To draw a custom model or texture,
-use `mob_submit`; the content declaration inherits the template's goals.
+use `render_living_pre`; the content declaration inherits the template's goals.
 
 #### Menu types
 
@@ -682,7 +696,7 @@ from (`results`, as a furnace's result slot):
 ```
 
 It is the menu type `<id>:<name>`, with its network id after vanilla's. A mod block's container opens it when its
-`menu` names it with as many slots ([native mods](native-mods.md), `block_entity_container`). The menu holds
+`menu` names it with as many slots ([native mods](native-mods.md), `r.block_container(&block, container)`). The menu holds
 its slots, then the player's 36. A shift-click from the inventory goes to the first slots with room, never a result
 slot, and one on the container goes to the inventory, as a chest's does. `results` fence players only: hoppers follow the
 container's faces and `inputs`, so leave result slots out of `inputs`. The data slots are the block entity's `data`
