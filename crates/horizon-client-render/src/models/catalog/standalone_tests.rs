@@ -23,7 +23,7 @@ impl Fixture {
         for y in 0..16usize {
             for x in 0..16usize {
                 let shaft = (7..=8).contains(&x) && (5..=14).contains(&y);
-                let head = (1..=7).contains(&y) && x.abs_diff(7) <= y - 1;
+                let head = (1..=7).contains(&y) && x.abs_diff(7) < y;
                 if shaft || head {
                     pixels[(y * 16 + x) * 4..(y * 16 + x + 1) * 4]
                         .copy_from_slice(&[255, 0, 0, 255]);
