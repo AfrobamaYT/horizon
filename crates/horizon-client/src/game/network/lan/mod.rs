@@ -2866,7 +2866,7 @@ impl Game<'_> {
     /// A sand place in the same tick as another sand's fall schedule still
     /// sees the support (#4510). `tick_lan` then syncs the level; a paused
     /// tick that never calls this still drains inside `tick_lan`.
-    pub(super) fn tick_lan_packets(&mut self) {
+    pub(in crate::game) fn tick_lan_packets(&mut self) {
         if self.level_pass.packets_drained {
             return;
         }

@@ -178,6 +178,9 @@ pub struct Guest {
     /// The hub tick the player was placed on: chunks go out from the tick
     /// after next, behind the first doTick's packets, as vanilla's do.
     pub placed_at: u64,
+    /// The hub tick the guest entered its level (a join or a level change): `player_move` does not
+    /// hear the tick after it.
+    pub level_entered: u64,
     /// The chunk cache centre placeNewPlayer already sent.
     pub center_sent: Option<(i32, i32)>,
     /// Why the connection closed (the console's "lost connection").
@@ -679,6 +682,7 @@ impl Guest {
             last_seen: Default::default(),
             signatures: Default::default(),
             placed_at: 0,
+            level_entered: 0,
             center_sent: None,
             left_reason: String::new(),
             pending_move: None,

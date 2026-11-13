@@ -6,12 +6,27 @@
 //! fires the hook with nothing of the hub borrowed and calls [`Hub::resolve_move`]: commit, or drop
 //! and correct the client to the accepted position and look. With no listener nothing is held:
 //! [`Hub::accept_move`] commits at once, as it did before the hook existed.
+//!
+//! Not heard, and committed in place: a player's first tick in a level (the tick after a join or a
+//! level change), the confirmation of a teleport, and a passage crossing. A report that arrives
+//! while a teleport is unconfirmed never gets here (the hub only applies its rotation), so the
+//! correction a veto sends is not heard either.
 
 use super::{HostEvent, Hub};
 
-/// How many ticks a report may stay pending. A mod that has not ruled by then is out of time: the
-/// report is dropped with the correction, never committed.
+/// How many ticks a report may stay pending, the tick it was held at the first of them: it can be
+/// ruled on up to the 20th tick, and the 21st finds it out of time, dropped with the correction and
+/// never committed.
 pub const MOVE_PENDING_TICKS: u64 = 20;
+
+/// Whether the mods hear a validated report.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Hearing {
+    /// A report from the player's own movement: heard when a mod listens and it changes something.
+    Heard,
+    /// A report the hub applies in place: the confirmation of a teleport, a passage crossing.
+    Unheard,
+}
 
 /// A movement report that passed the server's own checks (`handlePlayerPositionChange`).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -48,11 +63,17 @@ pub struct MoveReport {
 }
 
 impl Hub {
-    /// Commits the validated report `m` of guest `i`, or holds it for the mods when one listens and
-    /// the report changes the position or the look. Not heard: a player's first move after
-    /// joining. A passenger never gets here (its vehicle carries it).
-    pub(super) fn accept_move(&mut self, i: usize, m: Accepted, events: &mut Vec<HostEvent>) {
-        if self.moves_listened && self.move_changes(i, &m) {
+    /// Commits the validated report `m` of guest `i`, or holds it for the mods when one listens, it
+    /// is `Heard` and it changes the position or the look. A passenger never gets here (its vehicle
+    /// carries it).
+    pub(super) fn accept_move(
+        &mut self,
+        i: usize,
+        m: Accepted,
+        hearing: Hearing,
+        events: &mut Vec<HostEvent>,
+    ) {
+        if hearing == Hearing::Heard && self.moves_listened && self.move_changes(i, &m) {
             let (since, conn) = (self.ticks, self.guests[i].conn);
             let (teleports, dimension) = {
                 let g = &self.guests[i];
@@ -71,10 +92,11 @@ impl Hub {
         self.commit_move(i, m, events);
     }
 
-    /// The report differs from the accepted position or look, and is not the player's first.
+    /// The report differs from the accepted position or look, and is not of the player's first tick
+    /// in its level: the tick after it entered (a join, a level change) is not heard, the next is.
     fn move_changes(&self, i: usize, m: &Accepted) -> bool {
         let g = &self.guests[i];
-        g.ticks > 0
+        self.ticks > g.level_entered + 1
             && (m.to != g.position || m.yaw != g.yaw || m.pitch.clamp(-90.0, 90.0) != g.pitch)
     }
 
@@ -129,12 +151,17 @@ impl Hub {
             self.guests.update(i, |g| g.pending_move = None);
             return false;
         }
-        if self.ticks.saturating_sub(p.since) > MOVE_PENDING_TICKS {
+        if self.move_expired(p) {
             self.guests.update(i, |g| g.pending_move = None);
             self.correct_move(i);
             return false;
         }
         true
+    }
+
+    /// The report has been pending for [`MOVE_PENDING_TICKS`] ticks already.
+    fn move_expired(&self, p: &PendingMove) -> bool {
+        self.ticks.saturating_sub(p.since) >= MOVE_PENDING_TICKS
     }
 
     fn pending_is_current(&self, i: usize, p: &PendingMove) -> bool {
@@ -161,8 +188,8 @@ impl Hub {
         })
     }
 
-    /// The mods ruled on guest `conn`'s pending report: `commit` applies it, otherwise it is
-    /// dropped and the client corrected. Nothing happens if the player is gone or has no pending
+    /// The mods ruled on guest `conn`'s pending report: `commit` applies it, otherwise (or when the
+    /// ruling is past [`MOVE_PENDING_TICKS`]) it is dropped and the client corrected. Nothing happens if the player is gone or has no pending
     /// report any more (a disconnect, a teleport or a level change dropped it).
     pub fn resolve_move(&mut self, conn: u32, commit: bool) {
         let Some(i) = self.guests.iter().position(|g| g.conn == conn) else {
@@ -174,7 +201,8 @@ impl Hub {
         if !self.pending_is_current(i, &p) {
             return;
         }
-        if !commit {
+        // A ruling that comes too late is no ruling: out of time, the report is dropped.
+        if !commit || self.move_expired(&p) {
             self.correct_move(i);
             return;
         }

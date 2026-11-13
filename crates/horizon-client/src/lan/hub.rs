@@ -52,7 +52,7 @@ mod raw_inbox;
 mod spawn_info;
 use advancements::AdvancementOwners;
 use chat::yellow_names;
-pub use pending_move::{Accepted, PendingMove};
+pub use pending_move::{Accepted, Hearing, PendingMove};
 use raw_inbox::{PacketDrain, yield_raw};
 pub mod game_event {
     pub const NO_RESPAWN_BLOCK_AVAILABLE: u8 = 0;
@@ -1622,6 +1622,7 @@ impl Hub {
             }));
             g.center_sent = Some((cx, cz));
             g.placed_at = self.ticks;
+            g.level_entered = self.ticks;
         });
         self.send_active_effects(i);
         // ServerPlayer.sendPostEffects and initInventoryMenu.
@@ -1744,6 +1745,7 @@ impl Hub {
             g.imported = false;
             g.placed = true;
             g.placed_at = self.ticks;
+            g.level_entered = self.ticks;
         });
         // The player list entry of the newcomer, to everyone placed or held (itself included).
         let newcomer = C::PlayerInfoUpdate(play::PlayerInfoUpdate {
@@ -4154,7 +4156,9 @@ impl Hub {
                             }
                         });
                         let rot = (p.yaw, p.pitch);
-                        self.position_change(i, [p.x, p.y, p.z], rot, 0, ctx, events);
+                        // The confirmation of a teleport is validated, never heard (`player_move`).
+                        let at = [p.x, p.y, p.z];
+                        self.position_change(i, at, rot, 0, Hearing::Unheard, ctx, events);
                     }
                 }
                 // handlePlayerAbilities: the client flies only if it may.
@@ -4487,7 +4491,7 @@ impl Hub {
         }
         let to = pos.unwrap_or(g.position);
         let rot = rot.unwrap_or((g.yaw, g.pitch));
-        self.position_change(i, to, rot, flags, ctx, events);
+        self.position_change(i, to, rot, flags, Hearing::Heard, ctx, events);
     }
 
     /// ServerGamePacketListenerImpl.handlePlayerPositionChange.
@@ -4497,6 +4501,7 @@ impl Hub {
         to: [f64; 3],
         (yaw, pitch): (f32, f32),
         flags: u8,
+        hearing: Hearing,
         ctx: &TickCtx,
         events: &mut Vec<HostEvent>,
     ) {
@@ -4621,7 +4626,7 @@ impl Hub {
             stands,
             floating,
         };
-        self.accept_move(i, accepted, events);
+        self.accept_move(i, accepted, hearing, events);
     }
 
     /// `ServerGamePacketListenerImpl.noBlocksAround`: every block of the
@@ -5012,6 +5017,7 @@ impl Hub {
             // Out of the old level with its chunks (ChunkMap.removeEntity).
             super::chunk_watch::unwatch_all(&mut self.chunk_watches, g);
             g.dimension = self.config.dimension.clone();
+            g.level_entered = self.ticks;
             // A mod's collision exclusions were the old level's (#3717).
             g.collision_exclusions.clear();
             // The load timer is not restarted: vanilla resets the client's loaded state on death and
@@ -5262,6 +5268,8 @@ mod tests {
     #[path = "../far_tests.rs"]
     mod far_tests;
     mod ordered_inbox_tests;
+    mod pending_move_bound_tests;
+    mod pending_move_scope_tests;
     mod pending_move_tests;
     mod sound_tests;
     use super::*;

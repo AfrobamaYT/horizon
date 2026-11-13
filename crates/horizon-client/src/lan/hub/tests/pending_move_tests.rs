@@ -1,8 +1,8 @@
 //! `player_move`: a changed report is held for the mods, ruled on, and the inbox waits behind it.
 use super::*;
-use crate::lan::guest::InboxItem;
+pub(super) use crate::lan::guest::InboxItem;
 
-fn with_input_context<T>(run: impl FnOnce(&mut TickCtx<'_>) -> T) -> T {
+pub(super) fn with_input_context<T>(run: impl FnOnce(&mut TickCtx<'_>) -> T) -> T {
     let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
     let mut next_entity = 2;
     let border = crate::worldborder::WorldBorder::default();
@@ -25,7 +25,7 @@ fn with_input_context<T>(run: impl FnOnce(&mut TickCtx<'_>) -> T) -> T {
     })
 }
 
-fn at(x: f64) -> S {
+pub(super) fn at(x: f64) -> S {
     S::MovePlayerPos(play::MovePlayerPos {
         x,
         y: 64.0,
@@ -34,7 +34,17 @@ fn at(x: f64) -> S {
     })
 }
 
-fn turned(yaw: f32) -> S {
+/// A report that moves and claims no ground.
+pub(super) fn walking(x: f64) -> S {
+    S::MovePlayerPos(play::MovePlayerPos {
+        x,
+        y: 64.0,
+        z: 0.0,
+        flags: 0,
+    })
+}
+
+pub(super) fn turned(yaw: f32) -> S {
     S::MovePlayerRot(play::MovePlayerRot {
         yaw,
         pitch: 0.0,
@@ -42,10 +52,12 @@ fn turned(yaw: f32) -> S {
     })
 }
 
-/// A hub whose guest 0 stands at `(0, 64, 0)`, has moved before and listens (or not).
-fn standing(listened: bool, inbox: Vec<S>) -> Hub {
+/// A hub at tick 10 whose guest 0 stands at `(0, 64, 0)`, entered its level at tick 0 and listens (or not).
+pub(super) fn standing(listened: bool, inbox: Vec<S>) -> Hub {
     let (mut hub, _rx) = hub_with_a_guest();
     hub.moves_listened = listened;
+    // Long after the guest entered its level (tick 0): its first tick there is long past.
+    hub.ticks = 10;
     hub.guests.update(0, |g| {
         g.load_timeout = 0;
         g.position = [0.0, 64.0, 0.0];
@@ -58,11 +70,11 @@ fn standing(listened: bool, inbox: Vec<S>) -> Hub {
     hub
 }
 
-fn drain(hub: &mut Hub) -> Vec<HostEvent> {
+pub(super) fn drain(hub: &mut Hub) -> Vec<HostEvent> {
     with_input_context(|ctx| hub.drain_packets(ctx))
 }
 
-fn moves(events: &[HostEvent]) -> Vec<u32> {
+pub(super) fn moves(events: &[HostEvent]) -> Vec<u32> {
     events
         .iter()
         .filter_map(|e| match e {
@@ -72,45 +84,93 @@ fn moves(events: &[HostEvent]) -> Vec<u32> {
         .collect()
 }
 
-fn next_client_tick(hub: &mut Hub, more: Vec<S>) {
-    hub.guests.update(0, |g| {
-        g.inbox.push_front(InboxItem::uncredited(S::ClientTickEnd(
-            horizon_protocol::packets::Empty,
-        )));
-        g.inbox.extend(more.into_iter().map(InboxItem::uncredited));
-    });
+/// The next hub tick: the guest's packets that waited are read again.
+pub(super) fn next_tick(hub: &mut Hub) -> Vec<HostEvent> {
+    hub.ticks += 1;
+    drain(hub)
+}
+
+pub(super) fn tick_end() -> S {
+    S::ClientTickEnd(horizon_protocol::packets::Empty)
+}
+
+/// The guest's accepted look as `[yaw, pitch]`.
+fn look(hub: &Hub) -> [f32; 2] {
+    [hub.guests[0].yaw, hub.guests[0].pitch]
 }
 
 #[test]
-fn two_reports_are_heard_in_order_each_after_the_one_before_was_ruled_on() {
-    let mut hub = standing(true, vec![at(0.5), at(0.75)]);
+fn two_reports_in_one_tick_are_heard_in_order_each_from_the_one_before_when_both_pass() {
+    let mut hub = standing(true, vec![turned(10.0), turned(20.0)]);
     let conn = hub.guests[0].conn;
-    let events = drain(&mut hub);
+    assert_eq!(moves(&drain(&mut hub)), [conn], "the first is held");
+    assert_eq!(hub.guests[0].inbox.len(), 1, "the second keeps its place");
     assert_eq!(
-        moves(&events),
-        [conn],
-        "one report is held, the second waits behind it"
+        look(&hub),
+        [0.0, 0.0],
+        "nothing is applied before the ruling"
     );
-    let g = &hub.guests[0];
-    assert_eq!(
-        g.position,
-        [0.0, 64.0, 0.0],
-        "nothing is committed before the ruling"
-    );
-    assert_eq!(g.inbox.len(), 1, "the later report keeps its place");
     let first = hub.pending_move_report(conn).unwrap();
-    assert_eq!((first.from, first.to), ([0.0, 64.0, 0.0], [0.5, 64.0, 0.0]));
-    hub.resolve_move(conn, true);
     assert_eq!(
-        hub.guests[0].position,
-        [0.5, 64.0, 0.0],
-        "a commit applies the report"
+        (first.from_rotation, first.to_rotation),
+        ([0.0, 0.0], [10.0, 0.0])
     );
-    assert!(hub.pending_move_report(conn).is_none());
-    // The next client tick: its tick end first, then the report that waited.
-    next_client_tick(&mut hub, vec![]);
-    let events = drain(&mut hub);
-    assert_eq!(moves(&events), [conn]);
+    hub.resolve_move(conn, true);
+    assert_eq!(look(&hub), [10.0, 0.0]);
+    assert_eq!(moves(&next_tick(&mut hub)), [conn]);
+    let second = hub.pending_move_report(conn).unwrap();
+    assert_eq!(
+        (second.from_rotation, second.to_rotation),
+        ([10.0, 0.0], [20.0, 0.0])
+    );
+    hub.resolve_move(conn, true);
+    assert_eq!(look(&hub), [20.0, 0.0]);
+    assert!(hub.guests[0].inbox.is_empty());
+}
+
+#[test]
+fn a_veto_of_the_first_of_two_reports_in_one_tick_corrects_and_the_second_is_not_heard() {
+    let mut hub = standing(true, vec![turned(10.0), turned(20.0)]);
+    let conn = hub.guests[0].conn;
+    assert_eq!(moves(&drain(&mut hub)), [conn]);
+    hub.resolve_move(conn, false);
+    assert_eq!(look(&hub), [0.0, 0.0], "the vetoed report is not applied");
+    assert!(hub.guests[0].awaiting_teleport.is_some());
+    // The second waited behind it, and meets the unconfirmed correction: only the server's own
+    // handling of a report that arrives then, no hearing.
+    assert!(moves(&next_tick(&mut hub)).is_empty());
+    assert!(hub.guests[0].pending_move.is_none());
+    assert!(hub.guests[0].inbox.is_empty());
+    assert_eq!(look(&hub), [0.0, 0.0]);
+}
+
+#[test]
+fn two_reports_in_one_tick_with_no_listener_are_committed_at_once_in_order() {
+    let mut hub = standing(false, vec![turned(10.0), turned(20.0)]);
+    assert!(moves(&drain(&mut hub)).is_empty());
+    assert_eq!(look(&hub), [20.0, 0.0]);
+    assert!(hub.guests[0].pending_move.is_none());
+    assert!(hub.guests[0].inbox.is_empty());
+}
+
+#[test]
+fn the_end_of_the_client_tick_and_the_next_report_keep_their_order_behind_a_held_report() {
+    let mut hub = standing(true, vec![at(0.5), tick_end(), at(0.75)]);
+    let conn = hub.guests[0].conn;
+    assert_eq!(moves(&drain(&mut hub)), [conn]);
+    assert_eq!(hub.guests[0].inbox.len(), 2, "tick end and report wait");
+    assert!(
+        hub.guests[0].position_this_tick,
+        "the tick end has not been read"
+    );
+    hub.resolve_move(conn, true);
+    assert_eq!(moves(&next_tick(&mut hub)), [conn]);
+    let g = &hub.guests[0];
+    assert!(
+        !g.disconnect_pending,
+        "the tick end was read before the report, so it is not a second position in one client tick"
+    );
+    assert_eq!(g.position, [0.5, 64.0, 0.0]);
     let second = hub.pending_move_report(conn).unwrap();
     assert_eq!(
         (second.from, second.to),
@@ -172,76 +232,42 @@ fn with_no_listener_the_report_is_committed_in_place_and_nothing_is_held() {
     assert!(g.inbox.is_empty());
 }
 
+/// What a vetoed report does to the counters: the server's own checks and the anticheat's record
+/// of the client's ticks saw it before the hook, and the packets behind it are read a tick late.
 #[test]
-fn a_players_first_move_is_not_heard() {
-    let mut hub = standing(true, vec![at(0.5)]);
-    hub.guests.update(0, |g| g.ticks = 0);
-    assert!(moves(&drain(&mut hub)).is_empty());
-    assert_eq!(hub.guests[0].position, [0.5, 64.0, 0.0]);
-}
-
-#[test]
-fn a_report_nobody_rules_on_is_dropped_with_the_correction_never_committed() {
-    let mut hub = standing(true, vec![at(0.5)]);
+fn a_vetoed_report_is_counted_before_the_hook_and_adds_no_violation() {
+    let mut hub = standing(true, vec![walking(0.5), tick_end()]);
+    let config = horizon_anticheat::Config::default();
+    hub.set_anticheat(config.clone());
     let conn = hub.guests[0].conn;
-    drain(&mut hub);
-    hub.ticks += 21;
-    next_client_tick(&mut hub, vec![]);
-    drain(&mut hub);
+    assert_eq!(moves(&drain(&mut hub)), [conn]);
     let g = &hub.guests[0];
-    assert!(g.pending_move.is_none());
-    assert_eq!(g.position, [0.0, 64.0, 0.0], "never committed");
-    assert!(g.awaiting_teleport.is_some(), "the client was corrected");
-    hub.resolve_move(conn, true);
+    assert_eq!(g.received_moves, 1, "the speed check's window counted it");
     assert_eq!(
-        hub.guests[0].position,
-        [0.0, 64.0, 0.0],
-        "a late ruling finds nothing"
-    );
-}
-
-#[test]
-fn a_teleport_or_a_level_change_drops_a_pending_report_without_a_correction() {
-    let mut hub = standing(true, vec![at(0.5)]);
-    let conn = hub.guests[0].conn;
-    drain(&mut hub);
-    hub.teleport_command(0, [10.5, 70.0, 10.5], [false; 3]);
-    assert!(hub.guests[0].pending_move.is_none());
-    let counter = hub.guests[0].teleport_counter;
-    hub.resolve_move(conn, true);
-    assert_eq!(
-        hub.guests[0].position,
-        [10.5, 70.0, 10.5],
-        "the teleport stands"
+        g.record.as_ref().map(|r| r.ended()),
+        Some(0),
+        "its tick end waits"
     );
     assert_eq!(
-        hub.guests[0].teleport_counter, counter,
-        "no second correction"
+        g.anticheat.timer.ms, 0.0,
+        "the timer has not read the tick end"
     );
-
-    let mut hub = standing(true, vec![at(0.5)]);
-    drain(&mut hub);
-    hub.guests
-        .update(0, |g| g.dimension = "minecraft:the_nether".into());
-    let counter = hub.guests[0].teleport_counter;
-    hub.resolve_move(conn, true);
-    let g = &hub.guests[0];
-    assert_eq!(
-        g.position,
-        [0.0, 64.0, 0.0],
-        "not committed into another level"
-    );
-    assert_eq!(g.teleport_counter, counter, "and not corrected");
-}
-
-#[test]
-fn a_player_who_left_has_nothing_pending_and_a_late_ruling_is_ignored() {
-    let mut hub = standing(true, vec![at(0.5)]);
-    let conn = hub.guests[0].conn;
-    drain(&mut hub);
-    let gone = hub.remove_guest(0, "gone");
-    assert!(gone.pending_move.is_some(), "it leaves with the guest");
-    hub.resolve_move(conn, true);
     hub.resolve_move(conn, false);
-    assert!(hub.pending_move_report(conn).is_none());
+    assert!(
+        hub.guests[0].moves.is_empty(),
+        "its bookkeeping was skipped"
+    );
+    assert!(moves(&next_tick(&mut hub)).is_empty());
+    let g = &hub.guests[0];
+    let record = g.record.as_ref().unwrap();
+    assert_eq!(record.ended(), 1, "the tick end was read a tick late");
+    assert_eq!(
+        record.ticks().last().and_then(|t| t.position),
+        Some([0.5, 64.0, 0.0]),
+        "the record holds what the client sent, vetoed or not"
+    );
+    assert_eq!(g.anticheat.timer.ms, -50.0, "one tick end of the timer");
+    for check in horizon_anticheat::Check::ALL {
+        assert_eq!(g.anticheat.vl(&config, *check, hub.ticks), 0.0, "{check:?}");
+    }
 }
