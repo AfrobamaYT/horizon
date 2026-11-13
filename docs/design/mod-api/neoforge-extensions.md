@@ -275,6 +275,20 @@ not its type properties, so "partial" below means the vanilla answer is readable
 | `canExtinguish(state, level, pos)` | Partial | `FluidTypeProperties.can_extinguish` | Static, and only a water-family fluid extinguishes; a mod fluid cannot opt in. |
 | `appendHoverText(stack, context, display, lines, flag)` | Missing | — | `FluidStack` has no tooltip hook. |
 
+## `BlockItemExtension`
+
+| Method | Verdict | Horizon | Notes |
+| --- | --- | --- | --- |
+| `onBlockPlacedBy(context, level, pos, state, placer, stack)` | Covered | `ItemPart::on_block_placed_by` (`hooks/on_block_placed_by.rs`, hook version 1) | Server notice with a `ServerHost`, the pre-shrink stack, optional player, primary position, final state and placement face/click. Fires once after stack block-entity data and `Block.setPlacedBy` companions exist, before level events and consumption, on player and dispenser block-item placement; a dispenser has no placer. Refused, failed and `entity_place`-canceled placements never notify. An item with no subscribed Part costs one lookup and no stack conversion. |
+
+With `HORIZON_TEST_RESOURCES` pointing to prepared 26.3 resources, the isolated Game regression
+places a custom block item, a two-part red bed and a dispenser's shulker box, and checks cancellation
+and refusal without consuming the stack:
+
+```sh
+cargo test -p horizon-client --lib game::native_hooks::on_block_placed_by_tests::block_items_notify_after_setup_and_before_consumption -- --exact --ignored
+```
+
 ## `IMenuTypeExtension`
 
 Menu types are content data (`MenuType` in `crates/horizon-mod-package/src/content.rs`, files under

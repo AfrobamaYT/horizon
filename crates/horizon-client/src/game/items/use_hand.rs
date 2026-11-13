@@ -656,6 +656,8 @@ impl Game<'_> {
                 _ => {}
             }
         }
+        let placer = self.native_acting_player();
+        self.block_item_placed(&stack, placer, pos, &ctx);
         // BlockItem.place's SUCCESS: the client swings with its own prediction.
         self.swing_arm_predicted();
         // BlockItem.place's sound is among the level events;
