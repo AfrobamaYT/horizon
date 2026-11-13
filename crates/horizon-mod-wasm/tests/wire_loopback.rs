@@ -2358,6 +2358,8 @@ fn world_phase_messages_round_trip_returns_filter_decision() {
     );
 }
 
+#[path = "wire_loopback/level_ticking.rs"]
+mod level_ticking;
 #[test]
 fn wire_loopback_block_entity_data_received_preserves_tag_and_handle() {
     thread_local! { static CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
