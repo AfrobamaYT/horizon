@@ -144,6 +144,11 @@
     "category": "dispatch table",
     "reason": "Thread-local dispatch inventory for isolated engine tests."
   },
+  "wire/mod.rs::RESOURCE_REACHED": {
+    "type": "std::cell::Cell<bool>",
+    "category": "reentrancy guard",
+    "reason": "Per-thread flag set while a Wire layout walk reaches a resource handle's codec, read by the Part state declaration's capability check."
+  },
   "wire/wire_resources.rs::ACCESS": {
     "type": "OnceLock<ResourceAccess>",
     "category": "set-once socket",

@@ -80,15 +80,21 @@ let done = Press::edit_state(host, entity, |_, progress| {
 - An undecodable saved value refuses before the closure runs and keeps its bytes.
 - A transaction that aborts puts back the values, the chunk's unsaved mark and any block entity it
   removed, with its attachment map still bound. Handles of block entities made inside it stay
-  `Stale`. Removed block entities retire only when the outermost transaction commits, and no save
-  runs while a value may still be tentative.
+  `Stale`. Removed block entities retire only when the outermost transaction commits. No save runs
+  while a value may still be tentative, and a chunk unload waits until no transaction is open.
+- A wasm closure that traps ends the call like a native panic that unwinds: nothing is stored and
+  the transaction aborts. The runtime then stops calling that module's link group, since the trap
+  may have left its own state half-written.
 - No size or depth limit of its own applies to a value. A saved value follows the chunk's NBT rules:
   vanilla 26.3 reads region files with `NbtAccounter.unlimitedHeap`, an unbounded byte budget and
   depth 512. The 2 MiB quota of a chunk packet's block entity data is a network limit and does not
   cap saved state.
 - Registration refuses a declaration that syncs, copies on death, lies outside the mod's namespaces
-  or reuses a key with another type. It also refuses a wasm mod's declaration without a codec. The
-  refusal names the Part, the key, the type and the reason.
+  or reuses a key with a different Wire layout. It refuses a type whose Wire form holds a resource
+  handle (an erased handler such as `Arc<dyn BlockPart>`) on every target: such a value crosses
+  only into one link group and cannot be saved. It also refuses a declaration without a codec from
+  a mod the game loaded as wasm, whatever the module says of itself. The refusal names the Part,
+  the key, the type and the reason.
 - Values without a codec last for the session. Part state is server-side for now. A client reads the
   default, because nothing is sent to it yet.
 

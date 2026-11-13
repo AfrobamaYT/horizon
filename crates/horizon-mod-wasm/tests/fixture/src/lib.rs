@@ -261,6 +261,10 @@ impl Hooks for Mod {
         mod_api::Flow::Continue
     }
 
+    fn blocks(&self, _: &mod_api::RegistrationContext, event: &mut mod_api::BlocksEvent<'_>) {
+        part_state::blocks(event);
+    }
+
     fn register(&self, registrar: &mut dyn mod_api::Registrar, cx: &mod_api::RegistrationContext) {
         runtime_environment::register(cx);
         capability_registration::register(registrar, cx);

@@ -418,7 +418,7 @@ impl BlockEntitiesRegistrar for PartRegistrar {
     ) -> Result<(), crate::BlockEntityStateError> {
         let key = (declaration.namespace, declaration.name);
         let checked = declaration
-            .check()
+            .check(self.mod_wasm)
             .and_then(|()| {
                 self.owned_declaration_id(&format!("{}:{}", key.0, key.1))
                     .map(drop)

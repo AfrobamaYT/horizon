@@ -127,6 +127,10 @@ pub enum PartStateRefusal {
     /// `DATA` has no codec, which a wasm mod needs: its values cross the wasm
     /// boundary only in their saved form.
     NoCodecOnWasm,
+    /// `Data`'s Wire form holds a resource handle (an erased handler such as
+    /// `Arc<dyn BlockPart>`), which crosses only into one link group's resource scope:
+    /// not as data both targets read, nor into a save.
+    ResourceHandle,
     /// `DATA`'s namespace is not one this mod owns.
     UnownedNamespace,
     /// The same key is already declared with a type of another Wire layout, named here.
@@ -186,6 +190,10 @@ impl fmt::Display for BlockEntityStateError {
             PartStateRefusal::NoCodecOnWasm => f.write_str(
                 "a wasm mod's part state needs a codec (its values cross only in saved form)",
             ),
+            PartStateRefusal::ResourceHandle => f.write_str(
+                "its Wire form holds a resource handle, which crosses only within one link \
+                 group: not to every target, nor into a save",
+            ),
             PartStateRefusal::UnownedNamespace => {
                 f.write_str("the namespace is not one this mod owns")
             }
@@ -225,35 +233,39 @@ pub struct PartStateDeclaration {
     sync: bool,
     copy_on_death: bool,
     codec: bool,
-    /// Whether the declaring mod runs in wasm, where the value needs a codec.
-    wasm: bool,
+    /// Whether the type's Wire form holds a resource handle anywhere in it.
+    resource: bool,
 }
 
 impl PartStateDeclaration {
     /// The declaration of `key`: what the typed declaration is erased to, the same on both
     /// targets.
     pub fn of<T: crate::wire::Wire + 'static>(key: &AttachmentType<T>) -> Self {
+        let (layout, resource) = crate::wire::resource_layout::<T>();
         Self {
             namespace: key.namespace,
             name: key.name,
-            layout: T::layout(&mut Vec::new()),
+            layout,
             data_name: std::any::type_name::<T>(),
             sync: key.sync,
             copy_on_death: key.copy_on_death,
             codec: key.codec.is_some(),
-            wasm: cfg!(target_arch = "wasm32"),
+            resource,
         }
     }
 
-    /// What the declaration is refused for on its own: syncing, copying on death, or no
-    /// codec where the mod runs in wasm.
-    pub fn check(&self) -> Result<(), PartStateRefusal> {
-        let wasm = self.wasm;
+    /// What the declaration is refused for on its own, for a mod the game loaded as a wasm
+    /// module where `wasm` (the game's knowledge, not the module's): syncing, copying on death,
+    /// a resource handle in its Wire form, or no codec in a wasm mod.
+    pub fn check(&self, wasm: bool) -> Result<(), PartStateRefusal> {
         if self.sync {
             return Err(PartStateRefusal::Sync);
         }
         if self.copy_on_death {
             return Err(PartStateRefusal::CopyOnDeath);
+        }
+        if self.resource {
+            return Err(PartStateRefusal::ResourceHandle);
         }
         if wasm && !self.codec {
             return Err(PartStateRefusal::NoCodecOnWasm);
@@ -418,12 +430,8 @@ mod tests {
     }
 
     #[test]
-    fn declarations_refuse_sync_copy_on_death_and_codec_less_wasm_state() {
-        let check = |key: &AttachmentType<i32>, wasm| {
-            let mut declaration = PartStateDeclaration::of(key);
-            declaration.wasm = wasm;
-            declaration.check()
-        };
+    fn declarations_refuse_sync_copy_on_death_handles_and_codec_less_wasm_state() {
+        let check = |key: &AttachmentType<i32>, wasm| PartStateDeclaration::of(key).check(wasm);
         assert_eq!(check(&key(false, false, true), true), Ok(()));
         assert_eq!(check(&key(false, false, false), false), Ok(()));
         assert_eq!(
@@ -438,6 +446,22 @@ mod tests {
             check(&key(false, true, true), false),
             Err(PartStateRefusal::CopyOnDeath)
         );
+        // A handle anywhere in the type, however deep, on either target.
+        type Held = Option<Vec<(u8, Arc<dyn crate::BlockPart>)>>;
+        static HELD: AttachmentType<Held> = AttachmentType {
+            namespace: "test",
+            name: "held",
+            default: || None,
+            codec: None,
+            copy_on_death: false,
+            sync: false,
+        };
+        for wasm in [false, true] {
+            assert_eq!(
+                PartStateDeclaration::of(&HELD).check(wasm),
+                Err(PartStateRefusal::ResourceHandle)
+            );
+        }
     }
 
     #[test]

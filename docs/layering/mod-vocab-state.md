@@ -73,6 +73,7 @@ OUT_DIR file checked by the generator before writing it.
 | `runtime.rs::MODS` | `OnceLock<Installed>` | dispatch table | Dependency-ordered hook routing and its per-mod enabled bits remain engine-owned. |
 | `runtime.rs::MODS_SWITCHED` | `std::sync::atomic::AtomicU64` | dispatch table | Counts changes to the per-mod enabled bits it sits beside; read through the host's capability provider table, never by a guest's own copy. |
 | `runtime.rs::TEST_MODS` | `std::cell::Cell<Option<&'staticInstalled>>` | dispatch table | Thread-local dispatch inventory for isolated engine tests. |
+| `wire/mod.rs::RESOURCE_REACHED` | `std::cell::Cell<bool>` | reentrancy guard | Per-thread flag set while a Wire layout walk reaches a resource handle's codec, read by the Part state declaration's capability check. |
 | `wire/wire_resources.rs::ACCESS` | `OnceLock<ResourceAccess>` | set-once socket | Set-once platform callback registration; mutable platform storage lives above the engine. |
 | `wire/wire_resources.rs::shared::MARKER` | `std::sync::OnceLock<std::sync::Arc<Unsupported>>` | immutable cache | Shared immutable unsupported-resource marker with no writable payload. |
 | `world/server_reload.rs::first::ID` | `LazyLock<Identifier>` | immutable cache | Immutable vanilla reload-boundary identifier, allocated once and shared by anchor declarations. |

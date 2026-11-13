@@ -1791,9 +1791,16 @@ impl Streaming {
         // at once when the view moves and every eighth tick otherwise: a
         // column can stay a little past the edge without anyone noticing.
         let area = (self.center, self.radius);
-        let sweep = area != self.scan_area || self.scan_age >= 8;
-        self.scan_area = area;
-        self.scan_age = if sweep { 0 } else { self.scan_age + 1 };
+        // The sweep unloads columns, saving them and dropping their block entities' bindings:
+        // never while a transaction is open, whose values may still be tentative. A due sweep
+        // waits for the next update instead.
+        let sweep = (area != self.scan_area || self.scan_age >= 8)
+            && !world.block_entities.defers_retirement();
+        if sweep {
+            (self.scan_area, self.scan_age) = (area, 0);
+        } else {
+            self.scan_age += 1;
+        }
         self.requeue();
         self.relight_edits(world);
         hz_laps.lap("st_relight_edits");

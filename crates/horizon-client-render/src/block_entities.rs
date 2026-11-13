@@ -499,6 +499,10 @@ impl BlockEntities {
     pub fn defer_retirement(&mut self) {
         self.retiring.get_or_insert_with(Vec::new);
     }
+    /// Whether a transaction is open: between `defer_retirement` and `publish_retirement`.
+    pub fn defers_retirement(&self) -> bool {
+        self.retiring.is_some()
+    }
     /// Retires every map kept since `defer_retirement`, and stops deferring: the root
     /// transaction closed. What an abort did not put back goes: those of block entities a
     /// committed transaction removed, and those of block entities an aborted one made.
