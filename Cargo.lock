@@ -2448,6 +2448,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-mod-wasm-wire-loopback"
+version = "0.1.0"
+dependencies = [
+ "horizon-core",
+ "horizon-game-discovery",
+ "horizon-mod-api",
+ "horizon-mod-api-gen",
+ "horizon-mod-runtime",
+ "horizon-world",
+ "log",
+ "serde_json",
+]
+
+[[package]]
 name = "horizon-modding-examples"
 version = "0.0.0"
 dependencies = [

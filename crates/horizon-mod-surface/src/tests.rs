@@ -523,3 +523,33 @@ fn a_trait_whose_role_is_not_known_hashes_like_one_mods_implement() {
     let plain = api_trait("trait:ChunkGenerator", Role::None, &[], &[]);
     assert_ne!(bounded.hash, plain.hash);
 }
+
+#[test]
+fn how_a_type_crosses_and_whether_a_struct_can_be_built_are_outside_its_hash() {
+    let base = plain_struct(&[("height", "i32")]);
+    let with = |edit: fn(&mut TypeContract)| {
+        let mut contract = base.contract.clone();
+        edit(&mut contract);
+        Type::new(
+            "type:Settings",
+            "",
+            None,
+            contract,
+            base.fields.clone(),
+            vec![],
+        )
+        .hash
+    };
+    assert_eq!(with(|c| c.wire = true), base.hash);
+    assert_eq!(with(|c| c.wire_form = Some("record".into())), base.hash);
+    assert_eq!(with(|c| c.constructible = false), base.hash);
+    assert_eq!(with(|c| c.non_exhaustive = true), base.hash);
+    // An enum's `non_exhaustive` is in its hash: it decides whether a `match` needs a wildcard.
+    let enum_with = |non_exhaustive: bool| {
+        let mut contract = base.contract.clone();
+        contract.kind = TypeKind::Enum;
+        contract.non_exhaustive = non_exhaustive;
+        Type::new("type:Settings", "", None, contract, vec![], vec![]).hash
+    };
+    assert_ne!(enum_with(true), enum_with(false));
+}

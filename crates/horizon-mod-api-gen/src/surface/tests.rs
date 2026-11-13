@@ -938,3 +938,25 @@ fn a_hidden_public_field_is_part_of_the_field_set() {
     assert_eq!(private.fields_hash, before.fields_hash);
     assert!(before.contract.constructible && !private.contract.constructible);
 }
+
+#[test]
+fn a_listed_boundary_trait_an_older_tree_lacks_is_a_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    for (path, text) in FILES {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    let catalog = Catalog::parse(&[("hooks/ping.rs".into(), HOOKS.into())]).unwrap();
+    let mut index = Index::new(root, &[]);
+    let mut listed = boundary();
+    listed.roles.push(("FluidsHost".into(), Role::Call));
+    let export = build(root, &mut index, &catalog.hooks, &listed).unwrap();
+    assert!(
+        export.notes.iter().any(|note| note
+            == "boundary trait FluidsHost: not found in mod_api, its role is not recorded"),
+        "{:?}",
+        export.notes
+    );
+}

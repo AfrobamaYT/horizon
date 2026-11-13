@@ -128,6 +128,12 @@ jobs:
             echo "SDK_OUT=$scratch/sdk"
             echo "PROBE_OUT=$scratch/probe"
           } >> "$GITHUB_ENV"
+      # Every build in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py). The SDK
+      # stages and builds outside the checkout, beyond the Cargo config --cap writes, so the count also
+      # goes to CARGO_BUILD_JOBS, as fn-replace-check does; 4 GiB per release rustc.
+      - name: Cap build parallelism to the runner
+        if: runner.environment == 'self-hosted'
+        run: echo "CARGO_BUILD_JOBS=$(python3 tools/ci/cargo_jobs.py --job-mib 4096 --cap)" | tee -a "$GITHUB_ENV"
       - name: Build the unmodified prebuilt SDK topology
         run: >-
           "$PROBE_PYTHON" tools/prebuilt_game.py build "$SDK_OUT"
