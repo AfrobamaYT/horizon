@@ -402,6 +402,11 @@ mod tests {
             game.handle_packet(run(1, &[block(x, y, z, chest), diamonds([x, y, z])]))
                 .unwrap();
         }
+        // Instantiate live block entities, park their world, then retain fresh packet data too.
+        game.handle_packet(respawn(NETHER, 3)).unwrap();
+        game.handle_packet(respawn(OVERWORLD, 3)).unwrap();
+        game.handle_packet(run(1, &[diamonds([83, 70, 85]), diamonds([86, 70, 85])]))
+            .unwrap();
         {
             let nether = game.remote.as_ref().unwrap().viewed.get(1).unwrap();
             assert_eq!(nether.block_entities[&(5, 5)].len(), 2);
