@@ -844,6 +844,14 @@ jobs:
             echo "Superseded: a newer main push's shards carry this coverage." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          # A main push that waited over an hour cannot route by its own pool snapshot (the token
+          # reads Variables only as of the run's creation), so its shards were skipped. Coverage
+          # comes from the newer pushes queued behind it; a fresh run with the pool off still fails.
+          if [ "$RESULT" = skipped ] && [ "$GITHUB_EVENT_NAME" = push ] &&
+             [[ "$REASON" == "snapshot rejected: run age outside"* ]]; then
+            echo "Not tested here: the run waited past its routing snapshot; a newer main push carries this coverage." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if [ "$RESULT" != success ]; then
             echo "::error::Prepared-data coverage required; shard result: $RESULT; self-hosted: $ROUTE; $REASON"
             exit 1
