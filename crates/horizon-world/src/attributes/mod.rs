@@ -88,7 +88,7 @@ pub enum Display {
     Ranged,
     /// Added values as percentages too (`+5%` for `+0.05`).
     Percentage,
-    /// On or off: an added value above zero enables, below zero disables.
+    /// On or off: an added value above zero enables, any other disables.
     Boolean,
 }
 /// What an attribute's tooltip lines take from its declaration (NeoForge's

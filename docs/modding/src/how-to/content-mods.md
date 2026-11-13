@@ -629,7 +629,7 @@ modifier lines read on item tooltips, as NeoForge's `IAttributeExtension` does:
 
 - `display: AttributeDisplay::Percentage` (NeoForge's `PercentageAttribute`) shows added values as percentages
   too, so `+0.05` reads `+5% Swim Speed`. `AttributeDisplay::Boolean` (`BooleanAttribute`) shows an added
-  value above zero as enabled and below zero as disabled (`horizon.attribute.modifier.enabled` and
+  value above zero as enabled and any other as disabled (`horizon.attribute.modifier.enabled` and
   `.disabled`). `Ranged`, the default, is vanilla's.
 - `base_modifier: Some("mymod:base_mana")` (`getBaseId`) makes a modifier with that namespaced id read as the
   green total of the player's base value and its amount, as attack damage's base modifier does. The recipe

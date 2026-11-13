@@ -1277,7 +1277,7 @@ pub enum AttributeDisplay {
     Ranged,
     /// Added values as percentages too: `+0.05` reads `+5%`.
     Percentage,
-    /// On or off: an added value above zero reads enabled, below zero disabled.
+    /// On or off: an added value above zero reads enabled, any other disabled.
     Boolean,
 }
 

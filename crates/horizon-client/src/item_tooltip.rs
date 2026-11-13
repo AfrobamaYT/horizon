@@ -35,9 +35,10 @@ fn format_amount(value: f64) -> String {
 }
 
 /// `ItemAttributeModifiers.Display.Default.apply`: a modifier's line, none
-/// for a zero amount. `operation` is the modifier's operation id (0: added
-/// value, 1 and 2: multiplied); `display` is how the attribute reads its amounts
-/// (NeoForge's `IAttributeExtension.toValueComponent`).
+/// for a zero amount except a Boolean attribute's, which reads disabled.
+/// `operation` is the modifier's operation id (0: added value, 1 and 2:
+/// multiplied); `display` is how the attribute reads its amounts (NeoForge's
+/// `IAttributeExtension.toValueComponent`).
 fn modifier_line(
     translate: &dyn Fn(&str) -> Option<String>,
     attribute: &str,
@@ -48,13 +49,9 @@ fn modifier_line(
 ) -> Option<String> {
     let text = |key: &str| translate(key).unwrap_or_else(|| key.to_owned());
     let name = || crate::text::Text::literal(text(&format!("attribute.name.{attribute}")));
-    // `BooleanAttribute`: an added value turns it on or off.
+    // `BooleanAttribute`: an added value above zero turns it on, any other turns it off.
     if display == Display::Boolean && operation == 0 && !total {
-        let state = match amount {
-            a if a > 0.0 => "enabled",
-            a if a < 0.0 => "disabled",
-            _ => return None,
-        };
+        let state = if amount > 0.0 { "enabled" } else { "disabled" };
         let key = format!("horizon.attribute.modifier.{state}");
         return Some(crate::text::format_translation(&text(&key), &[name()]).plain());
     }
@@ -75,14 +72,13 @@ fn modifier_line(
     } else {
         return None;
     };
+    // A percentage reads through the multiplied operations' percent translation.
+    let form = if percent { 1 } else { operation };
     // TranslatableContents: `%s` and numbered `%1$s` arguments, `%%` a percent sign.
     Some(
         crate::text::format_translation(
-            &text(&format!("attribute.modifier.{kind}.{operation}")),
-            &[
-                crate::text::Text::literal(format_amount(shown) + if percent { "%" } else { "" }),
-                name(),
-            ],
+            &text(&format!("attribute.modifier.{kind}.{form}")),
+            &[crate::text::Text::literal(format_amount(shown)), name()],
         )
         .plain(),
     )
@@ -1191,13 +1187,15 @@ pub fn enchantment_lines(
 }
 
 /// The lines of `stack` below its name that its components give, in
-/// `ItemStack.addDetailsToTooltip` order.
+/// `ItemStack.addDetailsToTooltip` order. `style` answers each attribute's declared tooltip
+/// style, as [`attribute_tooltip`]'s does.
 pub fn detail_lines(
     stack: &ItemStack,
     info: Option<&ItemInfo>,
     attributes: &dyn AttributeTooltipListener,
     enchantments: &Enchantments,
     translate: &dyn Fn(&str) -> Option<String>,
+    style: &dyn Fn(&str) -> Option<AttributeStyle>,
 ) -> Vec<String> {
     let text = |key: &str| translate(key).unwrap_or_else(|| key.to_owned());
     let path = stack.item.trim_start_matches("minecraft:");
@@ -1274,16 +1272,9 @@ pub fn detail_lines(
         creative: false,
     };
     let (modifier_lines, added) = attribute_tooltip(
-        stack,
-        &modifiers,
-        &ctx,
+        stack, &modifiers, &ctx,
         // The search text lists attribute lines whatever the stack's display says, as before.
-        true,
-        attributes,
-        translate,
-        // The search text builds without a catalog: vanilla colors, positive
-        // for a mod attribute.
-        &|_| None,
+        true, attributes, translate, style,
     );
     lines.extend(modifier_lines.into_iter().map(|(line, _)| line));
     lines.extend(added.into_iter().map(|(text, _)| text.plain()));
@@ -1415,13 +1406,14 @@ pub fn container_lines(
     lines
 }
 
-/// Every line of `stack`'s tooltip, name first.
+/// Every line of `stack`'s tooltip, name first. `style` is as [`detail_lines`]'s.
 pub fn lines(
     stack: &ItemStack,
     info: Option<&ItemInfo>,
     attributes: &dyn AttributeTooltipListener,
     enchantments: &Enchantments,
     translate: &dyn Fn(&str) -> Option<String>,
+    style: &dyn Fn(&str) -> Option<AttributeStyle>,
 ) -> Vec<String> {
     let mut lines = vec![name_line(stack, translate)];
     if tooltip_display(stack).shows("minecraft:lore") {
@@ -1433,6 +1425,7 @@ pub fn lines(
         attributes,
         enchantments,
         translate,
+        style,
     ));
     lines
 }
@@ -1505,6 +1498,7 @@ mod tests {
             &NoAttributeListener,
             &enchantments,
             &translate,
+            &|_| None,
         );
         assert_eq!(lines.first().map(String::as_str), Some("Music Disc - 5"));
         let other = ItemStack::new("minecraft:stick", 1);
@@ -1515,7 +1509,8 @@ mod tests {
                 None,
                 &NoAttributeListener,
                 &enchantments,
-                &translate
+                &translate,
+                &|_| None,
             )
             .iter()
             .any(|l| l == "Music Disc - 5")
@@ -1760,10 +1755,24 @@ mod tests {
             Some((format!("Bad Omen IV ({duration})"), blue))
         );
         assert!(
-            lines(&bottle, None, &NoAttributeListener, &enchantments, &lang)
-                .contains(&format!("Bad Omen IV ({duration})")),
+            lines(
+                &bottle,
+                None,
+                &NoAttributeListener,
+                &enchantments,
+                &lang,
+                &|_| None
+            )
+            .contains(&format!("Bad Omen IV ({duration})")),
             "{:?}",
-            lines(&bottle, None, &NoAttributeListener, &enchantments, &lang)
+            lines(
+                &bottle,
+                None,
+                &NoAttributeListener,
+                &enchantments,
+                &lang,
+                &|_| None
+            )
         );
         // A numbered template, as some languages write it.
         let numbered = |key: &str| match key {
@@ -2148,6 +2157,7 @@ mod tests {
             ("mymod:swim", "mymod:boots", 0.05),
             ("mymod:glide", "mymod:wings", 1.0),
             ("mymod:mana", "mymod:base_mana", 5.0),
+            ("mymod:glide", "mymod:clipped", 0.0),
         ]
         .map(|(attribute, id, amount)| {
             ModifierRow::new(attribute, id, amount, "add_value", "mainhand")
@@ -2157,8 +2167,10 @@ mod tests {
                 match key {
                     "item.modifiers.mainhand" => "When in Main Hand:",
                     "attribute.modifier.plus.0" => "+%s %s",
+                    "attribute.modifier.plus.1" => "+%s%% %s",
                     "attribute.modifier.equals.0" => "%s %s",
                     "horizon.attribute.modifier.enabled" => "%s: Enabled",
+                    "horizon.attribute.modifier.disabled" => "%s: Disabled",
                     "attribute.name.mymod:swim" => "Swim Speed",
                     "attribute.name.mymod:glide" => "Gliding",
                     "attribute.name.mymod:mana" => "Mana",
@@ -2190,8 +2202,9 @@ mod tests {
                 .skip(2)
                 .collect()
         };
-        let (blue, green, debug) = (
+        let (blue, red, green, debug) = (
             rgba(85, 85, 255, 255),
+            rgba(255, 85, 85, 255),
             rgba(0, 170, 0, 255),
             rgba(85, 85, 85, 255),
         );
@@ -2201,13 +2214,122 @@ mod tests {
                 ("+5% Swim Speed".to_owned(), blue),
                 ("Gliding: Enabled".to_owned(), blue),
                 (" 15 Mana".to_owned(), green),
+                // A Boolean attribute's zero is a line too, not nothing.
+                ("Gliding: Disabled".to_owned(), red),
             ]
         );
         // Recipe search has no player: the base modifier is a plain line.
         assert_eq!(lines(None, false)[2], ("+5 Mana".to_owned(), blue));
         let advanced = lines(None, true);
-        assert_eq!(advanced.len(), 6);
+        assert_eq!(advanced.len(), 8);
         assert_eq!(advanced[1], ("  mymod:boots".to_owned(), debug));
+    }
+
+    /// A Percentage attribute's added value reads through the percent translation, whatever
+    /// its word order, and a Boolean attribute reads disabled at zero and below.
+    #[test]
+    fn a_percentage_reads_through_the_percent_translation_and_a_boolean_zero_is_disabled() {
+        let lang = |key: &str| {
+            Some(
+                match key {
+                    "attribute.modifier.plus.1" => "%2$s: +%1$s%%",
+                    "attribute.modifier.take.1" => "%2$s: -%1$s%%",
+                    "horizon.attribute.modifier.disabled" => "%s: Disabled",
+                    "attribute.name.mymod:swim" => "Swim Speed",
+                    "attribute.name.mymod:glide" => "Gliding",
+                    _ => return None,
+                }
+                .to_owned(),
+            )
+        };
+        let line =
+            |attribute, amount, display| modifier_line(&lang, attribute, amount, 0, false, display);
+        assert_eq!(
+            line("mymod:swim", 0.05, Display::Percentage).as_deref(),
+            Some("Swim Speed: +5%")
+        );
+        assert_eq!(
+            line("mymod:swim", -0.5, Display::Percentage).as_deref(),
+            Some("Swim Speed: -50%")
+        );
+        assert_eq!(line("mymod:swim", 0.0, Display::Percentage), None);
+        for amount in [0.0, -1.0] {
+            assert_eq!(
+                line("mymod:glide", amount, Display::Boolean).as_deref(),
+                Some("Gliding: Disabled"),
+                "{amount}"
+            );
+        }
+    }
+
+    /// The recipe book's search text reads each attribute as its declared style says.
+    #[test]
+    fn the_search_text_reads_declared_attribute_styles() {
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        let row = |attribute: &str, amount: f64| {
+            Tag::compound([
+                ("type", Tag::String(attribute.into())),
+                ("id", Tag::String("mymod:charm".into())),
+                ("amount", Tag::Double(amount.to_bits())),
+                ("operation", Tag::String("add_value".into())),
+                ("slot", Tag::String("mainhand".into())),
+            ])
+        };
+        stack.data_mut().set_other(
+            "minecraft:attribute_modifiers",
+            Some(Tag::List(vec![
+                row("mymod:swim", 0.05),
+                row("mymod:glide", 0.0),
+            ])),
+        );
+        let lang = |key: &str| {
+            Some(
+                match key {
+                    "attribute.modifier.plus.0" => "+%s %s",
+                    "attribute.modifier.plus.1" => "+%s%% %s",
+                    "horizon.attribute.modifier.disabled" => "%s: Disabled",
+                    "attribute.name.mymod:swim" => "Swim Speed",
+                    "attribute.name.mymod:glide" => "Gliding",
+                    _ => return None,
+                }
+                .to_owned(),
+            )
+        };
+        let style = |attribute: &str| {
+            let display = match attribute {
+                "mymod:swim" => Display::Percentage,
+                "mymod:glide" => Display::Boolean,
+                _ => return None,
+            };
+            Some(AttributeStyle {
+                tooltip: Tooltip {
+                    display,
+                    ..Tooltip::default()
+                },
+                player_base: None,
+            })
+        };
+        let enchantments = Enchantments::default();
+        let search = |style: &dyn Fn(&str) -> Option<AttributeStyle>| {
+            lines(
+                &stack,
+                None,
+                &NoAttributeListener,
+                &enchantments,
+                &lang,
+                style,
+            )
+        };
+        let styled = search(&style);
+        assert!(styled.iter().any(|l| l == "+5% Swim Speed"), "{styled:?}");
+        assert!(
+            styled.iter().any(|l| l == "Gliding: Disabled"),
+            "{styled:?}"
+        );
+        // Without the catalog both read as plain numbers, as before.
+        let plain = search(&|_| None);
+        assert!(plain.iter().any(|l| l == "+0.05 Swim Speed"), "{plain:?}");
+        assert!(!plain.iter().any(|l| l.contains("Gliding")), "{plain:?}");
     }
 
     fn sword_rows() -> Vec<horizon_items::item_data::ModifierRow> {

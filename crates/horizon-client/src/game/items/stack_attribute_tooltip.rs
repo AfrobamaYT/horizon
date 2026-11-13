@@ -8,6 +8,7 @@ use horizon_client::item_tooltip::{
 };
 use horizon_client::items::ItemStack;
 use horizon_client::text::Text;
+use horizon_world::attributes::Tooltip;
 
 impl Game<'_> {
     /// The attribute modifier lines of `stack`'s tooltip and the lines mods add after them.
@@ -27,25 +28,10 @@ impl Game<'_> {
         let mut modifiers =
             horizon_client::item_attributes::attribute_modifiers(stack, self.items()).into_owned();
         modifiers.extend(self.active_enchantment_definitions().modifier_rows(stack));
-        // `Player.getAttributeBaseValue`: the attribute's default where the player has none.
-        let base = |name: &str, default| {
-            self.player
-                .as_ref()
-                .and_then(|player| {
-                    let key = player.attributes.key(name)?;
-                    let handle = player.attributes.lookup(Some(&key))?;
-                    player
-                        .attributes
-                        .instance(&handle)
-                        .ok()
-                        .map(|value| value.base_value())
-                })
-                .unwrap_or(default)
-        };
         let player_base = (!nested).then(|| {
             [
-                base("minecraft:attack_damage", 1.0),
-                base(
+                self.player_attribute_base("minecraft:attack_damage", 1.0),
+                self.player_attribute_base(
                     "minecraft:attack_speed",
                     horizon_client::attack_strength::BASE_ATTACK_SPEED,
                 ),
@@ -67,18 +53,44 @@ impl Game<'_> {
         } else {
             &NoAttributeListener
         };
-        let catalog = &self.motion.attributes;
-        let style = |attribute: &str| {
-            let registered = catalog.attribute(catalog.id(attribute)?);
-            Some(AttributeStyle {
-                tooltip: registered.tooltip.clone(),
-                player_base: (!nested)
-                    .then(|| base(attribute, registered.definition.default_value())),
-            })
-        };
+        let style = |attribute: &str| self.attribute_style(attribute, !nested);
         let translate = |k: &str| self.pack.names.display_get(k);
         attribute_tooltip(
             stack, &modifiers, &context, shown, listener, &translate, &style,
         )
+    }
+
+    /// How `attribute`'s modifier lines read, from its declaration in the attribute catalog;
+    /// none for vanilla's look, so the vanilla attributes clone and look up nothing. `player`
+    /// adds the local player's base value for a declared base modifier's total line; the
+    /// recipe search has no player.
+    pub(super) fn attribute_style(&self, attribute: &str, player: bool) -> Option<AttributeStyle> {
+        let catalog = &self.motion.attributes;
+        let registered = catalog.attribute(catalog.id(attribute)?);
+        if registered.tooltip == Tooltip::default() {
+            return None;
+        }
+        Some(AttributeStyle {
+            tooltip: registered.tooltip.clone(),
+            player_base: (player && registered.tooltip.base_modifier.is_some()).then(|| {
+                self.player_attribute_base(attribute, registered.definition.default_value())
+            }),
+        })
+    }
+
+    /// `Player.getAttributeBaseValue`: the attribute's default where the player has none.
+    fn player_attribute_base(&self, name: &str, default: f64) -> f64 {
+        self.player
+            .as_ref()
+            .and_then(|player| {
+                let key = player.attributes.key(name)?;
+                let handle = player.attributes.lookup(Some(&key))?;
+                player
+                    .attributes
+                    .instance(&handle)
+                    .ok()
+                    .map(|value| value.base_value())
+            })
+            .unwrap_or(default)
     }
 }
