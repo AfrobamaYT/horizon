@@ -3352,7 +3352,7 @@ mod tests {
     }
     #[test]
     fn pack_tags_join_the_prepared_ones_and_broken_ones_are_dropped() {
-        let raw = Bundle::from([(
+        let raw = BTreeMap::from([(
             "minecraft:hill".to_owned(),
             r#"{"values":["minecraft:a"]}"#.to_owned(),
         )]);
@@ -3377,7 +3377,7 @@ mod tests {
         assert_eq!(dropped.len(), 1, "{dropped:?}");
         assert!(dropped[0].contains("p:broken"));
         // Without packs the prepared tags must all resolve.
-        let broken = Bundle::from([(
+        let broken = BTreeMap::from([(
             "p:broken".to_owned(),
             r#"{"values":["minecraft:gone"]}"#.to_owned(),
         )]);
