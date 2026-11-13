@@ -1,7 +1,8 @@
 name: prebuilt game build
 # The prebuilt game's build (#589), every OS, called by the daily run (daily.yml, its commit) and by prebuilt-game.yml
 # (a hand dispatch, which also publishes). It only builds, smokes and uploads the archives as this run's artifacts
-# (`horizon-prebuilt-v5-<target>[-server].tar.gz`): no job here writes anything, so a read-only caller may call it.
+# (`horizon-prebuilt-v<format>-<target>[-server].tar.gz`, <format> the built commit's
+# crates/horizon-mod-package/src/sdk/package-format, which tools/ci/nightly.py SDK_ARCHIVES also reads): no job here writes anything, so a read-only caller may call it.
 # A commit whose prebuilt-<sha> release already exists stops early (output `needed` false).
 on:
   workflow_call:
@@ -63,15 +64,18 @@ jobs:
     defaults:
       run:
         shell: bash
-    env:
-      # v<layout>: the launcher asks only for the archive layout it reads (prebuilt_archive in
-      # crates/horizon-mod-package/src/index/native.rs); bump both when the folder's layout changes.
-      ARCHIVE: horizon-prebuilt-v5-${{ matrix.target }}${{ matrix.server && '-server' || '' }}.tar.gz
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
           ref: ${{ inputs.commit }}
+      # v<format>: the package format the built commit declares, the one number the launcher, the SDK publish's
+      # exact-archive check (nightly.py SDK_ARCHIVES) and this name all read; no literal here to fall behind it.
+      - name: The archive's name, at the commit's package format
+        run: |
+          format=$(tr -d '[:space:]' < crates/horizon-mod-package/src/sdk/package-format)
+          [[ "$format" =~ ^[0-9]+$ ]] || { echo "::error::package-format is not a number: $format"; exit 1; }
+          echo "ARCHIVE=horizon-prebuilt-v$format-${{ matrix.target }}${{ matrix.server && '-server' || '' }}.tar.gz" >> "$GITHUB_ENV"
       - name: The launcher's pinned Rust
         id: rust
         run: |

@@ -4,6 +4,8 @@ import io
 import json
 import os
 import re
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -365,19 +367,46 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertEqual(jobs["nightly"]["with"]["daily"], "true")
         self.assertTrue(jobs["summary"]["name"].startswith("summary ${{ needs.resolve.outputs.commit }}"))
 
+    @unittest.skipUnless(shutil.which("bash"), "runs the workflow's naming step")
     def test_the_sdk_build_uploads_exactly_the_archives_a_release_needs(self):
+        """The build names its archives from the package-format file, the number SDK_ARCHIVES reads too: a format
+        bump can't split the producer from the publish's exact-archive check."""
         from tests.test_ci_concurrency import ROOT, yaml
         from tools.ci import nightly
         build = yaml.load((ROOT / ".github/workflows/prebuilt-game-build.yml").read_text(),
                           Loader=yaml.BaseLoader)["jobs"]["build"]
-        # One archive per matrix leg, at the source's package format. The workflow's hand-set ARCHIVE still names
-        # format 5, which `prebuilt_game.py build` refuses until the SDK publish switch (PR 5) replaces it.
-        names = {f"horizon-prebuilt-v{nightly.package_format()}-{entry['target']}"
-                 f"{'-server' if entry.get('server') == 'true' else ''}.tar.gz"
-                 for entry in build["strategy"]["matrix"]["include"]}
-        self.assertEqual(build["env"]["ARCHIVE"],
-                         "horizon-prebuilt-v5-${{ matrix.target }}${{ matrix.server && '-server' || '' }}.tar.gz")
+        self.assertNotIn("ARCHIVE", build.get("env", {}), "no hand-set name to fall behind the format")
+        step = next(step for step in build["steps"] if "ARCHIVE=" in step.get("run", ""))
+        names = set()
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "crates/horizon-mod-package/src/sdk").mkdir(parents=True)
+            shutil.copy(ROOT / "crates/horizon-mod-package/src/sdk/package-format", root / "crates/horizon-mod-package/src/sdk")
+            for entry in build["strategy"]["matrix"]["include"]:
+                script = step["run"].replace("${{ matrix.target }}", entry["target"]).replace(
+                    "${{ matrix.server && '-server' || '' }}", "-server" if entry.get("server") == "true" else "")
+                env_file = root / "env"
+                env_file.write_text("")
+                subprocess.run(["bash", "-e", "-c", script], cwd=root, check=True,
+                               env={**os.environ, "GITHUB_ENV": str(env_file)})
+                names.add(env_file.read_text().strip().removeprefix("ARCHIVE="))
         self.assertEqual(names, set(nightly.SDK_ARCHIVES))
+        # The launcher asks for horizon_mod_package::index::native::prebuilt_archive(host, server):
+        # `horizon-prebuilt-v{PACKAGE_FORMAT}-{host}{-server}.tar.gz`, PACKAGE_FORMAT being
+        # include_str!("sdk/package-format"), the same file (a format bump moves all three together).
+        package = ROOT / "crates/horizon-mod-package/src"
+        native = (package / "index/native.rs").read_text()
+        self.assertIn('format!("horizon-prebuilt-v{}-", crate::sdk::PACKAGE_FORMAT)', native)
+        self.assertIn('format!("{}{host}{side}.tar.gz", prebuilt_prefix())', native)
+        self.assertIn('let side = if server { "-server" } else { "" };', native)
+        self.assertIn('pub const PACKAGE_FORMAT: u32 = number(include_str!("sdk/package-format"));',
+                      (package / "sdk.rs").read_text())
+        launcher = {f"horizon-prebuilt-v{nightly.package_format()}-{entry['target']}"
+                    f"{'-server' if entry.get('server') == 'true' else ''}.tar.gz"
+                    for entry in build["strategy"]["matrix"]["include"]}
+        self.assertEqual(launcher, names)
+        upload = next(step for step in build["steps"] if step.get("uses", "").startswith("actions/upload-artifact"))
+        self.assertEqual(upload["with"]["name"], "${{ env.ARCHIVE }}")
 
     def test_every_leg_is_a_called_workflow_with_the_commit(self):
         jobs = self.workflow["jobs"]
