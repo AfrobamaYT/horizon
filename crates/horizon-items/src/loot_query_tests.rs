@@ -172,6 +172,21 @@ fn queried_context_and_ability_reach_native_adapter() {
             );
         }
     }
+    let empty_shears = ItemStack {
+        item: Arc::from("minecraft:shears"),
+        count: 0,
+        damage: 0,
+        extra: None,
+    };
+    let guard = json!({"pools":[{"rolls":1,"condition":{"type":"neoforge:can_item_perform_ability","ability":"shears_dig"},"entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}]});
+    let empty = data(vec![("test:a", guard)]).loot_table(
+        "test:a",
+        false,
+        Some(&empty_shears),
+        &mut LegacyRandom::new(9),
+    );
+    assert_eq!(empty.len(), 0);
+    assert_eq!(OBSERVED_ABILITY.with(|v| v.take()), None);
     let table = json!({"pools":[{"rolls":1,"condition":{"type":"test:query"},"entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}]});
     let data = data(vec![
         (

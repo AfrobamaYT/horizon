@@ -8,7 +8,11 @@ impl<R: RandomSource> LootContext<'_, R> {
             return None;
         }
         let tool = (c["type"].as_str() == Some("neoforge:can_item_perform_ability"))
-            .then(|| self.held.map(loot_of))
+            .then(|| {
+                self.held
+                    .filter(|s| s.count > 0 && &*s.item != "minecraft:air")
+                    .map(loot_of)
+            })
             .flatten();
         horizon_world::loot::query::condition(c, &self.query, tool.as_ref(), |item, ability| {
             self.items.vanilla_can_perform(item, ability)
