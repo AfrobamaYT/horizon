@@ -8,9 +8,10 @@ use std::sync::Arc;
 pub(crate) struct EntitySelectorInfo {
     pub(crate) name: Box<str>,
     pub(crate) selector: Arc<dyn crate::EntitySelectorType>,
+    pub(crate) base: crate::SelectorBase,
 }
 
-/// The selector tokens every installed mod registered, in registration order.
+/// The selector tokens every installed mod registered, in token-name order.
 pub(crate) fn installed_entity_selectors() -> &'static [EntitySelectorInfo] {
     installed().map_or(&[], |installed| installed.keys.entity_selectors.as_slice())
 }

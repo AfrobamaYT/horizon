@@ -10,26 +10,17 @@ use mod_api::SelectorSort;
 /// `base` panics is left out, with why.
 pub(super) fn selector_tokens() -> Vec<SelectorToken> {
     mod_api::__private::entity_selector_types()
-        .into_iter()
-        .filter_map(|(name, selector)| {
-            let Ok(base) =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| selector.base()))
-            else {
-                log::warn!("Horizon: selector token @{name} was left out: its base panicked");
-                return None;
-            };
-            Some(SelectorToken {
-                name,
-                tooltip: base.tooltip,
-                players_only: base.players_only,
-                limit: base.limit.map_or(usize::MAX, |limit| limit as usize),
-                sort: match base.sort {
-                    SelectorSort::Nearest => "nearest",
-                    SelectorSort::Furthest => "furthest",
-                    SelectorSort::Random => "random",
-                    _ => "arbitrary",
-                },
-            })
+        .map(|(name, base)| SelectorToken {
+            name: name.to_owned(),
+            tooltip: base.tooltip.clone(),
+            players_only: base.players_only,
+            limit: base.limit.map_or(usize::MAX, |limit| limit as usize),
+            sort: match base.sort {
+                SelectorSort::Nearest => "nearest",
+                SelectorSort::Furthest => "furthest",
+                SelectorSort::Random => "random",
+                _ => "arbitrary",
+            },
         })
         .collect()
 }
@@ -48,10 +39,7 @@ impl Game<'_> {
         let Some(token) = &s.token else {
             return selected;
         };
-        let Some(selector) = mod_api::__private::entity_selector_types()
-            .into_iter()
-            .find_map(|(name, selector)| (name == *token).then_some(selector))
-        else {
+        let Some(selector) = mod_api::__private::entity_selector_type(token) else {
             return Vec::new();
         };
         let Ok(source) = self.native_command_origin(self.ui.registries.permission) else {

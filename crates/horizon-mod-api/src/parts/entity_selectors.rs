@@ -37,10 +37,36 @@ impl EntitySelectorsRegistrar for PartRegistrar {
             self.refused.push(refusal);
             return;
         }
-        self.parts.entity_selectors.push(EntitySelectorInfo {
-            name: name.into(),
-            selector,
-        });
+        let base = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| selector.base()))
+        {
+            Ok(base) if base.limit != Some(0) => base,
+            Ok(_) => {
+                self.refused.push(format!(
+                    "{} registered selector @{name} with zero limit",
+                    self.mod_id
+                ));
+                return;
+            }
+            Err(_) => {
+                self.refused.push(format!(
+                    "{} registered selector @{name} whose base panicked",
+                    self.mod_id
+                ));
+                return;
+            }
+        };
+        let index = self
+            .parts
+            .entity_selectors
+            .partition_point(|info| info.name.as_ref() < name);
+        self.parts.entity_selectors.insert(
+            index,
+            EntitySelectorInfo {
+                name: name.into(),
+                selector,
+                base,
+            },
+        );
     }
 }
 
