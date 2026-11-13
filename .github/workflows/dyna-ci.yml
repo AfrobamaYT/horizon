@@ -776,6 +776,9 @@ jobs:
       # The unit tier: a test that starts a child process is #[ignore = "daily"]; helpers in tools/ci/process-spawns.txt.
       - name: Process-starting tests are daily tests
         run: python3 tools/ci/check_process_tests.py
+      # A test that reruns its own test executable by --exact must select it ignored or not, or a daily one checks nothing.
+      - name: Test reruns select ignored tests too
+        run: python3 tools/ci/reexec_include_ignored.py --check
       # docs/layers.md: a crate depends only on its own layer or a lower one; today's exceptions only shrink.
       - name: Crates follow the layers
         if: needs.changes.outputs.rust_required != 'false'
