@@ -2,8 +2,6 @@
 //! `tick_experience`), the stacks a destroyed container lets fall, and spawning and merging orbs.
 use super::*;
 
-mod ahead;
-
 impl Game<'_> {
     pub(super) fn tick_items(&mut self) {
         let mut round = self.item_update_round();
@@ -656,61 +654,6 @@ impl Game<'_> {
         self.add_item_entity_prepared(stack, position, velocity, pickup_delay, None)
     }
 
-    /// `spawnAtLocation` for a drop that then calls
-    /// `ItemEntity.setExtendedLifetime`: the item joins the world at `age`
-    /// instead of 0, so the wither's nether star lives 12000 ticks, not 6000.
-    pub(super) fn spawn_item_aged(&mut self, stack: ItemStack, position: [f64; 3], age: i32) {
-        self.add_item_entity_drawn(stack, position, None, true, 10, age);
-    }
-
-    /// `add_item_entity`; `constructor_motion` draws the five-argument
-    /// constructor's default motion, which a given `velocity` then replaces.
-    fn add_item_entity_drawn(
-        &mut self,
-        stack: ItemStack,
-        position: [f64; 3],
-        velocity: Option<[f64; 3]>,
-        constructor_motion: bool,
-        pickup_delay: u32,
-        age: i32,
-    ) -> [f64; 3] {
-        let (item, count) = (stack.item.clone(), stack.count as i32);
-        self.next_entity += 1;
-        let p = Vec3::new(position[0], position[1], position[2]);
-        // The item's own random, in vanilla's order: Entity's UUID, ItemEntity's
-        // bobOffs and yaw, then (the five-argument constructor) its default motion.
-        let mut own = random_source::entity();
-        let uuid = horizon_client::save::insecure_uuid(&mut own);
-        self.persist.uuids.insert(self.next_entity, uuid);
-        let bob = own.next_float() * std::f32::consts::PI * 2.0;
-        let yaw = own.next_float() * 360.0;
-        let constructed = constructor_motion.then(|| {
-            let x = own.next_double() * 0.2 - 0.1;
-            [x, 0.2, own.next_double() * 0.2 - 0.1]
-        });
-        let velocity = velocity
-            .or(constructed)
-            .expect("an item entity without a velocity takes the constructor's");
-        self.dropped.push(ItemEntity {
-            rotation: [yaw, 0.0],
-            pickup_delay: i64::from(pickup_delay),
-            random: own,
-            age,
-            ..ItemEntity::new(
-                self.next_entity,
-                stack,
-                p,
-                Vec3::new(velocity[0], velocity[1], velocity[2]),
-                bob,
-            )
-        });
-        // ServerLevel.addFreshEntity.
-        if self.native_joins_flush(false, self.next_entity) {
-            self.native_item_spawn(self.next_entity, &item, count, position);
-        }
-        velocity
-    }
-
     /// Block.popResource
     pub(super) fn pop_resource(&mut self, pos: [i32; 3], mut stack: ItemStack) {
         self.pending.attach(pos, &mut stack);
@@ -811,35 +754,6 @@ impl Game<'_> {
         Some(item.id)
     }
 
-    /// DropExperienceBlock / RedStoneOreBlock / SculkBlock experience ranges.
-    pub(super) fn block_experience(&mut self, name: &str) -> u32 {
-        let (min, max) = match name.trim_start_matches("minecraft:") {
-            "coal_ore" | "deepslate_coal_ore" => (0, 2),
-            "nether_gold_ore" => (0, 1),
-            "lapis_ore" | "deepslate_lapis_ore" | "nether_quartz_ore" => (2, 5),
-            "diamond_ore" | "deepslate_diamond_ore" | "emerald_ore" | "deepslate_emerald_ore" => {
-                (3, 7)
-            }
-            "redstone_ore" | "deepslate_redstone_ore" => (1, 5),
-            "sculk" => (1, 1),
-            "sculk_catalyst" | "sculk_sensor" | "calibrated_sculk_sensor" | "sculk_shrieker" => {
-                (5, 5)
-            }
-            // SpawnerBlock.spawnAfterBreak: 15 + nextInt(15) + nextInt(15).
-            "spawner" => {
-                let r = &mut self.world.random;
-                let a = r.next_int_bound(15).unwrap_or(0);
-                return (15 + a + r.next_int_bound(15).unwrap_or(0)) as u32;
-            }
-            _ => (0, 0),
-        };
-        // ConstantInt.sample (sculk) does not advance the level random.
-        if min == max {
-            return min as u32;
-        }
-        (min + self.world.random.next_int_bound(max - min + 1).unwrap_or(0)) as u32
-    }
-
     /// `FurnaceResultSlot.checkTakeAchievements`: the player took from the output of the
     /// furnace at `pos`, which pops the experience of what it made at them
     /// (`awardUsedRecipesAndPopExperience`) and forgets it.
@@ -859,23 +773,6 @@ impl Game<'_> {
                 &mut self.world.random,
             );
             self.spawn_orbs(at, xp);
-        }
-    }
-
-    /// `Player.giveExperiencePoints`, and `giveExperienceLevels`' level-up
-    /// sound every fifth level (at most every 100 ticks).
-    pub(super) fn give_orb_points(&mut self, gained: u32) {
-        let Some(gained) = self.xp_change(gained as i32) else {
-            return;
-        };
-        let gained = gained.max(0);
-        let old_level = self.experience.level;
-        let gave = self.experience.give(gained);
-        self.native_player_level_changed(old_level);
-        // Player.giveExperienceLevels runs per level, so the first multiple of 5
-        // crossed plays the sound (and starts the cooldown for the rest).
-        if let Some(level) = gave {
-            self.play_level_up(1, level);
         }
     }
 }
@@ -1021,10 +918,3 @@ mod escape_tests {
         assert_eq!(game.world.random.next_float(), level.next_float());
     }
 }
-
-#[cfg(test)]
-#[path = "item_void_tests.rs"]
-mod item_void_tests;
-#[cfg(test)]
-#[path = "wither_star_tests.rs"]
-mod wither_star_tests;
