@@ -2844,6 +2844,7 @@ mod tests {
     /// No account never joins; the signed-in rule is compared with the real
     /// client login listener by test_lan_auth_parity.py.
     #[test]
+    #[ignore = "daily"]
     fn lan_login_continues_after_authentication_failure() {
         let (root, data) = empty_item_data("lan-auth");
         for lan in [true, false] {
