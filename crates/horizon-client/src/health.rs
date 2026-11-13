@@ -255,9 +255,6 @@ impl<'a> DamageLevel<'a> {
     }
     /// Return the hook's immunity decision, or vanilla's without a listener.
     pub fn invulnerability_check(&mut self, hurting: Hurting<'_>, vanilla: bool) -> bool {
-        if crate::native_client_hooks::deferring() {
-            return vanilla;
-        }
         match self.hooks.invulnerable {
             Some(hook) => hook(self.reborrow(), hurting, vanilla),
             None => vanilla,
@@ -271,33 +268,17 @@ impl<'a> DamageLevel<'a> {
         victim: Victim,
         container: &mut DamageContainer,
     ) -> bool {
-        if crate::native_client_hooks::deferring() {
-            return false;
-        }
         let hook = self.hooks.incoming;
         hook.is_some_and(|hook| hook(self.reborrow(), hurting, victim, container))
     }
     /// `LivingDamageEvent.Pre` of the hit on `hurting` ([`DamageHooks::pre`]; nothing without it).
     pub fn damage_pre(&mut self, hurting: Hurting<'_>, container: &mut DamageContainer) {
-        if crate::native_client_hooks::deferring() {
-            return;
-        }
         if let Some(hook) = self.hooks.pre {
             hook(self.reborrow(), hurting, container);
         }
     }
     /// `LivingDamageEvent.Post` of the hit on `hurting` ([`DamageHooks::post`]; nothing without it).
     pub fn damage_post(&mut self, hurting: Hurting<'_>, container: &DamageContainer) {
-        if let Hurting::Mob(mob, damage) = &hurting
-            && crate::native_client_hooks::deferring()
-        {
-            crate::native_client_hooks::defer(crate::native_client_hooks::Deferred::DamagePost {
-                mob: Box::new((*mob).clone()),
-                damage: **damage,
-                container: container.clone(),
-            });
-            return;
-        }
         if let Some(hook) = self.hooks.post {
             hook(self.reborrow(), hurting, container);
         }
@@ -518,9 +499,6 @@ impl DamageLevel<'_> {
     /// Whether [`DamageHooks::knockback`] canceled the knockback (never without it). A
     /// value it leaves that is not a finite number is put back as it was.
     pub fn knockback_canceled(&mut self, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
-        if crate::native_client_hooks::deferring() {
-            return false;
-        }
         let Some(hook) = self.hooks.knockback else {
             return false;
         };

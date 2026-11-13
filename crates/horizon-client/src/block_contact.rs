@@ -289,7 +289,7 @@ pub fn in_level<R>(dimension: Option<&'static str>, f: impl FnOnce() -> R) -> R 
 
 /// `Block.stepOn` for a mod block: the entity stands on `contact`'s block.
 pub fn step_on(block: &str, contact: Contact<'_>) {
-    if block.starts_with("minecraft:") || crate::native_client_hooks::deferring() {
+    if block.starts_with("minecraft:") {
         return;
     }
     if let Some(dimension) = LEVEL.get()
@@ -315,9 +315,6 @@ pub fn fall_listens(state: BlockStateId) -> bool {
 /// ignored and a negative one is zero. The writes the part asked for are kept until the
 /// entity's batch ends. Nothing runs off the server or without a part.
 pub fn fall(level: &mut DamageLevel<'_>, contact: Contact<'_>, distance: f64, damage: f32) -> f32 {
-    if crate::native_client_hooks::deferring() {
-        return damage;
-    }
     let (Some(dimension), Some(hooks)) = (LEVEL.get(), HOOKS.get()) else {
         return damage;
     };

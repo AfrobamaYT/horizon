@@ -676,7 +676,7 @@ pub mod staging;
 pub use build::{generate, generate_points, generate_render, write_if_changed};
 pub use notes::generate as generate_hook_notes;
 mod staged;
-pub use staged::{MODS_STAGE, mob_turn, staged_mods};
+pub use staged::{MODS_STAGE, staged_mods};
 
 /// Generate the dispatch test fixture without preventing xtask from filling new placeholders.
 #[doc(hidden)]

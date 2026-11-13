@@ -42,18 +42,4 @@ fn main() {
     if std::env::var("CARGO_PKG_NAME").as_deref() != Ok("horizon-client") {
         windows_exe::resources("horizon-client");
     }
-    // Whether a native mod can run in a mob's turn (`game/creatures/mob_islands.rs`). The
-    // launcher adds trait packages to the workspace's members.
-    println!(
-        "cargo:rerun-if-changed={}",
-        root.join("Cargo.toml").display()
-    );
-    for dir in ["native-api", "native-crates"] {
-        if root.join(dir).is_dir() {
-            println!("cargo:rerun-if-changed={}", root.join(dir).display());
-        }
-    }
-    if let Some(found) = horizon_mod_api_gen::mob_turn(&root) {
-        println!("cargo:rustc-env=HORIZON_MOB_TURN={found}");
-    }
 }
