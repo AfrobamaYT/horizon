@@ -6,6 +6,9 @@ use syn::{Item, UseTree};
 /// The crates whose items mod API signatures name: crate name and source directory.
 const CRATES: &[(&str, &str)] = &[
     ("mod_api", "crates/horizon-mod-vocab/src"),
+    // The facade mods depend on: its root re-exports `mod_vocab` (the crate above, here named
+    // `mod_api`) and adds its own modules.
+    ("horizon_mod_api", "crates/horizon-mod-api/src"),
     ("horizon_core", "crates/horizon-core/src"),
     ("horizon_mod_runtime", "crates/horizon-mod-runtime/src"),
     ("horizon_world", "crates/horizon-world/src"),
@@ -113,6 +116,10 @@ impl<'a> Index<'a> {
                     Some((Some((_, items)), _)) => self.expand_includes(items)?,
                     // `#[path]` is relative to the declaring file's directory: `parent.rs`
                     // sits beside it, `parent/mod.rs` below.
+                    // A generated `#[path]` is absolute.
+                    Some((None, Some(file))) if Path::new(&file).is_absolute() => {
+                        self.parse(krate, &file)?
+                    }
                     Some((None, Some(file))) => {
                         let beside = parent_dir(&path[..path.len() - 1]);
                         let below = parent_dir(path);
@@ -263,7 +270,7 @@ impl<'a> Index<'a> {
     }
 
     /// `path`, written in `module`, as a module of an indexed crate, if it is one.
-    fn absolute(&self, module: usize, path: &[String]) -> Option<(&'static str, Vec<String>)> {
+    pub(super) fn absolute(&self, module: usize, path: &[String]) -> Option<(&'static str, Vec<String>)> {
         let m = &self.modules[module];
         let (first, rest) = path.split_first()?;
         let mut base = match first.as_str() {
@@ -309,7 +316,7 @@ fn defines(item: &Item, name: &str) -> bool {
 }
 
 /// Each path `tree` imports, with the name it binds (`None` for a glob).
-fn uses(tree: &UseTree, prefix: &mut Vec<String>, f: &mut impl FnMut(Vec<String>, Option<String>)) {
+pub(super) fn uses(tree: &UseTree, prefix: &mut Vec<String>, f: &mut impl FnMut(Vec<String>, Option<String>)) {
     match tree {
         UseTree::Path(path) => {
             prefix.push(path.ident.to_string());
