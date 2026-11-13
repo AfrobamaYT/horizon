@@ -2,6 +2,21 @@
 //! `UiResources` and `PackResources`.
 use super::*;
 
+pub(super) fn load_animate_tables(
+    root: &Path,
+    registry: &horizon_world::registry::BlockRegistry,
+    draws: bool,
+    biomes: &Biomes,
+) -> Result<(horizon_client::animate_tick::AnimateTables, horizon_client::fog::FogTables)> {
+    let _step = startup::step("rest.animate_fog");
+    let animate = if draws {
+        horizon_client::animate_tick::AnimateTables::load(root, registry)?
+    } else {
+        Default::default()
+    };
+    Ok((animate, horizon_client::fog::FogTables::load(root, biomes)))
+}
+
 impl Resources {
     pub(super) fn rest(&self) -> &WorldRest {
         self.rest
