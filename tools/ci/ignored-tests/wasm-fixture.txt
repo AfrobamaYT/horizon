@@ -10,4 +10,5 @@ horizon-client game::remote::interaction_event_tests::interaction_event_wasm_tes
 horizon-client game::block_entity_tick_reply_tests::native_and_compiled_wasm_tick_reply_matrix HORIZON_WASM_FIXTURE needs # HORIZON_WASM_STD is supplied alongside the fixture by wasm-mods.yml.
 horizon-client game::remote::movement_input_tests::wasm_movement_input_keys_axes_and_sprint HORIZON_WASM_FIXTURE needs
 horizon-client game::native_hooks::runtime_environment::tests::native_and_wasm_process_environment_in_registration_and_game_hosts HORIZON_WASM_FIXTURE needs
+horizon-client game::registration_capability_coverage_wasm_tests::compiled_guest_reads_game_coverage_during_registration HORIZON_WASM_FIXTURE needs
 horizon-client-lib raw_payloads::wasm_tests::compiled_guest_observes_physical_provider_pressure HORIZON_WASM_FIXTURE needs

@@ -809,6 +809,31 @@ pub trait LevelsBackendMut {
     #[access(WorldOnly)]
     fn level_set_spawn_flags(&mut self, level: LevelRef, flags: SpawnFlags) -> bool;
     /// Side: server.
+    /// Registers `passage` in the level ([`Passage`], #3775) and numbers it. The engine
+    /// tells it to every Horizon client holding its chunk ([`Passage::chunk`]) at the end of
+    /// the server's tick, and to a client that gets the chunk later as the chunk is sent
+    /// (`chunk_sent`); a client forgets it with the chunk. Passages are not saved and a
+    /// datapack reload does not bring them back: they hold until `remove_passage`, the
+    /// level's close or the world's, so a mod registers its own again in `level_load`. An
+    /// id is never given again while the game runs. A level holds 256 at most and a chunk 8.
+    /// A passage removed before the tick's end is never told. Refused with nothing
+    /// registered for a stale handle, a client, a passage that isn't a finite rectangle
+    /// with unit axes at a right angle and sides above 0 and at most 32 blocks, one with a
+    /// corner past vanilla's position limits, a full level or chunk, and once every id was
+    /// given.
+    #[access(WorldOnly)]
+    fn level_register_passage(
+        &mut self,
+        level: LevelRef,
+        passage: Passage,
+    ) -> Result<PassageId, PassageRegistrationError>;
+    /// Side: server.
+    /// Removes the level's passage `id`: the clients that were told of it are told it is
+    /// gone at the end of the server's tick. True when it was registered in this level.
+    /// False for another level's or an unknown id, a stale handle and a client.
+    #[access(WorldOnly)]
+    fn level_remove_passage(&mut self, level: LevelRef, id: PassageId) -> bool;
+    /// Side: server.
     /// `/forceload add` or `remove` of one chunk (`ServerLevel.setChunkForced`):
     /// true when the forced set changed. A forced chunk is kept loaded and
     /// entity ticking, saved with the level, and the level keeps ticking

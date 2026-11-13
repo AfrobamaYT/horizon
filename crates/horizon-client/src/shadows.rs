@@ -134,7 +134,7 @@ fn shadow_gates(radius: f32, strength: f32, dist_sq: f64) -> Option<(f32, f32)> 
 /// model bounds. Keep the distance/strength gate before the frustum test: most
 /// entities are too far away to cast a shadow at all.
 pub fn in_view(
-    view: &crate::gfx::Frustum,
+    view: &crate::gfx::JoinedFrusta,
     camera: DVec3,
     pos: DVec3,
     radius: f32,
