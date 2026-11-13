@@ -480,8 +480,7 @@ pub(super) struct LanHost {
     /// Far terrain sampled for Horizon clients (game/network/lan_far.rs); None when
     /// `horizon-lod-distance` is 0.
     pub far: Option<horizon_client::lod_net::Service>,
-    /// Native mods' commands and the level each needs, once asked
-    /// (game/modding/native_server.rs).
+    /// Native mods' commands and the level each needs, once asked (game/modding/native_server.rs).
     pub(super) native_commands: Option<super::native_server::NativeCommands>,
     /// The players a native mod leaves out of the sleep count when they
     /// aren't in bed (`native_sleep_ignored`).
@@ -1667,6 +1666,7 @@ impl Game<'_> {
         let lan = Lan::start_with(sync.clone(), net)?;
         let mut hub = Hub::new(lan, sync, encoder, config, self.loop_context.clone());
         self.bind_guest_residency(&mut hub);
+        self.passages.record_on(&mut hub);
         hub.rule_registry = self.level.rule_registry.clone();
         hub.sync_attachments = !mod_api::__private::mods().is_empty();
         hub.flat_world = self.world_flat;
