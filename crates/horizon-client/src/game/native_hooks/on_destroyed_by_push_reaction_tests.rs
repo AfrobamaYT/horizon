@@ -37,6 +37,8 @@ impl BlockPart for Torch {
         let pos = [event.pos.x, event.pos.y, event.pos.z];
         // The torch is still in its cell.
         assert_eq!(level.block_state(pos), Some(event.state));
+        // The cell holds no fluid.
+        assert!(event.fluid.is_empty());
         assert_eq!(level.state_block(event.state), Some("minecraft:torch"));
         self.heard
             .lock()

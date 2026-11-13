@@ -59,7 +59,7 @@ way, and vanilla's answer is used.
 `on_destroyed_by_push_reaction(level, event)` hears a piston's move destroy the
 block (a `Destroy` push reaction, such as a torch's), after the block dropped
 its resources and while it is still in its cell. `event.direction` is the way
-the blocks move. The removal still happens: the cell becomes air afterwards.
+the blocks move and `event.fluid` is the fluid state the cell holds. The removal still happens: the cell becomes air afterwards.
 The level host writes and schedules ticks, but a write to any cell of the move
 is lost. The destroyed cells turn to air, and the pushed blocks were read
 before, so each moves as it was and the cells they leave and enter end as air

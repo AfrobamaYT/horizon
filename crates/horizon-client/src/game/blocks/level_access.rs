@@ -363,8 +363,9 @@ impl LevelAccess for GameLevel<'_> {
         pos: BlockPos,
         state: BlockStateId,
         direction: Direction,
+        fluid: FluidState,
     ) {
-        self.destroyed_by_push_reaction(ticks, pos, state, direction);
+        self.destroyed_by_push_reaction(ticks, pos, state, direction, fluid);
     }
     fn observe_piston_moved(
         &self,
