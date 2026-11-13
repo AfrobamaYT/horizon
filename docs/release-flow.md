@@ -445,6 +445,14 @@ the current `nightly`. `nightly.py source_line` writes the full source commit in
 `keep-source` preserves it under `nightly-source/<date>-<short>`. Those permanent source tags preserve source
 availability, not a promise to retain compiled SDKs forever.
 
+### What pruning deletes
+
+Once SDKs publish as `sdk-<sha>` releases, each asset's `kind` is listed in the release's signed `sdk.json`.
+Pruning deletes only assets whose `kind` is `runtime`, `api` or `engine`, never the release, its small files or
+its signature. An evicted build keeps `sdk.json`, `surface.json`, `build-data.tar.xz`, `api-source.tar.xz`,
+`SHA256SUMS` and `SHA256SUMS.sig`, so `cargo horizon-mod sdk diff` and the fit test keep working for it; only
+building against it needs the compiled assets back.
+
 ### Keep set and bound
 
 At one UTC instant T, let R be **all actually existing** current and dated Nightly releases, including drafts,
