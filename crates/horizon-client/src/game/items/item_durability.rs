@@ -2,6 +2,7 @@
 //! (`wear_armor`, `hurt_armor`, `hurt_equipment`, `hurt_player_equipment`) and the held stack's wear
 //! (`damage_held`, `damage_held_in_slot`, `hurt_held_without_breaking`).
 use super::*;
+use horizon_client::motion::MotionEvent;
 
 impl Game<'_> {
     /// Run equipment continuations with the acting player installed on the real host.
