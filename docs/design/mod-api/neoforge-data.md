@@ -42,31 +42,3 @@ loaded mod. Changed enabled IDs participate in cache identity and are published
 with successful reloads; failed preparation preserves the old generation, and
 retained readers keep their old snapshot. Recipe condition behavior is unchanged.
 This shared contract does not add readers for the two modifier kinds above.
-
-## Built-in block data maps
-
-NeoForge's `neoforge:flammable`, `neoforge:oxidizables` and `neoforge:waxables`
-(`data/neoforge/data_maps/block/<name>.json`) load from the world's data packs
-and mods' files on every server data load, merged as a mod's own data maps are.
-Fire reads a block's `ignite_odds` and `burn_odds` after a mod's fire hook and
-before vanilla's table. Weathering takes `next_oxidation_stage`; a mapped block
-weathers only where the existing weathering dispatch already ticks it, so naming
-an arbitrary block does not make it age by itself. Honeycomb waxing (player and
-dispenser) takes `waxed`.
-
-The inverse maps are derived from the forward ones on every load, never
-declared. The axe reads them before its transform table: the oxidation inverse
-scrapes one stage back, the waxing inverse takes the wax off. Where several
-blocks share a next stage or a waxed twin, the one with the lowest block
-registry id is the one given back (a Horizon choice). Random-tick oxidation,
-honeycomb, dispenser waxing and the axe each move exactly one step, so a chain
-that loops only alternates there. Lightning resets a struck block along the
-whole oxidation inverse: an oxidation chain that loops, a block that is its own
-next stage included, is refused at load with an error naming
-`neoforge:oxidizables` and the blocks (its scraping steps are left out), and the
-lightning walk also stops where it would come back to a block it passed.
-Lightning's waxed check, the carved pumpkin and the copper chest keep vanilla's
-own lists. A block the maps don't name keeps vanilla's behaviour.
-`generate_block_transform`, `neoforge:transformables` and
-`block_transform_appenders` are not read yet
-([#3359](https://github.com/arismoko/horizon/issues/3359)).

@@ -114,7 +114,7 @@ impl BlockMaps {
         }
         for cycle in cycles(&maps.scrapes_to) {
             log::error!(
-                "Horizon: neoforge:oxidizables: the oxidation chain loops through {};                  scraping is left out for those blocks",
+                "Horizon: neoforge:oxidizables: the oxidation chain loops through {}; scraping is left out for those blocks",
                 cycle.join(" -> ")
             );
             for block in &cycle {

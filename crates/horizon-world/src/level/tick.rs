@@ -2128,6 +2128,10 @@ impl RandomTickMask {
 mod fire_tick_tests;
 
 #[cfg(test)]
+#[path = "block_maps_tests.rs"]
+mod block_maps_tests;
+
+#[cfg(test)]
 mod first_stage_tests {
     use super::first_stage;
 
