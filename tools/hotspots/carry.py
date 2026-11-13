@@ -12,10 +12,15 @@ Kinds:
   row format; the topic is --topic or the PR's branch name (from `gh`). A changed or removed row is changed or
   removed where it lives now.
 - part-table: available with PR G (exports/part_table.rs split per parts file).
-- dispatch-stub: available with PR E (dispatch-test stand-ins, one file each).
+- dispatch-stub: a stand-in the PR added, changed or removed inside `mod stubs` or `mod api` of the old
+  dispatch-tests/src/fixtures/shared.rs is written to (or removed from) fixtures/stubs/<Name>.rs or
+  fixtures/api/<Name>.rs, as the PR's head has it (with its impls). It stops when that file on this tree is neither
+  the PR's base version nor its head version (main changed the same stand-in). Hunks outside the two modules are
+  not carried: they still merge into shared.rs.
 
     python3 tools/hotspots/carry.py ignored-test 3788
     python3 tools/hotspots/carry.py ignored-test 3788 --head pr/3788 --topic attribute-bounds
+    python3 tools/hotspots/carry.py dispatch-stub 3911
 """
 import argparse
 from dataclasses import dataclass, field
@@ -23,6 +28,9 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import check_stand_ins  # noqa: E402
 
 
 class CarryError(Exception):
@@ -149,10 +157,117 @@ def carry_ignored_test(repo, base, head, topic):
     return done
 
 
+SHARED = f"{check_stand_ins.FIXTURES}/shared.rs"
+SCOPES = check_stand_ins.FOLDERS
+
+
+def dedent(text):
+    lines = text.split("\n")
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    return "\n".join(re.sub(r"^ {1,4}", "", line) for line in lines).rstrip() + "\n"
+
+
+def stand_ins(source):
+    """{(scope, name): file text} for the stand-ins in `mod stubs` and `mod api` of an old-layout shared.rs, and
+    shared.rs without them. A stand-in's text is its item, each impl whose self type it is (or whose trait it is,
+    when the self type is not in that module), and a `use` of a path under it, with the comments above each; `use`
+    lines of anything else stay in shared.rs."""
+    stripped = check_stand_ins.strip(source)
+    found, cuts = {}, []
+    for scope in SCOPES:
+        match = re.search(rf"(?m)^mod\s+{scope}\s*\{{", stripped)
+        if not match:
+            continue
+        close = check_stand_ins.block_end(stripped, match.end() - 1) - 1
+        items, previous = [], match.end()
+        for start, end in check_stand_ins.spans(stripped, match.end(), close):
+            items.append((stripped[start:end], source[previous:end]))
+            previous = end
+        names = {check_stand_ins.item_name(code) for code, _ in items} - {None}
+        groups, kept = {}, []
+        for code, text in items:
+            name = check_stand_ins.item_name(code)
+            if not name:
+                body = check_stand_ins.without_attributes(code)
+                impl = re.match(r"impl\s*(?:<[^{]*?>)?\s*(?:([\w:]+)(?:<[^{]*?>)?\s+for\s+)?([\w:]+)", body)
+                use = re.match(r"(?:pub(?:\([^)]*\))?\s+)?use\s+(\w+)::", body)
+                if impl:
+                    self_type, trait = impl.group(2).split("::")[-1], (impl.group(1) or "").split("::")[-1]
+                    name = self_type if self_type in names else trait
+                elif use and use.group(1) in names:
+                    name = use.group(1)
+            if name in names:
+                groups.setdefault(name, []).append(text)
+            else:
+                kept.append(text)
+        for name, texts in groups.items():
+            found[(scope, name)] = dedent("".join(texts))
+        body = "".join(kept).rstrip()
+        replacement = f"mod {scope} {{{body}\n}}" if body.strip() else ""
+        cuts.append((match.start(), close + 1, replacement))
+    rest = source
+    for start, end, replacement in reversed(cuts):
+        tail = rest[end:]
+        if not replacement:
+            rest = rest[:start].rstrip("\n") + "\n" + (tail.lstrip("\n") and "\n" + tail.lstrip("\n"))
+        else:
+            rest = rest[:start] + replacement + tail
+    return found, rest
+
+
+TOKEN = re.compile(r'''b?r(#*)".*?"\1|b?"(?:\\.|[^"\\])*"|'(?:\\[^']{1,10}|[^\\'\n])'|//[^\n]*|/\*.*?\*/|\w+|\S''',
+                   re.S)
+
+
+def tokens(text):
+    """Rust source as tokens: whitespace between tokens does not count, literals and comments are kept whole."""
+    return [m.group(0) for m in TOKEN.finditer(text)]
+
+
+def carry_dispatch_stub(repo, base, head, _topic):
+    """Writes the stand-ins the PR changed in the old shared.rs to their files; returns what it did."""
+    fixtures = Path(repo) / check_stand_ins.FIXTURES
+    if not all((fixtures / scope).is_dir() for scope in SCOPES):
+        raise CarryError("fixtures/stubs/ and fixtures/api/ do not exist on this tree: the dispatch-stub switch "
+                         "(PR E) has not landed")
+
+    def version(rev):
+        rc, text = git(repo, "show", f"{rev}:{SHARED}", ok=(0, 128))
+        return stand_ins(text)[0] if rc == 0 else {}
+
+    def same(a, b):
+        return (a is None) == (b is None) and tokens(a or "") == tokens(b or "")
+
+    before, after = version(base), version(head)
+    writes, stuck = [], []
+    for key in sorted(set(before) | set(after)):
+        old, new = before.get(key), after.get(key)
+        if same(old, new):
+            continue
+        path = fixtures / key[0] / f"{key[1]}.rs"
+        now = path.read_text(encoding="utf-8") if path.exists() else None
+        if same(now, new):
+            continue
+        if not same(now, old):
+            stuck.append(f"{path.relative_to(repo).as_posix()} on this tree differs from the PR's base; the PR's "
+                         f"head has:\n{new or '(removed)'}")
+            continue
+        writes.append((path, new))
+    if stuck:
+        raise CarryError("cannot place these stand-ins; carry them by hand:\n\n" + "\n\n".join(stuck))
+    for path, text in writes:
+        if text is None:
+            path.unlink()
+        else:
+            path.write_text(text, encoding="utf-8")
+    return [path.relative_to(repo).as_posix() for path, _ in writes]
+
+
 KINDS = {
     "ignored-test": carry_ignored_test,
     "part-table": "available with PR G, which splits exports/part_table.rs into one fragment per parts file",
-    "dispatch-stub": "available with PR E, which gives each dispatch-test stand-in its own file",
+    "dispatch-stub": carry_dispatch_stub,
 }
 
 
@@ -182,7 +297,7 @@ def main(argv=None):
     try:
         repo = Path(git(args.repo, "rev-parse", "--show-toplevel")[1].strip())
         base, head = pr_range(repo, args.pr, args.head, args.main)
-        topic = args.topic or topic_from_branch(branch_of(args.pr))
+        topic = args.topic or (topic_from_branch(branch_of(args.pr)) if args.kind == "ignored-test" else None)
         done = run(repo, base, head, topic)
     except CarryError as e:
         print(f"carry.py {args.kind} #{args.pr}: {e}", file=sys.stderr)
