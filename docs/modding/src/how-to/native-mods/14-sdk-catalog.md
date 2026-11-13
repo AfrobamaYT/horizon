@@ -90,7 +90,8 @@ even if the macro would cope. One case stays out of the scan's reach: names asse
 outside the mod (`paste!`, `concat_idents!`), which never appear in the source as written. The real compile on
 the player's machine is always the final check, and it catches those. Some sources cannot be judged at all:
 - a file that does not parse as Rust (the message gives its line);
-- source nested deeper than 256 levels;
+- source nested deeper than 256 levels. The count is cautious, so one bracket holding more than about 250
+  comparisons between plain names (`[a < b, c < d, …]`) is also refused, though it would compile;
 - a `use` statement nested deeper than 64 groups;
 - a symbolic link;
 - a `#[path]` or `include!` that leaves the mod's folder or is computed, or an `include!` renamed by a `use`;
