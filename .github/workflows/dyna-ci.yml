@@ -736,6 +736,11 @@ jobs:
         run: |
           date -u '+data-leg start utc=%Y-%m-%dT%H:%M:%SZ'
           sccache --show-stats || echo 'data-leg compiler-cache statistics unavailable'
+      # Every job that builds in this runner's persistent target keeps its source snapshot true: a
+      # build of another tree without it left artifacts that a later job judged fresh (stale generated
+      # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
+      - name: Restore unchanged source timestamps
+        run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes.json"
       # Missing data must fail on both main pushes and nightly dispatches.
       - name: Prepare checkout-keyed vanilla data
         id: data
@@ -860,6 +865,11 @@ jobs:
           workspaces: launcher
           shared-key: launcher
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Every job that builds in this runner's persistent target keeps its source snapshot true: a
+      # build of another tree without it left artifacts that a later job judged fresh (stale generated
+      # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
+      - name: Restore unchanged source timestamps
+        run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes.json"
       - name: Check the launcher's formatting, lint and tests
         if: needs.changes.outputs.launcher_required != 'false'
         working-directory: launcher
@@ -922,6 +932,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+      # Every job that builds in this runner's persistent target keeps its source snapshot true: a
+      # build of another tree without it left artifacts that a later job judged fresh (stale generated
+      # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
+      - name: Restore unchanged source timestamps
+        run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes.json"
       - name: Check prepared output digest
         run: |
           # Never reuse a completed preparation for this diagnostic, including a retry.
@@ -967,6 +982,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+      # Every job that builds in this runner's persistent target keeps its source snapshot true: a
+      # build of another tree without it left artifacts that a later job judged fresh (stale generated
+      # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
+      - name: Restore unchanged source timestamps
+        run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes.json"
       - name: Set up disk-backed parity scratch and prepared vanilla data
         run: |
           rm -rf "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp"

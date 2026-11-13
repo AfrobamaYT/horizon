@@ -96,6 +96,11 @@ jobs:
             mkdir -p "$scratch"
           fi
           echo "FNR_SCRATCH=$scratch" >> "$GITHUB_ENV"
+      # Every job that builds in this runner's persistent target keeps its source snapshot true: a
+      # build of another tree without it left artifacts that a later job judged fresh (stale generated
+      # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
+      - name: Restore unchanged source timestamps
+        run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes.json"
       # The SDK is built with the launcher's Rust: a mod's code is compiled against its metadata.
       - name: Server SDK, warnings denied
         run: python3 tools/prebuilt_game.py build "$FNR_SCRATCH/prebuilt" --server

@@ -68,6 +68,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+      # Every job that builds in this runner's persistent target keeps its source snapshot true: a
+      # build of another tree without it left artifacts that a later job judged fresh (stale generated
+      # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
+      - name: Restore unchanged source timestamps
+        run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes.json"
       - name: Prepare checkout-keyed vanilla data
         run: |
           for dir in minecraft datagen horizon-client tools; do
