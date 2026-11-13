@@ -21,3 +21,8 @@ game/block_breaking.rs	game/blocks/block_breaking.rs	break_block,destroy_progres
 game/world_update.rs	game/world/world_update.rs	clear_lod,prepare_lod,update_world		
 game/block_ticks.rs	game/blocks/block_ticks.rs	random_tick_chunks,sync_tick_chunks,tick_blocks,tick_blocks_with_scratch,tick_moving_pistons,tick_scheduled		
 game/menu_clicks.rs	game/interface/menu_clicks.rs	apply_crafter_slot_states,click_inventory,creative_display_click,creative_throw_carrying,inventory_quick_move,menu_ops,menu_session,player_menu_sound		game/interface/inventory_slots.rs#reset_inventory_clicks
+# Taken by hand after the rows above (the script matches by name):
+# game/clip_ray.rs -> game/items/clip_ray.rs (upstream split clip_ray_fluids out of clip_ray);
+# menu_click, give, block_face_sprite: the fork's renamed copies (click_open_inventory,
+# add_stack_to_inventory, falling_block_face_sprite; Game has methods of the old names) moved to
+# upstream's destinations under the fork's names; handle_window_event_inner back into game.rs.
