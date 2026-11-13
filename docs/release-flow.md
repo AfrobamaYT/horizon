@@ -211,7 +211,9 @@ a hand dispatch never does, so it retries a run whose tag move, issues or nightl
 the ignored-tests data shards (`ignored-tests.yml`), the wasm fixture and guest stacks (`wasm-mods.yml`),
 `fn-replace-check.yml`, the native linkage probe (`native-dylib-probe.yml`), the launcher's Windows runtime-lease
 tests (`launcher-windows-check.yml`) and the prebuilt SDK of the commit
-(`prebuilt-game-build.yml`; its archives are published as `prebuilt-<sha>` by `sdk-publish` only after a green summary on a real run on main, before the Nightly that needs them), each called
+(`prebuilt-game-build.yml`; each leg packs its slices, and `sdk-publish` signs and publishes them as the mod SDK's
+release `sdk-<sha>` (`sdk-publish.yml`) only after a green summary on a real run on main, before the Nightly that
+needs them; a failed publish files one issue, `Daily: sdk-publish did not complete`), each called
 with the commit. Its
 summary (`tools/ci/daily_summary.py`) reads each leg's result and its sanitised verdict file, never a log:
 
@@ -433,9 +435,17 @@ of downloads or caches belong to #3009; retaining a release does not authenticat
 
 The fork's [Nightly workflow](../.github/workflows/nightly-build.yml) selects an SDK-paired source through
 [`tools/ci/nightly.py`](../tools/ci/nightly.py), then calls `require-sdk` before rotation and again before
-publication. A complete pair currently means a published, non-draft `prebuilt-<40 lowercase hex SHA>` release
-with `SHA256SUMS` and the four v4 archives (Linux client, Linux server, Windows GNU and macOS ARM64).
-The daily run (`sdk-publish` in [daily.yml](../.github/workflows/daily.yml)) and the [SDK workflow](../.github/workflows/prebuilt-game.yml)'s hand dispatch publish those exact-SHA releases without pruning.
+publication. A complete SDK means a published, non-draft `sdk-<40 lowercase hex SHA>` release holding every asset
+`nightly.py sdk-assets` names: `sdk.json`, `SHA256SUMS` signed for `sdk-<sha>` (`SHA256SUMS.sig`), `surface.json`,
+`build-data.tar.xz` and the `runtime`, `api` and `engine` slices of the four packages (Linux client, Linux server,
+Windows GNU and macOS ARM64); its `sdk.json` must match those sums and name that build and this package format. The
+Nightly carries that `sdk.json` in its own signed sums. The SDK signature's message names `sdk-<sha>`, so it never
+passes for a game release, nor a game release's for an SDK (`horizon-release-sign`: `signed_digest`, `sdk_digest`).
+One publish step ([sdk-publish.yml](../.github/workflows/sdk-publish.yml)), called by the daily run (`sdk-publish`
+in [daily.yml](../.github/workflows/daily.yml)) and by the [SDK workflow](../.github/workflows/prebuilt-game.yml)'s
+hand dispatch, publishes those exact-SHA releases without pruning; it signs through the `release` environment on
+main only, and any other run signs with a throwaway key and publishes nothing. Older `prebuilt-<sha>` releases are
+outside it and are removed by hand.
 These workflows currently have separate concurrency groups (`nightly-build` and `prebuilt-game`): the two
 publication-time checks alone would not make concurrent deletion safe.
 

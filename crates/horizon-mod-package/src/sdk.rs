@@ -85,11 +85,46 @@ pub struct Toolchain {
     pub rust: String,
 }
 
-/// The stable surface (`surface.json`) this build offers.
+/// The stable surface (`surface.json`) this build offers, and how it differs from the SDK
+/// published before it ([`Index::compare`]). The first SDK has no `previous`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Surface {
     /// The surface document's own `hash`: equal hashes, equal surface.
     pub hash: String,
+    /// The build id of the SDK this one is compared with: the newest published before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous: Option<String>,
+    /// The comparison in one word: its worst change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<Verdict>,
+    /// The ids of the records that changed, in the diff's order (breaking first).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changes: Vec<String>,
+    /// The change notes attached to them (`crates/horizon-mod-vocab/changes/*.toml`, read by the
+    /// surface diff), once each, in the notes files' own shape.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<ChangeNote>,
+}
+
+/// One change note, as its file says it: the ids it explains, why they changed, and how a mod
+/// moves on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChangeNote {
+    /// The changed records it names (those of them this comparison found changed).
+    pub ids: Vec<String>,
+    pub why: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migrate: Option<String>,
+}
+
+/// A surface comparison's verdict (`horizon-stage surface-diff`'s `verdict`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Verdict {
+    Identical,
+    Additive,
+    Conditional,
+    Breaking,
 }
 
 /// The pinned horizon-mixins tool, which keeps its own release.
@@ -519,7 +554,13 @@ impl Index {
             package_format: PACKAGE_FORMAT,
             toolchain: Toolchain { rust },
             content_api: crate::manifest::API.to_owned(),
-            surface: Surface { hash },
+            surface: Surface {
+                hash,
+                previous: None,
+                source: None,
+                changes: Vec::new(),
+                notes: Vec::new(),
+            },
             mixins: Mixins {
                 rev: crate::mixins_tool::REV.to_owned(),
                 patch: crate::mixins_tool::patch_hash(),
@@ -527,6 +568,62 @@ impl Index {
             assets,
             inputs: inputs(),
         })
+    }
+
+    /// Fills the surface's comparison with `previous` (a build id) from `diff`, the JSON that
+    /// `horizon-stage surface-diff <previous surface.json> <this surface.json> --json` wrote. A
+    /// diff whose new side is not this surface is refused: it compares another build.
+    pub fn compare(&mut self, previous: &str, diff: &[u8]) -> Result<(), Refusal> {
+        #[derive(Deserialize)]
+        struct Diff {
+            new: String,
+            verdict: Verdict,
+            changes: Vec<Change>,
+        }
+        #[derive(Deserialize)]
+        struct Change {
+            id: String,
+            #[serde(default)]
+            notes: Vec<Note>,
+        }
+        #[derive(Deserialize)]
+        struct Note {
+            file: String,
+            why: String,
+            #[serde(default)]
+            migrate: Option<String>,
+        }
+        let diff: Diff = serde_json::from_slice(diff)
+            .map_err(|error| Refusal::Malformed(format!("the surface diff: {error}")))?;
+        if diff.new != self.surface.hash {
+            return Err(Refusal::Malformed(format!(
+                "the surface diff is of surface {}, not this build's {}",
+                diff.new, self.surface.hash
+            )));
+        }
+        // One entry per note file, with every change it is attached to.
+        let mut files: Vec<&str> = Vec::new();
+        let mut notes: Vec<ChangeNote> = Vec::new();
+        for change in &diff.changes {
+            for note in &change.notes {
+                match files.iter().position(|file| *file == note.file) {
+                    Some(at) => notes[at].ids.push(change.id.clone()),
+                    None => {
+                        files.push(&note.file);
+                        notes.push(ChangeNote {
+                            ids: vec![change.id.clone()],
+                            why: note.why.clone(),
+                            migrate: note.migrate.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        self.surface.previous = Some(previous.to_owned());
+        self.surface.source = Some(diff.verdict);
+        self.surface.changes = diff.changes.into_iter().map(|change| change.id).collect();
+        self.surface.notes = notes;
+        Ok(())
     }
 
     /// `sdk.json`'s text: pretty, sorted, ending in a newline.
