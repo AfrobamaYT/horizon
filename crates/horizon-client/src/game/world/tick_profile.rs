@@ -38,10 +38,11 @@ thread_local! {
 }
 
 /// Who wants the tick's spans recorded besides nobody: `HORIZON_SPIKES` (the slow ring's steps),
-/// a report's recording, a mod (`native_spans`).
+/// a report's recording.
 pub(super) const SPANS_SPIKES: u8 = 1;
 pub(super) const SPANS_REPORT: u8 = 2;
-pub(super) const SPANS_MOD: u8 = 4;
+#[cfg(test)]
+const SPANS_MOD: u8 = 4;
 static SPAN_USERS: AtomicU8 = AtomicU8::new(0);
 
 /// `user` wants the spans recorded, or no longer does: they stay on while anyone does.
@@ -69,26 +70,31 @@ fn set(who: u8, on: bool) {
 }
 
 /// Who samples on this thread: what a helper thread running part of its mob loop samples for.
+#[cfg(any(test, feature = "upstream-parallel-mobs"))]
 pub(super) fn sampling() -> u8 {
     SAMPLING.with(Cell::get)
 }
 
 /// A helper thread's sums, for the thread whose mob loop it ran part of ([`merge`]).
+#[cfg(any(test, feature = "upstream-parallel-mobs"))]
 pub(super) struct Sums([Totals; 1]);
 
 /// This helper thread samples for `who` ([`sampling`] of the thread it helps), from empty sums.
+#[cfg(any(test, feature = "upstream-parallel-mobs"))]
 pub(super) fn begin_helper(who: u8) {
     SAMPLING.with(|s| s.set(who));
     COSTS.with(|c| *c.borrow_mut() = Default::default());
 }
 
 /// What this helper thread sampled since [`begin_helper`]; it samples nothing more.
+#[cfg(any(test, feature = "upstream-parallel-mobs"))]
 pub(super) fn end_helper() -> Sums {
     SAMPLING.with(|s| s.set(0));
     Sums(COSTS.with(|c| std::mem::take(&mut *c.borrow_mut())))
 }
 
 /// Add a helper thread's sums to this thread's.
+#[cfg(any(test, feature = "upstream-parallel-mobs"))]
 pub(super) fn merge(sums: Sums) {
     COSTS.with(|c| {
         let mut costs = c.borrow_mut();
