@@ -1542,8 +1542,7 @@ impl StructureStart {
             {
                 has_piece_beardifier = true;
                 if rigid.adjustment != TerrainAdjustment::None {
-                    let bounds = BoundingBox::new(rigid.bounds.minimum(), rigid.bounds.maximum())
-                        .inflated(12, 12);
+                    let bounds = influence_box(rigid.bounds.minimum(), rigid.bounds.maximum());
                     match &mut override_bounds {
                         Some(union) => union.encapsulate(&bounds),
                         None => override_bounds = Some(bounds),
@@ -1790,10 +1789,31 @@ pub fn place_in_chunk<W: FeatureWorld + PlacementContext, R: RandomSource + 'sta
     Ok(())
 }
 
+/// A piece's terrain box grown by the beardifier's reach (12 around), without overflowing:
+/// a mod's bounds may sit at the `i32` limits.
+fn influence_box(minimum: [i32; 3], maximum: [i32; 3]) -> BoundingBox {
+    BoundingBox::new(
+        minimum.map(|v| v.saturating_sub(12)),
+        maximum.map(|v| v.saturating_add(12)),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_terrain_box_at_the_i32_limits_grows_without_overflowing() {
+        assert_eq!(
+            influence_box([i32::MIN, i32::MIN + 5, 0], [i32::MAX, i32::MAX - 5, 3]),
+            BoundingBox::new([i32::MIN, i32::MIN, -12], [i32::MAX, i32::MAX, 15])
+        );
+        assert_eq!(
+            influence_box([0, 64, 0], [8, 73, 8]),
+            BoundingBox::new([-12, 52, -12], [20, 85, 20])
+        );
+    }
 
     fn registry(structures: &[(&str, Value)], sets: &[(&str, Value)]) -> StructureRegistry {
         let text = |l: &[(&str, Value)]| {

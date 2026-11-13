@@ -266,7 +266,7 @@ impl ModStructureType for Adapter {
             .into_iter()
             .map(|piece| {
                 Box::new(ModPiece {
-                    beardifier: piece.beardifier().map(engine_beardifier),
+                    beardifier: piece.beardifier().and_then(engine_beardifier),
                     piece,
                     ty: ty.clone(),
                     id,
@@ -285,7 +285,7 @@ impl ModStructureType for Adapter {
         // Preserve the engine's existing bad-piece refusal. The API loader's diagnostic is typed.
         let piece = self.inner.load_piece(metadata, tag).ok()?;
         Some(Box::new(ModPiece {
-            beardifier: piece.beardifier().map(engine_beardifier),
+            beardifier: piece.beardifier().and_then(engine_beardifier),
             piece,
             ty: self.inner.clone(),
             id: self.id,
@@ -293,7 +293,10 @@ impl ModStructureType for Adapter {
     }
 }
 
-fn engine_beardifier(piece: mod_api::PieceBeardifier) -> horizon_core::density::RigidPiece {
+/// The engine's rigid piece for a mod piece's answer; bounds whose minimum is above their
+/// maximum are mod-controlled input, refused with a warning (the piece adds no terrain
+/// adjustment) instead of trusting the decoder to have ordered them.
+fn engine_beardifier(piece: mod_api::PieceBeardifier) -> Option<horizon_core::density::RigidPiece> {
     use horizon_core::density::{StructureBounds, TerrainAdjustment as Engine};
     use mod_api::TerrainAdjustment as Api;
     let adjustment = match piece.adjustment {
@@ -303,12 +306,19 @@ fn engine_beardifier(piece: mod_api::PieceBeardifier) -> horizon_core::density::
         Api::BeardBox => Engine::BeardBox,
         Api::Encapsulate => Engine::Encapsulate,
     };
-    horizon_core::density::RigidPiece {
-        bounds: StructureBounds::new(piece.bounds.min, piece.bounds.max)
-            .expect("BoundingBox has ordered bounds"),
+    let Some(bounds) = StructureBounds::new(piece.bounds.min, piece.bounds.max) else {
+        log::warn!(
+            "a mod structure piece's beardifier bounds {:?}..{:?} are not ordered: it adds no terrain adjustment",
+            piece.bounds.min,
+            piece.bounds.max
+        );
+        return None;
+    };
+    Some(horizon_core::density::RigidPiece {
+        bounds,
         adjustment,
         ground_level_delta: piece.ground_level_delta,
-    }
+    })
 }
 
 /// The engine's legacy piece around a mod's piece: `createTag` of the type id

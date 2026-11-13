@@ -896,3 +896,19 @@ fn piece_beardifier_shapes_terrain_and_is_resolved_once() {
         "terrain chunks must use cached answers"
     );
 }
+
+#[test]
+fn unordered_beardifier_bounds_add_no_terrain_adjustment() {
+    let unordered = mod_api::PieceBeardifier::new(
+        BoundingBox::new([1, 0, 0], [0, 0, 0]),
+        mod_api::TerrainAdjustment::BeardThin,
+        0,
+    );
+    assert!(engine_beardifier(unordered).is_none());
+    let ordered = mod_api::PieceBeardifier::new(
+        BoundingBox::new([0, 0, 0], [1, 1, 1]),
+        mod_api::TerrainAdjustment::BeardThin,
+        2,
+    );
+    assert_eq!(engine_beardifier(ordered).unwrap().ground_level_delta, 2);
+}
