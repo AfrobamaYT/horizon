@@ -779,6 +779,22 @@ fn potion_duration_scale_decodes_and_matches_float_values() {
         .unwrap(),
         Tag::Float(0x7f7f_ffff),
     );
+    let absence_source = r#"{"type":"neoforge:components","items":"minecraft:potion","components":{"!minecraft:potion_duration_scale":{}}}"#;
+    let absence = parse(absence_source, &items);
+    let mut removed = ItemStack::new("minecraft:potion", 1);
+    assert!(!absence.test_in(&context, &removed));
+    removed.data_mut().set_loot_component(ID, &None);
+    assert!(absence.test_in(&context, &removed));
+    assert!(!positive.test_in(&context, &removed));
+    let mut populated = ItemStack::new("minecraft:potion", 1);
+    populated
+        .data_mut()
+        .set_loot_component(ID, &Some(Tag::Float(1.5_f32.to_bits())));
+    assert!(!absence.test_in(&context, &populated));
+    assert!(
+        parse(absence_source, &Items::empty())
+            .test_in(&context, &ItemStack::new("minecraft:potion", 1),)
+    );
 }
 
 #[test]
