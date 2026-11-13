@@ -24,9 +24,10 @@ The installer is `horizon-fork-launcher-macos-arm64.dmg`; self-update uses
 `horizon-fork-launcher-macos-arm64.zip` from arismoko/horizon. Settings, accounts
 and game data use the separate fork namespace.
 
-The app is **ad hoc signed, not notarized**. Drag it to Applications, then on first
-open **right-click the app and choose Open**. No Apple signing identity or
-notarization profile is needed. The upstream signing description below does not
+The app is **ad hoc signed, not notarized**. Drag it to Applications. On macOS 14
+and earlier, right-click the app and choose **Open**, then confirm **Open**. On
+macOS 15 and later, open it once, then use **System Settings › Privacy & Security ›
+Open Anyway** and confirm. No Apple signing identity or notarization profile is needed. The upstream signing description below does not
 apply to these fork packages.
 
 ## Signing and notarization
