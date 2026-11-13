@@ -147,6 +147,48 @@ class PartTableCarryTest(unittest.TestCase):
         self.assertEqual(carry.carry_part_table(r.path, self.base, head, None), [])
 
 
+    def assert_refused(self, head, *diagnostics):
+        before = {p.name: p.read_text() for p in (self.repo.path / EXPORTS).glob("*.rs")}
+        with self.assertRaises(carry.CarryError) as e:
+            carry.carry_part_table(self.repo.path, self.base, head, None)
+        for diagnostic in diagnostics:
+            self.assertIn(diagnostic, str(e.exception))
+        self.assertEqual({p.name: p.read_text() for p in (self.repo.path / EXPORTS).glob("*.rs")}, before)
+
+    def test_a_name_main_exports_differently_stops_before_writing(self):
+        r = self.repo
+        r.commit("main", {f"{PARTS}/blocks.rs": "pub trait BlockProvider {}\npub fn block_count() {}\n",
+                          f"{EXPORTS}/parts_blocks.rs": "pub use parts::BlockProvider;\n#[cfg(test)]\n"
+                                                        "pub(crate) use parts::block_count;\n"}, "landed")
+        table = TABLE.replace("Attached, BlockProvider", "Attached, BlockProvider, block_count").replace(
+            "attribute_declarations}", "attribute_declarations, attribute_count}")
+        head = self.pr(table, {f"{PARTS}/blocks.rs": "pub trait BlockProvider {}\npub fn block_count() {}\n",
+                               f"{PARTS}/attributes.rs": "pub struct AttributeDeclaration;\n"
+                                                         "pub fn attribute_declarations() {}\n"
+                                                         "pub fn attribute_count() {}\n"})
+        self.assert_refused(head, "block_count (root scope): this tree already exports that name with another cfg",
+                            "pub use parts::block_count;")
+
+    def test_a_removed_name_stops_before_writing(self):
+        table = TABLE.replace("Attached, BlockProvider", "Attached, BlockCount")
+        head = self.pr(table, {f"{PARTS}/blocks.rs": "pub fn BlockCount() {}\n"})
+        self.assert_refused(head, "BlockProvider (root scope): the PR removed or changed this line of part_table.rs: "
+                                  "pub use parts::BlockProvider;")
+
+    def test_a_renamed_name_stops_before_writing(self):
+        table = TABLE.replace("Attached, BlockProvider}", "Attached, BlockProvider, BlockCount}").replace(
+            "mod __private {\n", "mod __private {\n    pub use crate::parts::KnownIds as Ids;\n")
+        base_table = TABLE.replace("mod __private {\n", "mod __private {\n    pub use crate::parts::KnownIds as Known;\n")
+        r = self.repo
+        self.base = r.commit("old", {**self.parts, f"{PARTS}/shared.rs": self.parts[f"{PARTS}/shared.rs"] +
+                                     "pub struct KnownIds;\n", f"{EXPORTS}/part_table.rs": base_table},
+                             base=self.base)
+        head = r.commit("old", {f"{EXPORTS}/part_table.rs": table,
+                                f"{PARTS}/blocks.rs": "pub trait BlockProvider {}\npub fn BlockCount() {}\n"})
+        r.git("checkout", "-q", "main")
+        self.assert_refused(head, "Known (__private scope): the PR removed or changed this line of part_table.rs: "
+                                  "pub use crate::parts::KnownIds as Known;")
+
 STUBS = carry.check_stand_ins.FIXTURES
 OLD_SHARED = """//! Shared.
 fn helper() {}

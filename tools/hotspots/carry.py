@@ -14,8 +14,9 @@ Kinds:
 - part-table: a name the PR added to a list of the old crates/horizon-mod-vocab/src/exports/part_table.rs goes to
   the fragment of the parts file that defines it on the PR's head (exports/parts_<file>.rs, found as
   tools/refactors/split_part_table.py found them), in the same scope, visibility and `#[cfg]`, as a `pub use` line
-  of its own. A name already exported in that scope on this tree is skipped. A name it cannot attribute, or one the
-  PR removed, stops it before writing anything, printing the name and its line.
+  of its own. A name this tree already exports in that scope with the same cfg, visibility and source is skipped.
+  A name it cannot attribute, one exported there differently, or one the PR removed or renamed stops it before
+  writing anything, printing the name and its line.
 - dispatch-stub: a stand-in the PR added, changed or removed inside `mod stubs` or `mod api` of the old
   dispatch-tests/src/fixtures/shared.rs is written to (or removed from) fixtures/stubs/<Name>.rs or
   fixtures/api/<Name>.rs, as the PR's head has it (with its impls). It stops when that file on this tree is neither
@@ -272,9 +273,18 @@ def carry_dispatch_stub(repo, base, head, _topic):
     return [path.relative_to(repo).as_posix() for path, _ in writes]
 
 
+def export_form(attrs, vis, path):
+    """An export as compared across fragments: its attributes, visibility and the item it names, with `parts::...`
+    and `crate::parts::...` (the two spellings the fragments use) taken as the same path."""
+    path = "::".join(path)
+    if path == "parts" or path.startswith("parts::"):
+        path = "crate::" + path
+    return tuple(part_table.attr_text(a) for a in attrs), "".join((vis or "").split()), path
+
+
 def exported(source):
-    """{(scope, bound name)} of the `use` leaves of an export fragment, at every scope."""
-    found = set()
+    """{(scope, bound name): {export form}} of the `use` leaves of an export fragment, at every scope."""
+    found = {}
 
     def walk(items, scope):
         for item in items:
@@ -282,7 +292,8 @@ def exported(source):
                 body = item["tokens"]
                 walk(part_table.top_items(" ".join(body[body.index("{") + 1:-1])), scope + (item["name"],))
             elif item["kind"] == "use":
-                found.update((scope, bound) for _, bound in item["leaves"])
+                for path, bound in item["leaves"]:
+                    found.setdefault((scope, bound), set()).add(export_form(item["attrs"], item["vis"], path))
 
     walk(part_table.top_items(source), ())
     return found
@@ -309,9 +320,10 @@ def carry_part_table(repo, base, head, _topic):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(git(repo, "show", f"{head}:{name}")[1], encoding="utf-8")
         owners = part_table.owners(tree)
-    have = set()
+    have = {}
     for path in exports.glob("*.rs"):
-        have |= exported(path.read_text(encoding="utf-8"))
+        for key, forms in exported(path.read_text(encoding="utf-8")).items():
+            have.setdefault(key, set()).update(forms)
     texts, stuck = {}, []
 
     def line(entry):
@@ -321,7 +333,12 @@ def carry_part_table(repo, base, head, _topic):
 
     for entry in added:
         scope, name, bound = entry[0], entry[4], entry[5] or entry[4]
+        form = export_form(entry[1], entry[2], entry[3].split("::") + [name])
+        if form in have.get((scope, bound), ()):
+            continue
         if (scope, bound) in have:
+            stuck.append(f"{bound} ({'::'.join(scope) or 'root'} scope): this tree already exports that name with "
+                         "another cfg, visibility or source; the PR's line is " + " ".join(line(entry)))
             continue
         owner = owners.get(name)
         if owner is None:
@@ -348,10 +365,10 @@ def carry_part_table(repo, base, head, _topic):
                 texts[path] = text[:block.end() - 2] + body + text[block.end() - 2:]
             else:
                 texts[path] = text + "mod __private {\n" + body + "}\n"
-        have.add((scope, bound))
+        have.setdefault((scope, bound), set()).add(form)
     for entry in removed:
-        stuck.append(f"{entry[4]} ({'::'.join(entry[0]) or 'root'} scope): the PR removed it from part_table.rs; "
-                     "remove it from its fragment by hand if the PR's head no longer defines it")
+        stuck.append(f"{entry[5] or entry[4]} ({'::'.join(entry[0]) or 'root'} scope): the PR removed or changed this "
+                     "line of part_table.rs: " + " ".join(line(entry)))
     if stuck:
         raise CarryError("cannot place these names; carry them by hand:\n" + "\n".join(stuck))
     for path, text in texts.items():
