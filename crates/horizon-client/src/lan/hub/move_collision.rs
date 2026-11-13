@@ -34,14 +34,29 @@ impl Hub {
             binding,
             subject: None,
         };
+        // A Player-cause move through the move gate (#2414); the gate records the movement
+        // unchanged and its delta is what the collision resolves.
+        let gate = crate::move_gate::armed(
+            &self.loop_context,
+            g.entity_id as u32,
+            "minecraft:player",
+            horizon_world::entity_move::MoverType::Player,
+            Vec3::new(
+                to[0] - g.position[0],
+                to[1] - g.position[1],
+                to[2] - g.position[2],
+            ),
+        );
+        let movement = gate.delta();
         // A move with no exclusions pays this one check.
         if g.collision_exclusions.is_empty() {
-            return check_move(g, to, &mut scene);
+            return check_move(g, to, movement, &mut scene);
         }
         let boxes = g.collision_exclusions.boxes();
         check_move(
             g,
             to,
+            movement,
             &mut Excluding {
                 world: &mut scene,
                 boxes,
@@ -51,7 +66,7 @@ impl Hub {
 }
 
 /// [`Hub::collide`] against `world`'s blocks.
-fn check_move<W>(g: &Guest, to: [f64; 3], world: &mut W) -> (bool, bool, bool)
+fn check_move<W>(g: &Guest, to: [f64; 3], movement: Vec3, world: &mut W) -> (bool, bool, bool)
 where
     W: BlockCollisionWorld<Error = io::Error> + EntityMovementWorld<Error = io::Error>,
 {
@@ -68,11 +83,6 @@ where
     let (old, new) = (at(g.position), at(to));
     // player.move, then how far from the target it ended (vanilla drops
     // the vertical part: `yDist > -0.5 || yDist < 0.5` always holds).
-    let movement = Vec3::new(
-        to[0] - g.position[0],
-        to[1] - g.position[1],
-        to[2] - g.position[2],
-    );
     // The mover's own sneaking, as CollisionContext.of(player): a sneaking
     // player descends through scaffolding.
     let context = CollisionContext::position(g.position[1]).with_descending(g.sneaking);
