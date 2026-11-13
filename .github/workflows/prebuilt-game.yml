@@ -88,6 +88,12 @@ jobs:
         run: python tools/prebuilt_game.py build prebuilt ${{ matrix.server && '--server' || '' }}
       - name: The starter mod and the game executable build against the archive alone
         run: python tools/prebuilt_game.py smoke prebuilt
+      # Runs what smoke built, installed as the launcher installs it, with no game data: it loads the game's
+      # libraries and sets up the mods' runtime, and must stop cleanly at the missing prepared files. A crash
+      # there (two allocators, #3877) fails this OS's leg, so its archive never publishes.
+      - name: The game executable starts and loads the game's libraries
+        timeout-minutes: 10
+        run: python tools/prebuilt_game.py start prebuilt
       - name: Exported names, toward Windows' 65,535
         run: python tools/prebuilt_game.py exports prebuilt | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Archive

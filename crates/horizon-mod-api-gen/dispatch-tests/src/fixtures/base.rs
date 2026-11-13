@@ -259,7 +259,7 @@ fn slot_rules_mutate_and_item_tick_can_cancel() {
     });
     let (mut may_place, mut max_stack) = (true, 64);
     dispatch_menu_slot_rules(
-        &Loop("loop"),
+        &TestHost,
         "test:menu",
         0,
         &ItemStack::default(),
@@ -549,6 +549,7 @@ fn dispatch_contracts() {
             );
             assert_eq!(event.source.damage_type, "minecraft:player_attack");
             assert!(event.attacker_main.is_none() && event.attacker_off.is_none());
+            assert_eq!(event.entry, KnockbackEntry::Full);
             assert_eq!(event.strength, 0.4);
             event.strength *= 2.0;
             event.x = -event.x;
@@ -572,6 +573,7 @@ fn dispatch_contracts() {
             attacker: 7,
             attacker_main: None,
             attacker_off: None,
+            entry: KnockbackEntry::Full,
             strength: &mut strength,
             x: &mut x,
             z: &mut z,
