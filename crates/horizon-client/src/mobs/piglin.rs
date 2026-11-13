@@ -2799,7 +2799,7 @@ mod conversion_tests {
 #[cfg(test)]
 mod cannot_hunt_save_tests {
     use super::*;
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     fn piglin() -> Mob {
         let mut kind = crate::mobs::sensor_scan_tests::kind();
