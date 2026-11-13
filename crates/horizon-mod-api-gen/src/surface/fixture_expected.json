@@ -509,6 +509,17 @@
       ]
     },
     {
+      "id": "capability:fixture:more_fluids",
+      "hash": "*",
+      "doc": "Fluids, made by a constructor.",
+      "kind": "block",
+      "constant": "MORE_FLUIDS",
+      "handler": "dyn FluidHandler",
+      "refs": [
+        "trait:FluidHandler"
+      ]
+    },
+    {
       "id": "capability:registries",
       "hash": "*",
       "doc": "New registries.",

@@ -786,22 +786,22 @@ fn capability_key(
         "EntityCapabilityKey" => CapabilityKind::Entity,
         _ => return None,
     };
-    let syn::Expr::Struct(literal) = &*constant.expr else {
-        return None;
+    let text = |expr: &syn::Expr| match expr {
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(key),
+            ..
+        }) => Some(key.value()),
+        _ => None,
     };
-    let key = literal
-        .fields
-        .iter()
-        .find_map(|field| match (&field.member, &field.expr) {
-            (
-                syn::Member::Named(name),
-                syn::Expr::Lit(syn::ExprLit {
-                    lit: syn::Lit::Str(key),
-                    ..
-                }),
-            ) if name == "name" => Some(key.value()),
+    // A literal with a `name`, or a constructor given the name (`Key::new("horizon:x")`).
+    let key = match &*constant.expr {
+        syn::Expr::Struct(literal) => literal.fields.iter().find_map(|field| match &field.member {
+            syn::Member::Named(name) if name == "name" => text(&field.expr),
             _ => None,
-        })?;
+        }),
+        syn::Expr::Call(call) => call.args.first().and_then(text),
+        _ => None,
+    }?;
     let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
         return None;
     };

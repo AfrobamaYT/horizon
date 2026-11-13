@@ -108,6 +108,8 @@ pub const FLUIDS: CapabilityKey<dyn FluidHandler> = CapabilityKey {
     name: "fixture:fluids",
     handler: std::marker::PhantomData,
 };
+/// Fluids, made by a constructor.
+pub const MORE_FLUIDS: CapabilityKey<dyn FluidHandler> = CapabilityKey::new("fixture:more_fluids");
 pub const LIMIT: u32 = 3;
 /// Makes a key.
 #[macro_export]
