@@ -122,8 +122,8 @@ It exits non-zero when something fails.
 ### CI tiers
 
 CI is split by how long a test takes and what it needs. Main and rollups run only quick checks and unit tests;
-every test that boots the game runs once a day. Existing in-game tests still in `verify` are being moved by the next
-change of #4022.
+every test that boots the game runs once a day. Existing tests that need prepared resources, a child process or the
+network and are still in `verify` are being moved by the next change of #4022.
 
 | Tier | Runs on | What |
 | --- | --- | --- |
