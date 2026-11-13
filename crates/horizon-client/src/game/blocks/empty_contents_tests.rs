@@ -198,30 +198,39 @@ fn a_player_pour_with_a_changed_hand_is_refused_and_placement_undone() {
             replace_hand: true,
             ..Plan::default()
         };
-        game.creative = false;
-        let stick = ItemStack::new("minecraft:stick", 1);
-        let slot = game.held_slot();
-        *game.held_mut() = Some(stick.clone());
-        let hit = crate::game::Hit {
-            pos: [6, 63, 5],
-            face: [0, 1, 0],
-            point: [6.5, 64.0, 5.5],
-            inside: false,
-        };
-        let used = game.player_empty_contents(&stick, TARGET, &hit);
-        assert!(matches!(
-            used,
-            Some(horizon_client::first_person::UseResult::Fail)
-        ));
-        assert_eq!(
-            game.inventory[slot],
-            Some(ItemStack::new("minecraft:stone", 1))
-        );
-        assert_eq!(
-            Some(game.world.block(6, 64, 5)),
-            game.pack.assets.registry.default_state("minecraft:air")
-        );
-        assert!(!honey_at_target(game));
+        crate::game::native_item_places::tests::open_to_lan(game);
+        game.lan
+            .as_mut()
+            .unwrap()
+            .hub
+            .guests
+            .push(crate::game::native_item_places::tests::guest(1));
+        game.as_guest(1, |game| {
+            game.creative = false;
+            let stick = ItemStack::new("minecraft:stick", 1);
+            let slot = game.held_slot();
+            *game.held_mut() = Some(stick.clone());
+            let hit = crate::game::Hit {
+                pos: [6, 63, 5],
+                face: [0, 1, 0],
+                point: [6.5, 64.0, 5.5],
+                inside: false,
+            };
+            let used = game.player_empty_contents(&stick, TARGET, &hit);
+            assert!(matches!(
+                used,
+                Some(horizon_client::first_person::UseResult::Fail)
+            ));
+            assert_eq!(
+                game.inventory[slot],
+                Some(ItemStack::new("minecraft:stone", 1))
+            );
+            assert_eq!(
+                Some(game.world.block(6, 64, 5)),
+                game.pack.assets.registry.default_state("minecraft:air")
+            );
+            assert!(!honey_at_target(game));
+        });
     });
 }
 
