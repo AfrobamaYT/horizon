@@ -2,7 +2,8 @@
 
 ## Pins and scope
 
-- Fork base: `11fadb75ddb963c01b7bb86b9931d613f2bb48f9`.
+- Initial fork integration base: `11fadb75ddb963c01b7bb86b9931d613f2bb48f9`.
+- Authorized main refresh: `fa5ed5ab45` (rollup 63), merged once after the initial full workspace/all-target compile passed. The sole conflict retained main's direct DamageHooks shape alongside sync deferral guards.
 - Upstream: `36eb98b6f6ec4f22649cbe65bbfd32bc0dc2083f`.
 - Upstream's own main-push checks passed in run `43332621008`.
 - Previous upstream ancestor in this base: `f24ee1accf1c816736e6e067939d04f3853f474e`.
@@ -31,7 +32,7 @@ Keep fork typed ownership, attachment and join lifetimes, generated module disco
 - Preserve mod dimensions and registered sea levels when taking map and world-loading fixes.
 - Preserve live entity/vehicle transfer tokens. Consume `PendingEntity` in the extracted persist loader, setting TNT runtime portal context before admission/join hooks; never serialize the runtime flag into NBT.
 - Extras glue remains under `game/interface/extras`, retaining counters/minimap hooks and the existing reconnect and PvP owners.
-- Preserve sampler calibration and report restoration while adopting upstream's consistent dual-user helper collection.
+- Preserve sampler calibration, span-owner arbitration, report restoration and CPU attribution. Omit unconsumed mod-only/helper-thread sampler support: its upstream diagnostic consumers and grouped helper path are not imported. Retain the canonical single report accumulator rather than unused parallel APIs.
 
 ### Rendering, protocol and saves
 
@@ -75,4 +76,4 @@ Source implementation moves include renderer in-flight/frustum code, crystal con
 
 The file-size baseline is generated separately from the integrated source against the actual fork base, with the pinned upstream marker. It is never hand-edited.
 
-Verification: compile-only workspace/all-target check is pending. No local tests, clippy, parity harnesses or game runs are permitted for this sync. Workers performed rustfmt parsing and static area audits only; CI remains the runtime proof.
+Verification: both the initial integrated source and the authorized main refresh passed `CARGO_INCREMENTAL=0 cargo check --workspace --all-targets --keep-going -j 2`. Those checks reported unused incoming helpers. Static audit confirmed the active container-viewer implementation already exists, and the additional mod/helper sampler support has no imported consumer; duplicate/unconsumed helpers were removed without warning allowances. The full workspace/all-target compile-only check after that cleanup passed without source warnings (pass 7). No local tests, clippy, parity harnesses or game runs are permitted for this sync. Workers performed rustfmt parsing and static area audits only; CI remains the runtime proof.

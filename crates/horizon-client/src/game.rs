@@ -3691,9 +3691,6 @@ impl Game<'_> {
     ) -> [f64; 3] {
         self.add_item_entity_prepared(stack, position, velocity, pickup_delay, None, 0)
     }
-    pub(super) fn spawn_item_aged(&mut self, stack: ItemStack, position: [f64; 3], age: i32) {
-        self.add_item_entity_prepared(stack, position, None, 10, None, age);
-    }
     /// Joins an item only after drop hooks have seen its constructor's motion.
     fn add_item_entity_prepared(
         &mut self,
