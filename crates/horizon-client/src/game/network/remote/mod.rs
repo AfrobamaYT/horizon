@@ -6,6 +6,8 @@
 //! clicks). The player still moves with the local physics, as the vanilla
 //! client predicts its own movement; the server stays authoritative for
 //! everything else.
+mod selector_metadata;
+use selector_metadata::hurt_sound_for;
 mod attack_target;
 mod fall_sound;
 mod interaction_actions;
@@ -153,28 +155,6 @@ pub(super) fn remote_text(tag: &Tag) -> horizon_client::text::Text {
 /// level random either.
 pub(super) fn player_voice_pitch() -> f32 {
     1.0
-}
-
-/// The hurt sound of a `ClientboundDamageEventPacket`'s damage type, by its
-/// synchronized registry id: `Player.getHurtSound` picks the type's effects.
-fn hurt_sound_for(
-    registries: &Dynamic,
-    damage: &horizon_world::damage_source::Catalog,
-    source_type: i32,
-) -> &'static str {
-    if let Some(data) = registries.data("minecraft:damage_type", source_type) {
-        let effects = data.get("effects").and_then(|t| match t {
-            Tag::String(effects) => effects.to_string().ok(),
-            _ => None,
-        });
-        return horizon_client::health::hurt_sound(effects.as_deref().unwrap_or("hurt"));
-    }
-    registries
-        .name("minecraft:damage_type", source_type)
-        .and_then(|name| damage.id(name).and_then(|id| damage.definition(id)))
-        .map_or(horizon_client::health::hurt_sound("hurt"), |d| {
-            horizon_client::health::hurt_sound(&d.effects)
-        })
 }
 
 /// The live entity a bound sound names; absence means that object was removed.
