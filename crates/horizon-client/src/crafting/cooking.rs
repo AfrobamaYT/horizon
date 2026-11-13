@@ -23,7 +23,12 @@ impl Recipes {
     }
     /// `cook` by scanning every recipe, as it was before the index.
     #[cfg(test)]
-    pub(super) fn cook_scan(&self, context: &LoopContext, kind: &str, input: &ItemStack) -> Option<&Cooking> {
+    pub(super) fn cook_scan(
+        &self,
+        context: &LoopContext,
+        kind: &str,
+        input: &ItemStack,
+    ) -> Option<&Cooking> {
         self.cooking
             .iter()
             .find(|c| c.kind == kind && c.ingredient.test_in(context, input))
