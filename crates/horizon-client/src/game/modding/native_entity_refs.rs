@@ -4496,6 +4496,85 @@ pub(super) mod tests {
         });
     }
 
+    /// A client's `entities_in` lists another player standing in the box (added through the
+    /// real `AddEntity` packet), after the entities the server tracks and before the window's
+    /// own player; a player outside the box, and one the server removed, are not listed.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_lists_another_player_in_the_box_after_the_tracked_entities() {
+        use super::super::execution_role::ExecutionRole;
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::{
+            connection::Pipe,
+            packets::play::{AddEntity, Clientbound as C, RemoveEntities},
+        };
+        use mod_api::{Host, LevelRef};
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            game.options.dedicated = None;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "EntitiesInTest").unwrap();
+            let remote = game.remote.as_mut().unwrap();
+            remote.logged_in = true;
+            remote.entity_id = 7;
+            remote.profile = 42;
+            let player = remote
+                .builtin
+                .get("minecraft:entity_type")
+                .unwrap()
+                .id("minecraft:player")
+                .unwrap();
+            game.player =
+                Some(horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.spawn_entity(15, "minecraft:pig", [2.0, 0.0, 0.0], [0.0; 3]);
+            let add_player = |game: &mut crate::game::Game<'_>, id, uuid, x| {
+                game.handle_packet(C::AddEntity(AddEntity {
+                    id,
+                    uuid,
+                    kind: player,
+                    position: [x, 0.0, 0.0],
+                    velocity: [0.0; 3],
+                    pitch: 0,
+                    yaw: 0,
+                    head_yaw: 0,
+                    data: 0,
+                }))
+                .unwrap();
+            };
+            // 18 stands in the box, 19 far outside it, 20 in it until the server removes it.
+            add_player(game, 18, 9, 1.0);
+            add_player(game, 19, 10, 40.0);
+            add_player(game, 20, 11, 0.5);
+            assert!(
+                [18, 19, 20]
+                    .iter()
+                    .all(|id| game.mobs.iter().any(|m| m.id == *id))
+            );
+            let level = game.level("minecraft:overworld").unwrap();
+            let ids = |host: &dyn Host, level: LevelRef, min, max| {
+                level
+                    .entities_in(host, min, max)
+                    .map(|found| found.into_iter().map(|e| e.id()).collect::<Vec<_>>())
+            };
+            // Entity-list order: the pig, then the other players, then the window's own.
+            assert_eq!(
+                ids(game, level, [-1.0, -1.0, -1.0], [3.0, 2.0, 1.0]),
+                Some(vec![15, 18, 20, 7])
+            );
+            // A box around only the far player finds it, and the near box did not.
+            assert_eq!(
+                ids(game, level, [39.0, -1.0, -1.0], [41.0, 2.0, 1.0]),
+                Some(vec![19])
+            );
+            game.handle_packet(C::RemoveEntities(RemoveEntities { ids: vec![20] }))
+                .unwrap();
+            assert_eq!(
+                ids(game, level, [-1.0, -1.0, -1.0], [3.0, 2.0, 1.0]),
+                Some(vec![15, 18, 7])
+            );
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_client_refuses_a_box_with_a_bound_that_is_not_finite_and_swaps_an_inverted_one() {

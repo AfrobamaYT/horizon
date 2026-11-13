@@ -37,19 +37,29 @@ class CargoJobsTests(unittest.TestCase):
                 self.assertEqual(cargo_jobs.jobs(*args), expected)
 
     def test_limits_read_the_runner_cgroup(self):
-        with tempfile.TemporaryDirectory() as directory:
-            cgroup = Path(directory)
-            (cgroup / "cpu.max").write_text("750000 100000\n")
-            (cgroup / "memory.max").write_text(f"{16 * GIB}\n")
-            self.assertEqual(cargo_jobs.limits(cgroup), (7, 16 * GIB))
-            (cgroup / "cpu.max").write_text("max 100000\n")
-            (cgroup / "memory.max").write_text("max\n")
-            cpus, memory = cargo_jobs.limits(cgroup)
-            self.assertEqual(cpus, len(os.sched_getaffinity(0)))
-            self.assertEqual(memory, os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
-            result = subprocess.run([sys.executable, ROOT / "tools/ci/cargo_jobs.py", "--job-mib", "3072",
-                                     "--cgroup", cgroup], capture_output=True, text=True, check=True)
-            self.assertEqual(int(result.stdout), cargo_jobs.jobs(cpus, memory, 3072))
+        machine_cpus = len(os.sched_getaffinity(0))
+        machine_memory = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+        small = min(machine_memory, 16 * GIB)
+        cases = [
+            # (files under the cgroup root, expected (cpus, memory))
+            ({"cpu.max": "750000 100000\n", "memory.max": f"{small}\n"}, (7, small)),  # v2 with a quota
+            ({"cpu.max": "max 100000\n", "memory.max": "max\n"}, (machine_cpus, machine_memory)),  # v2, no limit
+            ({"cpu/cpu.cfs_quota_us": "200000\n", "cpu/cpu.cfs_period_us": "100000\n",
+              "memory/memory.limit_in_bytes": f"{small}\n"}, (2, small)),  # v1 with a quota
+            ({"cpu/cpu.cfs_quota_us": "-1\n", "cpu/cpu.cfs_period_us": "100000\n",
+              "memory/memory.limit_in_bytes": "9223372036854771712\n"}, (machine_cpus, machine_memory)),  # v1, none
+            ({}, (machine_cpus, machine_memory)),  # no cgroup files: a GitHub-hosted job's root cgroup
+        ]
+        for files, expected in cases:
+            with self.subTest(files=sorted(files)), tempfile.TemporaryDirectory() as directory:
+                cgroup = Path(directory)
+                for name, text in files.items():
+                    (cgroup / name).parent.mkdir(parents=True, exist_ok=True)
+                    (cgroup / name).write_text(text)
+                self.assertEqual(cargo_jobs.limits(cgroup), expected)
+                result = subprocess.run([sys.executable, ROOT / "tools/ci/cargo_jobs.py", "--job-mib", "3072",
+                                         "--cgroup", cgroup], capture_output=True, text=True, check=True)
+                self.assertEqual(int(result.stdout), cargo_jobs.jobs(*expected, 3072))
 
     @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "requires POSIX Bash")
     def test_workflow_steps_route_parallelism_by_runner(self):

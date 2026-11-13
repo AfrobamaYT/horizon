@@ -2010,14 +2010,14 @@ impl Game<'_> {
     }
     /// A statistic is about to be awarded to a server player, before its count and scoreboard criteria
     /// change. `stat_type` and `stat` are ids such as `minecraft:mined` and `minecraft:stone`, and
-    /// `value` the amount. Set `cancel` to award nothing. Server-side.
+    /// `value` the amount; all three are writable. Invalid rewrites retain the original. Set `cancel` to award nothing.
     pub(in crate::game) fn native_player_stat_award(
         &mut self,
         player: u128,
         name: &str,
-        stat_type: &str,
-        stat: &str,
-        value: i32,
+        stat_type: &mut String,
+        stat: &mut String,
+        value: &mut i32,
         cancel: &mut bool,
     ) {
         self.fire_player_stat_award(player, name, stat_type, stat, value, cancel);
