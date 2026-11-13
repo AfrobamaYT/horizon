@@ -1,14 +1,16 @@
 name: sdk publish
 # The mod SDK's one publish step (docs/release-flow.md "Mod SDK"; design: /box/shared/sdk-lead/design.md §3): the
-# release `sdk-<sha>` from the packing legs of prebuilt-game-build.yml in the caller's run. Called by the daily run
+# release `sdk-<sha>` from the packing legs of prebuilt-game-build.yml in the caller's run (their `sdk-leg-*`
+# artifacts). Only `publish` may write; the jobs that read the legs' output have `contents: read`. Called by the daily run
 # after a green summary (daily.yml, sdk-publish) and by prebuilt-game.yml's hand dispatch.
 # - `index` (no secrets): gathers every leg's assets once, after checking that each copy of the build data and the
 #   surface is the same (tools/prebuilt_game.py gather), compares the surface with the SDK published before it on
-#   this commit's history (horizon-stage surface-diff), and writes sdk.json over every asset (prebuilt_game.py index).
+#   this commit's history (horizon-stage surface-diff), writes the API source (tools/sdk_api_source.py), and writes
+#   sdk.json over every asset (prebuilt_game.py index).
 # - `sign` is the only job with the release key, and only on main with `publish` set (the `release` environment):
 #   it checks out nothing but tools/ci/sign_release.sh, which hashes the assets and signs SHA256SUMS for the tag
-#   `sdk-<sha>`, so the signature never passes for a game release (horizon-release-sign: sdk_digest). Any other run
-#   signs with a throwaway key.
+#   `sdk-<sha>`, so the signature never passes for a game release (horizon-release-sign: sdk_digest), and refuses a
+#   commit that is not on main. Any other run signs with a throwaway key.
 # - `publish` checks the signature as the launcher does (horizon-release-sign verify) and that the release holds
 #   exactly the assets a Nightly needs (tools/ci/nightly.py sdk-assets), then creates `sdk-<sha>`: only on main
 #   with `publish` set. A branch run, or a dry run, publishes nothing.
@@ -31,7 +33,9 @@ env:
 jobs:
   index:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,16 +49,23 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.rust.outputs.version }}
+          # The API source is checked for wasm32 too (tools/sdk_api_source.py build).
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: sdk-publish
-      # Each leg's assets in a folder of its own (sdk-<leg>), so a file two legs both made is seen, not overwritten.
+      # Each leg's assets in a folder of its own (sdk-leg-<leg>), so a file two legs both made is seen, not
+      # overwritten. Only the legs' artifacts: never this workflow's own from an earlier attempt.
       - uses: actions/download-artifact@v4
         with:
-          pattern: sdk-*
+          pattern: sdk-leg-*
           path: legs
       - name: Gather the legs' assets, with one build data and surface
         run: python3 tools/prebuilt_game.py gather legs dist
+      - name: The API source, with its generated code written out
+        run: |
+          python3 tools/sdk_api_source.py build "$RUNNER_TEMP/api-source"
+          python3 tools/sdk_api_source.py archive "$RUNNER_TEMP/api-source" dist/api-source.tar.xz
       - name: Compare the surface with the SDK published before this one
         id: previous
         env:
@@ -82,17 +93,21 @@ jobs:
         env:
           PREVIOUS: ${{ steps.previous.outputs.build }}
         run: python3 tools/prebuilt_game.py index dist ${PREVIOUS:+--previous "$PREVIOUS" surface-diff.json}
+      # Overwritten by a rerun, so every later job reads this attempt's files.
       - uses: actions/upload-artifact@v4
         with:
           name: sdk-release
           path: dist
           if-no-files-found: error
           retention-days: 7
+          overwrite: true
 
   sign:
     needs: index
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    permissions:
+      contents: read
     # The key's only job, and only for a publishing run on main: sign_release.sh hashes the assets and signs with the
     # runner's OpenSSL, never running what the legs built.
     environment: ${{ inputs.publish && github.ref == 'refs/heads/main' && 'release' || '' }}
@@ -102,6 +117,16 @@ jobs:
           sparse-checkout: tools/ci/sign_release.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
+          # main's history without its files' contents: enough for the check below.
+          fetch-depth: 0
+          filter: blob:none
+      # Where the key is: whatever the caller says, the real key signs only a commit of main.
+      - name: The commit is on main
+        if: ${{ inputs.publish && github.ref == 'refs/heads/main' }}
+        run: |
+          git fetch -q --no-tags --filter=blob:none origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$COMMIT" refs/remotes/origin/main \
+            || { echo "::error::$COMMIT is not on main: its SDK is not signed"; exit 1; }
       - uses: actions/download-artifact@v4
         with:
           name: sdk-release
@@ -118,12 +143,14 @@ jobs:
           path: dist/SHA256SUMS*
           if-no-files-found: error
           retention-days: 7
+          overwrite: true
       - uses: actions/upload-artifact@v4
         if: ${{ !(inputs.publish && github.ref == 'refs/heads/main') }}
         with:
           name: sdk-ephemeral.pub
           path: dist/ephemeral.pub
           retention-days: 7
+          overwrite: true
 
   publish:
     needs: [index, sign]

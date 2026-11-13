@@ -79,6 +79,12 @@ jobs:
         run: |
           # A branch, tag or short SHA becomes the full SHA here; every later job and the run's summary job name use it.
           sha=$(git rev-parse --verify --quiet "$COMMIT^{commit}") || { echo "::error::$COMMIT is not a commit of this repository"; exit 1; }
+          # A writing run tags, files issues and signs and publishes the SDK and the Nightly: only for main's commits.
+          if [ "$DRY_RUN" != true ]; then
+            git fetch -q --no-tags origin +refs/heads/main:refs/remotes/origin/main
+            git merge-base --is-ancestor "$sha" refs/remotes/origin/main \
+              || { echo "::error::$sha is not on main: a writing daily run takes only main's commits"; exit 1; }
+          fi
           skip=false
           if [ "$SCHEDULED" = true ] && [ "$DRY_RUN" != true ]; then
             # A completed real daily run of this commit: its summary job is named `summary <full sha>`.

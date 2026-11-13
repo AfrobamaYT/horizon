@@ -248,7 +248,7 @@ class SdkPairTests(unittest.TestCase):
     def test_only_complete_published_exact_pair_is_eligible(self):
         # Written out, not taken from the module: the release a Nightly needs, signed index and sums included.
         assets = [{"name": name} for name in (
-            "sdk.json", "SHA256SUMS", "SHA256SUMS.sig", "build-data.tar.xz", "surface.json",
+            "sdk.json", "SHA256SUMS", "SHA256SUMS.sig", "api-source.tar.xz", "build-data.tar.xz", "surface.json",
             *(f"{kind}-{leg}.tar.xz" for kind in ("runtime", "api", "engine") for leg in (
                 "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu-server", "x86_64-pc-windows-gnu",
                 "aarch64-apple-darwin")))]
@@ -355,6 +355,14 @@ class SdkPairTests(unittest.TestCase):
         self.assertFalse(nightly.listed("sdk.json", b"other", sums))
         self.assertFalse(nightly.listed("surface.json", b"index", sums))
         self.assertFalse(nightly.listed("SHA256SUMS", b"index", sums))
+
+    def test_an_sdk_asset_is_trusted_only_under_the_forks_signature_for_its_own_tag(self):
+        command = nightly.signature_check("a" * 40, Path("/tmp/x"), ["sdk.json"])
+        self.assertEqual(command[:6], ["cargo", "run", "--locked", "--quiet", "-p", "horizon-release-sign"])
+        arguments = command[command.index("--") + 1:]
+        self.assertEqual(arguments, ["verify", "--repository", "arismoko/horizon", "--tag", "sdk-" + "a" * 40,
+                                     "--only", "sdk.json", "/tmp/x"])
+        self.assertNotIn("--publishing", command, "an unsigned SDK is refused, as the launcher refuses it")
 
     def test_the_previous_sdk_is_the_nearest_published_one_behind_the_build(self):
         a, b, c, d = ("a" * 40, "b" * 40, "c" * 40, "d" * 40)

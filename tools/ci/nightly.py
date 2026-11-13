@@ -242,10 +242,11 @@ def package_format() -> int:
 # The SDK's packing legs (prebuilt-game-build.yml's matrix): each target, and the Linux server's side.
 SDK_LEGS = (("x86_64-unknown-linux-gnu", ""), ("x86_64-unknown-linux-gnu", "-server"),
             ("x86_64-pc-windows-gnu", ""), ("aarch64-apple-darwin", ""))
-# The assets the legs make, gathered once (tools/prebuilt_game.py gather): each leg's three slices, and one build
-# data and surface. What the publish job refuses to release without (`nightly.py sdk-archives`).
+# The SDK's assets beside its index: each packing leg's three slices, one build data and surface (gathered once,
+# tools/prebuilt_game.py gather) and the API source (tools/sdk_api_source.py). What the publish job refuses to
+# release without (`nightly.py sdk-archives`), and what a mod tool's fetch needs.
 SDK_ARCHIVES = tuple(f"{kind}-{target}{side}.tar.xz" for target, side in SDK_LEGS
-                     for kind in ("runtime", "api", "engine")) + ("build-data.tar.xz", "surface.json")
+                     for kind in ("runtime", "api", "engine")) + ("api-source.tar.xz", "build-data.tar.xz", "surface.json")
 # Beside them in the release: the index and the signed sums (`horizon_mod_package::sdk::BESIDE_ASSETS`).
 SDK_INDEX = "sdk.json"
 SDK_ASSETS = SDK_ARCHIVES + (SDK_INDEX, "SHA256SUMS", "SHA256SUMS.sig")
@@ -275,15 +276,27 @@ def listed(name: str, data: bytes, sums: str) -> bool:
     return False
 
 
+def signature_check(sha: str, folder: Path, names: list[str]) -> list[str]:
+    """The command that checks sdk-<sha>'s SHA256SUMS signature in `folder` as the launcher does (horizon-release-sign,
+    with the fork's keys and the tag the signature must name), and the bytes of `names` against it."""
+    return ["cargo", "run", "--locked", "--quiet", "-p", "horizon-release-sign", "--", "verify",
+            "--repository", "arismoko/horizon", "--tag", f"sdk-{sha}",
+            *(argument for name in names for argument in ("--only", name)), str(folder)]
+
+
 def released(sha: str, name: str) -> bytes:
-    """The asset `name` of sdk-<sha>, once its bytes match the release's SHA256SUMS (whose signature the SDK's own
-    publish checked)."""
+    """The asset `name` of sdk-<sha>, once its SHA256SUMS signature is the fork's for `sdk-<sha>` and its bytes match
+    them ([`signature_check`])."""
     with tempfile.TemporaryDirectory() as folder:
         gh("release", "download", f"sdk-{sha}", "--repo", "arismoko/horizon", "--dir", folder,
-           "--pattern", name, "--pattern", "SHA256SUMS")
+           "--pattern", name, "--pattern", "SHA256SUMS", "--pattern", "SHA256SUMS.sig")
         data = (Path(folder) / name).read_bytes()
         if not listed(name, data, (Path(folder) / "SHA256SUMS").read_text()):
             raise SystemExit(f"sdk-{sha}'s {name} does not match its SHA256SUMS")
+        checked = subprocess.run(signature_check(sha, Path(folder), [name]), cwd=Path(__file__).resolve().parents[2],
+                                 capture_output=True, text=True)
+        if checked.returncode != 0:
+            raise SystemExit(f"sdk-{sha}'s signature does not check: {checked.stderr.strip()}")
         return data
 
 
