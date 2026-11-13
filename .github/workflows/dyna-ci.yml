@@ -736,6 +736,10 @@ jobs:
           bash tools/ci/rustup_install.sh --profile minimal --component rustfmt --component clippy
       - name: Vocabulary state has explicit ownership
         run: python3 tools/check_mod_vocabulary_state.py
+      # One file per topic in tools/ci/ignored-tests/: well-formed rows, each test in one file, nothing else in the
+      # folder, no file at the retired single-list path.
+      - name: Ignored-test policy files read cleanly
+        run: python3 tools/ci/check_ignored_test_rows.py
       # docs/layers.md: a crate depends only on its own layer or a lower one; today's exceptions only shrink.
       - name: Crates follow the layers
         if: needs.changes.outputs.rust_required != 'false'
