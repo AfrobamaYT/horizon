@@ -31,7 +31,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: native-dylib-probe-${{ github.ref }}
+  group: native-dylib-probe-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: false
 
 jobs:
