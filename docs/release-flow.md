@@ -207,7 +207,9 @@ trigger since 2026-11-13.
 `.github/workflows/daily.yml` runs every in-game test once a day, at 09:00 UTC on main's head, and when root
 dispatches it (`-f commit=<sha>`, `-f dry_run=false` to write). Its legs are the workflows that left main pushes:
 the ignored-tests data shards (`ignored-tests.yml`), the wasm fixture and guest stacks (`wasm-mods.yml`),
-`fn-replace-check.yml` and the native linkage probe (`native-dylib-probe.yml`), each called with the commit. Its
+`fn-replace-check.yml`, the native linkage probe (`native-dylib-probe.yml`) and the prebuilt SDK of the commit
+(`prebuilt-game.yml`, published as `prebuilt-<sha>` only by a real run on main, which the Nightly needs), each called
+with the commit. Its
 summary (`tools/ci/daily_summary.py`) reads each leg's result and its sanitised verdict file, never a log:
 
 - every leg green: the tag `daily-green` moves to the commit, and `release.yml` (kind `nightly`) decides the

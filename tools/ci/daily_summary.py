@@ -32,8 +32,11 @@ PREFIX = "Daily: "
 UNFINISHED = " did not complete"
 DISCLOSURE = "> 🤖 Filed by Aria's agent swarm, Dyna, not by Aria."
 # daily.yml's leg jobs (each a called workflow), and the called workflows' own routing jobs, which test nothing.
-LEGS = ("shards", "wasm-mods", "fn-replace-check", "linkage")
-HELPERS = ("plan", "route")
+LEGS = ("shards", "wasm-mods", "fn-replace-check", "linkage", "sdk")
+HELPERS = ("plan", "route", "fresh")
+# Legs whose skipped jobs are not missing coverage: the SDK skips its build when prebuilt-<sha> already exists and
+# its publish on a dry run.
+SKIP_IS_FINE = ("sdk",)
 # The wasm fixture step whose failures its verdict file names test by test.
 FIXTURE_TESTS_STEP = "Run the client tests that load the compiled fixture"
 MERGE = re.compile(r"^Merge pull request #(\d+) from ")
@@ -76,6 +79,11 @@ def leg_jobs(jobs):
             and job["name"].split(" / ", 1)[1] not in HELPERS]
 
 
+def job_green(job):
+    return job["conclusion"] == "success" or (
+        job["conclusion"] == "skipped" and job["name"].split(" / ", 1)[0] in SKIP_IS_FINE)
+
+
 def failed_steps(job):
     return [step["name"] for step in job.get("steps") or []
             if step.get("conclusion") in ("failure", "cancelled", "timed_out")]
@@ -106,7 +114,7 @@ def verdicts(jobs, reports, results):
         report = report_for(job, reports)
         if report:
             passed |= {(item["package"], item["test"]) for item in report["passed"]}
-        if job["conclusion"] == "success":
+        if job_green(job):
             green_legs.add(job["name"])
             continue
         steps = failed_steps(job)
@@ -129,7 +137,7 @@ def verdicts(jobs, reports, results):
         if results.get(leg, {}).get("result") != "success" and leg not in seen:
             unfinished.append((leg, results.get(leg, {}).get("result", "missing"), [], "no job of this leg ran"))
     green = (all(results.get(leg, {}).get("result") == "success" for leg in LEGS)
-             and all(job["conclusion"] == "success" for job in leg_jobs(jobs)) and not tests and not unfinished)
+             and all(job_green(job) for job in leg_jobs(jobs)) and not tests and not unfinished)
     failing = {(item["package"], item["test"]) for item in tests}
     return tests, unfinished, passed - failing, green_legs, green
 

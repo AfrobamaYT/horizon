@@ -22,7 +22,8 @@ def job(name, conclusion="success", failed=()):
 GREEN_JOBS = [job("shards / plan"), job("shards / ignored-tests-shards (horizon-world)"),
               job("wasm-mods / fixture"), job("wasm-mods / Guest stack / ubuntu-latest"),
               job("fn-replace-check / route"), job("fn-replace-check / fn-replace-check"),
-              job("linkage / route"), job("linkage / linkage x86_64-unknown-linux-gnu")]
+              job("linkage / route"), job("linkage / linkage x86_64-unknown-linux-gnu"),
+              job("sdk / fresh"), job("sdk / build linux"), job("sdk / publish", "skipped")]
 
 
 def shard_report(problems=(), passed=(), incomplete=()):
@@ -91,6 +92,25 @@ class DailySummaryTests(unittest.TestCase):
         self.assertCountEqual(closed, ["issues/5", "issues/6"])
         self.assertFalse(any(path.startswith("issues/7") for _, path, _ in api.writes))
         self.assertIn("Move `daily-green`", text)
+
+    def test_a_skipped_sdk_build_or_publish_is_fine_but_a_skipped_shard_is_not(self):
+        jobs = [job for job in GREEN_JOBS if not job["name"].startswith("sdk")] + [
+            job("sdk / fresh"), job("sdk / build linux", "skipped"), job("sdk / publish", "skipped")]
+        _, out = self.run_summary(Api(jobs), [shard_report()])
+        self.assertIn("green=true", out, "prebuilt-<sha> already exists, and a dry run publishes nothing")
+        jobs = [job("shards / ignored-tests-shards (horizon-world)", "skipped")] + GREEN_JOBS[2:]
+        api = Api(jobs)
+        _, out = self.run_summary(api, [])
+        self.assertIn("green=false", out, "a skipped shard is missing coverage")
+
+    def test_a_failed_sdk_build_is_red(self):
+        jobs = [job for job in GREEN_JOBS if not job["name"].startswith("sdk")] + [
+            job("sdk / fresh"), job("sdk / build windows", "failure", ["Build and collect"])]
+        api = Api(jobs)
+        _, out = self.run_summary(api, [shard_report()], results=dict(LEGS, sdk={"result": "failure"}))
+        self.assertIn("green=false", out)
+        self.assertEqual([body["title"] for _, path, body in api.writes if path == "issues"],
+                         ["Daily: sdk / build windows did not complete"])
 
     def test_the_tag_is_created_the_first_time(self):
         api = Api(GREEN_JOBS, tag=False)
@@ -197,13 +217,14 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertEqual(jobs["nightly"]["if"],
                          "needs.summary.outputs.green == 'true' && needs.resolve.outputs.dry_run == 'false'")
         self.assertEqual(self.workflow["concurrency"]["cancel-in-progress"], "false")
+        self.assertEqual(jobs["sdk"]["with"]["publish"], "${{ needs.resolve.outputs.dry_run == 'false' }}")
 
     def test_every_leg_is_a_called_workflow_with_the_commit(self):
         jobs = self.workflow["jobs"]
         for leg in summary.LEGS:
             with self.subTest(leg=leg):
                 self.assertTrue(jobs[leg]["uses"].startswith("./.github/workflows/"))
-                self.assertEqual(jobs[leg]["with"], {"commit": "${{ needs.resolve.outputs.commit }}"})
+                self.assertEqual(jobs[leg]["with"]["commit"], "${{ needs.resolve.outputs.commit }}")
                 self.assertIn(leg, jobs["summary"]["needs"])
 
 

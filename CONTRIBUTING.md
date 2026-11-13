@@ -128,7 +128,7 @@ every test that boots the game runs once a day.
 | --- | --- | --- |
 | Push | every pull request push | `format`, `verify-static` |
 | Gate | rollup and sync pull requests, pushes to main | `lint`, `verify` (unit tests only), `verify-static`, `launcher` |
-| Daily | once a day on main's head | every test that boots the game or needs prepared resources, the wasm fixture, `fn-replace-check`, the SDK linkage probe |
+| Daily | once a day on main's head | every test that boots the game or needs prepared resources, the wasm fixture, `fn-replace-check`, the SDK build and its linkage probe |
 
 **A unit test** uses no prepared resources, boots no game, starts no child process, uses no network and no compiled
 wasm fixture, and finishes in under 2 seconds. Any other test is a daily test: it carries `#[ignore]` and a row in

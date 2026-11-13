@@ -3,14 +3,22 @@ name: prebuilt game
 # launcher builds native trait mods against it with rustc alone, in seconds, instead of rebuilding the game.
 # Each OS builds with explicit --target <host>: target metadata lives in deps/, host proc-macros in host/.
 # Built with the pinned Rust (tools/ci/rust-version, which the launcher builds native mods with), because rustc reads only metadata from its own
-# version. Built once a day from main's head (a run whose commit already has a release stops early) and published as
-# a prerelease tagged prebuilt-<sha>, never marked latest. Exact-SHA SDKs are retained: Nightlies and installed
+# version. Built by the daily run (daily.yml) for its commit, and by dispatch (a run whose commit already has a
+# release stops early), and published as a prerelease tagged prebuilt-<sha>, never marked latest. Exact-SHA SDKs are retained: Nightlies and installed
 # games can continue referencing older builds. Only compiler outputs go in:
-# tools/prebuilt_game.py refuses anything else, and nothing here reads vanilla data. A dispatch on another branch
-# builds and smokes every OS and publishes nothing.
+# tools/prebuilt_game.py refuses anything else, and nothing here reads vanilla data. A run on another branch, or a
+# daily call that is a dry run, builds and smokes every OS and publishes nothing.
 on:
-  schedule:
-    - cron: '0 5 * * *'
+  workflow_call:
+    inputs:
+      commit:
+        description: The commit to build (the daily run's)
+        type: string
+        default: ''
+      publish:
+        description: Publish prebuilt-<commit> (the daily run on main with dry_run false)
+        type: boolean
+        default: false
   workflow_dispatch:
 permissions:
   contents: read
@@ -18,7 +26,8 @@ concurrency:
   group: prebuilt-game
   cancel-in-progress: false
 env:
-  TAG: prebuilt-${{ github.sha }}
+  COMMIT: ${{ inputs.commit || github.sha }}
+  TAG: prebuilt-${{ inputs.commit || github.sha }}
 jobs:
   fresh:
     # Main's head may already have its build: a quiet day, or a second dispatch.
@@ -68,6 +77,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          ref: ${{ inputs.commit }}
       - name: The launcher's pinned Rust
         id: rust
         run: |
@@ -127,8 +137,9 @@ jobs:
 
   publish:
     needs: build
-    # A dispatch on any other branch builds and smokes every OS but releases nothing.
-    if: github.ref == 'refs/heads/main'
+    # A run on any other branch builds and smokes every OS but releases nothing; so does a daily dry run (a call
+    # with a commit publishes only when the daily run asks).
+    if: github.ref == 'refs/heads/main' && (inputs.commit == '' || inputs.publish)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -145,6 +156,6 @@ jobs:
           set -euo pipefail
           cd archives
           sha256sum horizon-prebuilt-*.tar.gz > SHA256SUMS
-          gh release create "$TAG" horizon-prebuilt-*.tar.gz SHA256SUMS --target "$GITHUB_SHA" --prerelease \
-            --latest=false --title "Prebuilt game ${GITHUB_SHA::10}" \
+          gh release create "$TAG" horizon-prebuilt-*.tar.gz SHA256SUMS --target "$COMMIT" --prerelease \
+            --latest=false --title "Prebuilt game ${COMMIT::10}" \
             --notes "The game as a Rust dylib plus crate metadata, for the launcher's native mod builds (#589). Compiler outputs plus game-owned registry patch sources."

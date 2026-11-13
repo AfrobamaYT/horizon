@@ -2,7 +2,8 @@ name: daily
 run-name: daily ${{ inputs.commit || github.sha }}${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run || github.ref != 'refs/heads/main') && ' (dry run)' || '' }}
 # The daily tier (CI tiers, owner 2026-11-13; docs/release-flow.md "Daily run"): every in-game test, once a day on
 # main's head and by root's dispatch. Its legs are the workflows that used to run on main pushes, called unchanged:
-# the ignored-tests data shards, the wasm fixture and guest stacks, fn-replace-check and the native linkage probe.
+# the ignored-tests data shards, the wasm fixture and guest stacks, fn-replace-check and the native linkage probe,
+# plus the prebuilt SDK of the commit (prebuilt-game.yml), which the nightly needs.
 # The summary then moves the tag `daily-green` to the commit when every leg passed, or files one issue per failing
 # test (tools/ci/daily_summary.py), and on all green the nightly is published from that commit (release.yml).
 # Only a run on main with dry_run false writes anything: tags, issues, the nightly.
@@ -105,10 +106,21 @@ jobs:
     uses: ./.github/workflows/native-dylib-probe.yml
     with:
       commit: ${{ needs.resolve.outputs.commit }}
+  # The prebuilt SDK of this commit (prebuilt-<sha>), which the nightly needs before it publishes; a dry run builds
+  # and smokes it but publishes nothing.
+  sdk:
+    needs: resolve
+    if: needs.resolve.outputs.skip == 'false'
+    permissions:
+      contents: write  # the prebuilt-<sha> release
+    uses: ./.github/workflows/prebuilt-game.yml
+    with:
+      commit: ${{ needs.resolve.outputs.commit }}
+      publish: ${{ needs.resolve.outputs.dry_run == 'false' }}
 
   # Reads every leg's result and verdict file (never a log) and moves `daily-green` or files the issues.
   summary:
-    needs: [resolve, shards, wasm-mods, fn-replace-check, linkage]
+    needs: [resolve, shards, wasm-mods, fn-replace-check, linkage, sdk]
     if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 15
