@@ -23,6 +23,13 @@ the runner has a Vulkan driver (an ICD file), and must pass there.
 
 `needs-plain` is like `needs`, but selects a plain test without `--ignored`.
 
+A row marked `daily` (`PACKAGE TEST TARGET daily REASON`, in `daily-<package>.txt`) is a test moved out of
+`verify` into the daily run with `#[ignore = "daily"]` (tools/ci/move_to_daily.py): not a known failure, it must
+pass, and its row must name a test that still runs. A package's shard runs the daily rows of the targets it
+already runs (its library; every target for the packages in INTEGRATION_TESTS); the shard `daily-rows`
+(tools/ci/ignored_shards.py) runs every other daily row, one `cargo test -p PACKAGE TARGET -- --ignored --exact
+TEST...` per package and target.
+
 `--needs VARIABLE --one-process-each` runs the tests marked `needs VARIABLE`, each alone in its own process
 (`--list` prints those commands instead), and fails unless every run reports exactly one test passed: a
 renamed test would otherwise match nothing and pass. Every test runs, then the step fails if any did.
@@ -55,6 +62,7 @@ from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools import lab
+from tools.ci import ignored_shards
 
 # One file per topic, read in file-name order (README.md there gives the row format).
 POLICY = Path(__file__).with_name("ignored-tests")
@@ -79,6 +87,10 @@ ABORTS = (
 INTEGRATION_TESTS = {"horizon-client"}
 LEG = re.compile(r"^(?P<package>[^#]+)#(?P<number>\d+)of(?P<count>\d+)$")
 LISTED = re.compile(r"^(\S+): test$")
+# A daily row's TARGET: the library, or one binary or integration test (cargo's --bin NAME, --test NAME).
+DAILY_TARGET = re.compile(r"^(?:lib|(?:bin|test):[\w-]+)$")
+# Why a test is a daily test (CONTRIBUTING.md "CI tiers"): slower than 2 s, or what it needs.
+DAILY_REASONS = ("slow", "game-boot", "resources", "child-process", "network", "wasm-fixture")
 ICD_DIRS = ("/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d")
 
 
@@ -174,6 +186,7 @@ class Row(NamedTuple):
     reference: str
     mark: str | None
     file: str  # `ignored-tests/<topic>.txt`, for messages
+    reason: str | None = None  # a `daily` row's reason; its REFERENCE is its target
 
 
 def listed_entries():
@@ -193,13 +206,18 @@ def listed_entries():
             line = line.split(" # ", 1)[0].split()
             if not line or line[0].startswith("#"):
                 continue
-            if len(line) < 3 or line[3:] not in ([], ["flaky"], ["harness"], ["gpu"], ["needs"], ["needs-plain"]):
-                sys.exit(f"{file}:{number}: expected `PACKAGE TEST REFERENCE [flaky|harness|gpu|needs|needs-plain]`")
+            if line[3:4] == ["daily"]:
+                if len(line) != 5 or not DAILY_TARGET.match(line[2]) or line[4] not in DAILY_REASONS:
+                    sys.exit(f"{file}:{number}: expected `PACKAGE TEST TARGET daily REASON`, TARGET `lib`, "
+                             f"`bin:NAME` or `test:NAME`, REASON one of {', '.join(DAILY_REASONS)}")
+            elif len(line) < 3 or line[3:] not in ([], ["flaky"], ["harness"], ["gpu"], ["needs"], ["needs-plain"]):
+                sys.exit(f"{file}:{number}: expected `PACKAGE TEST REFERENCE [flaky|harness|gpu|needs|needs-plain|daily]`")
             if (line[0], line[1]) in seen:
                 sys.exit(f"{file}:{number}: {line[0]} {line[1]} is already listed in {seen[line[0], line[1]]}; "
                          "a test belongs to one file")
             seen[line[0], line[1]] = f"{file}:{number}"
-            rows.append(Row(line[0], line[1], line[2], line[3] if len(line) > 3 else None, file))
+            rows.append(Row(line[0], line[1], line[2], line[3] if len(line) > 3 else None, file,
+                            line[4] if len(line) > 4 else None))
     if not rows:
         sys.exit(f"{POLICY_PATH}/ has no rows")
     return rows
@@ -207,7 +225,27 @@ def listed_entries():
 
 def known_failures():
     """(package, test) -> its mark (None, "flaky", "harness" or "gpu"), from the policy files."""
-    return {(row.package, row.test): row.mark for row in listed_entries() if row.mark not in {"needs", "needs-plain"}}
+    return {(row.package, row.test): row.mark for row in listed_entries()
+            if row.mark not in {"needs", "needs-plain", "daily"}}
+
+
+def daily_rows():
+    """The rows marked `daily`: tests moved out of verify that the daily run must run and pass."""
+    return [row for row in listed_entries() if row.mark == "daily"]
+
+
+def shard_runs(package, target):
+    """Whether `package`'s own shard runs the tests of `target` (`lib`, `bin:NAME`, `test:NAME`)."""
+    return package in ignored_shards.SHARDS and (target == "lib" or package in INTEGRATION_TESTS)
+
+
+def daily_rows_groups(rows):
+    """The daily rows no package shard runs, as {(package, target): [test, ...]}: the `daily-rows` shard's runs."""
+    groups = {}
+    for row in rows:
+        if not shard_runs(row.package, row.reference):
+            groups.setdefault((row.package, row.reference), []).append(row.test)
+    return {key: sorted(tests) for key, tests in sorted(groups.items())}
 
 
 def harness_inputs():
@@ -567,8 +605,10 @@ def listed_result_records(line, expected, max_name_length):
         cursor = line.find("test ", start)
 
 
-def run(package, skip, number=None, count=None):
-    """Each test's result in `package`'s ignored library tests but `skip` (and, with a leg, the other legs'), or None if they didn't build."""
+def run(package, skip, number=None, count=None, only=None):
+    """Each test's result in `package`'s ignored library tests but `skip` (and, with a leg, the other legs'), or None if they didn't build.
+
+    `only=(target, tests)` runs just those ignored tests of one target (`lib`, `bin:NAME`, `test:NAME`) instead."""
     # Resource-backed fixtures need a fresh home, not the runner user's game files.
     with tempfile.TemporaryDirectory(prefix="horizon-ignored-") as scratch:
         homes = {}
@@ -586,6 +626,10 @@ def run(package, skip, number=None, count=None):
         # Owner-approved stopgap; #2944 removes this when the legs run under 15 minutes.
         client_half = package == "horizon-client" and count == 2 and number in (1, 2)
         command = ["cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []), "--no-fail-fast"]
+        if only:
+            target = only[0]
+            command = ["cargo", "test", "-p", package,
+                       *(["--lib"] if target == "lib" else [f"--{target.split(':')[0]}", target.split(":", 1)[1]])]
         if client_half:
             # The runner's own cap (tools/ci/cargo_jobs.py --cap) when set, else the old fixed one.
             command.append(f"--jobs={os.environ.get('CI_JOBS', '8')}")
@@ -618,8 +662,10 @@ def run(package, skip, number=None, count=None):
             print(f"data-leg phase={phase} test-command-start utc={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} listed={int(number is not None)} compile_list_seconds={time.monotonic() - compile_started:.3f}", flush=True)
         execution_started = time.monotonic()
         threads = min(8 if client_half else 4, int(os.environ.get("CI_CPUS", "8")))
+        selection = ["--ignored", "--exact", f"--test-threads={threads}", *only[1]] if only else \
+            ["--include-ignored", "--exact", f"--test-threads={threads}", *skips]
         process = subprocess.run(
-            [*command, "--", "--include-ignored", "--exact", f"--test-threads={threads}", *skips],
+            [*command, "--", *selection],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace", env=env,
         )
         if timing:
@@ -763,22 +809,34 @@ def main(shards, report=None):
     # Reuse the hash selection in two consecutive processes on the same runner.
     # Resource-backed client-lib families retain registries across tests; releasing
     # the process between halves bounds that retention without another CI leg.
+    daily = daily_rows()
+    groups = daily_rows_groups(daily)
     selections = [
         selection
         for shard in shards
         for selection in (
             ("horizon-client-lib#1of2", "horizon-client-lib#2of2")
-            if shard == "horizon-client-lib" else (shard,)
+            if shard == "horizon-client-lib" else
+            [f"{ignored_shards.DAILY_ROWS}:{package}:{target}" for package, target in groups]
+            if shard == ignored_shards.DAILY_ROWS else (shard,)
         )
     ]
     for shard in selections:
-        package, number, count = parse_shard(shard)
-        skip = [test for (listed, test), mark in known.items() if listed == package and mark in skipped]
-        for (listed, test), variable in sorted(inputs.items()):
-            if listed == package and in_leg(test, number, count) and not os.environ.get(variable):
-                print(f"{package} {safe_identity(test)}: refused, needs {variable}; run by the parity harness")
-                skip.append(test)
-        results = run(package, skip, number, count) if number is not None else run(package, skip)
+        if shard.startswith(f"{ignored_shards.DAILY_ROWS}:"):
+            _, package, target = shard.split(":", 2)
+            print(f"{package} {target}: {len(groups[package, target])} daily tests", flush=True)
+            results = run(package, [], only=(target, groups[package, target]))
+            expected_daily = groups[package, target]
+        else:
+            package, number, count = parse_shard(shard)
+            expected_daily = [row.test for row in daily if row.package == package
+                              and shard_runs(package, row.reference) and in_leg(row.test, number, count)]
+            skip = [test for (listed, test), mark in known.items() if listed == package and mark in skipped]
+            for (listed, test), variable in sorted(inputs.items()):
+                if listed == package and in_leg(test, number, count) and not os.environ.get(variable):
+                    print(f"{package} {safe_identity(test)}: refused, needs {variable}; run by the parity harness")
+                    skip.append(test)
+            results = run(package, skip, number, count) if number is not None else run(package, skip)
         if results is None:
             problems.append(f"{shard}: the test run did not complete")
             verdict["incomplete"].append(shard)
@@ -804,6 +862,12 @@ def main(shards, report=None):
                 problem(package, policy_test, "passes-now", policy)
             elif passed:
                 verdict["passed"].append({"package": package, "test": test})
+        for test in expected_daily:
+            if test not in results:
+                problems.append(f"{package} {safe_identity(test)}: listed in {files[package, test]} but no longer runs")
+                problem(package, test, "no-longer-runs", files[package, test])
+        if shard.startswith(f"{ignored_shards.DAILY_ROWS}:"):
+            continue
         for (listed, test), mark in known.items():
             if listed == package and mark not in skipped and in_leg(test, number, count) and test not in results:
                 problems.append(f"{package} {safe_identity(test)}: listed in {files.get((package, test), POLICY_PATH)} but no longer runs")
