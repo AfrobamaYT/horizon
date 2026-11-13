@@ -1,5 +1,14 @@
 use super::*;
 
+/// `ClientClockManager.tick` for one clock: it moves on by `delta` game ticks at its rate, the
+/// part of a tick it makes carried to the next.
+pub(in crate::game) fn advance_clock(clock: &mut play::ClockState, delta: i64) {
+    let partial = f64::from(clock.partial_tick) + delta as f64 * f64::from(clock.rate);
+    let full = partial.floor();
+    clock.partial_tick = (partial - full) as f32;
+    clock.total_ticks += full as i64;
+}
+
 /// Per-level client work bracketed by the shared LevelTickEvent hooks.
 /// No level means no event; failed ticks never emit the post event.
 impl Game<'_> {
