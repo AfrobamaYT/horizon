@@ -619,6 +619,7 @@ impl Game<'_> {
     /// Discard state belonging to an already removed connectionless guest.
     pub(super) fn cleanup_fake_player(&mut self, host: &mut super::lan::LanHost, guest: &Guest) {
         host.play.remove(&guest.conn);
+        host.forget_menus(guest.conn);
         host.poses.remove(&guest.conn);
         host.mob_players.retain(|_, conn| *conn != guest.conn);
         self.destroying.remove(&guest.entity_id);
