@@ -20,7 +20,7 @@ inherit it. The guard fails closed: each binary is also listed (`--list`), and a
 lacks a timed record for one of its listed, not ignored tests fails the run, naming the binary and the tests.
 A test over FAIL seconds fails the run by name, with the instruction to move it to the daily run; one over WARN only
 warns. The time is libtest's elapsed (wall) time with `--jobs` binaries and each binary's test threads running at
-once, not an isolated measurement, so FAIL keeps a margin over the 2 s target. Only these binaries are timed: the
+once, not an isolated measurement, so FAIL keeps a margin over the 2 s target. A `harness = false` target runs its own main, not libtest: it runs, untimed. Only these binaries are timed: the
 documentation examples and the Python steps of `verify` are not under the guard. The run ends with the slowest five
 tests and the summed test seconds. (libtest's own `--ensure-time` was the alternative: it fails a slow test inside
 the binary with libtest's words, not the instruction, and needs a threshold variable per kind of test target.)
@@ -33,6 +33,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -75,8 +76,23 @@ def test_binaries(messages: str) -> list[dict]:
                 "CARGO_PKG_VERSION": version,
                 "CARGO_CRATE_NAME": message["target"]["name"].replace("-", "_"),
             },
+            "libtest": uses_libtest(manifest, message["target"]),
         })
     return binaries
+
+
+def uses_libtest(manifest: str, target: dict) -> bool:
+    """False for a target its manifest builds with `harness = false`: its own main, not libtest, so no list or log."""
+    try:
+        table = tomllib.loads(Path(manifest).read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return True
+    sections = {"test": "test", "bin": "bin", "bench": "bench", "example": "example"}
+    entries = [entry for kind in target.get("kind", []) for entry in table.get(sections.get(kind, ""), [])
+               if entry.get("name") == target["name"]]
+    if "lib" in target.get("kind", []) or "rlib" in target.get("kind", []):
+        entries.append(table.get("lib", {}))
+    return all(entry.get("harness", True) for entry in entries)
 
 
 def listed_tests(binary: dict, env: dict, test_args: list[str]) -> list[str] | None:
@@ -88,7 +104,11 @@ def listed_tests(binary: dict, env: dict, test_args: list[str]) -> list[str] | N
         return None
     if listing.returncode:
         return None
-    return [found[1] for line in listing.stdout.splitlines() if (found := re.match(r"^(\S+): test$", line))]
+    names = [found[1] for line in listing.stdout.splitlines() if (found := re.match(r"^(\S+): test$", line))]
+    # The listing must be the plain one, ending in its own count: any other form (`--format json`, an output that
+    # interleaved) is unreadable here, never an empty suite.
+    count = re.search(r"^(\d+) tests?, \d+ benchmarks?$", listing.stdout, re.M)
+    return names if count and int(count[1]) == len(names) else None
 
 
 def read_log(text: str) -> dict[str, tuple[str, float | None]]:
@@ -113,6 +133,7 @@ def run_one(binary: dict, extra_env: dict, test_args: list[str], timed: bool = F
     result = {"binary": binary, "output": tempfile.TemporaryFile("w+", errors="replace"), "max_rss_kib": 0}
     env = {**os.environ, **extra_env, **binary["env"]}
     log = None
+    timed = timed and binary.get("libtest", True)
     if timed:
         result["listed"] = listed_tests(binary, env, test_args)
         handle, log = tempfile.mkstemp(prefix="libtest-", suffix=".log")
@@ -142,7 +163,7 @@ def untimed(result: dict) -> list[str]:
 
     An ignored test has a record without a time and is not expected to have one; a binary that failed is already
     a failure, and its missing records are not reported again."""
-    if result["status"] != "ok":
+    if result["status"] != "ok" or "listed" not in result:
         return []
     if result.get("listed") is None:
         return ["(its tests could not be listed)"]

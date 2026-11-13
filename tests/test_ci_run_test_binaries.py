@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -117,6 +118,34 @@ class RunTestBinariesTests(unittest.TestCase):
         self.assertEqual(runner.untimed({**result, "status": "exit 101"}), [])
         self.assertEqual(runner.untimed({**result, "listed": None}), ["(its tests could not be listed)"])
 
+    def test_a_harness_false_target_is_run_untimed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "Cargo.toml"
+            manifest.write_text('[package]\nname = "p"\n[[test]]\nname = "probe"\nharness = false\n[[test]]\nname = "plain"\n')
+            self.assertFalse(runner.uses_libtest(str(manifest), {"name": "probe", "kind": ["test"]}))
+            self.assertTrue(runner.uses_libtest(str(manifest), {"name": "plain", "kind": ["test"]}))
+            self.assertTrue(runner.uses_libtest(str(manifest), {"name": "p", "kind": ["lib"]}))
+            binary = Path(directory) / "probe"
+            binary.write_text("#!/bin/sh\necho \"args=$*\"\n")
+            binary.chmod(0o755)
+            result = runner.run_one({"executable": str(binary), "cwd": directory, "env": {}, "libtest": False},
+                                    {}, ["-Z", "unstable-options", "--report-time"], timed=True)
+            self.assertNotIn("listed", result)
+            self.assertEqual(runner.untimed(result), [])
+
+    def test_a_listing_counts_only_when_it_is_the_plain_form_with_its_own_total(self):
+        binary = {"executable": "x", "cwd": "."}
+        for stdout, expected in [
+            ("a::b: test\nc::d: test\n\n2 tests, 0 benchmarks\n", ["a::b", "c::d"]),
+            ("\n0 tests, 0 benchmarks\n", []),
+            ("a::b: test\nbench::x: bench\n\n1 test, 1 benchmark\n", ["a::b"]),
+            ('{ "type": "suite", "event": "discovery" }\n', None),
+            ("a::b: test\n\n2 tests, 0 benchmarks\n", None),
+        ]:
+            with unittest.mock.patch.object(runner.subprocess, "run",
+                                            return_value=subprocess.CompletedProcess([], 0, stdout, "")):
+                self.assertEqual(runner.listed_tests(binary, {}, []), expected, stdout)
+
     def test_a_test_over_the_limit_fails_by_name_and_one_over_the_target_warns(self):
         errors, warnings = runner.timing_verdict(
             [(0.5, "a::fast", "pkg"), (5.0, "a::at_the_line", "pkg"), (5.01, "a::over", "pkg"), (2.2, "a::slowish", "pkg")],
@@ -129,7 +158,7 @@ class RunTestBinariesTests(unittest.TestCase):
     # A libtest stand-in: `--list` lists a::slow, a::fast and a::lost; a run writes its log to the --logfile path,
     # with no record for a::lost when LOSE is set, and prints garbled interleaved output on stdout.
     FAKE_LIBTEST = """#!/bin/sh
-for arg in "$@"; do case "$arg" in --list) printf 'a::slow: test\\na::fast: test\\na::lost: test\\n'; exit 0;; esac; done
+for arg in "$@"; do case "$arg" in --list) printf 'a::slow: test\\na::fast: test\\na::lost: test\\n\\n3 tests, 0 benchmarks\\n'; exit 0;; esac; done
 log=""; previous=""
 for arg in "$@"; do [ "$previous" = "--logfile" ] && log="$arg"; previous="$arg"; done
 echo "args=$* bootstrap=$RUSTC_BOOTSTRAP"
