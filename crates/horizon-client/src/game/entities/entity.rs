@@ -1158,7 +1158,7 @@ macro_rules! define_entity_handles {
 
             pub(super) fn entity_id_cursor(&self) -> EntityIdCursor {
                 EntityIdCursor {
-                    $($field: (self$(.$list)+.get(0).map(|e| e.id()), 0, self$(.$list)+.len()),)*
+                    $($field: (self$(.$list)+.first().map(|e| e.id()), 0, self$(.$list)+.len()),)*
                 }
             }
 
