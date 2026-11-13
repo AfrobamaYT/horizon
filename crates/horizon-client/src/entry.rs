@@ -210,7 +210,7 @@ pub fn start<G>(
     raise_open_file_limit();
     if let Err(error) = game::run_with(options, native) {
         // A bad command line is the caller's mistake, not a crash: no report.
-        let missing_mods = game::dedicated::is_missing_mods_refusal(&error);
+        let missing_mods = game::dedicated::is_missing_mods_refusal(error.as_ref());
         let usage = error.is::<game::UsageError>() || missing_mods;
         if !missing_mods {
             log::error!("Horizon: {error}");
