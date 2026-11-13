@@ -594,17 +594,21 @@ mod tests {
     // Isolate process-wide service tests from unrelated crate tests entering native guards.
     fn isolated(name: &str) -> bool {
         if std::env::var_os("HORIZON_PROFILER_TEST_CHILD").is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--include-ignored",
+                    "--exact",
+                    &format!("__private::profiler::tests::{name}"),
+                ])
+                .env("HORIZON_PROFILER_TEST_CHILD", "1")
+                .output()
+                .unwrap();
+            // The child must run this one test: a success that ran nothing checks nothing.
+            let stdout = String::from_utf8_lossy(&output.stdout);
             assert!(
-                std::process::Command::new(std::env::current_exe().unwrap())
-                    .args([
-                        "--include-ignored",
-                        "--exact",
-                        &format!("__private::profiler::tests::{name}")
-                    ])
-                    .env("HORIZON_PROFILER_TEST_CHILD", "1")
-                    .status()
-                    .unwrap()
-                    .success()
+                output.status.success() && stdout.contains("test result: ok. 1 passed;"),
+                "the isolated rerun of {name} did not pass exactly one test:\n{stdout}{}",
+                String::from_utf8_lossy(&output.stderr)
             );
             return false;
         }
