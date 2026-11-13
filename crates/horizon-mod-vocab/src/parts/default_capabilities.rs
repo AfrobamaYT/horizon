@@ -39,6 +39,7 @@ pub trait DefaultCapabilitiesRegistrar {
 }
 
 /// Default-provider operations available to both native and portable hosts.
+// hidden: the game reads the installed default providers through it; mods declare them through the registrar.
 #[doc(hidden)]
 pub trait DefaultCapabilitiesCapabilityProviders {
     /// First enabled declaration of this block's item container.
