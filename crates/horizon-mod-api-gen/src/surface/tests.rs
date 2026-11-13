@@ -370,7 +370,9 @@ fn masked(value: serde_json::Value) -> serde_json::Value {
         serde_json::Value::Object(map) => serde_json::Value::Object(
             map.into_iter()
                 .map(|(key, value)| match key.as_str() {
-                    "hash" | "shape" if !value.is_null() => (key, serde_json::Value::from("*")),
+                    "hash" | "shape" | "fields_hash" if !value.is_null() => {
+                        (key, serde_json::Value::from("*"))
+                    }
                     _ => (key, masked(value)),
                 })
                 .collect(),
@@ -461,14 +463,14 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
             &["fn:first"],
         ),
         (
-            "a field added to a constructible struct",
+            "a field added to a constructible struct: its fields_hash, not its hash",
             &[(
                 LIB,
                 "    pub y: i32,\n",
                 "    pub y: i32,\n    pub z: i32,\n",
             )],
             HOOKS,
-            &["type:Point"],
+            &[],
         ),
         (
             "a variant added to an exhaustive enum",
@@ -483,10 +485,10 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
             &["type:Mode"],
         ),
         (
-            "a derive added",
+            "a derive added: one more of its impls, outside its hash",
             &[(LIB, "/// A mode.\n", "/// A mode.\n#[derive(Debug)]\n")],
             HOOKS,
-            &["type:Mode"],
+            &[],
         ),
         (
             "a required method added to a trait mods implement",
@@ -515,24 +517,36 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
             &["hook:ping"],
         ),
         (
-            "a hook argument's type",
+            "an argument added to a hook",
             &[(
                 LIB,
                 "pub cancelled: bool,",
                 "pub cancelled: bool,\n        pub extra: u8,",
             )],
             HOOKS,
-            &["hook:ping", "type:PingEvent"],
+            &[],
         ),
         (
-            "a supertrait bound",
+            "a hook argument's type",
+            &[(LIB, "pub cancelled: bool,", "pub cancelled: u8,")],
+            HOOKS,
+            &["hook:ping.cancelled", "type:PingEvent.cancelled"],
+        ),
+        (
+            "a supertrait bound on a trait mods call",
             &[(
                 LIB,
                 "pub trait ServerHost: Host {",
                 "pub trait ServerHost: Host + Send {",
             )],
             HOOKS,
-            &["trait:ServerHost"],
+            &[],
+        ),
+        (
+            "a supertrait bound on a trait mods implement",
+            &[(LIB, "pub trait Hooks {", "pub trait Hooks: Send {")],
+            HOOKS,
+            &["trait:Hooks"],
         ),
         (
             "a defaulted method becoming required on a trait mods implement",
@@ -571,14 +585,14 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
             &["hook:ping"],
         ),
         (
-            "a trait impl added",
+            "a trait impl added: outside the hash",
             &[(
                 LIB,
                 "/// A mode.\npub enum Mode {",
                 "impl Default for Mode {\n    fn default() -> Self {\n        Self::On\n    }\n}\n/// A mode.\npub enum Mode {",
             )],
             HOOKS,
-            &["type:Mode"],
+            &[],
         ),
         (
             "a handle's impl bounds",
@@ -819,4 +833,36 @@ fn the_real_tree_exports() {
         );
     }
     assert!(read.traits.iter().any(|t| t.id == "trait:Hooks"));
+}
+
+#[test]
+fn a_derive_and_a_hand_written_impl_are_the_same_impl() {
+    let point = |export: &Export| {
+        export
+            .surface
+            .types
+            .iter()
+            .find(|t| t.id == "type:Point")
+            .cloned()
+            .unwrap()
+    };
+    let before = point(&export_fixture(&[], HOOKS));
+    let derived = point(&export_fixture(
+        &[
+            (
+                LIB,
+                "#[derive(Clone, Copy, Wire)]\npub struct Point",
+                "#[derive(Clone, Copy, Default, Wire)]\npub struct Point",
+            ),
+            (
+                LIB,
+                "impl Default for Point {\n    fn default() -> Self {\n        Self { x: 0, y: 0 }\n    }\n}\n",
+                "",
+            ),
+        ],
+        HOOKS,
+    ));
+    assert_eq!(before.impls, ["Clone", "Copy", "Default"]);
+    assert_eq!(derived.impls, before.impls);
+    assert_eq!(derived.hash, before.hash);
 }

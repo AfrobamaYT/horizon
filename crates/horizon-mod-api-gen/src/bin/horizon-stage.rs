@@ -9,7 +9,18 @@
 //! the change notes of DIR (`crates/horizon-mod-vocab/changes`) that are not in `--base-notes`
 //! byte for byte. Exits 1 when a new note names an id that did not change, or with `--gate`
 //! when a breaking change has no note; 2 when an input cannot be read.
+//!
+//! `horizon-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]`: list
+//! what the mod in MOD_DIR uses of SURFACE, each item with the place that brought it in, then
+//! how it builds each struct it builds with a literal; with `--json`, write the table a package
+//! carries.
+//!
+//! `horizon-stage fits USES_JSON TARGET_SURFACE`: whether a uses table fits a build's surface,
+//! naming each changed item. Exit 0 fits, 1 does not fit, 2 error.
+use horizon_mod_api_gen::mod_uses;
 use horizon_mod_api_gen::staging::{self, Mode};
+use mod_surface::Surface;
+use mod_surface::uses::{Fit, ManifestFacts, Origin, UsesTable, fits, uses};
 use std::path::PathBuf;
 
 fn surface(root: &std::path::Path, out: &std::path::Path) {
@@ -53,18 +64,23 @@ fn surface(root: &std::path::Path, out: &std::path::Path) {
     );
 }
 
-fn surface_diff(args: &[PathBuf]) -> std::process::ExitCode {
+/// Prints `message` as an error and exits 2.
+fn fail(message: impl std::fmt::Display) -> ! {
+    eprintln!("horizon-stage: {message}");
+    std::process::exit(2)
+}
+
+fn read_surface(path: &std::path::Path) -> Surface {
+    let bytes = std::fs::read(path).unwrap_or_else(|e| fail(format!("{}: {e}", path.display())));
+    Surface::read(&bytes).unwrap_or_else(|e| fail(format!("{}: {e}", path.display())))
+}
+
+fn surface_diff(args: &[PathBuf]) -> ! {
     use horizon_mod_api_gen::surface::notes;
-    use std::process::ExitCode;
-    let fail = |message: String| {
-        eprintln!("horizon-stage surface-diff: {message}");
-        ExitCode::from(2)
-    };
     let [old, new, options @ ..] = args else {
-        return fail(
-            "usage: surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--json OUT] [--gate]"
-                .into(),
-        );
+        fail(
+            "usage: horizon-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--json OUT] [--gate]",
+        )
     };
     let (mut notes_dir, mut base_notes, mut json, mut gate) = (None, None, None, false);
     let mut options = options.iter();
@@ -77,28 +93,17 @@ fn surface_diff(args: &[PathBuf]) -> std::process::ExitCode {
             Some("--notes") => &mut notes_dir,
             Some("--base-notes") => &mut base_notes,
             Some("--json") => &mut json,
-            _ => return fail(format!("unknown option {}", option.display())),
+            _ => fail(format!("unknown option {}", option.display())),
         };
-        let Some(value) = options.next() else {
-            return fail(format!("{} needs a value", option.display()));
-        };
+        let value = options
+            .next()
+            .unwrap_or_else(|| fail(format!("{} needs a value", option.display())));
         *slot = Some(value);
     }
-    let read = |path: &PathBuf| {
-        let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        mod_surface::Surface::read(&bytes).map_err(|e| format!("{}: {e}", path.display()))
-    };
-    let (old, new) = match (read(old), read(new)) {
-        (Ok(old), Ok(new)) => (old, new),
-        (Err(e), _) | (_, Err(e)) => return fail(e),
-    };
-    let mut diff = mod_surface::diff(&old, &new);
+    let mut diff = mod_surface::diff(&read_surface(old), &read_surface(new));
     let mut stale = Vec::new();
     if let Some(dir) = notes_dir {
-        let found = match notes::read(dir, base_notes.map(PathBuf::as_path)) {
-            Ok(found) => found,
-            Err(e) => return fail(e.to_string()),
-        };
+        let found = notes::read(dir, base_notes.map(PathBuf::as_path)).unwrap_or_else(|e| fail(e));
         for file in found {
             for id in diff.attach(&file.note, &file.ids) {
                 stale.push(format!(
@@ -111,9 +116,7 @@ fn surface_diff(args: &[PathBuf]) -> std::process::ExitCode {
     print!("{}", diff.to_text());
     if let Some(out) = json {
         let text = serde_json::to_string_pretty(&diff).expect("a diff serializes") + "\n";
-        if let Err(e) = std::fs::write(out, text) {
-            return fail(format!("{}: {e}", out.display()));
-        }
+        std::fs::write(out, text).unwrap_or_else(|e| fail(format!("{}: {e}", out.display())));
     }
     let mut failed = !stale.is_empty();
     for line in stale {
@@ -125,29 +128,111 @@ fn surface_diff(args: &[PathBuf]) -> std::process::ExitCode {
             failed = true;
         }
     }
-    if failed {
-        ExitCode::FAILURE
-    } else {
-        ExitCode::SUCCESS
+    std::process::exit(i32::from(failed))
+}
+
+fn uses_command(args: &[PathBuf]) {
+    let [surface, dir, options @ ..] = args else {
+        fail("usage: horizon-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]")
+    };
+    let (mut json, mut made_for) = (None, None);
+    let mut options = options.iter();
+    while let Some(option) = options.next() {
+        let value = options
+            .next()
+            .unwrap_or_else(|| fail(format!("{} needs a value", option.display())));
+        match option.to_str() {
+            Some("--json") => json = Some(value.clone()),
+            Some("--made-for") => made_for = value.to_str().map(str::to_owned),
+            _ => fail(format!("unknown option {}", option.display())),
+        }
+    }
+    let surface = read_surface(surface);
+    let input = mod_uses::read(dir).unwrap_or_else(|e| fail(e));
+    if let Some(why) = &input.exact {
+        eprintln!(
+            "note: this mod is made for exactly one build ({why}); the fit test does not apply"
+        );
+    }
+    // No manifest form names a hook version today (the schema refuses `hook_version`).
+    let manifest = ManifestFacts {
+        names: input.manifest_names,
+        hook_versions: Default::default(),
+    };
+    let uses = uses(
+        input.sources.iter().map(|(p, t)| (p, t)),
+        &manifest,
+        &surface,
+    );
+    let mut kinds = std::collections::BTreeMap::<&str, usize>::new();
+    for used in &uses.items {
+        let place = match &used.origin {
+            Origin::Source { file, line } => format!("{file}:{line}"),
+            Origin::Manifest => "horizon-mod.toml".to_owned(),
+            Origin::Via(id) => format!("via {id}"),
+        };
+        println!("{}  {}  {place}", used.entry.id, used.entry.hash);
+        let kind = used.entry.id.split(':').next().unwrap_or_default();
+        *kinds.entry(kind).or_default() += 1;
+    }
+    let counts: Vec<String> = kinds.iter().map(|(k, n)| format!("{k}={n}")).collect();
+    println!("uses {} items: {}", uses.items.len(), counts.join(" "));
+    for note in uses.entries().filter_map(|entry| entry.building_note()) {
+        println!("{note}");
+    }
+    if let Some(out) = json {
+        let made_for = made_for.unwrap_or_else(|| fail("--json needs --made-for BUILD"));
+        std::fs::write(&out, uses.table(made_for).to_json())
+            .unwrap_or_else(|e| fail(format!("{}: {e}", out.display())));
     }
 }
 
-fn main() -> std::process::ExitCode {
+fn fits_command(args: &[PathBuf]) -> ! {
+    let [table, target] = args else {
+        fail("usage: horizon-stage fits USES_JSON TARGET_SURFACE")
+    };
+    let bytes = std::fs::read(table).unwrap_or_else(|e| fail(format!("{}: {e}", table.display())));
+    let table =
+        UsesTable::read(&bytes).unwrap_or_else(|e| fail(format!("{}: {e}", table.display())));
+    match fits(&table.entries, &read_surface(target)) {
+        Fit::Fits => {
+            println!(
+                "fits ({} items, made for {})",
+                table.entries.len(),
+                table.made_for
+            );
+            std::process::exit(0)
+        }
+        Fit::DoesNotFit(misfits) => {
+            println!(
+                "does not fit: {} of the {} items it uses changed",
+                misfits.len(),
+                table.entries.len()
+            );
+            for misfit in &misfits {
+                println!("  {misfit}  [{}]", misfit.id);
+            }
+            std::process::exit(1)
+        }
+    }
+}
+
+fn main() {
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
-    if let [command, rest @ ..] = &args[..]
-        && command == "surface-diff"
-    {
-        return surface_diff(rest);
+    match args.first().and_then(|c| c.to_str()) {
+        Some("uses") => return uses_command(&args[1..]),
+        Some("fits") => fits_command(&args[1..]),
+        Some("surface-diff") => surface_diff(&args[1..]),
+        _ => {}
     }
     if let [command, root, out] = &args[..]
         && command == "surface"
     {
-        surface(root, out);
-        return std::process::ExitCode::SUCCESS;
+        return surface(root, out);
     }
     let usage = || {
         eprintln!(
-            "usage: horizon-stage ROOT POINTS_JSON INTERNALS_JSON API_VERSION [--sync-internals]\n       horizon-stage surface ROOT OUT\n       horizon-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--json OUT] [--gate]"
+            "usage: horizon-stage ROOT POINTS_JSON INTERNALS_JSON API_VERSION [--sync-internals]\n       horizon-stage surface ROOT OUT\n       horizon-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]\n       horizon-stage fits USES_JSON TARGET_SURFACE\n       horizon-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--json OUT] [--gate]"
         );
         std::process::exit(2)
     };
@@ -195,5 +280,4 @@ fn main() -> std::process::ExitCode {
             std::process::exit(1);
         }
     }
-    std::process::ExitCode::SUCCESS
 }
