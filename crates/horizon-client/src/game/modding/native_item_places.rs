@@ -2486,6 +2486,44 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources"]
+    fn a_scratch_stack_merges_into_its_parent_and_ends_with_the_outermost() {
+        with_game(|game| {
+            open_to_lan(game);
+            let bucket = ItemStack::new("minecraft:bucket", 1)
+                .try_into_api()
+                .unwrap();
+            let buckets = ItemResource::of(&bucket);
+            let host: &mut dyn ServerHost = game;
+            let place = host.transaction(|host, _| {
+                // Made and filled in a child that commits: the parent keeps it as it was left.
+                let place = host
+                    .transaction(|host, tx| {
+                        let place = host.scratch_stack(tx, bucket.clone()).unwrap().unwrap();
+                        assert_eq!(place.insert(host, tx, &buckets, 1), 1);
+                        Ok::<_, ()>(place)
+                    })
+                    .unwrap();
+                assert_eq!(place.amount(host), 2);
+                // A child that writes it and aborts puts it back.
+                let aborted = host.transaction(|host, tx| {
+                    assert_eq!(place.insert(host, tx, &buckets, 3), 3);
+                    assert_eq!(place.amount(host), 5);
+                    Err::<(), _>(())
+                });
+                assert_eq!(aborted, Err(()));
+                assert_eq!(place.amount(host), 2);
+                Ok::<_, ()>(place)
+            });
+            // The outermost close ends it: nothing reads or takes it after.
+            let place = place.unwrap();
+            assert_eq!(place.amount(host), 0);
+            let taken = host.transaction(|host, tx| Ok::<_, ()>(host.scratch_take(tx, &place)));
+            assert_eq!(taken, Ok(None));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
     fn a_strict_slot_refuses_what_the_plain_slot_spreads() {
         use horizon_client::chunk::Chunk;
         use mod_api::BlockUpdateFlags;
