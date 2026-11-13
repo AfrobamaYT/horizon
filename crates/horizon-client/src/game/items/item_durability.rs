@@ -1,6 +1,6 @@
 //! Durability lost by what the player wears and holds: armour hurt with its wearer
 //! (`wear_armor`, `hurt_armor`, `hurt_equipment`, `hurt_player_equipment`) and the held stack's wear
-//! (`damage_held` and its variants, `apply_held_damage`, `hurt_held_without_breaking`).
+//! (`damage_held`, `damage_held_in_slot`, `hurt_held_without_breaking`).
 use super::*;
 
 impl Game<'_> {
@@ -66,33 +66,6 @@ impl Game<'_> {
                 rules,
                 hit,
             )
-    }
-    /// `push_seen_with_hurt` for the host: the push is kept only when the hurt
-    /// marks the velocity as seen, and the hurt goes through
-    /// `hurt_player_equipment` so the worn armor loses durability. Answers
-    /// whether a native hook canceled the hurt.
-    pub(super) fn push_seen_with_equipment_hurt(
-        &mut self,
-        push: Vec3,
-        source: Option<horizon_world::damage_source::DamageTypeId>,
-        amount: f32,
-    ) -> bool {
-        let Some(p) = self.player.as_mut() else {
-            return false;
-        };
-        let before = p.velocity;
-        let marked_before = std::mem::take(&mut p.health.sync_velocity);
-        p.velocity = before.add_vector(push);
-        let canceled = source
-            .and_then(|id| self.hurt_player_equipment(id, amount, None, false, 0).ok())
-            .is_some_and(|(o, _)| o.canceled);
-        if let Some(p) = self.player.as_mut() {
-            if !p.health.sync_velocity {
-                p.velocity = before;
-            }
-            p.health.sync_velocity |= marked_before;
-        }
-        canceled
     }
     /// The armor hits among a tick's motion events (`Player.hurtArmor` from
     /// `getDamageAfterArmorAbsorb`), whatever the damage: a mob, an explosion,
@@ -277,45 +250,6 @@ impl Game<'_> {
         });
         if let Some(broken) = broken {
             self.player_equipment_broke(break_slot, &broken);
-        }
-    }
-    pub(super) fn damage_held_with_max(&mut self, amount: u32, max: u32) {
-        if self.creative {
-            return;
-        }
-        let amount = match self.held().cloned() {
-            Some(held) => self.wear(&held, amount),
-            None => amount,
-        };
-        self.apply_held_damage(
-            amount,
-            max,
-            horizon_world::player_inventory::EquipmentSlot::MainHand,
-        );
-    }
-    /// `ItemStack.hurtAndBreak`: apply nonzero processed wear to the acting hand.
-    pub(super) fn apply_held_damage(
-        &mut self,
-        amount: u32,
-        max: u32,
-        break_slot: horizon_world::player_inventory::EquipmentSlot,
-    ) {
-        // ItemStack.hurtAndBreak does not apply damage or break a stack when
-        // processDurabilityChange leaves no wear (including Unbreaking).
-        if amount == 0 {
-            return;
-        }
-        let cell = self.held_mut();
-        if let Some(stack) = cell.as_mut()
-            && max > 0
-        {
-            stack.damage += amount;
-            if stack.damage >= max {
-                let gone = stack.clone();
-                *cell = None;
-                // LivingEntity.onEquippedItemBroken: the sound and the crumbs.
-                self.player_equipment_broke(break_slot, &gone);
-            }
         }
     }
     /// `ItemStack.hurtWithoutBreaking`: Unbreaking applies, but the stack stops at
