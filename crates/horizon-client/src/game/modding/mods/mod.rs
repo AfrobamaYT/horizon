@@ -1192,24 +1192,32 @@ fn register_mob_effects(mods: &[horizon_client::mod_content::ContentMod]) {
     }
 }
 
-/// the mods' thrown entity types, as their mob effects: set once, from the
+/// the mods' entity types' templates, which the tracker reads their settings
+/// from, and their thrown types, as their mob effects: set once, from the
 /// startup root. Living types are mobs, loaded with vanilla's from the
 /// content root's `entity-types.json`.
 fn register_entity_types(mods: &[horizon_client::mod_content::ContentMod]) {
-    use horizon_client::projectiles;
+    use horizon_client::{lan::tracking, projectiles};
     let mut types = horizon_client::mod_content::entity_types(mods);
+    let templates = types.iter().map(|t| (t.id.clone(), t.template.clone()));
+    let templates_set = tracking::register_templates(templates);
+    let templates_changed = !templates_set
+        && tracking::templates()
+            .iter()
+            .map(|t| t.0)
+            .ne(types.iter().map(|t| t.id.as_str()));
     types.retain(|t| t.item.is_some());
     let set = projectiles::register_thrown_types(
         types
             .iter()
             .filter_map(|t| Some((t.id.clone(), t.item.clone()?, t.damage))),
     );
-    if !set
+    let thrown_changed = !set
         && projectiles::thrown_types()
             .iter()
             .map(|t| t.id)
-            .ne(types.iter().map(|t| t.id.as_str()))
-    {
+            .ne(types.iter().map(|t| t.id.as_str()));
+    if templates_changed || thrown_changed {
         log::warn!("Horizon: the mods' entity types changed; restart the game to use them");
     }
 }
