@@ -207,14 +207,14 @@ entity coverage is data, handles and global hooks. On the server a mod can act o
 | `revive()` | Missing | — | No entity revive API. |
 | `isMultipartEntity()` | Missing | — | The dragon's parts are internal to the engine. |
 | `getParts()` | Missing | — | Same; `EntityRef` names dragon parts in some reads but does not expose the array. |
-| `getFluidTypeHeight(type)` | Covered | `host.entity_fluid_heights` | Each fluid the entity touched with its height, from its last fluid update. Server-side. |
-| `getMaxHeightFluidType()` | Covered | `host.entity_fluid_heights` | The first entry: the list is highest first. |
-| `isInFluidType(state)` | Covered | `host.entity_fluid_heights` | Whether the state's fluid is in the list. Entities track water and lava; mod fluids join once the entity update tracks them. |
-| `isInFluidType(type)` | Covered | `host.entity_fluid_heights` | Same. |
-| `isInFluidType(predicate)` | Covered | `host.entity_fluid_heights` | The mod applies its predicate to the list. |
-| `isInFluidType()` | Covered | `host.entity_fluid_heights` | A non-empty list. |
-| `getFirstEyeInFluidType()` | Covered | `host.entity_eye_fluid` | Water or lava at the eyes from the last fluid update; mobs now track lava there too. |
-| `isEyeInFluidType(type)` | Covered | `host.entity_eye_fluid` | Compare its answer. |
+| `getFluidTypeHeight(type)` | Partial | `host.entity_fluid_heights` | Each fluid the entity touched with its height, from its last fluid update. Server only; the client half is still to come (#3341). |
+| `getMaxHeightFluidType()` | Partial | `host.entity_fluid_heights` | The first entry: the list is highest first. Server only. |
+| `isInFluidType(state)` | Partial | `host.entity_fluid_heights` | Whether the state's fluid is in the list. Entities track water and lava; mod fluids join once the entity update tracks them. Server only. |
+| `isInFluidType(type)` | Partial | `host.entity_fluid_heights` | Same. |
+| `isInFluidType(predicate)` | Partial | `host.entity_fluid_heights` | The mod applies its predicate to the list. Server only. |
+| `isInFluidType()` | Partial | `host.entity_fluid_heights` | A non-empty list. Server only. |
+| `getFirstEyeInFluidType()` | Partial | `host.entity_eye_fluid` | Water or lava at the eyes from the last fluid update; mobs now track lava there too. Server only; the client half is still to come (#3341). |
+| `isEyeInFluidType(type)` | Partial | `host.entity_eye_fluid` | Compare its answer. Server only. |
 | `canStartSwimming()` | Missing | — | Swimming start is engine-owned. |
 | `getFluidMotionScale(type)` | Missing | — | No per-entity fluid scale. |
 | `isPushedByFluid(type)` | Partial | `FluidTypeProperties.can_push_entity` | Per-fluid data, not a per-entity answer. |

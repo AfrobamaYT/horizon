@@ -421,13 +421,15 @@ pub trait EntitiesBackend {
     /// The one read behind `isInFluidType` in all its forms (any fluid, one type, a predicate
     /// over this list) and `getMaxHeightFluidType` (the first entry). Fluids are named
     /// `minecraft:water` and `minecraft:lava`, the ones the entity update tracks. Players and
-    /// mobs; None for other kinds and stale handles.
+    /// mobs; None for other kinds and stale handles. Server only: a client keeps no fluid
+    /// state for the entities it shows, so the client half of #3341 is still to come.
     #[access(WorldOnly)]
     fn entity_fluid_heights(&self, entity: EntityRef) -> Option<Vec<(String, f64)>>;
     /// Side: server.
     /// The fluid at the entity's eyes from its last fluid update (NeoForge's
     /// `IEntityExtension.getFirstEyeInFluidType`; `isEyeInFluidType` compares it):
-    /// `Some(None)` in air. Players and mobs; None for other kinds and stale handles.
+    /// `Some(None)` in air. Players and mobs; None for other kinds and stale handles. Server
+    /// only, as `entity_fluid_heights`.
     #[access(WorldOnly)]
     fn entity_eye_fluid(&self, entity: EntityRef) -> Option<Option<String>>;
     /// Side: server.

@@ -981,7 +981,7 @@ impl Mob {
             return Fluids::default();
         }
         let lo = Vec3::new(lo.x, lo.y.max(boat.max_y - 0.001), lo.z);
-        w.fluids(Aabb::new(lo, hi), self.eye_y())
+        w.fluids_from(Aabb::new(lo, hi), b.min_position().y, self.eye_y())
     }
     /// Entity.updateFluidInteraction: the fluid state, then touching water
     /// resets the fall and entering it (after the first tick) splashes.
