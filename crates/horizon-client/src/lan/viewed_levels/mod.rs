@@ -7,11 +7,13 @@
 //! never the forced chunks' or the mods' chunk tickets, and they live apart from what makes a
 //! player count in a level (`Guest::placed_in`, `Guest::watches_level`): an area is not a player
 //! for spawning, sleeping, raids or any other rule. A client whose capability answer allows it is
-//! sent the areas of the levels it is not in, each packet wrapped with its level (`send`).
+//! sent the areas of the levels it is not in, each packet wrapped with its level (`send`), and
+//! the entities there (`entities`).
 //!
 //! With no area on the server, a level pass costs one integer compare ([`ViewedLevels::active`]).
 pub mod areas;
 pub mod capability;
+pub(super) mod entities;
 pub(super) mod send;
 #[cfg(test)]
 mod tests;
@@ -213,7 +215,7 @@ impl Hub {
     }
 
     /// Whether a player's client views the level in place.
-    pub(super) fn viewed_here(&self) -> bool {
+    pub fn viewed_here(&self) -> bool {
         self.viewed.active()
             && self
                 .guests

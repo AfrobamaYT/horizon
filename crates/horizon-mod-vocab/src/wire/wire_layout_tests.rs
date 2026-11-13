@@ -777,6 +777,17 @@ fn every_item_place_case_has_declared_tag_and_field_types() {
         },
         (9u32, 29u32, EquipmentSlot::Saddle),
     );
+    fields(ItemPlace::Scratch(41), (10u32, 41u64));
+    let parent = Box::new(ItemPlace::ItemEntity { id: 71 });
+    fields(ItemPlace::Strict(parent.clone()), (11u32, parent.clone()));
+    fields(ItemPlace::OneByOne(parent.clone()), (12u32, parent.clone()));
+    fields(
+        ItemPlace::InfiniteMaterials {
+            player: 0x1234,
+            inner: parent.clone(),
+        },
+        (13u32, 0x1234u128, parent),
+    );
     // The other four holder cases are exercised in handle_records above.
     fields(AttachmentHolder::Level(level), (4u32, level));
     fields(AttachmentRowError::StaleHolder, (1u32,));

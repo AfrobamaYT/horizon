@@ -162,7 +162,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `getMaxDamage(stack)` | Partial | `minecraft:max_damage` effective component, `host.max_damage` | The stack's effective component includes a patch over the item default; `host.max_damage` reads that default only. |
 | `isDamaged(stack)` | Covered | `ItemStack::damage`, `damage_component` | Distinguishes explicit zero from absent. |
 | `setDamage(stack, damage)` | Partial | `ItemStack::set_damage` | Stores the requested value; the game checks it against the effective maximum when it accepts the write instead of clamping here. |
-| `canPerformAction(instance, ability)` | Partial | `ItemPart::can_perform_action` (`hooks/can_perform_action.rs`), `block_tool_modification` (`hooks/block_tool_modification.rs`) | The part answers per stack and per namespaced ability id, starting from vanilla's answer, where vanilla checks the item kind: `minecraft:shield_block` (a raised item blocking attacks, its use time and animation), `minecraft:shears_harvest` (sheep, mooshroom, snow golem, bogged, bee nests, a dispenser's shears) and `minecraft:shears_carve` (a pumpkin). The block side of a tool action (strip, wax, path, ...) is `block_tool_modification`; no tool ability (`axe_strip`...) is asked of the item yet. [#1039](https://github.com/arismoko/horizon/issues/1039). |
+| `canPerformAction(instance, ability)` | Partial | `ItemPart::can_perform_action` (`hooks/can_perform_action.rs`), `block_tool_modification` (`hooks/block_tool_modification.rs`) | The part answers per stack and per plain, case-sensitive ability name, starting from vanilla's answer, where vanilla checks the item kind: `shield_block` (a raised item blocking attacks, its use time and animation), `shears_harvest` (sheep, mooshroom, snow golem, bogged, bee nests, a dispenser's shears) and `shears_carve` (a pumpkin). The block side of a tool action (strip, wax, path, ...) is `block_tool_modification`; no tool ability (`axe_strip`...) is asked of the item yet. [#1039](https://github.com/arismoko/horizon/issues/1039). |
 | `getMaxStackSize(stack)` | Partial | `max_stack_size` component, `host.max_stack_size` | The stack's effective component includes a patch over the item default; `host.max_stack_size` reads that default only, and invalid values are refused at the write. |
 | `isPrimaryItemFor(stack, enchantment)` | Partial | `host.enchantment_supports` | Answers supported items; the narrower "primary item" distinction is not exposed. |
 | `supportsEnchantment(stack, enchantment)` | Partial | `host.enchantment_supports` | A client-side read of `Enchantment.isSupportedItem` for an item id; not per stack and without NeoForge's enchanted-book special case. |
@@ -207,14 +207,14 @@ entity coverage is data, handles and global hooks. On the server a mod can act o
 | `revive()` | Missing | — | No entity revive API. |
 | `isMultipartEntity()` | Missing | — | The dragon's parts are internal to the engine. |
 | `getParts()` | Missing | — | Same; `EntityRef` names dragon parts in some reads but does not expose the array. |
-| `getFluidTypeHeight(type)` | Missing | — | Fluid properties are per-fluid data; no per-entity height. |
-| `getMaxHeightFluidType()` | Missing | — | Same. |
-| `isInFluidType(state)` | Partial | `host.entity_is_in_water`, `entity_is_in_lava` | Only water and lava answered; no arbitrary fluid. |
-| `isInFluidType(type)` | Partial | `host.entity_is_in_water`, `entity_is_in_lava` | Same. |
-| `isInFluidType(predicate)` | Partial | `host.entity_is_in_water`, `entity_is_in_lava` | No predicate form. |
-| `isInFluidType()` | Partial | `host.entity_is_in_water`, `entity_is_in_lava` | "Any fluid" is water-or-lava only. |
-| `getFirstEyeInFluidType()` | Missing | — | Eye position per fluid is engine-owned. |
-| `isEyeInFluidType(type)` | Missing | — | Same. |
+| `getFluidTypeHeight(type)` | Partial | `host.entity_fluid_heights` | Each fluid the entity touched with its height, from its last fluid update. Server only; the client half is still to come (#3341). |
+| `getMaxHeightFluidType()` | Partial | `host.entity_fluid_heights` | The first entry: the list is highest first. Server only. |
+| `isInFluidType(state)` | Partial | `host.entity_fluid_heights` | Whether the state's fluid is in the list. Entities track water and lava; mod fluids join once the entity update tracks them. Server only. |
+| `isInFluidType(type)` | Partial | `host.entity_fluid_heights` | Same. |
+| `isInFluidType(predicate)` | Partial | `host.entity_fluid_heights` | The mod applies its predicate to the list. Server only. |
+| `isInFluidType()` | Partial | `host.entity_fluid_heights` | A non-empty list. Server only. |
+| `getFirstEyeInFluidType()` | Partial | `host.entity_eye_fluid` | Water or lava at the eyes from the last fluid update; mobs now track lava there too. Server only; the client half is still to come (#3341). |
+| `isEyeInFluidType(type)` | Partial | `host.entity_eye_fluid` | Compare its answer. Server only. |
 | `canStartSwimming()` | Missing | — | Swimming start is engine-owned. |
 | `getFluidMotionScale(type)` | Missing | — | No per-entity fluid scale. |
 | `isPushedByFluid(type)` | Partial | `FluidTypeProperties.can_push_entity` | Per-fluid data, not a per-entity answer. |

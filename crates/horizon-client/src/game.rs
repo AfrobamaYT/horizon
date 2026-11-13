@@ -1709,7 +1709,7 @@ struct Game<'a> {
     panel: native_panel::Panel,
     /// Horizon's own shader pack, while one is picked (`game/modding/native_shaders.rs`).
     native_shaders: native_shaders::NativeShaders,
-    /// The items native client mods claim and the events they haven't polled (game/modding/native_claimed_items.rs).
+    /// Native client mods' claimed items, unpolled events and key mappings (game/modding/native_claimed_items.rs).
     native_input: native_claimed_items::ModInput,
     /// The native lifecycle bookkeeping.
     native_lifecycle: native_lifecycle::NativeLifecycle,
@@ -10417,6 +10417,11 @@ impl Game<'_> {
                                     t.arrow_key(key, (w, h), shift);
                                 }
                             }
+                            PhysicalKey::Code(key)
+                                if self
+                                    .title
+                                    .as_mut()
+                                    .is_some_and(|t| t.page_missing_mods(key, (w, h))) => {}
                             PhysicalKey::Code(KeyCode::Backspace) => self.title_edit(None, true),
                             PhysicalKey::Code(KeyCode::Tab) => {
                                 let shift = self.has_shift_down();

@@ -2,10 +2,10 @@
 //! chunk format, shape and facts of the dimension type the server synced for it. A wrapped
 //! packet changes only its own level's world; nothing here reaches the player's level, its
 //! renderer, its sounds or a mod's hooks.
-use super::routing::RouteError;
+use super::{entities::ViewedEntities, routing::RouteError};
 use crate::game::remote_chunks::{ChunkFormat, section_blocks};
 use horizon_client::{chunk::known_block_state, fast_hash::FxHashMap, world::World};
-use horizon_protocol::packets::play::Clientbound as C;
+use horizon_protocol::packets::play::{Clientbound as C, ClockState};
 use horizon_world::registry::BlockStateId;
 use std::sync::Arc;
 
@@ -22,7 +22,11 @@ pub(in crate::game) struct ViewedWorld {
     format: Arc<ChunkFormat>,
     /// The world clock its day time follows: its dimension type's `default_clock`.
     default_clock: Option<i32>,
+    /// That clock as the server last told it, moved on with the game time since
+    /// (`ClientClockManager`).
+    clock: Option<ClockState>,
     pub(in crate::game) world: World,
+    pub(in crate::game) entities: ViewedEntities,
 }
 
 impl ViewedWorld {
@@ -36,15 +40,17 @@ impl ViewedWorld {
             level,
             format,
             default_clock,
+            clock: None,
             world,
+            entities: ViewedEntities::default(),
         }
     }
 
     /// A wrapped packet of the level, as `ClientPacketListener` handles it with that level
-    /// current: what the world keeps of its chunks, light, biomes, blocks, time and weather.
-    /// Block events, destruction progress, level events and entities change nothing yet: what
-    /// they show is drawn, and drawing a viewed level is gap 13 (entities are 9d). A chunk of a
-    /// new column past [`MAX_COLUMNS`] is refused before it is decoded.
+    /// current: what the world keeps of its chunks, light, biomes, blocks, time, weather and
+    /// entities. Block events, destruction progress and level events change nothing yet: what
+    /// they show is drawn, and drawing a viewed level is gap 13. A chunk of a new column past
+    /// [`MAX_COLUMNS`] is refused before it is decoded.
     pub(in crate::game) fn apply(&mut self, packet: C) -> Result<(), RouteError> {
         match packet {
             // `handleLevelChunkWithLight`: the column replaces any it held, with the light the
@@ -90,20 +96,34 @@ impl ViewedWorld {
                     self.set_block(pos, state);
                 }
             }
-            // `handleSetTime`: the level's game time, and its day from the clock it follows
-            // when the packet carries that clock.
+            // `handleSetTime` / `ClientClockManager.handleUpdates`: the clock it follows moves on
+            // by the game time since the last packet at its rate, then takes what the packet
+            // carries of it; its day follows that clock.
+            // A time whose distance from the last, or whose clock's total, passes the range of a
+            // long is refused before anything changes.
             C::SetTime(p) => {
+                let delta = (p.game_time.checked_sub(self.world.game_time))
+                    .ok_or(RouteError::ClockOverflow)?;
+                if let Some(clock) = &mut self.clock {
+                    let mut moved = clock.clone();
+                    crate::game::remote::client_level_tick::advance_clock(&mut moved, delta)
+                        .ok_or(RouteError::ClockOverflow)?;
+                    *clock = moved;
+                }
                 self.world.game_time = p.game_time;
-                if let Some(clock) = p
+                if let Some(update) = p
                     .clocks
-                    .iter()
+                    .into_iter()
                     .find(|c| Some(c.clock) == self.default_clock)
                 {
+                    self.clock = Some(update);
+                }
+                if let Some(clock) = &self.clock {
                     self.world.day_time = clock.total_ticks;
                 }
             }
             C::GameEvent(p) => self.world.weather.game_event(p.event, p.param),
-            _ => {}
+            other => self.entities.apply(other)?,
         }
         Ok(())
     }
@@ -228,5 +248,85 @@ mod tests {
         assert_eq!(viewed.apply(column(2048)), Ok(()));
         assert!(viewed.world.chunks.contains_key(&(2048, 0)));
         assert_eq!(viewed.world.chunks.len(), 2048);
+    }
+
+    /// A time update with no clocks moves the retained clock on by the game time since the last
+    /// update at its rate, as the player's own level's does: 1000 at time 100, then an empty
+    /// update at time 120, is 1020. A clock at half rate carries its half tick.
+    #[test]
+    fn an_empty_time_update_moves_the_retained_clock_on() {
+        let overworld = DimensionType::vanilla("minecraft:overworld");
+        let format = Arc::new(ChunkFormat::new(&overworld, vec![0, 7, 9], 2));
+        let mut viewed = ViewedWorld::new(
+            "minecraft:the_end".into(),
+            format,
+            Some(3),
+            World::new(BlockStateId(0), 1),
+        );
+        let time = |game_time, clocks| C::SetTime(play::SetTime { game_time, clocks });
+        let clock = |clock, total_ticks, rate| ClockState {
+            clock,
+            total_ticks,
+            partial_tick: 0.0,
+            rate,
+        };
+        viewed
+            .apply(time(100, vec![clock(0, 7, 1.0), clock(3, 1000, 1.0)]))
+            .unwrap();
+        assert_eq!(viewed.world.day_time, 1000);
+        viewed.apply(time(120, Vec::new())).unwrap();
+        assert_eq!(viewed.world.day_time, 1020);
+        assert_eq!(viewed.world.game_time, 120);
+        viewed.apply(time(120, vec![clock(3, 2000, 0.5)])).unwrap();
+        viewed.apply(time(123, Vec::new())).unwrap();
+        assert_eq!(viewed.world.day_time, 2001);
+        viewed.apply(time(124, Vec::new())).unwrap();
+        assert_eq!(viewed.world.day_time, 2002);
+    }
+
+    /// A server's times that would overflow are refused with a fixed reason and change nothing:
+    /// the minimum game time then the maximum, and a retained clock at the maximum moved on a
+    /// tick.
+    #[test]
+    fn a_time_past_the_range_of_a_long_is_refused() {
+        let overworld = DimensionType::vanilla("minecraft:overworld");
+        let format = Arc::new(ChunkFormat::new(&overworld, vec![0, 7, 9], 2));
+        let fresh = || {
+            ViewedWorld::new(
+                "minecraft:the_end".into(),
+                format.clone(),
+                Some(3),
+                World::new(BlockStateId(0), 1),
+            )
+        };
+        let mut viewed = fresh();
+        let time = |game_time, clocks| C::SetTime(play::SetTime { game_time, clocks });
+        viewed.apply(time(i64::MIN, Vec::new())).unwrap();
+        assert_eq!(
+            viewed.apply(time(i64::MAX, Vec::new())),
+            Err(RouteError::ClockOverflow)
+        );
+        assert_eq!(viewed.world.game_time, i64::MIN);
+        assert_eq!(
+            RouteError::ClockOverflow.to_string(),
+            "horizon:levels: a viewed level's time past its range"
+        );
+        let full = ClockState {
+            clock: 3,
+            total_ticks: i64::MAX,
+            partial_tick: 0.0,
+            rate: 1.0,
+        };
+        let mut viewed = fresh();
+        viewed.apply(time(100, vec![full])).unwrap();
+        assert_eq!(viewed.world.day_time, i64::MAX);
+        assert_eq!(
+            viewed.apply(time(101, Vec::new())),
+            Err(RouteError::ClockOverflow)
+        );
+        assert_eq!(
+            (viewed.world.game_time, viewed.world.day_time),
+            (100, i64::MAX)
+        );
     }
 }

@@ -1,12 +1,15 @@
 //! The `horizon:levels` play payloads, routed: an `open` builds the level's world from the
 //! dimension type the server synced for it, a `run`'s packets go to that world, and a `close`
 //! drops it. A payload the protocol refuses closes the connection with its named reason.
-use super::worlds::{MAX_COLUMNS, ViewedWorld};
+use super::{
+    entities::MAX_TABLE,
+    worlds::{MAX_COLUMNS, ViewedWorld},
+};
 use crate::game::Game;
 use horizon_client::{text::Text, viewed_levels_net::MAX_LEVELS, world::World};
 use horizon_protocol::{
     packets::play::{Clientbound as C, SpawnInfo},
-    viewed_levels::{CHANNEL, Message, ViewedLevelsError},
+    viewed_levels::{CHANNEL, MAX_ENTITIES, Message, ViewedLevelsError},
 };
 use horizon_world::dimension_type::DimensionFacts;
 
@@ -26,6 +29,13 @@ pub(in crate::game) enum RouteError {
     NotOpen(i32),
     /// A `run`'s chunk of a new column in a world that holds `worlds::MAX_COLUMNS` already.
     TooManyColumns,
+    /// A `run`'s `AddEntity` of a new entity in a world that holds `MAX_ENTITIES` already.
+    TooManyEntities,
+    /// An entity's effect or attribute of a new kind past `entities::MAX_TABLE` of them.
+    EntityTableFull,
+    /// A `SetTime` whose game time, or whose clock's total moved on to it, passes the range of a
+    /// long.
+    ClockOverflow,
 }
 
 impl std::fmt::Display for RouteError {
@@ -46,6 +56,16 @@ impl std::fmt::Display for RouteError {
             Self::TooManyColumns => {
                 write!(f, "{CHANNEL}: a viewed level past {MAX_COLUMNS} columns")
             }
+            Self::TooManyEntities => {
+                write!(f, "{CHANNEL}: a viewed level past {MAX_ENTITIES} entities")
+            }
+            Self::EntityTableFull => {
+                write!(
+                    f,
+                    "{CHANNEL}: an entity past {MAX_TABLE} effects or attributes"
+                )
+            }
+            Self::ClockOverflow => write!(f, "{CHANNEL}: a viewed level's time past its range"),
         }
     }
 }

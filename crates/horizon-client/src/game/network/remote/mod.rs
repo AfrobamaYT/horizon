@@ -78,7 +78,7 @@ use {
 mod abilities;
 mod chat_received;
 use chat_received::QueuedChat;
-mod client_level_tick;
+pub(in crate::game) mod client_level_tick;
 mod item_use;
 mod remote_attributes;
 mod tables;
@@ -10805,10 +10805,7 @@ impl Game<'_> {
         let delta = self.world.game_time - r.clock_game_time;
         r.clock_game_time = self.world.game_time;
         for clock in r.clocks.values_mut() {
-            let partial = f64::from(clock.partial_tick) + delta as f64 * f64::from(clock.rate);
-            let full = partial.floor();
-            clock.partial_tick = (partial - full) as f32;
-            clock.total_ticks += full as i64;
+            let _ = client_level_tick::advance_clock(clock, delta);
         }
         self.world.day_time = r.clock_time(r.default_clock);
     }

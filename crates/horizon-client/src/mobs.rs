@@ -204,6 +204,8 @@ mod powder_snow_move_tests;
 
 #[derive(Clone, Debug)]
 pub struct MobType {
+    /// Resolved content renderer shadow; vanilla uses its normal table.
+    pub shadow: Option<(f32, f32)>,
     pub id: String,
     pub species: Species,
     pub width: f64,
@@ -274,18 +276,6 @@ impl MobType {
 
     pub fn layer(&self, key: &str) -> Option<&Arc<Part>> {
         self.layers.get(key)
-    }
-
-    /// The vanilla entity type whose class this type's mobs are: the type
-    /// itself, or the template a content mod's living type copies. What a
-    /// class saves and syncs of its own (`Zombie.addAdditionalSaveData`, its
-    /// entity data) follows it; the saved and sent id stays [`Self::id`].
-    pub fn class_id(&self) -> &str {
-        if self.id.starts_with("minecraft:") {
-            &self.id
-        } else {
-            species::vanilla_id(self.species)
-        }
     }
 }
 /// Each type's default attribute values, parsed exactly (serde_json's
@@ -503,6 +493,7 @@ impl MobTypes {
             out.insert(
                 id.clone(),
                 MobType {
+                    shadow: crate::shadows::content_shadow(t),
                     species: def.species,
                     item_stack_limits: item_stack_limits.clone(),
                     attribute_bounds,
@@ -5409,6 +5400,7 @@ pub(crate) mod sensor_scan_tests {
 
     pub(crate) fn kind() -> Arc<MobType> {
         Arc::new(MobType {
+            shadow: None,
             id: "minecraft:cow".into(),
             species: Species::Cow,
             width: 0.9,

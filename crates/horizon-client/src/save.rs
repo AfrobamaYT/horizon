@@ -3904,7 +3904,7 @@ pub struct Level {
     /// the world enables, `minecraft:vanilla` included. Empty is vanilla's
     /// default, which the level.dat omits.
     pub enabled_features: std::sync::Arc<[String]>,
-    /// `fml.LoadingModList` at the root beside `Data`, the code mods the world was saved with; `None` without one.
+    /// The code mods (`fml.LoadingModList` beside `Data`), then the content mods (`horizon.ContentModList`), the world was saved with; `None` without either list.
     pub saved_mods: Option<Vec<level_mods::ModRecord>>,
     /// Game rule values by name without namespace (`keep_inventory`, ...).
     pub game_rules: BTreeMap<String, i32>,

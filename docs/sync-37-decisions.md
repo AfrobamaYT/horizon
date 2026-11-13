@@ -44,3 +44,23 @@ hold type are removed, not claimed as passing:
 
 The upstream waypoint optimization is imported while retaining fork-owned guest state and interfaces.
 No protected SDK export, prebuilt package layout or injection routing design changes are part of this sync.
+
+## Main merge after rollup 79
+
+Merged fresh main `159024296f4` without rewriting history or changing the frozen upstream pin.
+The only conflicted file was `game/runtime/window_handler.rs`: main added title paging inside
+`handle_window_event_inner`, which this sync had already restored to `game.rs`. Keep that restored
+owner and port main's `page_missing_mods` key arm into it; do not reintroduce the duplicate method.
+Main's accepted-mouse `mod_mappings_button` and raw-key `key_input` changes merge unchanged in the
+runtime adapter. All other main carries merge unchanged, including the generated hotspot
+classification supplied by main. The four corrected source-extraction test paths remain intact.
+
+Fresh measurement of the resolved tree using main's imported measurement tool reports zero genuine
+remnants and the same nine classified name-only matches occupying 983 lines. Its parser reports
+12,274 physical lines, 168 functions and 10,083 function lines in `game.rs`; these counts use the
+new main tool and are not directly comparable with the earlier tool's function counts above.
+No measurement tool or classification was edited by this conflict resolution.
+
+Python guards for the four repaired source-fixture modules plus input-key, mouse-button and hotspot
+measurement tests passed (15 tests). Rustfmt ran only on the two resolved Rust files. No local Cargo
+check, clippy or tests were run for this merge.
