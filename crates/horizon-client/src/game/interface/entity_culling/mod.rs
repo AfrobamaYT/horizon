@@ -17,7 +17,7 @@ fn orb_billboard_radius(origin: glam::Vec3) -> f32 {
     0.3 + origin.abs().max_element() * f32::EPSILON * 4.0
 }
 
-pub(super) fn orb_in_view(view: &horizon_client::gfx::Frustum, origin: glam::Vec3) -> bool {
+pub(super) fn orb_in_view(view: &horizon_client::gfx::JoinedFrusta, origin: glam::Vec3) -> bool {
     view.intersects_sphere(origin, orb_billboard_radius(origin))
 }
 

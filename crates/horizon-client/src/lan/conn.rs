@@ -289,6 +289,8 @@ pub struct PlayerSender {
     pub datapack_offer: Option<Arc<[u8]>>,
     /// The plugin channels the client announced, in configuration and play.
     pub announced: Arc<super::announced_channels::AnnouncedChannels>,
+    /// Levels besides its own the client can view: its `horizon:levels` answer, 0 for none.
+    pub max_viewed_levels: u8,
 }
 #[derive(Clone)]
 enum To {
@@ -359,6 +361,7 @@ impl PlayerSender {
             payload_transport: Transport::empty(),
             datapack_offer: None,
             announced: Arc::default(),
+            max_viewed_levels: 0,
         }
     }
     #[cfg(test)]
@@ -395,6 +398,7 @@ impl PlayerSender {
             wire: None,
             datapack_offer: None,
             announced: Arc::default(),
+            max_viewed_levels: 0,
         };
         (sender, move || inspect.queued_contents())
     }
@@ -410,6 +414,7 @@ impl PlayerSender {
             payload_transport: Transport::empty(),
             datapack_offer: None,
             announced: Arc::default(),
+            max_viewed_levels: 0,
         }
     }
     /// The bytes received from and sent to the client on the wire so far.
@@ -1179,7 +1184,7 @@ struct Parts {
     info: ClientInformation,
     brand: String,
     datapack_offer: Option<Vec<u8>>,
-    announced: Option<Arc<super::announced_channels::AnnouncedChannels>>,
+    channels: super::config_payloads::EngineChannels,
 }
 
 fn login_and_configure(
@@ -1398,6 +1403,7 @@ fn login_and_configure(
                 data: horizon_protocol::custom_book::CAPABILITY.to_vec(),
             }),
         )?;
+        c.ask_viewed_levels().map_err(e)?;
     }
     // And how far it samples far terrain for it (crate::lod_net).
     if brand == "horizon" && shared.config.lod_distance > 0 {
@@ -1569,10 +1575,10 @@ fn login_and_configure(
         }
     }
     payload_transport.finish_configuration()?;
-    let announced = c.announced.clone();
+    let channels = std::mem::take(&mut c.channels);
     c.finish()?;
     Ok(Some(Parts {
-        announced,
+        channels,
         payload_transport,
         uuid,
         name: name.to_owned(),
@@ -1630,16 +1636,6 @@ fn receive_configuration(
         return Ok(None);
     }
     match packet {
-        // ServerCommonPacketListenerImpl hands these to the plugin messenger, in
-        // configuration as in play: the list stays on the connection.
-        cfg::Serverbound::CustomPayload(payload)
-            if super::announced_channels::is_list_channel(&payload.channel) =>
-        {
-            c.announced
-                .get_or_insert_with(Arc::default)
-                .apply(&payload.channel, &payload.data);
-            Ok(None)
-        }
         cfg::Serverbound::CustomPayload(payload) => c
             .application(payload)
             .map(|payload| payload.map(cfg::Serverbound::CustomPayload)),
@@ -1851,8 +1847,8 @@ fn wait_alive<T>(
             result
         });
     }
-    // The list lives on ConfigIo, which the wait below borrows as a plain connection.
-    let mut announced = c.announced.take();
+    // The engine's channels live on ConfigIo, which the wait below borrows as a plain connection.
+    let mut channels = std::mem::take(&mut c.channels);
     let result = {
         let connection = &mut **c;
         let writer = Mutex::new(&mut connection.writer);
@@ -1917,14 +1913,13 @@ fn wait_alive<T>(
                     }
                     continue;
                 }
-                // As receive_configuration does: the plugin messenger keeps the lists.
-                if let Ok(cfg::Serverbound::CustomPayload(payload)) = &packet
-                    && super::announced_channels::is_list_channel(&payload.channel)
-                {
-                    announced
-                        .get_or_insert_with(Arc::default)
-                        .apply(&payload.channel, &payload.data);
-                    continue;
+                // As receive_configuration does: the engine's channels are read here too.
+                if let Ok(cfg::Serverbound::CustomPayload(payload)) = &packet {
+                    match channels.receive(payload) {
+                        Ok(true) => continue,
+                        Ok(false) => {}
+                        Err(error) => break Err(error),
+                    }
                 }
                 if let Some(result) = answer(packet) {
                     break result;
@@ -1934,7 +1929,7 @@ fn wait_alive<T>(
             result
         })
     };
-    c.announced = announced;
+    c.channels = channels;
     result.map_err(|error| payload_disconnect(c, error))
 }
 
@@ -1975,7 +1970,8 @@ fn play(
         wire: Some(c.reader.counters.clone()),
         payload_transport: parts.payload_transport.clone(),
         datapack_offer: parts.datapack_offer.map(Into::into),
-        announced: parts.announced.clone().unwrap_or_default(),
+        announced: parts.channels.announced.clone().unwrap_or_default(),
+        max_viewed_levels: parts.channels.viewed_levels.max_levels(),
     };
     let required_pack = shared
         .config
@@ -2481,7 +2477,7 @@ mod tests {
         let mut info = ClientInformation::new(10);
         accept_code_of_conduct(&mut io, "Be kind.", &mut info, &transport, &mut negotiation)
             .unwrap();
-        let announced = io.announced.as_ref().map(|list| list.list());
+        let announced = io.channels.announced.as_ref().map(|list| list.list());
         assert_eq!(announced, Some(vec!["voicechat:secret".to_owned()]));
     }
 
@@ -3658,6 +3654,7 @@ mod outgoing_budget_tests {
             wire: None,
             datapack_offer: None,
             announced: Arc::default(),
+            max_viewed_levels: 0,
         }
     }
     #[test]
