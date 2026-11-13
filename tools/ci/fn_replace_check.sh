@@ -101,6 +101,8 @@ if [ "$side" = server ]; then
   test -z "$(find "$data/versions" -type f -name 'horizon-client*' ! -path "$version/*")"
 fi
 log=$data/native/build.log
+# Where the build's time went: each command's time and the whole prebuilt compile.
+grep -E ': [0-9]+ ms$|^Mods compiled against the prebuilt game in ' "$log" || true
 # Only a `[[native.*]]` row patches a function; a mod of hooks alone must not say it did.
 if grep -qs '^\[\[native\.' "$mods"/*/horizon-mod.toml; then
   grep -F 'Function replacement:' "$log"
