@@ -1,6 +1,5 @@
-//! Save visibility while authoritative rows are lent out.
-use super::*;
-
+//! Save visibility while a falling block's row is lent out (`tick_one_falling`,
+//! game/blocks/falling_blocks.rs).
 #[cfg(test)]
 mod tests {
     use crate::game::native_entity_refs::tests::{prepare_entity_ticking_neighborhood, with_game};
