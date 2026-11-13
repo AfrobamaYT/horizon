@@ -1208,6 +1208,7 @@ pub(super) fn make_streaming(
             ),
             ModLevel::Staged(mut inner) => {
                 inner.add_mod_signs(res.facts());
+                register_sea_level(inner.sea_level());
                 let inner = Arc::new(inner);
                 inner.load_structure_mobs_behind();
                 keep_structure_references(&inner, world_root, dim, &save);

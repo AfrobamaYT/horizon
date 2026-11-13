@@ -10,34 +10,41 @@ use crate::worldgen::terrain::TerrainError;
 /// A mod's terrain and the stages its level runs. `stages.structures` is off when the world's
 /// structures are.
 pub(super) struct ModTerrain {
+    /// The registered generator's id, for the refusals.
+    id: String,
     generator: Arc<dyn ModChunkGenerator>,
     pub(super) stages: VanillaStages,
 }
 
 impl ModTerrain {
-    /// The fill of `buildTerrain`: the mod's blocks in `chunk`, which is air, and the
-    /// worldgen heightmaps the noise fill keeps (`ChunkStatus.NOISE`'s), which the
-    /// material rule and the carvers read.
+    /// The fill of `buildTerrain`: the mod's blocks in `chunk`, which is air, within the noise's
+    /// `min_y` and `height` as the noise fill writes, and the worldgen heightmaps the noise fill
+    /// keeps (`ChunkStatus.NOISE`'s), which the material rule and the carvers read.
     pub(super) fn fill(
         &self,
         chunk: &mut TerrainChunk<'_, GenBlockStates>,
         registry: &'static BlockRegistry,
         seed: i64,
+        [min_y, height]: [i32; 2],
     ) -> Result<(), TerrainError> {
         self.generator.build_terrain(&mut Filling {
             chunk,
             registry,
             seed,
+            min_y,
+            height,
         });
         chunk.prime_heightmaps(&[HeightmapType::OceanFloorWg, HeightmapType::WorldSurfaceWg])
     }
 }
 
-/// The proto chunk as a mod's generator writes it.
+/// The proto chunk as a mod's generator writes it: its noise range only.
 struct Filling<'a, 'r> {
     chunk: &'a mut TerrainChunk<'r, GenBlockStates>,
     registry: &'static BlockRegistry,
     seed: i64,
+    min_y: i32,
+    height: i32,
 }
 
 impl ChunkAccess for Filling<'_, '_> {
@@ -51,10 +58,10 @@ impl ChunkAccess for Filling<'_, '_> {
         self.seed
     }
     fn min_y(&self) -> i32 {
-        self.chunk.min_y()
+        self.min_y
     }
     fn height(&self) -> i32 {
-        self.chunk.height()
+        self.height
     }
     fn state(&self, name: &str) -> BlockStateId {
         super::super::structure::legacy::block_state(self.registry, name, &[])
@@ -64,7 +71,10 @@ impl ChunkAccess for Filling<'_, '_> {
     }
     fn set_block(&mut self, [x, y, z]: [i32; 3], state: BlockStateId) -> bool {
         let pos = self.chunk.position();
-        x >> 4 == pos.x && z >> 4 == pos.z && self.chunk.set_block_raw(x, y, z, state).is_ok()
+        x >> 4 == pos.x
+            && z >> 4 == pos.z
+            && (self.min_y..self.min_y + self.height).contains(&y)
+            && self.chunk.set_block_raw(x, y, z, state).is_ok()
     }
 }
 
@@ -73,8 +83,10 @@ where
     R::Positional: Clone + Send + Sync,
 {
     /// The pipeline of a mod's level: `terrain` in place of the noise, and decoration with the
-    /// biomes' placed features only when it asks for them. A stage the world's data cannot
-    /// supply (no structure set, no placed feature) refuses the level, naming it.
+    /// biomes' placed features only when it asks for them, and none when it asks for neither
+    /// structures nor features. A stage the world's data cannot supply (no structure set, no
+    /// placed features, a placed feature the game cannot place) refuses the level, naming the
+    /// generator.
     pub(super) fn with_mod_terrain(
         mut self,
         terrain: Option<ModTerrain>,
@@ -82,25 +94,47 @@ where
         let Some(terrain) = terrain else {
             return Ok(self);
         };
-        let stages = terrain.stages;
+        let (id, stages) = (terrain.id.as_str(), terrain.stages);
         if stages.structures && self.structures.is_none() {
-            return Err(resource(
-                "a mod's chunk generator asks for structures, but the world has no structure sets",
-            ));
+            return Err(resource(format!(
+                "chunk generator {id} asks for structures, but the world has no structure sets"
+            )));
         }
         if !stages.features {
             // The structure pieces still place in FEATURES, so the decoration stays without them.
-            self.decoration = super::super::generator_decoration::Decoration::new_with(
-                &self.data,
-                &self.source,
-                Some(super::super::generator_decoration::FlatDecoration::NONE),
-            )?
-            .map(Arc::new);
+            self.decoration = if stages.structures {
+                super::super::generator_decoration::Decoration::new_with(
+                    &self.data,
+                    &self.source,
+                    Some(super::super::generator_decoration::FlatDecoration::NONE),
+                )?
+                .map(Arc::new)
+            } else {
+                None
+            };
         }
-        if self.decoration.is_none() {
-            return Err(resource(
-                "a mod's chunk generator runs vanilla stages, but the world has no placed features",
-            ));
+        let asked = if stages.features {
+            "features"
+        } else {
+            "structures"
+        };
+        if (stages.structures || stages.features) && self.decoration.is_none() {
+            return Err(resource(format!(
+                "chunk generator {id} asks for {asked}, but the world has no placed features"
+            )));
+        }
+        if let Some(decoration) = self.decoration.as_ref().filter(|_| stages.features) {
+            let unsupported = decoration.unsupported();
+            if !unsupported.is_empty() {
+                let features: Vec<String> = unsupported
+                    .iter()
+                    .map(|(name, error)| format!("{name} ({error})"))
+                    .collect();
+                return Err(resource(format!(
+                    "chunk generator {id} asks for features the game cannot place: {}",
+                    features.join(", ")
+                )));
+            }
         }
         self.mod_terrain = Some(terrain);
         Ok(self)
@@ -135,7 +169,11 @@ impl OverworldGenerator {
         }
         let mut stages = generator.vanilla_stages();
         stages.structures &= structures;
-        let terrain = ModTerrain { generator, stages };
+        let terrain = ModTerrain {
+            id: id.to_owned(),
+            generator,
+            stages,
+        };
         Self::from_stem(data, seed, stem, stages.structures, None, Some(terrain))
     }
 }
@@ -309,5 +347,228 @@ mod tests {
             "invalid generator resources: chunk generator test:slab runs vanilla stages over the \
              unknown noise settings test:gone"
         );
+    }
+
+    /// The mod writes within the noise range, as the noise fill does: an Overworld-shaped level
+    /// (y -64 to 319) over the Nether's noise settings (y 0 to 127) gets the mod's stone there
+    /// and nowhere else.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_mods_terrain_fills_the_noise_range_not_the_levels() {
+        struct Column;
+        impl ModChunkGenerator for Column {
+            fn build_terrain(&self, chunk: &mut dyn ChunkAccess) {
+                assert_eq!((chunk.min_y(), chunk.height()), (0, 128));
+                let (pos, stone) = (chunk.pos(), chunk.state("stone"));
+                let written = (-64..320)
+                    .filter(|&y| chunk.set_block([pos.x * 16, y, pos.z * 16], stone))
+                    .count();
+                assert_eq!(written, 128);
+            }
+            fn vanilla_stages(&self) -> VanillaStages {
+                VanillaStages {
+                    structures: true,
+                    ..Default::default()
+                }
+            }
+        }
+        let stem = stem(Value::from("minecraft:nether"));
+        let level = OverworldGenerator::for_mod(data(), 0, &stem, Arc::new(Column), true).unwrap();
+        let chunk = level.worker().generate_proto(ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(chunk.terrain.min_y(), -64);
+        for (y, block) in [
+            (-64, "minecraft:air"),
+            (-1, "minecraft:air"),
+            (0, "minecraft:stone"),
+            (127, "minecraft:stone"),
+            (128, "minecraft:air"),
+        ] {
+            assert_eq!(chunk.block_name(0, y, 0), block, "y {y}");
+        }
+    }
+
+    /// In a world without placed features or structure sets, a generator that asks only for the
+    /// surface and the carvers opens, and its FEATURES status places nothing; one that asks for
+    /// features or structures is refused, naming the generator and what is missing.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn without_placed_features_only_the_terrain_stages_open() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("resources"),
+        );
+        let registry = Box::leak(Box::new(crate::level::data::load_registry(&root).unwrap()));
+        let mut bare = GeneratorData::load(&root.join("worldgen"), registry).unwrap();
+        let fields = Arc::get_mut(&mut bare).expect("a fresh load");
+        fields.feature_resources = None;
+        fields.structures = None;
+        fields.structure_resources = None;
+        let open = |stages| {
+            let stem = stem(Value::from("minecraft:overworld"));
+            OverworldGenerator::for_mod(bare.clone(), 12345, &stem, Arc::new(Slab(stages)), true)
+        };
+        let surface = VanillaStages {
+            surface: true,
+            ..Default::default()
+        };
+        let carvers = VanillaStages {
+            carvers: true,
+            ..Default::default()
+        };
+        for stages in [surface, carvers] {
+            let mut worker = open(stages).unwrap().worker();
+            let mut region: [ProtoChunk; 9] = std::array::from_fn(|i| {
+                let i = i as i32;
+                worker
+                    .generate_proto(ChunkPos::new(i % 3 - 1, i / 3 - 1))
+                    .unwrap()
+            });
+            let undecorated = blocks(&region[4]);
+            worker.decorate(&mut region).unwrap();
+            assert!(region[4].is_decorated(), "{stages:?}");
+            assert!(blocks(&region[4]) == undecorated, "{stages:?}");
+            if stages == surface {
+                assert_eq!(region[4].block_name(0, 70, 0), "minecraft:grass_block");
+            }
+        }
+        let refusal = |stages| match open(stages) {
+            Ok(_) => panic!("opened"),
+            Err(e) => e.to_string(),
+        };
+        assert_eq!(
+            refusal(VanillaStages {
+                features: true,
+                ..Default::default()
+            }),
+            "invalid generator resources: chunk generator test:slab asks for features, but the \
+             world has no placed features"
+        );
+        assert_eq!(
+            refusal(VanillaStages {
+                structures: true,
+                ..Default::default()
+            }),
+            "invalid generator resources: chunk generator test:slab asks for structures, but the \
+             world has no structure sets"
+        );
+    }
+
+    /// Stone up to a height that changes from column to column and with the seed, with every
+    /// stage after it.
+    struct Hills;
+    impl ModChunkGenerator for Hills {
+        fn build_terrain(&self, chunk: &mut dyn ChunkAccess) {
+            let (pos, stone, seed) = (chunk.pos(), chunk.state("stone"), chunk.seed() as i32);
+            for x in pos.x * 16..pos.x * 16 + 16 {
+                for z in pos.z * 16..pos.z * 16 + 16 {
+                    let top = 60 + ((x.wrapping_mul(31) ^ z.wrapping_mul(17) ^ seed) & 15);
+                    for y in chunk.min_y()..=top {
+                        chunk.set_block([x, y, z], stone);
+                    }
+                }
+            }
+        }
+        fn vanilla_stages(&self) -> VanillaStages {
+            VanillaStages {
+                surface: true,
+                carvers: true,
+                structures: true,
+                features: true,
+            }
+        }
+    }
+
+    /// Every block of `chunk`, y up, then z, then x.
+    fn blocks(chunk: &ProtoChunk) -> Vec<BlockStateId> {
+        let ChunkPos { x, z } = chunk.position();
+        (-64..320)
+            .flat_map(|y| (0..16).flat_map(move |dz| (0..16).map(move |dx| [dx, y, dz])))
+            .map(|[dx, y, dz]| chunk.block(x * 16 + dx, y, z * 16 + dz))
+            .collect()
+    }
+
+    /// The region around `center`, its chunks generated in the order of `order` (row-major
+    /// indices), as `blocks` before and after its FEATURES status.
+    fn complete(
+        worker: &mut GeneratorWorker,
+        center: ChunkPos,
+        order: impl Iterator<Item = usize>,
+    ) -> [[Vec<BlockStateId>; 9]; 2] {
+        let mut made: Vec<(usize, ProtoChunk)> = order
+            .map(|i| {
+                let (dx, dz) = (i as i32 % 3 - 1, i as i32 / 3 - 1);
+                let chunk = ChunkPos::new(center.x + dx, center.z + dz);
+                (i, worker.generate_proto(chunk).unwrap())
+            })
+            .collect();
+        made.sort_by_key(|(i, _)| *i);
+        let mut region: [ProtoChunk; 9] = made
+            .into_iter()
+            .map(|(_, chunk)| chunk)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap_or_else(|_| panic!("nine chunks"));
+        let before = std::array::from_fn(|i| blocks(&region[i]));
+        worker.decorate(&mut region).unwrap();
+        [before, std::array::from_fn(|i| blocks(&region[i]))]
+    }
+
+    /// Complete chunks of a staged hilly level are the same whichever order they are generated
+    /// in and whichever workers generate them: one worker in order, against two workers at once
+    /// on a second generator, each going backwards. The regions hold a cave crossing a chunk
+    /// border and features written into a neighbour chunk.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn complete_chunks_do_not_depend_on_order_or_workers() {
+        let stem = stem(Value::from("minecraft:overworld"));
+        let open = || OverworldGenerator::for_mod(data(), 12345, &stem, Arc::new(Hills), true);
+        let centers = [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(x, z)| ChunkPos::new(x, z));
+        let first = open().unwrap();
+        let mut worker = first.worker();
+        let ordered: Vec<_> = centers
+            .iter()
+            .map(|&center| complete(&mut worker, center, 0..9))
+            .collect();
+        let second = open().unwrap();
+        let mut shuffled: Vec<_> = std::thread::scope(|scope| {
+            let halves = [[3, 0], [2, 1]].map(|half| {
+                let second = &second;
+                scope.spawn(move || {
+                    let mut worker = second.worker();
+                    half.map(|c| (c, complete(&mut worker, centers[c], (0..9).rev())))
+                })
+            });
+            halves
+                .into_iter()
+                .flat_map(|half| half.join().unwrap())
+                .collect()
+        });
+        shuffled.sort_by_key(|(c, _)| *c);
+        for (c, (_, chunks)) in shuffled.iter().enumerate() {
+            assert!(chunks == &ordered[c], "the region around {:?}", centers[c]);
+        }
+        let name = |id: BlockStateId| first.data().registry.state(id).unwrap().name.as_str();
+        let carved = |id| {
+            matches!(
+                name(id),
+                "minecraft:air" | "minecraft:cave_air" | "minecraft:water" | "minecraft:lava"
+            )
+        };
+        // Below y 56 the hills are solid until a carver opens them; a column's index is
+        // (y + 64) * 256 + z * 16 + x.
+        let at = |x: usize, y: i32, z: usize| (y + 64) as usize * 256 + z * 16 + x;
+        let crosses = ordered.iter().any(|[before, _]| {
+            (0..9).filter(|i| i % 3 < 2).any(|i| {
+                (-60..56).any(|y| {
+                    (0..16).any(|z| {
+                        carved(before[i][at(15, y, z)]) && carved(before[i + 1][at(0, y, z)])
+                    })
+                })
+            })
+        });
+        assert!(crosses, "a cave crossing a chunk border");
+        let spills = ordered
+            .iter()
+            .any(|[before, after]| (0..9).any(|i| i != 4 && before[i] != after[i]));
+        assert!(spills, "a feature written into a neighbour chunk");
     }
 }

@@ -238,10 +238,13 @@ vanilla's order: the structure starts before the terrain, then the level's mater
 (`surface`: grass, sand, deepslate, bedrock and ore veins over every solid block) and its biomes'
 carvers, as vanilla's noise generator runs them after its noise fill, then the structure pieces
 and the biomes' placed features. The material rule, the carvers' aquifer and the height a structure
-starts at come from the level's `noise_settings`, not from the generator's terrain. A world with its
-structures turned off gets none. A level whose stem names no noise settings or ones the world lacks,
-and one that asks for structures or features in a world with no structure sets or placed features,
-refuses to open with a message naming what is missing. A level that asks for none of them costs
+starts at come from the level's `noise_settings`, not from the generator's terrain, and so does its
+sea level. With any stage, `ChunkAccess`'s `min_y` and `height` are the noise settings' range and
+`set_block` writes only inside it, as vanilla's noise fill does. A world with its structures turned
+off gets none. A level whose stem names no noise settings or ones the world lacks, one that asks for
+structures in a world with no structure sets or for structures or features in one with no placed
+features, and one that asks for features the game cannot place yet, refuses to open with a message
+naming the generator and what is missing; the surface and the carvers alone need neither. A level that asks for none of them costs
 what it did before; one that asks for any runs on vanilla's generator, with the mod's terrain in
 place of the noise.
 

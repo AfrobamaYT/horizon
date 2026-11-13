@@ -16,9 +16,11 @@ pub trait ChunkAccess {
     fn pos(&self) -> ChunkPos;
     /// The world's seed.
     fn seed(&self) -> i64;
-    /// `getMinY`: the level's lowest block Y.
+    /// The lowest block Y the terrain fills: the level's, or with
+    /// [`VanillaStages`] its noise settings'.
     fn min_y(&self) -> i32;
-    /// `getHeight`: the level's build height, from its dimension type.
+    /// The blocks up from `min_y` the terrain fills: the level's build height,
+    /// or with [`VanillaStages`] its noise settings' height.
     fn height(&self) -> i32;
     /// A block state by block name (`stone`, `minecraft:oak_log`), with its
     /// default properties; air for a block the game doesn't have.
@@ -27,7 +29,7 @@ pub trait ChunkAccess {
     /// missing properties keep defaults.
     fn state_with(&self, name: &str, properties: &[(&str, &str)]) -> BlockStateId;
     /// `setBlockState`: write `state` at `pos`, answering whether it was
-    /// written. A position outside the chunk or the build height is skipped.
+    /// written. A position outside the chunk or that range is skipped.
     fn set_block(&mut self, pos: [i32; 3], state: BlockStateId) -> bool;
 }
 

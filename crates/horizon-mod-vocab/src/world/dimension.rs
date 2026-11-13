@@ -167,8 +167,9 @@ pub struct DimensionSettings {
     /// `Level.getSeaLevel`: the sea level mob spawning, rain and snow, maps and phantoms use. With
     /// `None` it is the noise settings' own for `minecraft:noise`, and the Overworld's 63 for a
     /// chunk generator a mod registered, which reads none; `Some` is for that generator, whose
-    /// terrain the game cannot read a sea level from. A level of `minecraft:noise` keeps its noise
-    /// settings' sea level, which the terrain is built with.
+    /// terrain the game cannot read a sea level from. A level of `minecraft:noise`, and one whose
+    /// chunk generator asks for vanilla stages, keeps its noise settings' sea level, which the
+    /// stages are built with.
     pub sea_level: Option<i32>,
     /// When a player can sleep in a bed here (`BedRule.canSleep`): `always`, `when_dark` or `never`.
     pub bed_can_sleep: String,

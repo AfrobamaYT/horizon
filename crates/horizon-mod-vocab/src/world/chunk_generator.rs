@@ -22,9 +22,12 @@ pub trait ChunkAccess {
     fn pos(&self) -> ChunkPos;
     /// The world's seed.
     fn seed(&self) -> i64;
-    /// `getMinY`: the level's lowest block Y.
+    /// The lowest block Y the terrain fills: the level's (`getMinY`), or with
+    /// [`VanillaStages`] its noise settings', as vanilla's noise fill reads them.
     fn min_y(&self) -> i32;
-    /// `getHeight`: the level's build height, from its dimension type.
+    /// How many blocks up from [`min_y`](Self::min_y) the terrain fills: the
+    /// level's build height (`getHeight`), or with [`VanillaStages`] its noise
+    /// settings' height inside it.
     fn height(&self) -> i32;
     /// The block's default state. Resolve before the terrain-writing loop.
     fn state(&self, block: BlockKey) -> BlockState;
@@ -32,7 +35,8 @@ pub trait ChunkAccess {
     /// Resolve before the terrain-writing loop, never once per placed block.
     fn state_with(&self, block: BlockKey, properties: &[(&str, &str)]) -> BlockState;
     /// `setBlockState`: write `state` at `pos`, answering whether it was written. A position
-    /// outside the chunk or the build height is skipped.
+    /// outside the chunk or the range [`min_y`](Self::min_y) and [`height`](Self::height) give is
+    /// skipped.
     fn set_block(&mut self, pos: [i32; 3], state: BlockState) -> bool;
 }
 
@@ -45,6 +49,7 @@ pub trait ChunkAccess {
 /// generator's terrain alone.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 // exhaustive: a generator builds it with a literal as its vanilla_stages answer
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct VanillaStages {
     /// The level's material rule over the terrain: grass, sand, deepslate,
     /// bedrock and ore veins, from its `noise_settings`.

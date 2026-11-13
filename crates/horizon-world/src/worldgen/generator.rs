@@ -1487,7 +1487,9 @@ where
     /// with the state it already has. Check their imported material flags too.
     /// Noise filling already built the WG maps; these writes add no fluid marks.
     fn identity_end_surface(&self, pos: ChunkPos) -> bool {
-        if !matches!(self.source, ResolvedBiomeSource::End(_))
+        // A mod's terrain is not the noise's default block.
+        if self.mod_terrain.is_some()
+            || !matches!(self.source, ResolvedBiomeSource::End(_))
             // At wrapped block coordinates the ordinary biome-region lookup
             // can fail; retain that lookup and its error outside this range.
             || ![pos.x, pos.z].into_iter().all(|c| {
@@ -1738,7 +1740,7 @@ where
         };
         context.set_lattice(lattice);
         let filled = match &self.mod_terrain {
-            Some(terrain) => terrain.fill(&mut chunk, data.registry, self.seed),
+            Some(terrain) => terrain.fill(&mut chunk, data.registry, self.seed, [min, height]),
             None => fill_noise(
                 &mut chunk,
                 volume,
@@ -2620,6 +2622,14 @@ where
                     &mut random,
                     self.structures.as_ref(),
                 )
+            }
+            // A mod's level that asks for neither structures nor features has nothing to place.
+            None if self.mod_terrain.is_some() => {
+                region[4]
+                    .terrain
+                    .set_generation_stage(PreLightChunkStage::Features);
+                region[4].set_decorated();
+                Ok(DecorateStats::default())
             }
             None => Err(resource("decoration resources were not loaded")),
         }
