@@ -108,7 +108,9 @@ impl Hooks for Scene {
         let zombie = Arc::new(Zombie(self.heard.clone()));
         event.renderers.register("minecraft:zombie".into(), zombie);
         let skeleton = self.skeleton.clone();
-        event.renderers.register("minecraft:skeleton".into(), skeleton);
+        event
+            .renderers
+            .register("minecraft:skeleton".into(), skeleton);
     }
     fn register_entity_layers(
         &self,
@@ -281,7 +283,12 @@ fn a_failed_renderer_draws_the_types_model_until_a_resource_reload() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_sleeping_or_baby_frame_reads_as_the_model_lays_it() {
     super::native_entity_refs::tests::with_client_game(|game| {
-        let kind = game.res.mob_types().get("minecraft:villager").unwrap().clone();
+        let kind = game
+            .res
+            .mob_types()
+            .get("minecraft:villager")
+            .unwrap()
+            .clone();
         let at = horizon_core::geometry::Vec3::new(0.5, 64.0, 0.5);
         let mut villager = Mob::new(94, kind, at, 0.0);
         // A baby asleep in a bed facing east.
@@ -293,5 +300,33 @@ fn a_sleeping_or_baby_frame_reads_as_the_model_lays_it() {
         assert_eq!(living.bed_orientation, Some(mod_api::Direction::East));
         assert!(living.is_baby);
         assert_eq!(living.age_scale, 0.5);
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn own_yaw_is_independent_of_body_rotation_across_a_wrap() {
+    super::native_entity_refs::tests::with_client_game(|game| {
+        let kind = game
+            .res
+            .mob_types()
+            .get("minecraft:zombie")
+            .unwrap()
+            .clone();
+        let mut mob = Mob::new(
+            95,
+            kind,
+            horizon_core::geometry::Vec3::new(0.5, 64.0, 0.5),
+            10.0,
+        );
+        mob.previous_yaw = 350.0;
+        mob.previous_body_yaw = 30.0;
+        mob.body_yaw = 50.0;
+        mob.previous_head_yaw = 70.0;
+        mob.head_yaw = 90.0;
+        let state = super::native_mob_draw::entity_render_state(&mob, 95, 0.5);
+        assert_eq!(state.yaw, 360.0); // The shortest interpolation reaches 0 degrees modulo 360.
+        assert_eq!(state.living.unwrap().body_rot, 40.0);
+        assert_eq!(state.living.unwrap().y_rot, 40.0);
     });
 }

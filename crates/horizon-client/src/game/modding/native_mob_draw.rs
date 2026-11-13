@@ -122,7 +122,7 @@ pub(super) fn entity_render_state(m: &Mob, id: u32, partial: f32) -> EntityRende
         id,
         partial,
         age: pose.age,
-        yaw: body_rot,
+        yaw: m.previous_yaw + horizon_client::mobs::living::wrap(m.yaw - m.previous_yaw) * partial,
         pitch: pose.x_rot,
         living: Some(living.into()),
     }

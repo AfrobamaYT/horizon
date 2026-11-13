@@ -224,7 +224,10 @@ impl Game<'_> {
         let entity = entity_render_state(mob, id, partial);
         let feet = mob.previous.lerp(mob.position, f64::from(partial));
         let feet = DVec3::new(feet.x, feet.y, feet.z);
-        let pose = mob_pose(feet - camera, entity.yaw);
+        let pose = mob_pose(
+            feet - camera,
+            entity.living.expect("mob living state").body_rot,
+        );
         let block = [feet.x, feet.y, feet.z].map(|c| c.floor() as i32);
         for layer in layers.iter() {
             self.guarded_entity_draw(&layer.failed, partial, block, pose, light, out, |draw| {
