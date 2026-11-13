@@ -37,7 +37,7 @@ enum Biomes {
 }
 
 impl ModTerrain {
-    /// The terrain of the level with stem `stem`, if `generators` has the
+    /// The terrain of the level `level` with stem `stem`, if `generators` has the
     /// generator it names and it asks for no vanilla stage: over the biome source of `sources` its
     /// `biome_source` names, else over its one biome. `biome_id` numbers a
     /// biome the world has. A registered source naming a biome the world lacks
