@@ -13,3 +13,7 @@ horizon-client game::viewed_worlds::tests::with_no_listener_a_viewed_sound_is_dr
 # Mod pet owner credit and shoulder identity fixtures.
 horizon-client game::combat::pet_credit_tests::a_tame_mod_wolf_types_hit_is_its_owners HORIZON_TEST_RESOURCES needs
 horizon-client game::shoulders::mod_parrot_tests::a_mod_parrot_type_rides_a_shoulder_as_itself HORIZON_TEST_RESOURCES needs
+
+# Viewed-level sound delivery through the server tick.
+horizon-client game::view_pass::tests::a_sound_in_a_viewed_level_reaches_its_viewer_through_tick_server HORIZON_TEST_RESOURCES needs
+horizon-client game::view_pass::tests::a_sound_bound_to_a_viewed_entity_reaches_the_view_tracking_it HORIZON_TEST_RESOURCES needs

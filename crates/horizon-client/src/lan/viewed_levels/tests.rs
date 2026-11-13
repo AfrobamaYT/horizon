@@ -844,6 +844,7 @@ fn wrapped_sounds(got: &[Got]) -> Vec<(i32, horizon_protocol::packets::play::Sou
 /// plus 16 blocks of it. A viewer without the chunk, one beyond the distance and a client of
 /// revision 2 get nothing; nothing is sent plain.
 #[test]
+#[ignore = "daily"]
 fn a_viewed_sound_reaches_a_viewer_holding_its_chunk_within_its_distance() {
     // 1 and 3 view a radius-3 square at (0, 0), 2 the one chunk (5, 0); 3 answered revision 2.
     let (mut hub, rx) = hub_with(&[1, 2, 3], 2);
@@ -911,6 +912,7 @@ fn a_viewed_sound_reaches_a_viewer_holding_its_chunk_within_its_distance() {
 /// With no client viewing a level, or none holding a sound's chunk, no wrapped copy of the sound
 /// is built.
 #[test]
+#[ignore = "daily"]
 fn with_no_viewer_no_copy_is_built() {
     let (mut hub, rx) = hub_with(&[1], 2);
     let built = || -> Vec<u8> { panic!("a copy was built") };
