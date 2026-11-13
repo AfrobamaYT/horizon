@@ -463,6 +463,9 @@ fn a_structs_field_set_is_its_fields_hash_not_its_own_hash() {
         .map(|b| format!("{b:02x}"))
         .collect();
     assert_eq!(before.fields_hash.as_deref(), Some(expected.as_str()));
+    // A literal names fields in any order: moving one changes nothing.
+    let moved = plain_struct(&[("sky", "bool"), ("height", "i32")]);
+    assert_eq!(moved.fields_hash, after.fields_hash);
     // Its trait impls are a set beside the hash.
     let mut with_impl = plain_struct(&[("height", "i32")]);
     with_impl.impls = vec!["Hash".into()];
@@ -552,4 +555,39 @@ fn how_a_type_crosses_and_whether_a_struct_can_be_built_are_outside_its_hash() {
         Type::new("type:Settings", "", None, contract, vec![], vec![]).hash
     };
     assert_ne!(enum_with(true), enum_with(false));
+}
+
+#[test]
+fn an_argument_references_only_the_items_its_own_type_names_by_path() {
+    let mut contract = hook_with(1, &[]).contract;
+    contract.arguments = vec![
+        Argument {
+            name: "left".into(),
+            ty: "a::Item".into(),
+        },
+        Argument {
+            name: "right".into(),
+            ty: "&'a mut Vec<b::Item>".into(),
+        },
+    ];
+    contract.refs = vec!["type:a::Item".into(), "type:b::Item".into()];
+    let hook = Hook::new(
+        "hook:joined",
+        "",
+        HookEngine::default(),
+        Counterparts::default(),
+        contract,
+    );
+    let refs: Vec<&[String]> = hook
+        .fields
+        .iter()
+        .map(|f| f.contract.refs.as_slice())
+        .collect();
+    assert_eq!(
+        refs,
+        [
+            &["hook:joined".to_owned(), "type:a::Item".to_owned()][..],
+            &["hook:joined".to_owned(), "type:b::Item".to_owned()][..],
+        ]
+    );
 }

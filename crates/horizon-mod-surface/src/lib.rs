@@ -68,9 +68,11 @@
 //! typed [`ReadError`], and ignores fields it does not know. It does not recompute record
 //! hashes: a newer writer may hash contract fields this reader does not know, and the file's
 //! integrity is the signature's job.
+pub mod diff;
 pub mod records;
 pub mod shape;
 
+pub use diff::{Diff, Verdict, diff};
 pub use records::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -227,7 +229,7 @@ impl Hook {
                 let mut refs: Vec<String> = contract
                     .refs
                     .iter()
-                    .filter(|r| mentions(&argument.ty, leaf(r)))
+                    .filter(|r| names(&argument.ty, r))
                     .cloned()
                     .collect();
                 refs.push(id.clone());
@@ -254,13 +256,17 @@ impl Hook {
     }
 }
 
-/// Whether the normalised type `ty` names an item whose last segment is `name`.
-fn mentions(ty: &str, name: &str) -> bool {
-    ty.split(|c: char| !(c.is_alphanumeric() || c == '_'))
-        .any(|word| word == name)
+/// Whether the normalised type `ty` names the item `id` by its full path: `a::Item` and
+/// `b::Item` are different items.
+fn names(ty: &str, id: &str) -> bool {
+    let path = id.split_once(':').map_or(id, |(_, path)| path);
+    ty.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':'))
+        .any(|word| word == path)
 }
 
-/// The hash of a struct's field set: each public field's `name: type` in declaration order.
+/// The hash of a struct's field set: each public field's `name: type`, sorted. A literal or a
+/// pattern names fields in any order, so moving a field changes nothing; a tuple struct's
+/// field names are its positions, so moving one of its fields still changes the set.
 pub fn fields_hash(fields: &[Field]) -> String {
     fields_hash_of(
         fields
@@ -272,14 +278,12 @@ pub fn fields_hash(fields: &[Field]) -> String {
 /// [`fields_hash`] of `(name, type)` pairs: the exporter's, over every public field a literal
 /// must name, `#[doc(hidden)]` ones included.
 pub fn fields_hash_of<'a>(fields: impl IntoIterator<Item = (&'a str, &'a str)>) -> String {
-    let mut text = String::new();
-    for (name, ty) in fields {
-        text.push_str(name);
-        text.push_str(": ");
-        text.push_str(ty);
-        text.push('\n');
-    }
-    shape::digest(&text)
+    let mut lines: Vec<String> = fields
+        .into_iter()
+        .map(|(name, ty)| format!("{name}: {ty}\n"))
+        .collect();
+    lines.sort();
+    shape::digest(&lines.concat())
 }
 
 impl Trait {
