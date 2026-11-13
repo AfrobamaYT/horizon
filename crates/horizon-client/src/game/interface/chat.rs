@@ -1743,7 +1743,10 @@ impl Game<'_> {
         Some(horizon_protocol::crypto::uuid_string(bits))
     }
     pub(super) fn draw_chat_screen(&mut self, batch: &mut HudBatch) {
+        self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Background);
+        self.gui_layer("minecraft:chat", batch, |g, batch| g.draw_chat(batch));
         let Some(mut screen) = self.ui.chat_screen.take() else {
+            self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Foreground);
             return;
         };
         // ChatScreen.updateNarrationState: the restricted prompt is
@@ -1771,16 +1774,18 @@ impl Game<'_> {
             .chat_opened
             .map_or(0, |t| t.elapsed().as_millis() as u64);
         let draws = screen.draw(&m, mouse, blink, background);
-        horizon_client::screen_draw::paint(batch, &self.gui.atlas, &draws);
         self.ui.chat_screen = Some(screen);
+        let tooltip = horizon_client::screen_draw::paint(batch, &self.gui.atlas, &draws);
         if in_bed {
             let (w, h) = (batch.width, batch.height);
             let rect = self
                 .built_chat(w, h)
                 .map_or_else(|| Self::leave_bed_button(w, h), |l| l.leave_bed);
             let button = Self::leave_bed_draws(&m, mouse, rect);
-            horizon_client::screen_draw::paint(batch, &self.gui.atlas, &button);
+            let _ = horizon_client::screen_draw::paint(batch, &self.gui.atlas, &button);
         }
+        self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Foreground);
+        horizon_client::screen_draw::paint_tooltip(batch, &self.gui.atlas, &draws, tooltip);
         // The hovered message part's tooltip (`renderComponentHoverEffect`),
         // or the text of the message tag under the cursor.
         let height = batch.height as i32;

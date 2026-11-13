@@ -277,17 +277,27 @@ impl PackOptionsUi {
         }
     }
 
-    pub fn draw(
+    pub(crate) fn draw_background(
         &mut self,
         batch: &mut HudBatch,
         atlas: &HudAtlas,
-        cursor: (f32, f32),
         in_world: bool,
-    ) {
+    ) -> (Columns, Vec<Line<u16, u16>>, f32) {
         let (w, h) = (batch.width, batch.height);
         let (cols, lines, content) = self.layout(w, h);
         self.scroll.clamp(cols.top, cols.bottom, content);
         shell::backdrop(batch, atlas, in_world);
+        style::panel(batch, atlas, cols.plate);
+        style::panel(batch, atlas, cols.dock);
+        (cols, lines, content)
+    }
+    pub(crate) fn draw_contents(
+        &mut self,
+        batch: &mut HudBatch,
+        atlas: &HudAtlas,
+        cursor: (f32, f32),
+        (cols, lines, content): (Columns, Vec<Line<u16, u16>>, f32),
+    ) {
         shell::mark(
             batch,
             atlas,
@@ -338,7 +348,6 @@ impl PackOptionsUi {
         shell::scroller(batch, atlas, &cols, content, self.scroll.amount);
         // The strip: the pointed-at entry's tooltip.
         let [x, y, ..] = cols.dock;
-        style::panel(batch, atlas, cols.dock);
         if let Some(row) = described {
             let name = Text::literal(self.parts(row).0);
             batch.text_styled(atlas, &name, x + 12.0, y + 8.0, style::WHITE, true);
