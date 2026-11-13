@@ -14,7 +14,9 @@ pub trait ChunkAccess {
     fn registry(&self) -> &'static crate::registry::BlockRegistry;
     /// `ChunkAccess.getPos`.
     fn pos(&self) -> ChunkPos;
-    /// The world's seed.
+    /// The id of the level this chunk belongs to.
+    fn level(&self) -> &str;
+    /// The level's seed: the world's seed.
     fn seed(&self) -> i64;
     /// The lowest block Y the terrain fills: the level's, or with
     /// [`VanillaStages`] its noise settings'.

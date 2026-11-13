@@ -986,6 +986,7 @@ fn mod_terrain(
         );
     }
     horizon_client::modgen::ModTerrain::for_stem(
+        dim.id(),
         &stem,
         generators,
         mod_biome_sources(),

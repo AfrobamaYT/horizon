@@ -368,6 +368,7 @@ mod tests {
         struct Marker(mod_api::BlockKey);
         impl mod_api::ChunkGenerator for Marker {
             fn build_terrain(&self, chunk: &mut dyn ChunkAccess) {
+                assert_eq!(chunk.level(), "test:pocket");
                 let state = chunk.state(self.0);
                 assert_eq!(chunk.metadata().name(state.block()), Ok("minecraft:stone"));
                 assert!(chunk.set_block([1, chunk.min_y(), 2], state));
@@ -394,6 +395,9 @@ mod tests {
             }
             fn pos(&self) -> ChunkPos {
                 ChunkPos::new(0, 0)
+            }
+            fn level(&self) -> &str {
+                "test:pocket"
             }
             fn seed(&self) -> i64 {
                 0

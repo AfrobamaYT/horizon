@@ -20,7 +20,10 @@ pub trait ChunkAccess {
     fn metadata(&self) -> &dyn BlockMetadata;
     /// `ChunkAccess.getPos`.
     fn pos(&self) -> ChunkPos;
-    /// The world's seed.
+    /// The id of the level this chunk belongs to (`mymod:pocket`), so one stateless generator
+    /// can tell the levels it serves apart.
+    fn level(&self) -> &str;
+    /// The level's seed: the world's seed.
     fn seed(&self) -> i64;
     /// The lowest block Y the terrain fills: the level's (`getMinY`), or with
     /// [`VanillaStages`] its noise settings', as vanilla's noise fill reads them.
