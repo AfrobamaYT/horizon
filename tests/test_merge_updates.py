@@ -26,7 +26,7 @@ class Summary(unittest.TestCase):
         self.assertEqual(mu.summary(None), "")
         message = mu.payload("sync", "merged", "Sync 34", "https://example/pr/9", "no heading")
         self.assertEqual(message["embeds"][0], {
-            "title": "Sync 34", "url": "https://example/pr/9", "color": 0x2ECC71,
+            "title": "Merged: Sync 34", "url": "https://example/pr/9", "color": 0x2ECC71,
             "footer": {"text": "Sync merged"},
         })
 
@@ -58,6 +58,7 @@ class Payload(unittest.TestCase):
         self.assertEqual(message["allowed_mentions"], {"parse": []})
         self.assertEqual(embed["color"], 0x3498DB)
         self.assertEqual(embed["footer"], {"text": "Rollup opened"})
+        self.assertTrue(embed["title"].startswith("Opened: ttt"), embed["title"])
         self.assertLessEqual(len(embed["title"]), 250)
         self.assertLessEqual(len(embed["description"]), 3500)
         self.assertEqual(embed["description"], "p" * 2000 + "…")
