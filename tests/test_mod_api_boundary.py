@@ -2,6 +2,7 @@
 `mod_api::__private`."""
 from pathlib import Path
 import re
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +33,37 @@ def api_text():
     return "\n".join(api_source(p) for p in api_files())
 
 
+def pub_items(path):
+    """Names of the top-level `pub` items of a rustfmt-formatted Rust file, `pub use` names included."""
+    text = path.read_text()
+    declared = re.findall(r"^pub (?:unsafe )?(?:struct|enum|union|trait|type|fn|const|static|mod|macro) (\w+)", text, re.M)
+    return set(declared) | use_names(text, path.parent.parent)
+
+
+def use_names(text, src):
+    """The names the `pub use` lines of `text` bind; a glob of `<domain>::types` (relative to `src`) is expanded to
+    that file's `pub` items, any other glob stays `*`."""
+    found = set()
+    for path in re.findall(r"^\s*pub use ([^;]*);", text, re.M):
+        if "{" in path:
+            prefix, rest = path.split("{", 1)
+            leaves = [prefix + n.strip() for n in re.sub(r"[{}\s]", " ", rest).split(",") if n.strip()]
+        else:
+            leaves = [path.strip()]
+        for leaf in leaves:
+            glob = re.fullmatch(r"(\w+)::types::\*", leaf.replace(" ", ""))
+            if glob and (src / glob[1] / "types.rs").is_file():
+                found |= pub_items(src / glob[1] / "types.rs")
+            else:
+                found.add(leaf.split(" as ")[-1].split("::")[-1].strip())
+    return found
+
+
+def game_side_api_names(api, private, src):
+    """Names re-exported both as API (`api` text) and on the game's side (`private` text)."""
+    return use_names(api, src) & (use_names(private, src) - {"*"})
+
+
 def preceding(lines, i):
     """The attribute, doc and comment lines directly above line `i`, nearest first."""
     found = []
@@ -59,24 +91,23 @@ class ModApiBoundaryTests(unittest.TestCase):
         self.assertEqual(missing, [], "add #[non_exhaustive], or a `// exhaustive: <why>` line above the type")
 
     def test_the_game_side_is_reached_only_through_private(self):
-        def names(text):
-            found = set()
-            for path in re.findall(r"^\s*pub use ([^;]*);", text, re.M):
-                if "{" in path:
-                    found |= {n.split(" as ")[-1].split("::")[-1].strip()
-                              for n in re.sub(r"[{}\s]", " ", path.split("{", 1)[1]).split(",") if n.strip()}
-                else:
-                    found.add(path.split(" as ")[-1].split("::")[-1].strip())
-            return found
         # `built` holds copies under the API's own names, so it is left out.
         private = re.sub(r"\npub mod built \{.*?\n\}\n", "\n", (API / "__private.rs").read_text(), flags=re.S)
         fragments = sorted((API / "exports").glob("*.rs"))
         private += "\n" + "\n".join(fragment_scope(path, scope) for path in fragments
                                     for scope in [("__private",), ("__private", "game"),
                                                   ("__private", "reload"), ("__private", "wasm_host")])
-        game = names(private) - {"*"}
-        api = names((API / "lib.rs").read_text() + "\n" + "\n".join(api_source(p) for p in fragments))
-        self.assertEqual(api & game, set(), "a game-side item is re-exported as API")
+        api = (API / "lib.rs").read_text() + "\n" + "\n".join(api_source(p) for p in fragments)
+        self.assertEqual(game_side_api_names(api, private, API), set(), "a game-side item is re-exported as API")
+
+    def test_a_game_side_name_behind_a_types_glob_is_caught(self):
+        with tempfile.TemporaryDirectory() as src:
+            (Path(src) / "block").mkdir()
+            (Path(src) / "block/types.rs").write_text(
+                "use crate::*;\n/// Docs.\n#[non_exhaustive]\npub struct BlockKey;\npub(crate) struct Hidden;\n"
+                "pub fn game_tick() {}\nimpl BlockKey {\n    pub fn inner() {}\n}\n")
+            private = "pub use crate::game::{game_tick, inner};\npub use crate::generated::calls::*;"
+            self.assertEqual(game_side_api_names("pub use block::types::*;", private, Path(src)), {"game_tick"})
 
     def test_doc_hidden_outside_private_says_why(self):
         # `__private` is the game's side. Elsewhere an item is hidden only with a
