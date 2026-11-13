@@ -64,7 +64,42 @@ class DailyRowsCoverage(unittest.TestCase):
         result = subprocess.run([sys.executable, str(ROOT / "tools/ci/check_ignored_test_rows.py")],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("0 that no daily leg runs", result.stdout)
+        self.assertIn("; 0 problems", result.stdout)
+
+
+class DailyRowsMatchTheSource(unittest.TestCase):
+    """The rows and the `#[ignore = "daily"]` attributes agree both ways, by package and function name."""
+    CLIENT = {"horizon-client", "horizon-client-lib"}
+
+    def test_the_committed_rows_and_attributes_agree(self):
+        functions = check.daily_functions()
+        self.assertTrue(functions)
+        self.assertEqual(check.source_problems(ignored_tests.daily_rows(), functions), [])
+
+    def test_an_attribute_without_a_row_fails_with_what_to_do(self):
+        problems = check.source_problems([], [("crates/horizon-relay/tests/tunnel.rs", 9, "slow", {"horizon-relay"})])
+        self.assertEqual(len(problems), 1)
+        self.assertTrue(problems[0].startswith("crates/horizon-relay/tests/tunnel.rs:9: `slow` is #[ignore"))
+        self.assertIn("tools/ci/move_to_daily.py apply", problems[0])
+
+    def test_a_row_without_an_attribute_fails_with_what_to_do(self):
+        problems = check.source_problems([row("horizon-relay", "gone", "test:tunnel")], [])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("horizon-relay gone: no function `gone`", problems[0])
+        self.assertIn("restore the attribute", problems[0])
+
+    def test_a_function_built_into_two_targets_has_one_attribute_and_a_row_per_target(self):
+        functions = [("crates/horizon-client-render/src/gfx/sunrise_fan.rs", 186, "angular", {"horizon-client-render"})]
+        rows = [row("horizon-client-render", "gfx::sunrise_fan::tests::angular"),
+                row("horizon-client-render", "sunrise_fan::tests::angular", "test:sunrise_shader")]
+        self.assertEqual(check.source_problems(rows, functions), [])
+
+    def test_a_shared_source_folder_belongs_to_both_packages(self):
+        owners = check.source_packages()
+        self.assertEqual(owners["crates/horizon-client"], self.CLIENT)
+        functions = [("crates/horizon-client/src/save.rs", 3, "slow", self.CLIENT)]
+        self.assertEqual(check.source_problems([row("horizon-client-lib", "save::tests::slow")], functions), [])
+        self.assertEqual(len(check.source_problems([row("horizon-world", "save::tests::slow")], functions)), 2)
 
 
 if __name__ == "__main__":
