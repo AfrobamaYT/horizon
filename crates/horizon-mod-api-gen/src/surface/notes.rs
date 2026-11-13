@@ -11,7 +11,7 @@
 //! mistyped key and an empty `ids` with a typed [`NoteError`]. A note is *new* when the base
 //! tree has no file of that name or a different one; only new notes are attached to a diff, and
 //! a new note that names an id the diff does not list is stale.
-use mod_surface::Note;
+use mod_surface::diff::Note;
 use std::path::Path;
 
 /// A note as read: its text and the ids it names.

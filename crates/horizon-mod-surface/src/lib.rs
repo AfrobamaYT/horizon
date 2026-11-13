@@ -71,7 +71,7 @@ pub mod scan;
 pub mod shape;
 pub mod uses;
 
-pub use diff::{Change, ChangeKind, Class, Diff, Note, Verdict, diff};
+pub use diff::{Diff, Verdict, diff};
 pub use records::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};

@@ -109,8 +109,6 @@ fn contract(kind: TypeKind, constructible: bool, members: &[&str]) -> TypeContra
     TypeContract {
         kind,
         generics: String::new(),
-        derives: vec![],
-        impls: vec![],
         wire: false,
         wire_form: None,
         constructible,
@@ -121,19 +119,12 @@ fn contract(kind: TypeKind, constructible: bool, members: &[&str]) -> TypeContra
     }
 }
 
-/// A struct; `constructible` lists its fields in the contract as the generator does.
 fn structure(name: &str, constructible: bool, fields: &[(&str, &str)]) -> Type {
-    let members: Vec<String> = fields.iter().map(|(n, t)| format!("{n}: {t}")).collect();
-    let members: Vec<&str> = members.iter().map(String::as_str).collect();
     Type::new(
         format!("type:{name}"),
         "",
         None,
-        contract(
-            TypeKind::Struct,
-            constructible,
-            if constructible { &members } else { &[] },
-        ),
+        contract(TypeKind::Struct, constructible, &[]),
         fields.iter().map(|(n, t)| field(name, n, t)).collect(),
         vec![],
     )
@@ -224,7 +215,7 @@ fn identical_surfaces_have_no_changes() {
     assert!(d.changes.is_empty());
     assert!(
         d.to_text()
-            .starts_with("Surface: identical (0 breaking, 0 additive")
+            .starts_with("Surface: identical (0 breaking, 0 conditional, 0 additive")
     );
 }
 
@@ -292,7 +283,7 @@ fn a_retyped_hook_argument_is_breaking_and_named() {
     assert_eq!(
         only(&diff(&old, &new)),
         (
-            "hook:player_logged_in",
+            "hook:player_logged_in.player",
             ChangeKind::Changed,
             Class::Breaking,
             vec!["argument `player`: `PlayerRef` → `ServerPlayerRef`"],
@@ -302,7 +293,7 @@ fn a_retyped_hook_argument_is_breaking_and_named() {
 }
 
 #[test]
-fn a_new_or_removed_hook_argument_is_breaking() {
+fn a_new_hook_argument_is_conditional_and_a_removed_one_breaks() {
     let old = hooks(vec![hook("tick", Side::Server, &[("level", "LevelRef")])]);
     let new = hooks(vec![hook(
         "tick",
@@ -310,16 +301,76 @@ fn a_new_or_removed_hook_argument_is_breaking() {
         &[("level", "LevelRef"), ("phase", "u8")],
     )]);
     let d = diff(&old, &new);
-    let (_, _, class, what, _) = only(&d);
+    assert_eq!(d.verdict, Verdict::Conditional);
+    assert_eq!(d.undeclared().count(), 0);
     assert_eq!(
-        (class, what),
-        (Class::Breaking, vec!["argument `phase: u8` added"])
+        only(&d),
+        (
+            "hook:tick.phase",
+            ChangeKind::Added,
+            Class::Conditional,
+            vec![
+                "argument `phase: u8` added to `tick`: breaks only a mod that builds this hook's event field by field, without `..`"
+            ],
+            vec![]
+        )
     );
-    let d = diff(&new, &old);
-    let (_, _, class, what, _) = only(&d);
     assert_eq!(
-        (class, what),
-        (Class::Breaking, vec!["argument `phase` removed"])
+        only(&diff(&new, &old)),
+        (
+            "hook:tick.phase",
+            ChangeKind::Removed,
+            Class::Breaking,
+            vec!["removed"],
+            vec![]
+        )
+    );
+}
+
+#[test]
+fn a_hook_version_is_conditional() {
+    let old = hooks(vec![hook("tick", Side::Server, &[])]);
+    let mut new = old.clone();
+    new.hooks[0].contract.version = 2;
+    assert_eq!(new.hooks[0].hash, old.hooks[0].hash);
+    assert_eq!(
+        only(&diff(&old, &new)),
+        (
+            "hook:tick",
+            ChangeKind::Changed,
+            Class::Conditional,
+            vec![
+                "version 1 → 2: affects only a mod that names this hook's version in its manifest"
+            ],
+            vec![]
+        )
+    );
+}
+
+#[test]
+fn a_hook_that_gains_an_output_breaks_and_carries_it() {
+    let old = hooks(vec![hook("damage", Side::Server, &[])]);
+    let mut contract = old.hooks[0].contract.clone();
+    contract.output = Some(Argument {
+        name: "amount".into(),
+        ty: "f32".into(),
+    });
+    let new = hooks(vec![Hook::new(
+        "hook:damage",
+        "",
+        HookEngine::default(),
+        Counterparts::default(),
+        contract,
+    )]);
+    assert_eq!(
+        only(&diff(&old, &new)),
+        (
+            "hook:damage",
+            ChangeKind::Changed,
+            Class::Breaking,
+            vec!["now has an output"],
+            vec!["hook:damage.amount"]
+        )
     );
 }
 
@@ -363,34 +414,51 @@ fn a_changed_signature_is_breaking_and_shown() {
 }
 
 #[test]
-fn a_field_on_a_constructible_struct_is_one_breaking_change_on_the_container() {
+fn a_field_on_a_constructible_struct_is_conditional_and_named() {
     let old = types(vec![structure("Pos", true, &[("x", "i32")])]);
     let new = types(vec![structure("Pos", true, &[("x", "i32"), ("y", "i32")])]);
     let d = diff(&old, &new);
-    assert_eq!(d.verdict, Verdict::Breaking);
+    assert_eq!(d.verdict, Verdict::Conditional);
     assert_eq!(
         only(&d),
         (
-            "type:Pos",
-            ChangeKind::Changed,
-            Class::Breaking,
-            vec!["field `y: i32` added: a `Pos { .. }` literal in a mod no longer compiles"],
-            vec!["type:Pos.y"]
+            "type:Pos.y",
+            ChangeKind::Added,
+            Class::Conditional,
+            vec![
+                "field `y: i32` added to `Pos`: breaks only a mod that builds `Pos` field by field, without `..`"
+            ],
+            vec![]
         )
     );
 }
 
 #[test]
-fn a_retyped_field_of_a_constructible_struct_is_reported_once() {
+fn a_retyped_field_is_breaking_and_named() {
     let old = types(vec![structure("Pos", true, &[("x", "i32")])]);
     let new = types(vec![structure("Pos", true, &[("x", "i64")])]);
     assert_eq!(
         only(&diff(&old, &new)),
         (
-            "type:Pos",
+            "type:Pos.x",
             ChangeKind::Changed,
             Class::Breaking,
             vec!["field `x`: `i32` → `i64`"],
+            vec![]
+        )
+    );
+}
+
+#[test]
+fn a_new_constructible_struct_is_additive_with_its_fields() {
+    let new = types(vec![structure("Pos", true, &[("x", "i32")])]);
+    assert_eq!(
+        only(&diff(&types(vec![]), &new)),
+        (
+            "type:Pos",
+            ChangeKind::Added,
+            Class::Additive,
+            vec!["added"],
             vec!["type:Pos.x"]
         )
     );
@@ -530,32 +598,92 @@ fn a_removed_container_carries_its_members() {
     );
 }
 
+fn with_impls(impls: &[&str]) -> Surface {
+    let mut surface = types(vec![structure("Id", false, &[])]);
+    surface.types[0].impls = impls.iter().map(|i| (*i).into()).collect();
+    surface
+}
+
 #[test]
-fn a_derive_added_is_additive_and_one_removed_breaks() {
-    let plain = types(vec![structure("Id", false, &[])]);
-    let mut derived = plain.clone();
-    derived.types[0] = Type::new(
+fn an_impl_gained_is_additive_and_one_lost_breaks_by_name() {
+    let plain = with_impls(&["Clone"]);
+    let hashed = with_impls(&["Clone", "Hash"]);
+    assert_eq!(hashed.types[0].hash, plain.types[0].hash);
+    assert_eq!(
+        only(&diff(&plain, &hashed)),
+        (
+            "type:Id",
+            ChangeKind::Changed,
+            Class::Additive,
+            vec!["now implements `Hash`"],
+            vec![]
+        )
+    );
+    assert_eq!(
+        only(&diff(&hashed, &plain)),
+        (
+            "type:Id",
+            ChangeKind::Changed,
+            Class::Breaking,
+            vec!["the type `Id` no longer implements `Hash`"],
+            vec![]
+        )
+    );
+    // A derive that becomes a hand-written impl is the same entry: nothing changed.
+    assert_eq!(
+        diff(&with_impls(&["Default"]), &with_impls(&["Default"])).verdict,
+        Verdict::Identical
+    );
+}
+
+fn wired(wire: bool, form: Option<&str>) -> Surface {
+    types(vec![Type::new(
         "type:Id",
         "",
         None,
         TypeContract {
-            derives: vec!["Clone".into()],
+            wire,
+            wire_form: form.map(str::to_owned),
             ..contract(TypeKind::Struct, false, &[])
         },
         vec![],
         vec![],
-    );
-    let d = diff(&plain, &derived);
-    let (_, _, class, what, _) = only(&d);
+    )])
+}
+
+#[test]
+fn a_wire_change_adds_when_a_type_starts_crossing_and_is_conditional_otherwise() {
+    let none = wired(false, None);
+    let derive = wired(true, Some("derive"));
+    let via = wired(true, Some("via:u32"));
+    let class_and_lines = |a: &Surface, b: &Surface| {
+        let d = diff(a, b);
+        let (_, _, class, what, _) = only(&d);
+        (
+            class,
+            what.into_iter().map(str::to_owned).collect::<Vec<_>>(),
+        )
+    };
     assert_eq!(
-        (class, what),
-        (Class::Additive, vec!["derive `Clone` added"])
+        class_and_lines(&none, &derive),
+        (
+            Class::Additive,
+            vec!["now crosses the wasm boundary".into()]
+        )
     );
-    let d = diff(&derived, &plain);
-    let (_, _, class, what, _) = only(&d);
     assert_eq!(
-        (class, what),
-        (Class::Breaking, vec!["derive `Clone` removed"])
+        class_and_lines(&derive, &none),
+        (
+            Class::Conditional,
+            vec!["no longer crosses the wasm boundary: affects wasm mods only".into()]
+        )
+    );
+    assert_eq!(
+        class_and_lines(&derive, &via),
+        (
+            Class::Conditional,
+            vec!["wire form: `derive` → `via:u32`: affects wasm mods only".into()]
+        )
     );
 }
 
@@ -575,7 +703,7 @@ fn breaking_changes_come_first_and_notes_declare_them() {
     assert_eq!(d.undeclared().count(), 0);
     assert_eq!(
         d.to_text(),
-        "Surface: breaking (1 breaking, 1 additive; 0 without a note)\n\
+        "Surface: breaking (1 breaking, 0 conditional, 1 additive; 0 breaking without a note)\n\
          Old OLD, new NEW\n\
          \n\
          Breaking (1)\n\
@@ -590,15 +718,15 @@ fn breaking_changes_come_first_and_notes_declare_them() {
 
 #[test]
 fn a_note_may_name_a_folded_member() {
-    let old = types(vec![structure("Pos", true, &[("x", "i32")])]);
-    let new = types(vec![structure("Pos", true, &[("x", "i32"), ("y", "i32")])]);
+    let old = types(vec![enumeration("Hand", true, &["Main"])]);
+    let new = types(vec![enumeration("Hand", true, &["Main", "Off"])]);
     let mut d = diff(&old, &new);
     let note = Note {
-        file: "y.toml".into(),
-        why: "Positions are 2D now.".into(),
+        file: "off.toml".into(),
+        why: "Two hands.".into(),
         migrate: None,
     };
-    assert!(d.attach(&note, &["type:Pos.y".into()]).is_empty());
+    assert!(d.attach(&note, &["type:Hand.Off".into()]).is_empty());
     assert_eq!(d.changes[0].notes, [note]);
 }
 
@@ -608,8 +736,8 @@ fn the_diff_round_trips_as_json() {
     let new = types(vec![structure("Pos", true, &[("x", "i32"), ("y", "i32")])]);
     let d = diff(&old, &new);
     let text = serde_json::to_string(&d).unwrap();
-    assert!(text.contains(r#""verdict":"breaking""#), "{text}");
-    assert!(text.contains(r#""class":"breaking""#), "{text}");
+    assert!(text.contains(r#""verdict":"conditional""#), "{text}");
+    assert!(text.contains(r#""class":"conditional""#), "{text}");
     assert_eq!(serde_json::from_str::<Diff>(&text).unwrap(), d);
 }
 

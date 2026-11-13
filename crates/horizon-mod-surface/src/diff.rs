@@ -1,28 +1,34 @@
 //! What changed between two surfaces, and whether it breaks mods.
 //!
 //! [`diff`] compares the records of two documents by id. A record only in the new one is
-//! `added`, only in the old one `removed`, in both with another hash `changed`. A rename shows as
-//! a removal and an addition: renames are never guessed.
+//! `added`, only in the old one `removed`, in both with another hash, or another value of a
+//! field the diff compares outside the hash, `changed`. A rename shows as a removal and an
+//! addition: renames are never guessed.
 //!
 //! # Classes
 //!
-//! - A removed record is breaking.
-//! - An added record is additive. Where a new member breaks existing users (a field of a
-//!   `constructible` struct, a variant of an exhaustive enum, a required item of a trait mods
-//!   implement), the container's own hash changed too, and the container's change is breaking.
-//! - A changed record is breaking, except for changes that only widen it: a method or function
-//!   now on wasm, a type that now crosses the boundary (`wire`, `wire_form`) or is now
-//!   `constructible`, a derive, impl or macro helper attribute added, a trait method that now
-//!   has a default, a trait item that is no longer required, and the member list a type gains
-//!   when it becomes constructible.
+//! - **Breaking**: it can stop any mod that uses the item from compiling or meaning the same.
+//!   A removed record; a changed contract (a hook's side or kind, a retyped field or argument, a
+//!   signature, a method no longer on wasm); a variant added to an exhaustive enum or a required
+//!   item added to a trait mods implement (the container's own hash covers those sets); an impl
+//!   a type no longer has.
+//! - **Conditional**: it breaks only some mods, which the fit test finds from each mod's source.
+//!   A field added to a struct mods can build, or an argument added to a hook (only a mod that
+//!   builds the value with a full literal, without `..`); a hook's `version` (only a mod whose
+//!   manifest names it); a type's wire form (wasm mods only).
+//! - **Additive**: a new record (a field of a struct mods cannot build, a variant of a
+//!   `#[non_exhaustive]` enum, a defaulted method), and changes that only widen an item: now on
+//!   wasm, now crossing the wasm boundary, now constructible, an impl gained, an item no longer
+//!   required.
 //!
-//! A container's members are reported with it once: when a type or trait is added or removed,
-//! and when its member list (`members`, `required`) changed, its members' own changes are folded
-//! into its change (listed in `members`) and its class is the worse of all of them.
+//! A container's members are reported with it once: when a type, trait or hook is added or
+//! removed, or its hashed member set (`members`, `required`, whether a hook has an output)
+//! changed, its members' own changes are folded into its change (listed in `members`) and its
+//! class is the worst of all of them.
 //!
 //! Each change says what changed in words a mod author can act on, from the records' contract
 //! fields: `argument `player`: `PlayerRef` → `ServerPlayerRef``, `side: server → both`.
-use crate::Surface;
+use crate::{Role, Surface, TypeKind};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -32,15 +38,19 @@ use std::collections::{BTreeMap, BTreeSet};
 #[serde(rename_all = "snake_case")]
 pub enum Class {
     Additive,
+    /// Breaks only a mod that builds the value with a full literal, names a hook version, or
+    /// is a wasm mod; the fit test judges each mod.
+    Conditional,
     Breaking,
 }
 
-/// The whole comparison in one word.
+/// The whole comparison in one word: its worst class.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Verdict {
     Identical,
     Additive,
+    Conditional,
     Breaking,
 }
 
@@ -77,7 +87,8 @@ pub struct Change {
     pub notes: Vec<Note>,
 }
 
-/// The comparison of two surfaces: breaking changes first, then additive, each by id.
+/// The comparison of two surfaces: breaking changes first, then conditional, then additive,
+/// each by id.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Diff {
     /// The old document's hash.
@@ -88,118 +99,187 @@ pub struct Diff {
     pub changes: Vec<Change>,
 }
 
-/// A record as the diff sees it: its hash and its contract as JSON.
+/// A record as the diff sees it.
 struct Entry {
     hash: String,
-    contract: Value,
+    /// The hashed part of its contract, as JSON.
+    view: Value,
+    /// What the diff compares outside the hash: a type's `impls`, `wire` and `wire_form`, a
+    /// hook's `version`.
+    extra: Map<String, Value>,
+}
+
+fn json<T: Serialize>(value: &T) -> Value {
+    serde_json::to_value(value).expect("contracts serialize")
+}
+
+/// The keys of `value` (an object) moved into a map of their own.
+fn take(value: &mut Value, keys: &[&str]) -> Map<String, Value> {
+    let object = value.as_object_mut().expect("contracts are objects");
+    keys.iter()
+        .filter_map(|k| object.remove(*k).map(|v| ((*k).to_owned(), v)))
+        .collect()
 }
 
 fn entries(surface: &Surface) -> BTreeMap<String, Entry> {
-    fn put<T: Serialize>(map: &mut BTreeMap<String, Entry>, id: &str, hash: &str, contract: &T) {
-        let contract = serde_json::to_value(contract).expect("contracts serialize");
+    let mut map = BTreeMap::new();
+    let mut put = |id: &str, hash: &str, view: Value, extra: Map<String, Value>| {
         map.insert(
             id.to_owned(),
             Entry {
                 hash: hash.to_owned(),
-                contract,
+                view,
+                extra,
             },
         );
-    }
-    let mut map = BTreeMap::new();
+    };
     for r in &surface.hooks {
-        put(&mut map, &r.id, &r.hash, &r.contract);
+        // A hook's arguments and output are member records; its hash holds only whether it
+        // has an output.
+        let mut view = json(&r.contract);
+        let extra = take(&mut view, &["version"]);
+        take(&mut view, &["arguments", "refs", "output"]);
+        view["output"] = Value::Bool(r.contract.output.is_some());
+        put(&r.id, &r.hash, view, extra);
+        for f in &r.fields {
+            put(&f.id, &f.hash, json(&f.contract), Map::new());
+        }
     }
     for r in &surface.traits {
-        put(&mut map, &r.id, &r.hash, &r.contract);
+        let mut view = json(&r.contract);
+        if r.contract.role != Role::Implement {
+            take(&mut view, &["bounds", "refs"]);
+        }
+        put(&r.id, &r.hash, view, Map::new());
         for m in &r.methods {
-            put(&mut map, &m.id, &m.hash, &m.contract);
+            put(&m.id, &m.hash, json(&m.contract), Map::new());
         }
         for a in &r.associated {
-            put(&mut map, &a.id, &a.hash, &a.contract);
+            put(&a.id, &a.hash, json(&a.contract), Map::new());
         }
     }
     for r in surface.handles.iter().chain(&surface.functions) {
-        put(&mut map, &r.id, &r.hash, &r.contract);
+        put(&r.id, &r.hash, json(&r.contract), Map::new());
     }
     for r in &surface.macros {
-        put(&mut map, &r.id, &r.hash, &r.contract);
+        put(&r.id, &r.hash, json(&r.contract), Map::new());
     }
     for r in &surface.types {
-        put(&mut map, &r.id, &r.hash, &r.contract);
+        let mut view = json(&r.contract);
+        let mut extra = take(&mut view, &["wire", "wire_form"]);
+        extra.insert("impls".into(), json(&r.impls));
+        put(&r.id, &r.hash, view, extra);
         for f in &r.fields {
-            put(&mut map, &f.id, &f.hash, &f.contract);
+            put(&f.id, &f.hash, json(&f.contract), Map::new());
         }
         for v in &r.variants {
-            put(&mut map, &v.id, &v.hash, &v.contract);
+            put(&v.id, &v.hash, json(&v.contract), Map::new());
         }
     }
     for r in &surface.parts {
-        put(&mut map, &r.id, &r.hash, &r.contract);
+        put(&r.id, &r.hash, json(&r.contract), Map::new());
     }
     for r in &surface.capabilities {
-        put(&mut map, &r.id, &r.hash, &r.contract);
+        put(&r.id, &r.hash, json(&r.contract), Map::new());
     }
     map
 }
 
 /// The container of a member record: a trait method's or associated item's trait, a field's
-/// or variant's type.
+/// or variant's type, a hook argument's hook.
 fn container(id: &str) -> Option<String> {
     let (kind, rest) = id.split_once(':')?;
     match kind {
         "method" | "assoc" => Some(format!("trait:{}", rest.rsplit_once("::")?.0)),
-        "type" => Some(format!("type:{}", rest.rsplit_once('.')?.0)),
+        "type" | "hook" => Some(format!("{kind}:{}", rest.rsplit_once('.')?.0)),
         _ => None,
     }
+}
+
+/// The containers in both surfaces whose new members a mod's full literal must name: every
+/// hook (its event) and every struct mods can build.
+fn literal_owners(old: &Surface, new: &Surface) -> BTreeSet<String> {
+    let builds = |surface: &Surface| -> BTreeSet<String> {
+        let structs = surface.types.iter().filter(|t| {
+            t.contract.constructible
+                && matches!(t.contract.kind, TypeKind::Struct | TypeKind::TupleStruct)
+        });
+        surface
+            .hooks
+            .iter()
+            .map(|h| h.id.clone())
+            .chain(structs.map(|t| t.id.clone()))
+            .collect()
+    };
+    builds(old).intersection(&builds(new)).cloned().collect()
 }
 
 /// Compares two surfaces.
 pub fn diff(old: &Surface, new: &Surface) -> Diff {
     let before = entries(old);
     let after = entries(new);
+    let owners = literal_owners(old, new);
     let ids: BTreeSet<&String> = before.keys().chain(after.keys()).collect();
     let mut changes: BTreeMap<String, Change> = BTreeMap::new();
     for id in ids {
-        let (kind, class, what) = match (before.get(id), after.get(id)) {
-            (Some(_), None) => (ChangeKind::Removed, Class::Breaking, vec!["removed".into()]),
-            (None, Some(_)) => (ChangeKind::Added, Class::Additive, vec!["added".into()]),
-            (Some(a), Some(b)) if a.hash != b.hash => {
-                let lines = describe(id, &a.contract, &b.contract);
-                let class = lines
-                    .iter()
-                    .map(|(_, c)| *c)
-                    .max()
-                    .unwrap_or(Class::Breaking);
-                let what = if lines.is_empty() {
-                    vec!["its contract changed in a field this tool does not know".into()]
-                } else {
-                    lines.into_iter().map(|(line, _)| line).collect()
+        let (kind, lines) = match (before.get(id), after.get(id)) {
+            (Some(_), None) => (
+                ChangeKind::Removed,
+                vec![("removed".into(), Class::Breaking)],
+            ),
+            (None, Some(b)) => {
+                let line = match container(id).filter(|owner| owners.contains(owner)) {
+                    Some(owner) => (literal_added(id, &owner, &b.view), Class::Conditional),
+                    None => ("added".into(), Class::Additive),
                 };
-                (ChangeKind::Changed, class, what)
+                (ChangeKind::Added, vec![line])
             }
-            _ => continue,
+            (Some(a), Some(b)) => {
+                let mut lines = if a.hash == b.hash {
+                    Vec::new()
+                } else {
+                    describe(id, &a.view, &b.view)
+                };
+                lines.extend(extras(id, &a.extra, &b.extra));
+                if a.hash != b.hash && lines.is_empty() {
+                    lines.push((
+                        "its contract changed in a field this tool does not know".into(),
+                        Class::Breaking,
+                    ));
+                }
+                if lines.is_empty() {
+                    continue;
+                }
+                (ChangeKind::Changed, lines)
+            }
+            (None, None) => continue,
         };
+        let class = lines
+            .iter()
+            .map(|(_, c)| *c)
+            .max()
+            .expect("one line at least");
         changes.insert(
             id.clone(),
             Change {
                 id: id.clone(),
                 kind,
                 class,
-                what,
+                what: lines.into_iter().map(|(line, _)| line).collect(),
                 members: Vec::new(),
                 notes: Vec::new(),
             },
         );
     }
-    // Fold members into a container that was added or removed, or whose member list changed.
+    // Fold members into a container that was added or removed, or whose member set changed.
     let folds: BTreeSet<String> = changes
         .values()
         .filter(|c| {
             c.kind != ChangeKind::Changed || {
-                let (a, b) = (&before[&c.id].contract, &after[&c.id].contract);
-                ["members", "required"]
-                    .iter()
-                    .any(|k| a.get(k).filter(|v| v.is_array()) != b.get(k).filter(|v| v.is_array()))
+                let (a, b) = (&before[&c.id].view, &after[&c.id].view);
+                ["members", "required", "output"].iter().any(|k| {
+                    a.get(k).filter(|v| !v.is_string()) != b.get(k).filter(|v| !v.is_string())
+                })
             }
         })
         .map(|c| c.id.clone())
@@ -220,6 +300,7 @@ pub fn diff(old: &Surface, new: &Surface) -> Diff {
     let verdict = match changes.iter().map(|c| c.class).max() {
         None => Verdict::Identical,
         Some(Class::Additive) => Verdict::Additive,
+        Some(Class::Conditional) => Verdict::Conditional,
         Some(Class::Breaking) => Verdict::Breaking,
     };
     Diff {
@@ -228,6 +309,77 @@ pub fn diff(old: &Surface, new: &Surface) -> Diff {
         verdict,
         changes,
     }
+}
+
+/// The line for a member added to a container a mod may build with a literal.
+fn literal_added(id: &str, owner: &str, view: &Value) -> String {
+    let member = format!("{}: {}", crate::leaf(id), show(&view["type"]));
+    let name = crate::leaf(owner);
+    if owner.starts_with("hook:") {
+        format!(
+            "argument `{member}` added to `{name}`: breaks only a mod that builds this hook's event field by field, without `..`"
+        )
+    } else {
+        format!(
+            "field `{member}` added to `{name}`: breaks only a mod that builds `{name}` field by field, without `..`"
+        )
+    }
+}
+
+/// What changed outside the hash: impls, a hook's version, the wire form.
+fn extras(id: &str, old: &Map<String, Value>, new: &Map<String, Value>) -> Vec<(String, Class)> {
+    let name = crate::leaf(id);
+    let get = |map: &Map<String, Value>, key: &str| map.get(key).cloned().unwrap_or(Value::Null);
+    let mut lines = Vec::new();
+    let list = |map: &Map<String, Value>| -> Vec<String> {
+        match map.get("impls") {
+            Some(Value::Array(items)) => items.iter().map(show).collect(),
+            _ => Vec::new(),
+        }
+    };
+    let (x, y) = (list(old), list(new));
+    for gained in y.iter().filter(|t| !x.contains(t)) {
+        lines.push((format!("now implements `{gained}`"), Class::Additive));
+    }
+    for lost in x.iter().filter(|t| !y.contains(t)) {
+        lines.push((
+            format!("the type `{name}` no longer implements `{lost}`"),
+            Class::Breaking,
+        ));
+    }
+    let (x, y) = (get(old, "version"), get(new, "version"));
+    if x != y {
+        lines.push((
+            format!(
+                "version {} → {}: affects only a mod that names this hook's version in its manifest",
+                show(&x),
+                show(&y)
+            ),
+            Class::Conditional,
+        ));
+    }
+    let wire = |map: &Map<String, Value>| get(map, "wire") == Value::Bool(true);
+    match (wire(old), wire(new)) {
+        (false, true) => lines.push(("now crosses the wasm boundary".into(), Class::Additive)),
+        (true, false) => lines.push((
+            "no longer crosses the wasm boundary: affects wasm mods only".into(),
+            Class::Conditional,
+        )),
+        _ => {
+            let (x, y) = (get(old, "wire_form"), get(new, "wire_form"));
+            if x != y {
+                lines.push((
+                    format!(
+                        "wire form: {} → {}: affects wasm mods only",
+                        quoted("wire_form", &x),
+                        quoted("wire_form", &y)
+                    ),
+                    Class::Conditional,
+                ));
+            }
+        }
+    }
+    lines
 }
 
 /// Keys whose values are words, shown without code quotes.
@@ -312,37 +464,37 @@ fn describe(id: &str, old: &Value, new: &Value) -> Vec<(String, Class)> {
         let key = key.as_str();
         match (key, &x, &y) {
             ("refs", ..) => refs_changed = true,
-            ("members", Value::Array(x), Value::Array(y)) => {
-                let breaking = a.get("constructible") == Some(&Value::Bool(true));
-                let enumeration = a.get("kind").and_then(Value::as_str) == Some("enum");
-                let (word, consequence) = if enumeration {
-                    (
-                        "variant",
-                        format!("an exhaustive `match` on `{name}` in a mod no longer compiles"),
-                    )
+            // A struct field's or hook argument's type.
+            ("type", ..) if container(id).is_some() => {
+                let word = if id.starts_with("hook:") {
+                    "argument"
                 } else {
-                    (
-                        "field",
-                        format!("a `{name} {{ .. }}` literal in a mod no longer compiles"),
-                    )
+                    "field"
                 };
-                let class = if breaking { Breaking } else { Additive };
+                lines.push((
+                    format!("{word} `{name}`: {} → {}", quoted(key, &x), quoted(key, &y)),
+                    Breaking,
+                ));
+            }
+            ("members", Value::Array(x), Value::Array(y)) => {
+                // Only an exhaustive enum lists its members in its contract.
+                let consequence =
+                    format!("an exhaustive `match` on `{name}` in a mod no longer compiles");
                 let x: Vec<&str> = x.iter().filter_map(Value::as_str).collect();
                 let y: Vec<&str> = y.iter().filter_map(Value::as_str).collect();
                 for line in pair(
                     &x,
                     &y,
-                    word,
+                    "variant",
                     |s| member_name(s).to_owned(),
                     |s| (*s).to_owned(),
                 ) {
-                    let added = line.ends_with(" added");
-                    let line = if breaking && added {
+                    let line = if line.ends_with(" added") {
                         format!("{line}: {consequence}")
                     } else {
                         line
                     };
-                    lines.push((line, class));
+                    lines.push((line, Breaking));
                 }
             }
             ("required", Value::Array(x), Value::Array(y)) => {
@@ -375,16 +527,13 @@ fn describe(id: &str, old: &Value, new: &Value) -> Vec<(String, Class)> {
                     }
                 }
             }
-            ("arguments" | "fields", Value::Array(x), Value::Array(y)) => {
-                let word = if key == "fields" { "field" } else { "argument" };
-                for line in pair(x, y, word, |v| show(&v["name"]), show) {
+            ("fields", Value::Array(x), Value::Array(y)) => {
+                for line in pair(x, y, "field", |v| show(&v["name"]), show) {
                     lines.push((line, Breaking));
                 }
             }
             (_, Value::Array(x), Value::Array(y)) => {
                 let word = match key {
-                    "derives" => "derive",
-                    "impls" => "impl",
                     "bounds" => "supertrait",
                     "attributes" => "helper attribute",
                     _ => key,
@@ -423,11 +572,9 @@ fn describe(id: &str, old: &Value, new: &Value) -> Vec<(String, Class)> {
             ("non_exhaustive", _, Value::Bool(true)) => {
                 lines.push(("now `#[non_exhaustive]`".into(), Breaking))
             }
-            ("wire", _, Value::Bool(true)) => {
-                lines.push(("now crosses the wasm boundary".into(), Additive))
-            }
-            ("wire_form", Value::Null, _) => {
-                lines.push((format!("wire form: none → {}", quoted(key, &y)), Additive))
+            ("output", _, Value::Bool(true)) => lines.push(("now has an output".into(), Breaking)),
+            ("output", _, Value::Bool(false)) => {
+                lines.push(("no longer has an output".into(), Breaking))
             }
             _ => lines.push((
                 format!("{}: {} → {}", label(key), quoted(key, &x), quoted(key, &y)),
@@ -518,23 +665,33 @@ impl Diff {
             .filter(|c| c.class == Class::Breaking && c.notes.is_empty())
     }
 
-    /// The report as text: the verdict and counts, then breaking changes, then additive ones.
+    /// The report as text: the verdict and counts, then breaking, conditional and additive changes.
     pub fn to_text(&self) -> String {
         let count = |class| self.changes.iter().filter(|c| c.class == class).count();
-        let (breaking, additive) = (count(Class::Breaking), count(Class::Additive));
+        let (breaking, conditional, additive) = (
+            count(Class::Breaking),
+            count(Class::Conditional),
+            count(Class::Additive),
+        );
         let verdict = match self.verdict {
             Verdict::Identical => "identical",
             Verdict::Additive => "additive",
+            Verdict::Conditional => "conditional",
             Verdict::Breaking => "breaking",
         };
         let mut text = format!(
-            "Surface: {verdict} ({breaking} breaking, {additive} additive; {} without a note)\nOld {}, new {}\n",
+            "Surface: {verdict} ({breaking} breaking, {conditional} conditional, {additive} additive; {} breaking without a note)\nOld {}, new {}\n",
             self.undeclared().count(),
             self.old,
             self.new
         );
         for (class, title, n) in [
             (Class::Breaking, "Breaking", breaking),
+            (
+                Class::Conditional,
+                "Conditional: breaks only the mods the fit test names",
+                conditional,
+            ),
             (Class::Additive, "Additive", additive),
         ] {
             if n == 0 {
