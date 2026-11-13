@@ -385,6 +385,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
         ) {
             PICKED_UP_POST.set(Some((
                 event.player,
+                event.item.entity().id(),
                 event.original.count(),
                 event.remaining.as_ref().map(|rest| rest.count()),
             )));
@@ -403,6 +404,14 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
                 event.remaining.as_ref().map(|rest| rest.count()),
             )));
             *event.remaining = None;
+        }
+        fn item_toss(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::ItemTossEvent,
+        ) -> mod_api::Flow {
+            TOSSED.set(Some((event.player, event.item.entity().id())));
+            mod_api::Flow::Cancel
         }
         fn game_rule_changed(
             &self,
@@ -1167,20 +1176,52 @@ fn wire_loopback_item_picked_up_post_carries_the_original_and_writes_back_the_re
     };
     let original = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 5).unwrap();
     let mut remaining = None;
+    let item = mod_api::ItemEntityRef::new(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), 9));
     let mut event = mod_api::ItemPickedUpPostEvent {
         player: 0x1234_5678_9abc_def0_1234_5678_9abc_def0,
+        item,
         original: &original,
         remaining: &mut remaining,
     };
     module.item_picked_up_post(&mut World, &mut event);
     assert_eq!(
         PICKED_UP_POST.get(),
-        Some((0x1234_5678_9abc_def0_1234_5678_9abc_def0, 5, None))
+        Some((0x1234_5678_9abc_def0_1234_5678_9abc_def0, 9, 5, None))
     );
     assert_eq!(
         remaining.map(|rest| rest.count()),
         Some(3),
         "the remainder a guest sets comes back"
+    );
+}
+#[test]
+fn wire_loopback_item_toss_carries_the_item_entity_and_its_cancel() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+    struct World;
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World);
+    impl mod_api::ServerHost for World {}
+    mod_api::impl_server_host_areas!(World);
+    install_counter();
+    let module = WasmMod {
+        group: 0,
+        subscribed: &[],
+        listeners: &[],
+        corrupt: false,
+    };
+    let item =
+        mod_api::ItemEntityRef::new(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), 11));
+    let mut event = mod_api::ItemTossEvent {
+        player: 0x42,
+        item,
+        cancelled: false,
+    };
+    let flow = module.item_toss(&mut World, &mut event);
+    assert_eq!(TOSSED.get(), Some((0x42, 11)));
+    assert!(
+        matches!(flow, mod_api::Flow::Cancel),
+        "the guest's cancel comes back"
     );
 }
 #[test]
@@ -1425,7 +1466,8 @@ thread_local! {
     static REGISTERED_EFFECT:std::cell::Cell<Option<mod_api::EffectKey>> = const {std::cell::Cell::new(None)};
     static APPEND_ATTACK:std::cell::Cell<u8> = const {std::cell::Cell::new(0)};
     static REGISTERED_KIND:std::cell::Cell<Option<mod_api::BlockEntityTypeKey>> = const {std::cell::Cell::new(None)};
-    static PICKED_UP_POST: std::cell::Cell<Option<(u128, u32, Option<u32>)>> = const { std::cell::Cell::new(None) };
+    static PICKED_UP_POST: std::cell::Cell<Option<(u128, u32, u32, Option<u32>)>> = const { std::cell::Cell::new(None) };
+    static TOSSED: std::cell::Cell<Option<(u128, u32)>> = const { std::cell::Cell::new(None) };
     static PICKED_UP_PARTIAL: std::cell::Cell<Option<(u128, u32, Option<u32>)>> = const { std::cell::Cell::new(None) };
 }
 fn install_counter() {
@@ -2409,6 +2451,8 @@ fn world_phase_messages_round_trip_returns_filter_decision() {
     );
 }
 
+#[path = "wire_loopback/level_ticking.rs"]
+mod level_ticking;
 #[test]
 fn wire_loopback_block_entity_data_received_preserves_tag_and_handle() {
     thread_local! { static CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
