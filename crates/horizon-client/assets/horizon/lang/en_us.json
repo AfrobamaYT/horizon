@@ -1210,7 +1210,6 @@
   "horizon.perf.retry_button": "[Retry]",
   "horizon.perf.retry_hover": "Try the upload again. The profile is still saved on your computer.",
   "horizon.perf.link_hover": "Open the shared profile in your browser.",
-  "Your display's reported peak is often too high: calibrate to set it up.": "Your display's reported peak is often too high: calibrate to set it up.",
   "horizon.biome_regions.adopt.button": "Use Installed Biome Regions",
   "horizon.biome_regions.adopt.confirm": "Use Installed Regions",
   "horizon.biome_regions.adopt.description": "New chunks will use the biome regions of the mods installed now, and mods' regions that are no longer installed are dropped. Completed chunks keep their biomes and blocks. Chunks still being generated may use the new regions when they finish, and new chunks beside old ones may differ in surface, decoration and structures. The choice is saved in the world.",
