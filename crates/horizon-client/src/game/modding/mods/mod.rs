@@ -5,7 +5,6 @@
 use super::{Game, execution_role::ExecutionRole};
 mod menu_books;
 mod standalone;
-use standalone::collect_standalone_models;
 use horizon_client::{
     lang,
     mod_list::{self, Installed},
@@ -17,6 +16,7 @@ use horizon_world::{
 };
 use mod_api::__private::game::*;
 use mod_api::RegistrationContext;
+use standalone::collect_standalone_models;
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
