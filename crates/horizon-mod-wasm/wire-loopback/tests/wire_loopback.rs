@@ -260,8 +260,9 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
         fn register(
             &self,
             registrar: &mut dyn mod_api::Registrar,
-            _: &mod_api::RegistrationContext,
+            cx: &mod_api::RegistrationContext,
         ) {
+            cx.warn("wire_test.warn.optional", &["café", "jei"]);
             arm_pose_registration::check(registrar);
             biome_region_registration::register(registrar);
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
@@ -1016,6 +1017,31 @@ fn wire_loopback_biome_region_declaration_reaches_the_host_bit_exact() {
     assert_eq!(declared[0].mod_id, "wire_test");
     assert_eq!(declared[0].id, "wire_test:ember_marsh");
     assert_eq!(declared[0].region, biome_region_registration::region());
+}
+#[test]
+fn wire_loopback_guest_warning_reaches_the_host_under_its_mod() {
+    let mods = [mod_api::ModEntry::new(
+        "wire_test",
+        Box::new(WasmMod {
+            group: 0,
+            subscribed: &[],
+            listeners: &[],
+            corrupt: false,
+        }),
+    )];
+    mod_api::__private::install_parts(
+        &mods,
+        &mod_api::__private::part_tests::rule_schema(),
+        |_| false,
+    )
+    .unwrap();
+    assert_eq!(
+        mod_api::__private::registration_warnings("wire_test"),
+        [mod_api::LoadingMessage::new(
+            "wire_test.warn.optional",
+            &["café", "jei"]
+        )]
+    );
 }
 #[test]
 fn wire_loopback_checked_append_is_atomic_and_bit_exact() {

@@ -596,6 +596,7 @@ pub struct RegistrationContext {
     pub(crate) data: Option<RegistrationData>,
     pub(crate) declaration_refusals: std::sync::Mutex<Vec<String>>,
     pub(crate) self_refusal: std::sync::Mutex<Option<String>>,
+    pub(crate) warnings: std::sync::Mutex<Vec<crate::LoadingMessage>>,
     pub(crate) instance_dir: Option<crate::InstanceDirectory>,
     pub(crate) runtime: Option<crate::RuntimeEnvironment>,
 }
@@ -610,6 +611,7 @@ impl RegistrationContext {
             data,
             declaration_refusals: Default::default(),
             self_refusal: Default::default(),
+            warnings: Default::default(),
             instance_dir,
             runtime,
         }

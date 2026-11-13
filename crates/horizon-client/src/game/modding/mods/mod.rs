@@ -1503,6 +1503,12 @@ impl Game<'_> {
                 }
             })
             .collect();
+        for (id, info) in &mut info {
+            info.warnings = mod_api::__private::registration_warnings(id)
+                .into_iter()
+                .map(|w| (w.key().to_owned(), w.args().to_vec()))
+                .collect();
+        }
         self.settings.mods.info = info;
         (self.mods.content_ids, self.mods.live_ids) = (content_ids, live_ids);
         if self.mods.applied.is_none() {
