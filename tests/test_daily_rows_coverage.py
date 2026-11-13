@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from tools.ci import ignored_shards, ignored_tests
@@ -165,6 +166,22 @@ class RowlessIgnores(unittest.TestCase):
         self.assertEqual([check.target_kind("crates/x", path) for path in (
             "crates/x/src/lib.rs", "crates/x/src/main.rs", "crates/x/src/bin/tool.rs", "crates/x/tests/it.rs",
             "crates/x/examples/probe.rs", "crates/x/src/a/tests.rs")], ["lib", "bin", "bin", "test", "example", "lib"])
+
+
+
+class WindowsDailyTests(unittest.TestCase):
+    def test_the_windows_daily_job_runs_exactly_the_packages_daily_rows(self):
+        rows = [row("horizon-mod-package", "b::slow"), row("horizon-mod-package", "a::slow"),
+                row("horizon-mod-package", "it::slow", "test:it"), row("horizon-world", "c::slow")]
+        with unittest.mock.patch.object(ignored_tests, "daily_rows", return_value=rows):
+            self.assertEqual(ignored_tests.daily_tests("horizon-mod-package", "lib"), ["a::slow", "b::slow"])
+        printed = subprocess.run([sys.executable, str(ROOT / "tools/ci/ignored_tests.py"), "--daily-tests",
+                                  "horizon-mod-package", "lib"], capture_output=True, text=True, check=True).stdout
+        self.assertIn("holder::tests::private_version_is_refused_before_normal_startup", printed.split())
+        self.assertNotIn("holder::game_entry::tests::write_missing_registration_actor", printed.split())
+        workflow = (ROOT / ".github/workflows/launcher-windows-check.yml").read_text()
+        self.assertIn("ignored_tests.py --daily-tests horizon-mod-package lib", workflow)
+        self.assertIn('-- --ignored --exact "${tests[@]}"', workflow)
 
 
 if __name__ == "__main__":

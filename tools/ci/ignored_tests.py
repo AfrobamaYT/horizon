@@ -35,6 +35,8 @@ own lockfile (`--locked`).
 `--needs VARIABLE --one-process-each` runs the tests marked `needs VARIABLE`, each alone in its own process
 (`--list` prints those commands instead), and fails unless every run reports exactly one test passed: a
 renamed test would otherwise match nothing and pass. Every test runs, then the step fails if any did.
+`--daily-tests PACKAGE TARGET` prints the tests one target's daily rows list, one per line (the Windows daily job
+runs horizon-mod-package's with `-- --ignored --exact`).
 `--report FILE` also writes the run's verdict as JSON for the daily run's summary (tools/ci/daily_summary.py): each
 problem's package, test identity, kind, panic location and policy file, the tests that passed, and the runs that
 did not complete with why (stopped()). It is written before each run too, naming that run as in progress, so a job
@@ -254,6 +256,12 @@ def known_failures():
 def daily_rows():
     """The rows marked `daily`: tests moved out of verify that the daily run must run and pass."""
     return [row for row in listed_entries() if row.mark == "daily"]
+
+
+def daily_tests(package, target):
+    """The tests of `package`'s `target` (`lib`, `bin:NAME`, `test:NAME`) that its daily rows list, sorted: what a
+    job outside the shards runs with `-- --ignored --exact`, so it runs no other ignored test (a `manual` one)."""
+    return sorted(row.test for row in daily_rows() if row.package == package and row.reference == target)
 
 
 def shard_runs(package, target):
@@ -1006,8 +1014,12 @@ if __name__ == "__main__":
     each.add_argument("--list", action="store_true", help="print their commands")
     parser.add_argument("--jobs", type=int, help="cargo's -j for --needs")
     parser.add_argument("--report", metavar="FILE", help="also write the verdict as JSON for the daily summary")
+    parser.add_argument("--daily-tests", nargs=2, metavar=("PACKAGE", "TARGET"),
+                        help="print the daily rows' tests of one package's target, one per line")
     args = parser.parse_args()
-    if args.needs and args.list:
+    if args.daily_tests:
+        print("\n".join(daily_tests(*args.daily_tests)))
+    elif args.needs and args.list:
         print("\n".join(shlex.join(command) for command in needs_commands(args.needs, args.jobs)))
     elif args.needs and args.one_process_each:
         sys.exit(run_one_process_each(args.needs, args.jobs, args.report))
