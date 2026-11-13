@@ -120,5 +120,34 @@ fn table() {
         self.assertIn("child.rs:2: `impl Providers for Other` lacks `provided`", found[0])
 
 
+    def test_a_missing_input_path_fails_naming_it(self):
+        (self.root / check.LOOPBACK).unlink()
+        found = check.problems(self.root)
+        self.assertEqual(found, [f"{check.LOOPBACK}: missing; tools/hotspots/check_stand_ins.py reads it. If it "
+                                 "moved, update the script's path."])
+        self.assertEqual(check.problems(self.root, "old/wire_loopback.rs")[0].split(":")[0], "old/wire_loopback.rs")
+
+    def test_no_hooks_or_no_union_members_fail_instead_of_passing(self):
+        self.write(f"{check.HOOKS}/placed.rs", "pub trait Hooks {}\n")
+        self.write(f"{check.VOCAB}/parts/tools.rs", VOCAB_TRAITS)
+        found = check.problems(self.root)
+        self.assertEqual(len(found), 2, found)
+        self.assertIn("no `#[hook(...)] fn` found", found[0])
+        self.assertIn("no `pub trait *CapabilityProviders` found", found[1])
+
+    def test_union_members_may_be_implemented_in_another_loopback_file(self):
+        self.write(check.LOOPBACK, (self.root / check.LOOPBACK).read_text().replace(
+            "    impl ToolsCapabilityProviders for Table {}\n", ""))
+        self.assertEqual(len(check.problems(self.root)), 1)
+        self.write(check.LOOPBACK.replace(".rs", "/tools.rs"), "impl ToolsCapabilityProviders for Table {}\n")
+        self.assertEqual(check.problems(self.root), [])
+
+    def test_a_cfg_gated_required_item_is_never_required(self):
+        self.write(f"{check.VOCAB}/parts/tools.rs", VOCAB_TRAITS.replace(
+            "    type Output;", "    type Output;\n    #[cfg(any())]\n    fn never(&self);")
+            + "pub trait ToolsCapabilityProviders {}\n")
+        self.assertEqual(check.problems(self.root), [])
+
+
 if __name__ == "__main__":
     unittest.main()

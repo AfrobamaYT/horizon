@@ -216,6 +216,15 @@ def stand_ins(source):
     return found, rest
 
 
+TOKEN = re.compile(r'''b?r(#*)".*?"\1|b?"(?:\\.|[^"\\])*"|'(?:\\[^']{1,10}|[^\\'\n])'|//[^\n]*|/\*.*?\*/|\w+|\S''',
+                   re.S)
+
+
+def tokens(text):
+    """Rust source as tokens: whitespace between tokens does not count, literals and comments are kept whole."""
+    return [m.group(0) for m in TOKEN.finditer(text)]
+
+
 def carry_dispatch_stub(repo, base, head, _topic):
     """Writes the stand-ins the PR changed in the old shared.rs to their files; returns what it did."""
     fixtures = Path(repo) / check_stand_ins.FIXTURES
@@ -228,7 +237,7 @@ def carry_dispatch_stub(repo, base, head, _topic):
         return stand_ins(text)[0] if rc == 0 else {}
 
     def same(a, b):
-        return re.sub(r"\s+", "", a or "") == re.sub(r"\s+", "", b or "")
+        return (a is None) == (b is None) and tokens(a or "") == tokens(b or "")
 
     before, after = version(base), version(head)
     writes, stuck = [], []

@@ -140,6 +140,20 @@ class DispatchStubCarryTest(unittest.TestCase):
         self.assertFalse((self.folder / "stubs/Gone.rs").exists())
         self.assertTrue((self.folder / "stubs/Pos.rs").exists())
 
+    def test_a_change_inside_a_string_literal_is_carried(self):
+        r = self.repo
+        head = r.commit("pr", {carry.SHARED: OLD_SHARED.replace("            self.id\n", "            \"a b\"\n")},
+                        base=self.base)
+        r.git("checkout", "-q", "main")
+        self.assertEqual(carry.carry_dispatch_stub(r.path, self.base, head, None), [f"{STUBS}/stubs/View.rs"])
+        view = f"{STUBS}/stubs/View.rs"
+        r.commit("main", {view: (r.path / view).read_text()}, "carried")
+        head2 = r.commit("pr2", {carry.SHARED: OLD_SHARED.replace("            self.id\n", "            \"ab\"\n")},
+                         base=head)
+        r.git("checkout", "-q", "main")
+        self.assertEqual(carry.carry_dispatch_stub(r.path, head, head2, None), [f"{STUBS}/stubs/View.rs"])
+        self.assertIn('"ab"', (self.folder / "stubs/View.rs").read_text())
+
     def test_a_stand_in_main_changed_too_stops_before_writing(self):
         r = self.repo
         r.commit("main", {f"{STUBS}/api/Face.rs": "pub enum Face {\n    Up,\n    Down,\n}\n"}, "main edit")
