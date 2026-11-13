@@ -13160,6 +13160,7 @@ impl Game<'_> {
         self.streaming
             .extra
             .extend(waiting.into_iter().map(|chunk| (chunk, 0)));
+        self.streaming.upload_backlog = self.pending_uploads.len();
         let plan = horizon_client::spans::time("streaming_plan", || {
             let mut step = self.streaming.begin_plan_update(&mut self.world);
             loop {
