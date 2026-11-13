@@ -196,8 +196,7 @@ fn the_contract_hash_leaves_out_doc_and_info_fields() {
     assert_eq!(documented.hash, bare.hash);
     // Independent of the code: SHA-256 of the compact JSON, first 16 bytes.
     use sha2::{Digest, Sha256};
-    let expected: String = Sha256::digest(br#"{"signature":"fn f(x: u8)","wasm":false}"#)
-        [..16]
+    let expected: String = Sha256::digest(br#"{"signature":"fn f(x: u8)","wasm":false}"#)[..16]
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect();

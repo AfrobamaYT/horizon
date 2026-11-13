@@ -320,14 +320,16 @@ impl<'a> Shapes<'a> {
         let frame = stack.last().expect("a field is inside a type");
         let each = |shape: &Shape| self.resolve(shape, stack).map(Box::new);
         Ok(match shape {
-            Shape::Param(index) => frame
-                .args
-                .get(*index)
-                .cloned()
-                .ok_or_else(|| ShapeError::Param {
-                    key: frame.key.clone(),
-                    index: *index,
-                })?,
+            Shape::Param(index) => {
+                frame
+                    .args
+                    .get(*index)
+                    .cloned()
+                    .ok_or_else(|| ShapeError::Param {
+                        key: frame.key.clone(),
+                        index: *index,
+                    })?
+            }
             Shape::List(t) => Shape::List(each(t)?),
             Shape::Set(t) => Shape::Set(each(t)?),
             Shape::Option(t) => Shape::Option(each(t)?),

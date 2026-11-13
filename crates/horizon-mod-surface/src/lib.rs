@@ -30,7 +30,8 @@
 //! # Hashes
 //!
 //! A record's `hash` is [`contract_hash`] of its contract: every field except `id`, `hash`,
-//! `doc`, a hook's `engine` and `counterparts`, a type's `shape`, and its member records. Each
+//! `doc`, `wasm_reason`, `paths`, a hook's `engine` and `counterparts`, a type's `shape`, and its
+//! member records. Each
 //! member (a method, field or variant) has its own hash, so adding a method to `Host`, adding a
 //! hook or adding a field to a type mods cannot build changes no existing record's hash. A
 //! container's hash covers its members only where a new member breaks users: the fields of a
@@ -289,7 +290,11 @@ impl Surface {
         let traits = self.traits.iter().flat_map(|r| {
             std::iter::once((r.id.as_str(), r.hash.as_str()))
                 .chain(r.methods.iter().map(|m| (m.id.as_str(), m.hash.as_str())))
-                .chain(r.associated.iter().map(|a| (a.id.as_str(), a.hash.as_str())))
+                .chain(
+                    r.associated
+                        .iter()
+                        .map(|a| (a.id.as_str(), a.hash.as_str())),
+                )
         });
         let functions = self
             .handles
@@ -365,7 +370,12 @@ impl Surface {
             for associated in &item.associated {
                 refs.insert(
                     &associated.id,
-                    associated.contract.refs.iter().map(String::as_str).collect(),
+                    associated
+                        .contract
+                        .refs
+                        .iter()
+                        .map(String::as_str)
+                        .collect(),
                 );
             }
             for method in &item.methods {

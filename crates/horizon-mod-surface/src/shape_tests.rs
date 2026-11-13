@@ -211,10 +211,7 @@ fn a_recursive_argument_counts_the_types_around_its_use() {
             "Wrap",
             Definition {
                 params: 1,
-                body: Body::Record(vec![(
-                    "v".into(),
-                    Shape::Option(Box::new(Shape::Param(0))),
-                )]),
+                body: Body::Record(vec![("v".into(), Shape::Option(Box::new(Shape::Param(0))))]),
             },
         ),
         (

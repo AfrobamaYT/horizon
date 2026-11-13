@@ -118,6 +118,49 @@ macro_rules! key {
 }
 /// A result of the fixture.
 pub type Outcome<T> = Result<T, Colour>;
+impl Default for Point {
+    fn default() -> Self {
+        Self { x: 0, y: 0 }
+    }
+}
+impl Point {
+    /// The origin.
+    pub const ORIGIN: Point = Point { x: 0, y: 0 };
+}
+/// A key whose Wire impl a macro writes.
+pub struct SlotKey(u32);
+slot_keys!(u32; SlotKey);
+/// An identifier, encoded by hand.
+pub struct Ident {
+    cache: u64,
+    pub namespace: String,
+}
+impl Wire for Ident {
+    layout_fields!("namespace" => String);
+}
+/// A name that crosses as a string.
+pub struct Name(String);
+impl Wire for Name {
+    fn layout(visiting: &mut Vec<&'static str>) -> u64 {
+        String::layout(visiting)
+    }
+}
+/// Context that crosses by a hand-written impl alone.
+pub struct Context;
+impl Wire for Context {}
+/// Where Parts are attached.
+pub trait Registrar {}
+impl dyn Registrar + '_ {
+    /// Attaches a part to the block `key` names.
+    pub fn attach(&mut self, key: SlotKey) {
+        let _ = key;
+    }
+}
+/// Data with an entry type.
+pub trait DataMap {
+    /// Its entry.
+    type Entry;
+}
 "#,
     ),
     (
@@ -155,6 +198,7 @@ pub fn horizon_mod(_: TokenStream, input: TokenStream) -> TokenStream { input }
     (
         "crates/horizon-mod-package/src/manifest.rs",
         r#"
+#[serde(rename_all = "kebab-case")]
 pub enum Capability {
     /// New registries.
     Registries,
@@ -189,16 +233,20 @@ pub trait Hooks {
 
 fn boundary() -> Boundary {
     let mut boundary = Boundary::default();
-    boundary.roles.insert("Hooks".into(), Role::Implement);
-    boundary.roles.insert("Host".into(), Role::Call);
-    boundary.roles.insert("ServerHost".into(), Role::Call);
-    boundary.sides.insert("ServerHost".into(), Side::Server);
-    boundary.unbound.insert(
-        ("ServerHost".into(), "send".into()),
+    boundary.roles.push(("Hooks".into(), Role::Implement));
+    boundary.roles.push(("Host".into(), Role::Call));
+    boundary.roles.push(("ServerHost".into(), Role::Call));
+    boundary.sides.push(("ServerHost".into(), Side::Server));
+    boundary.unbound.push((
+        "ServerHost".into(),
+        "send".into(),
         "Text does not cross".into(),
-    );
+    ));
     boundary
 }
+
+/// An edit that moves its file to the path given as `to`.
+const MOVE: &str = "<move>";
 
 /// The export of the fixture with `edits` (file, from, to) applied.
 fn export_fixture(edits: &[(&str, &str, &str)], hooks: &str) -> Export {
@@ -206,8 +254,14 @@ fn export_fixture(edits: &[(&str, &str, &str)], hooks: &str) -> Export {
     let root = dir.path();
     for (path, text) in FILES {
         let mut text = text.to_string();
+        let mut path = *path;
         for (file, from, to) in edits {
-            if file == path {
+            if *file != path {
+                continue;
+            }
+            if *from == MOVE {
+                path = to;
+            } else {
                 assert!(text.contains(from), "{from} not in {path}");
                 text = text.replacen(from, to, 1);
             }
@@ -248,13 +302,13 @@ fn changes(edits: &[(&str, &str, &str)], hooks: &str) -> (Vec<String>, Vec<Strin
     (changed, added)
 }
 
-/// `value` with every `hash` and `shape` written as `*`.
+/// `value` with every `hash` and every present `shape` written as `*`.
 fn masked(value: serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::Object(map) => serde_json::Value::Object(
             map.into_iter()
                 .map(|(key, value)| match key.as_str() {
-                    "hash" | "shape" => (key, serde_json::Value::from("*")),
+                    "hash" | "shape" if !value.is_null() => (key, serde_json::Value::from("*")),
                     _ => (key, masked(value)),
                 })
                 .collect(),
@@ -275,7 +329,12 @@ fn the_fixture_exports_the_expected_document() {
     assert_eq!(masked(written), expected, "{}", export.surface.to_json());
     assert_eq!(
         export.notes,
-        ["constant LIMIT: no record kind for constants"]
+        [
+            "0 public items are not public at their definition path: their id is their shortest public path, which a shorter re-export added later would change",
+            "3 items are reachable only through #[doc(hidden)] items or modules: recorded only where a recorded signature names them",
+            "constant LIMIT: no record kind for constants",
+            "type:Context: no shape, because Context crosses by a hand-written Wire impl that declares no layout, or does not cross",
+        ]
     );
 }
 
@@ -352,7 +411,7 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
                 "pub fn id(self) -> u64",
             )],
             HOOKS,
-            &["handle:EntityRef::id"],
+            &["handle:entity::EntityRef::id"],
         ),
         (
             "a hook's side",
@@ -369,6 +428,115 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
             )],
             HOOKS,
             &["hook:ping", "type:PingEvent"],
+        ),
+        (
+            "a supertrait bound",
+            &[(
+                LIB,
+                "pub trait ServerHost: Host {",
+                "pub trait ServerHost: Host + Send {",
+            )],
+            HOOKS,
+            &["trait:ServerHost"],
+        ),
+        (
+            "a defaulted method becoming required on a trait mods implement",
+            &[(
+                LIB,
+                "fn ping(&self, host: &mut dyn ServerHost, event: &mut PingEvent<'_>) {\n        let _ = (host, event);\n    }",
+                "fn ping(&self, host: &mut dyn ServerHost, event: &mut PingEvent<'_>);",
+            )],
+            HOOKS,
+            &["method:Hooks::ping", "trait:Hooks"],
+        ),
+        (
+            "an associated type added to a trait mods implement",
+            &[(
+                LIB,
+                "    /// Must be written.",
+                "    /// Its settings.\n    type Settings;\n    /// Must be written.",
+            )],
+            HOOKS,
+            &["trait:Hooks"],
+        ),
+        (
+            "a receiver becoming mutable",
+            &[(LIB, "fn time(&self) -> u64;", "fn time(&mut self) -> u64;")],
+            HOOKS,
+            &["method:Host::time"],
+        ),
+        (
+            "a hook's cancellable flag",
+            &[],
+            &HOOKS.replacen(
+                "neoforge = \"PingEvent\"",
+                "neoforge = \"PingEvent\",\n        cancellable = true",
+                1,
+            ),
+            &["hook:ping"],
+        ),
+        (
+            "a trait impl added",
+            &[(
+                LIB,
+                "/// A mode.\npub enum Mode {",
+                "impl Default for Mode {\n    fn default() -> Self {\n        Self::On\n    }\n}\n/// A mode.\npub enum Mode {",
+            )],
+            HOOKS,
+            &["type:Mode"],
+        ),
+        (
+            "a handle's impl bounds",
+            &[(
+                "crates/horizon-mod-vocab/src/entity.rs",
+                "impl EntityRef {",
+                "impl EntityRef where Self: Copy {",
+            )],
+            HOOKS,
+            &[
+                "handle:entity::EntityRef::id",
+                "handle:entity::EntityRef::path",
+            ],
+        ),
+        (
+            "trait methods reordered",
+            &[(
+                LIB,
+                "    /// Saves.\n    ///\n    /// Not on wasm: it writes\n    /// files.\n    fn save(&mut self, slot: u8);\n    /// Sends a text.\n    fn send(&mut self, text: Text) -> bool;",
+                "    /// Sends a text.\n    fn send(&mut self, text: Text) -> bool;\n    /// Saves.\n    ///\n    /// Not on wasm: it writes\n    /// files.\n    fn save(&mut self, slot: u8);",
+            )],
+            HOOKS,
+            &[],
+        ),
+        (
+            "a file moved under the same public path",
+            &[(
+                "crates/horizon-mod-vocab/src/entity.rs",
+                MOVE,
+                "crates/horizon-mod-vocab/src/entity/mod.rs",
+            )],
+            HOOKS,
+            &[],
+        ),
+        (
+            "a new root re-export",
+            &[(
+                LIB,
+                "pub use entity::EntityRef;",
+                "pub use entity::EntityRef;\npub use entity::EntityRef as Handle;",
+            )],
+            HOOKS,
+            &[],
+        ),
+        (
+            "a not-on-wasm reason reworded",
+            &[(
+                LIB,
+                "/// Not on wasm: it writes\n    /// files.",
+                "/// Not on wasm: it writes to the disk.",
+            )],
+            HOOKS,
+            &[],
         ),
         (
             "a doc line",
@@ -423,8 +591,11 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
         ),
     ];
     for (aspect, edits, hooks, expected) in cases {
-        let (changed, _) = changes(edits, hooks);
+        let (changed, added) = changes(edits, hooks);
         assert_eq!(changed, *expected, "{aspect}");
+        if aspect.starts_with("trait methods") || aspect.starts_with("a file moved") {
+            assert_eq!(added, Vec::<String>::new(), "{aspect}");
+        }
     }
     // A new hook (with its event type) adds records and changes none.
     let pong = HOOKS.replace(
@@ -468,13 +639,13 @@ fn shapes_follow_the_wire_layout() {
     assert_ne!(shape(&base, "type:Text"), shape(&reordered, "type:Text"));
     // A nested type's change reaches the types that hold it.
     let nested = export_fixture(&[(LIB, "    pub y: i32,\n}", "    pub y: i64,\n}")], HOOKS);
-    let holder = |e: &Export| shape(e, "type:PingEvent");
-    assert_eq!(holder(&base), holder(&export_fixture(&[], HOOKS)));
+    let holder = |e: &Export| shape(e, "type:Text");
+    assert!(holder(&base).is_some());
     let with_point = export_fixture(
         &[(
             LIB,
-            "pub cancelled: bool,",
-            "pub cancelled: bool,\n        pub at: Point,",
+            "    style: u8,\n}",
+            "    style: u8,\n    at: Point,\n}",
         )],
         HOOKS,
     );
@@ -482,8 +653,8 @@ fn shapes_follow_the_wire_layout() {
         &[
             (
                 LIB,
-                "pub cancelled: bool,",
-                "pub cancelled: bool,\n        pub at: Point,",
+                "    style: u8,\n}",
+                "    style: u8,\n    at: Point,\n}",
             ),
             (LIB, "    pub y: i32,\n}", "    pub y: i64,\n}"),
         ],
@@ -491,6 +662,42 @@ fn shapes_follow_the_wire_layout() {
     );
     assert_ne!(holder(&with_point), holder(&with_wider_point));
     assert_ne!(shape(&base, "type:Point"), shape(&nested, "type:Point"));
+    // A hand-written impl: its declared fields are its shape, its Rust fields are not.
+    let ident = |e: &Export| shape(e, "type:Ident");
+    let cache = export_fixture(
+        &[(
+            LIB,
+            "    cache: u64,\n    pub namespace",
+            "    cache: u32,\n    pub namespace",
+        )],
+        HOOKS,
+    );
+    assert_eq!(ident(&base), ident(&cache));
+    let declared = export_fixture(
+        &[(
+            LIB,
+            "layout_fields!(\"namespace\" => String);",
+            "layout_fields!(\"namespace\" => String, \"path\" => String);",
+        )],
+        HOOKS,
+    );
+    assert_ne!(ident(&base), ident(&declared));
+    // A type that crosses as another has that type's shape inside `via`, and one with no
+    // declared layout has none.
+    let types: BTreeMap<&str, &Type> = base
+        .surface
+        .types
+        .iter()
+        .map(|t| (t.id.as_str(), t))
+        .collect();
+    let form = |id: &str| types[id].contract.wire_form.clone();
+    assert_eq!(form("type:Name").as_deref(), Some("via:String"));
+    assert_eq!(form("type:Ident").as_deref(), Some("fields"));
+    assert_eq!(form("type:SlotKey").as_deref(), Some("fields"));
+    assert_eq!(form("type:Context").as_deref(), Some("manual"));
+    assert_eq!(form("type:Mode"), None);
+    assert!(types["type:Context"].contract.wire && types["type:Context"].shape.is_none());
+    assert!(types["type:Mode"].shape.is_none());
     // Renaming an unrelated type changes no other shape.
     let renamed = export_fixture(&[(LIB, "pub enum Mode {", "pub enum Toggle {")], HOOKS);
     assert_eq!(shape(&base, "type:Text"), shape(&renamed, "type:Text"));
