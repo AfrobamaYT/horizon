@@ -1393,7 +1393,6 @@ mod button_label_tests {
         sprite(&mut out, "widget/button", 10, 20, w, 20);
         {
             let batch = &mut batch;
-            let atlas = atlas;
             let draws = &out;
             let tooltip = paint(batch, atlas, draws);
             paint_tooltip(batch, atlas, draws, tooltip);

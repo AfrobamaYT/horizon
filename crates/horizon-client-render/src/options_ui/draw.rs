@@ -62,13 +62,10 @@ impl OptionsUi {
         let waiting = self.waiting();
         let in_world = self.in_world;
         self.radial.screen.glyphs = self.pad_glyphs;
-        let frame = if page == Page::HdrCalibration && self.calibration.is_some() {
-            FrameDraw::Calibration(
-                self.calibration
-                    .as_ref()
-                    .unwrap()
-                    .draw_background(batch, atlas),
-            )
+        let frame = if page == Page::HdrCalibration
+            && let Some(calibration) = self.calibration.as_ref()
+        {
+            FrameDraw::Calibration(calibration.draw_background(batch, atlas))
         } else if page == Page::ControllerRadialName && self.radial.screen.naming.is_some() {
             ui::menu_background(batch, atlas, 0.0, 0.0, w.ceil(), h.ceil(), in_world);
             FrameDraw::RadialName
