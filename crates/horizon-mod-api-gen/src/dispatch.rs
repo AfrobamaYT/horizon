@@ -834,8 +834,8 @@ pub(super) fn emit<'a>(
         } else {
             mod_item.clone()
         };
-        // A listener's stack-list commit follows the cancel statement; with none, the statement
-        // stands alone, so the generated code has no empty block.
+        // A listener's stack-list commit follows the cancel statement, separated by `;` so the
+        // generated `if` is never read as the start of an `else if`.
         let cancel_step = {
             let cancel = format!(
                 "if matches!({mod_item}.{name}({invoke}), Flow::Cancel) {{ {event}.cancelled = true; }}"
@@ -843,7 +843,7 @@ pub(super) fn emit<'a>(
             if stack_after.is_empty() {
                 cancel
             } else {
-                format!("{{ {cancel} }} {stack_after}")
+                format!("{cancel}; {stack_after}")
             }
         };
         let (lookup, calls) = match &scoped {
