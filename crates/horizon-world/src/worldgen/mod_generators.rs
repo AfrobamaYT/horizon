@@ -31,12 +31,38 @@ pub trait ChunkAccess {
     fn set_block(&mut self, pos: [i32; 3], state: BlockStateId) -> bool;
 }
 
+/// The vanilla stages a level runs around a mod's terrain
+/// ([`OverworldGenerator::for_mod`](super::generator::OverworldGenerator::for_mod)).
+/// None of them is the generator's terrain alone.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct VanillaStages {
+    /// The noise settings' material rule over the terrain.
+    pub surface: bool,
+    /// The biomes' carvers, with the noise settings' aquifer.
+    pub carvers: bool,
+    /// The structure starts and references, and the pieces in FEATURES.
+    pub structures: bool,
+    /// The biomes' placed features in FEATURES.
+    pub features: bool,
+}
+
+impl VanillaStages {
+    /// Whether the level runs any of them.
+    pub fn any(self) -> bool {
+        self.surface || self.carvers || self.structures || self.features
+    }
+}
+
 /// A chunk generator's engine side, as the executable's adapter sees it.
 /// `Send + Sync` because neighbouring chunks fill at once on worker threads;
 /// the same seed gives the same terrain.
 pub trait ModChunkGenerator: Send + Sync {
     /// `ChunkGenerator.buildTerrain`: the chunk's terrain.
     fn build_terrain(&self, chunk: &mut dyn ChunkAccess);
+    /// The vanilla stages its levels run, as the mod answered at registration.
+    fn vanilla_stages(&self) -> VanillaStages {
+        VanillaStages::default()
+    }
 }
 
 /// The installed generators, `modid:void` → generator. Set once, before any

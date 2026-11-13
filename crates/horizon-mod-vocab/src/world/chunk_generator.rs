@@ -8,7 +8,8 @@
 //! There is no `Host` here: chunks fill on the worldgen worker threads, so the
 //! mod sees only the [`ChunkAccess`] of the chunk it fills, and a generator
 //! keeps no mutable state because two workers can fill neighbouring chunks at
-//! once. The level gets terrain only: no surface, carvers or features.
+//! once. The level gets the generator's terrain, then the
+//! [`VanillaStages`] it asks for.
 use crate::{BlockKey, BlockMetadata, BlockState, ChunkPos};
 use std::sync::Arc;
 
@@ -35,6 +36,32 @@ pub trait ChunkAccess {
     fn set_block(&mut self, pos: [i32; 3], state: BlockState) -> bool;
 }
 
+/// The vanilla stages a level runs around a mod's terrain, in vanilla's chunk
+/// status order: the structure starts and references before the terrain;
+/// `surface` and then `carvers` after it, as `NoiseBasedChunkGenerator.buildTerrain`
+/// runs them after its noise fill; then the FEATURES status, where
+/// `ChunkGenerator.applyBiomeDecoration` places the structure pieces and the
+/// biomes' placed features. The default is none of them: the level is the
+/// generator's terrain alone.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+// exhaustive: a generator builds it with a literal as its vanilla_stages answer
+pub struct VanillaStages {
+    /// The level's material rule over the terrain: grass, sand, deepslate,
+    /// bedrock and ore veins, from its `noise_settings`.
+    pub surface: bool,
+    /// The carvers of the level's biomes: caves and canyons, with the aquifer
+    /// of its `noise_settings`.
+    pub carvers: bool,
+    /// The structures of the world's structure sets that may start in the
+    /// level's biomes (`ChunkGenerator.createStructures`) and their pieces. A
+    /// start is placed at the height of the level's `noise_settings` terrain
+    /// (`getBaseHeight`), not of the generator's. None while the world's
+    /// structures are turned off.
+    pub structures: bool,
+    /// The placed features of the level's biomes.
+    pub features: bool,
+}
+
 /// A mod's chunk generator: vanilla's `ChunkGenerator`, whose code answers for
 /// a level stem with `"generator": {"type": "modid:void"}`. Implemented once,
 /// kept by the game; deterministic and stateless.
@@ -42,20 +69,28 @@ pub trait ChunkGenerator: Send + Sync + 'static {
     /// `ChunkGenerator.buildTerrain`: write the terrain of `chunk`, which
     /// starts as air. The same seed and chunk give the same blocks.
     fn build_terrain(&self, chunk: &mut dyn ChunkAccess);
+    /// The vanilla stages the level runs after [`build_terrain`](Self::build_terrain),
+    /// asked once, at registration. None by default.
+    fn vanilla_stages(&self) -> VanillaStages {
+        VanillaStages::default()
+    }
 }
 
 /// A registered API generator, before the game builds its worker adapter.
 pub(crate) struct ChunkGeneratorInfo {
     pub(crate) id: Box<str>,
+    /// Its [`ChunkGenerator::vanilla_stages`], asked once at registration.
+    pub(crate) stages: VanillaStages,
     pub(crate) generator: Arc<dyn ChunkGenerator>,
 }
 
-/// Registered generators for the hidden game integration boundary.
+/// Registered generators for the hidden game integration boundary: each id, its
+/// vanilla stages and the generator.
 // hidden: the game's startup adapter reads the registered generators; mods declare them through the registrar.
 #[doc(hidden)]
-pub fn chunk_generator_declarations() -> Vec<(String, Arc<dyn ChunkGenerator>)> {
+pub fn chunk_generator_declarations() -> Vec<(String, VanillaStages, Arc<dyn ChunkGenerator>)> {
     crate::parts::installed_chunk_generator_list()
         .iter()
-        .map(|info| (info.id.to_string(), info.generator.clone()))
+        .map(|info| (info.id.to_string(), info.stages, info.generator.clone()))
         .collect()
 }
