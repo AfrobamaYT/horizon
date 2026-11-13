@@ -143,6 +143,9 @@ mod weather;
 #[cfg(test)]
 mod fertile_tests;
 #[cfg(test)]
+#[path = "tests/connections.rs"]
+mod connection_tests;
+#[cfg(test)]
 mod fire_tests;
 #[cfg(test)]
 mod growth_tests;
@@ -1123,14 +1126,35 @@ pub trait LevelAccess: BlockEntityNeighbors {
     ) -> BlockStateId {
         vanilla
     }
-    /// Whether connection queries (fences, walls, bars and panes) need the level hook.
+    /// Whether connection queries (fences, walls, bars and panes) need the level hooks:
+    /// [`Self::adjust_can_be_connected_to`] or [`Self::adjust_connects_to`].
     fn has_connection_hook(&self) -> bool {
         false
     }
-    /// The `kind` rule's connection once the library answered `vanilla` for
-    /// the block `state` at `pos` and the `neighbour` state beside it,
-    /// `direction` pointing from the block toward it and `face_solid` its
-    /// face's sturdiness: whether the block connects that side. The default keeps it.
+    /// NeoForge's `IBlockExtension.canBeConnectedTo`: once the `kind` rule
+    /// answered `vanilla` for a fence, wall, or bars or pane beside the block
+    /// `state` at `pos`, whether that block lets the `connector` state connect
+    /// to it, `direction` pointing from the block toward the connector and
+    /// `face_solid` whether the block's face toward it is sturdy. Asked before
+    /// [`Self::adjust_connects_to`], which starts from this answer and has the
+    /// last word. The default keeps it.
+    fn adjust_can_be_connected_to(
+        &self,
+        _kind: ConnectionKind,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _connector: BlockStateId,
+        _direction: Direction,
+        _face_solid: bool,
+        vanilla: bool,
+    ) -> bool {
+        vanilla
+    }
+    /// The `kind` rule's connection once the library and then the neighbour
+    /// ([`Self::adjust_can_be_connected_to`]) answered `vanilla` for the block
+    /// `state` at `pos` and the `neighbour` state beside it, `direction`
+    /// pointing from the block toward it and `face_solid` its face's
+    /// sturdiness: whether the block connects that side. The default keeps it.
     fn adjust_connects_to(
         &self,
         _kind: ConnectionKind,

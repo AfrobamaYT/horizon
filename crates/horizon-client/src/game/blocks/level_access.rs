@@ -470,7 +470,20 @@ impl LevelAccess for GameLevel<'_> {
     }
     fn has_connection_hook(&self) -> bool {
         self.native_authoritative
-            && mod_api::__private::has_scoped_hook(mod_api::HookId::ConnectsTo)
+            && (mod_api::__private::has_scoped_hook(mod_api::HookId::ConnectsTo)
+                || mod_api::__private::has_scoped_hook(mod_api::HookId::CanBeConnectedTo))
+    }
+    fn adjust_can_be_connected_to(
+        &self,
+        kind: horizon_core::connection_kind::ConnectionKind,
+        pos: BlockPos,
+        state: BlockStateId,
+        connector: BlockStateId,
+        direction: Direction,
+        face_solid: bool,
+        vanilla: bool,
+    ) -> bool {
+        self.can_be_connected_to(kind, pos, state, connector, direction, face_solid, vanilla)
     }
     fn adjust_connects_to(
         &self,
