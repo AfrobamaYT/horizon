@@ -4,7 +4,7 @@ use mod_api::mod_api::client::hud_layout::GuiDraw;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-#[derive(Default)]
+#[derive(Clone, Default, PartialEq)]
 struct ItemStack {
     item: Arc<str>,
     count: u32,
@@ -21,7 +21,14 @@ impl ItemStack {
         ItemKey(&self.item)
     }
 }
+#[derive(Debug)]
+enum StackWriteError {}
 mod content {
+    pub(super) mod crash {
+        pub fn current_native_mod() -> Option<&'static str> {
+            None
+        }
+    }
     pub(super) mod registry_keys {
         pub(in crate::tests) fn block_key(name: &str) -> Option<super::super::BlockKey> {
             match name {

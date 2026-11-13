@@ -911,14 +911,31 @@ impl Game<'_> {
             b.paddling = [right && !left || up, left && !right || up];
         }
         // Entity.move: collisions zero the blocked components, the world border's
-        // among them (`CollisionGetter.borderCollision`).
+        // among them (`CollisionGetter.borderCollision`). The boat's own move
+        // is a self move (#2414: vanilla's `AbstractBoat.tick` passes SELF);
+        // PR 1a records the movement unchanged.
         let mut scene = EntityCollisions {
             blocks: scene,
             entities: &obstacles,
             border: Some((self.border.geometry(), [b.position.x, b.position.z])),
         };
         let movement = b.take_movement();
-        if let Ok(moved) = scene.resolve(b.bounds(), movement, 0.0, b.on_ground) {
+        let mut gate = horizon_client::move_gate::armed_with(
+            &self.loop_context,
+            b.id,
+            || std::borrow::Cow::Owned(b.entity_type()),
+            horizon_world::entity_move::MoverType::SelfMovement,
+            movement,
+        );
+        let movement = gate.delta();
+        if let Ok(moved) = horizon_client::move_gate::entities_resolve(
+            &mut gate,
+            &mut scene,
+            b.bounds(),
+            movement,
+            0.0,
+            b.on_ground,
+        ) {
             b.fall_distance = self.vehicle_fall_reset(b.fall_distance, b.position, moved);
             b.position = Vec3::new(
                 b.position.x + moved.x,

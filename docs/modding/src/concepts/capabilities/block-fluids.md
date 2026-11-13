@@ -28,6 +28,22 @@ If a destination accepts only part of a transfer, `move_resources` rolls back an
 retries with that amount. A full water cauldron asked for a bucket when the
 destination has room for 500 mB supplies one level, 334 mB, without overanswering.
 
+## Cauldron contents
+
+To inspect a cauldron without probing its capability, use the `fluids` host reads
+`host.cauldron_content_for_block(block_key)` and `host.cauldron_content_for_fluid(fluid_key)`.
+Both return `Option<CauldronContent>`: typed `block` and `fluid` keys, full `total` in
+millibuckets, `max_level`, and optional `level_property`. Water answers 1000, 3, and
+`Some("level")`; lava answers 1000, 1, and `None`. `host.cauldron_level(state)` reads a
+typed state's current level (water at level 2 answers 2); an always-full content
+answers its maximum. Unregistered contents, including powder snow, answer `None`.
+These `WorldOnly` reads work on both sides, over the existing registration table,
+including mods and rebuilt resource generations. A client that has not built that table
+answers `None`. Native and wasm consumers receive the same plain values; there is no
+work unless called. A content lookup scans the existing content table without a mod
+scan, clones its shared snapshot, and allocates only the returned level-property string
+when present; the scalar level read allocates no result.
+
 ## Item containers
 
 Use `place.capability(host, &ITEM_FLUIDS)` for the fluid handler at an `ItemPlace`.

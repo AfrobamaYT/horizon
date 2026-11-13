@@ -2,11 +2,11 @@
 pub trait Notes {
     #[notes = r##"## Named hook catalog (draft)
 
-The declarations under `crates/horizon-mod-api/src/hooks/` map stable hook names and contract versions to the current
-source targets. A contract includes the signature, call timing and behavior.
-Keep an existing contract or add a new version when it changes incompatibly.
-The catalog does not cover helper methods or arbitrary private game code.
-Injections name them with `hook` and `hook_version` ("Named hook points" above).
+The declarations map stable hook names and contract versions to source targets. A contract includes its signature,
+timing and behavior: retain it or version incompatible changes. Injections name these with `hook` and `hook_version`.
+Each listener's edited stack-list outputs are validated before leaving its scope. A refused output keeps the immediately
+preceding accepted value; scalar outputs and cancellation still apply, and later listeners remain independent.
+One warning per refused output names its owning mod, hook, output and conversion error. Native and wasm share this rule.
 
 ### Reading server blocks (draft)
 

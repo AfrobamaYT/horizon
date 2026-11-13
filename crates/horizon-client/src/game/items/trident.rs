@@ -553,7 +553,8 @@ impl Game<'_> {
                 p.auto_spin_attack_item = spin_stack;
             }
             // `player.move(SELF, (0, 1.1999999, 0))` when on the ground: the lift
-            // stops at a ceiling.
+            // stops at a ceiling. A self move through the move gate (#2414);
+            // PR 1a records the movement unchanged.
             let lift = self
                 .player
                 .as_ref()
@@ -566,7 +567,17 @@ impl Game<'_> {
                     subject: None,
                 };
                 let up = Vec3::new(0.0, f64::from(1.1999999f32), 0.0);
-                let moved = scene.resolve(bounds, up, 0.0, true).unwrap_or(Vec3::ZERO);
+                let mut gate = horizon_client::move_gate::armed(
+                    &self.loop_context,
+                    self.player.as_ref().map_or(0, |p| p.entity_id as u32),
+                    "minecraft:player",
+                    horizon_world::entity_move::MoverType::SelfMovement,
+                    up,
+                );
+                let moved = horizon_client::move_gate::scene_resolve(
+                    &mut gate, &mut scene, bounds, up, 0.0, true,
+                )
+                .unwrap_or(Vec3::ZERO);
                 if let Some(p) = self.player.as_mut() {
                     p.position.y += moved.y;
                 }
