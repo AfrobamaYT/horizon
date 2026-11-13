@@ -22,3 +22,11 @@ once, then double it again only on `Short`: an input of 0.4 becomes 1.6 for `Sho
 and 0.8 for `Full`. There is no second hook dispatch. Two non-commuting listeners run
 in dispatch order, each completing its rewrites before the next; this does not simulate
 two separate passes over the listener list. Cancellation still leaves motion unchanged.
+
+## Living death contract version 2
+
+[`living_death` version 2](../../../native-mods.md#living-death-version-2) supplies
+the accepted killing source and its captured weapon stack. Cancellation keeps the
+health a listener leaves, suppresses loot, experience and death messages, and does
+not heal the body. An unhealed cancelled body is removed at tick 20 without loot
+or another death dispatch.
