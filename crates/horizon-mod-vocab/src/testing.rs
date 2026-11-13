@@ -552,6 +552,13 @@ impl crate::prelude::PlayersBackend for FakeHost {
         let level = self.player_level(player)?;
         crate::Identifier::parse(level.dimension_id()).ok()
     }
+    fn player_has_infinite_materials(&self, player: PlayerRef) -> Option<bool> {
+        Some(self.players.get(player.uuid())?.infinite_materials)
+    }
+    fn player_inventory(&self, player: PlayerRef) -> Option<Vec<ItemStack>> {
+        let slots = &self.players.get(player.uuid())?.slots;
+        Some(slots.range(0..36).map(|(_, stack)| stack.clone()).collect())
+    }
 }
 crate::impl_backend_areas!(
     FakeHost,

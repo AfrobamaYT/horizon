@@ -84,7 +84,7 @@ impl Hub {
     }
 
     /// `ChunkMap.sendToTrackingPlayers`: send to every placed guest that
-    /// tracks the entity `id`.
+    /// tracks the entity `id`, and wrapped to the clients viewing the level that do.
     pub fn send_to_tracking(&self, id: i32, packet: &C) {
         let body = packet.encode();
         for g in self
@@ -94,6 +94,7 @@ impl Hub {
         {
             g.sender.send(body.clone());
         }
+        self.send_view_trackers(id, packet);
     }
 
     /// `ServerChunkCache.sendToTrackingPlayersAndSelf`: send to every placed
@@ -107,6 +108,7 @@ impl Hub {
         {
             g.sender.send(body.clone());
         }
+        self.send_view_trackers(id, packet);
     }
 
     /// Send to every placed guest within `range` blocks of `at`

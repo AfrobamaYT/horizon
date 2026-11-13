@@ -234,10 +234,10 @@ class PruneBuildsTests(unittest.TestCase):
         self.assertIn('"dist/horizon-source.tar.gz#Source of this Nightly', publish)
         self.assertIn('nightly.py keep-source "$SHA" "$DATE"', publish)
 
-    def test_the_workflow_prunes_on_schedule_only(self):
+    def test_the_workflow_prunes_on_real_runs_only(self):
         build = (WORKFLOWS / "nightly-build.yml").read_text()
         step = build.split("Old nightly/build-* branches deleted", 1)[1].split("- uses:", 1)[0]
-        self.assertIn("if: github.event_name == 'schedule'", step)
+        self.assertIn("if: steps.mode.outputs.dry_run != 'true'", step)
         self.assertIn("prune-builds --days 7", step)
         self.assertIn("GITHUB_STEP_SUMMARY", step)
 
@@ -270,10 +270,22 @@ class SdkPairTests(unittest.TestCase):
                 mock.patch.object(nightly, "is_ancestor", return_value=True), \
                 mock.patch.object(nightly, "git", return_value="a" * 40), \
                 mock.patch.object(nightly, "sdk_ready", return_value=False), \
+                mock.patch.object(nightly.train, "daily_green", return_value=True), \
                 mock.patch.object(nightly.train, "green_main_head") as automatic:
             with self.assertRaises(SystemExit):
                 nightly.green_base("arismoko/horizon", "")
             automatic.assert_not_called()
+
+    def test_explicit_base_must_be_daily_green(self):
+        with mock.patch.dict(nightly.os.environ, {"NIGHTLY_BASE": "a" * 40}), \
+                mock.patch.object(nightly, "is_ancestor", return_value=True), \
+                mock.patch.object(nightly, "git", return_value="a" * 40), \
+                mock.patch.object(nightly, "sdk_ready", return_value=True), \
+                mock.patch.object(nightly.train, "daily_green", return_value=False), \
+                mock.patch.object(nightly, "stop", side_effect=SystemExit) as stop:
+            with self.assertRaises(SystemExit):
+                nightly.green_base("arismoko/horizon", "")
+        self.assertIn("is not `daily-green` or an ancestor of it", stop.call_args.args[2])
 
     def test_final_sha_change_or_disappearing_sdk_stops_before_pushing(self):
         for sha, sdk_ready in (("a" * 40, False), ("b" * 40, True)):
@@ -289,11 +301,13 @@ class SdkPairTests(unittest.TestCase):
     def test_automatic_selection_reads_inventory_once_for_all_candidates(self):
         def choose(*, parity, eligible):
             self.assertTrue(parity)
-            self.assertFalse(eligible("b" * 40))
+            self.assertFalse(eligible("b" * 40), "no SDK")
+            self.assertFalse(eligible("c" * 40), "SDK but not daily-green")
             self.assertTrue(eligible("a" * 40))
             return "a" * 40
         with mock.patch.dict(nightly.os.environ, {"NIGHTLY_BASE": ""}), \
-                mock.patch.object(nightly, "ready_sdk_shas", return_value={"a" * 40}) as inventory, \
+                mock.patch.object(nightly, "ready_sdk_shas", return_value={"a" * 40, "c" * 40}) as inventory, \
+                mock.patch.object(nightly.train, "daily_green", side_effect=lambda sha: sha == "a" * 40), \
                 mock.patch.object(nightly.train, "green_main_head", side_effect=choose), \
                 mock.patch.object(nightly, "is_ancestor", return_value=True), \
                 mock.patch.object(nightly, "git", side_effect=["a" * 40, NOW]):
