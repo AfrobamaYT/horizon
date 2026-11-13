@@ -2,7 +2,7 @@
 use super::*;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicUsize, Ordering};
-#[path = "../../src/prepared.rs"]
+#[path = "../../../src/prepared.rs"]
 mod slots;
 thread_local! {
     static REGISTER_PART: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };

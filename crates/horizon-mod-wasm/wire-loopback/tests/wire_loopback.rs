@@ -5,37 +5,11 @@
 use mod_api::wire::{Id, Reader, WireError, Writer, guest};
 use mod_api::{Hooks, LoopContext, StructurePiece};
 use std::{rc::Rc, sync::Arc};
-#[path = "wire_loopback/block_entity_on_load.rs"]
-mod block_entity_on_load;
-#[path = "wire_loopback/game_rule_reads.rs"]
-mod game_rule_reads;
+// One module per file of tests/wire_loopback/, written by build.rs: a new test goes in a file there.
+include!(concat!(env!("OUT_DIR"), "/wire_loopback_modules.rs"));
 mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
-#[path = "wire_loopback/biome_region_registration.rs"]
-mod biome_region_registration;
-#[path = "wire_loopback/block_entity_transform.rs"]
-mod block_entity_transform;
-#[path = "wire_loopback/crash_sections.rs"]
-mod crash_sections;
-#[path = "wire_loopback/entity_layers.rs"]
-mod entity_layers;
-#[path = "wire_loopback/entity_renderers.rs"]
-mod entity_renderers;
-#[path = "wire_loopback/item_drop_state.rs"]
-mod item_drop_state;
-#[path = "wire_loopback/load_conditions.rs"]
-mod load_conditions;
-#[path = "wire_loopback/loot_tags.rs"]
-mod loot_tags_wire;
-#[path = "wire_loopback/piglin_answers.rs"]
-mod piglin_answers;
-#[path = "wire_loopback/piston_push_reaction.rs"]
-mod piston_push_reaction;
-#[path = "wire_loopback/prepared_equip.rs"]
-mod prepared_equip;
-#[path = "wire_loopback/use_item_hand.rs"]
-mod use_item_hand;
 /// The generated proxies' refusal reason; the loopback refuses only on its own encode errors.
 fn wasm_call_refusal() -> String {
     "loopback refused".into()
@@ -2295,9 +2269,6 @@ fn listener_metadata_and_cancellation_cross_the_real_guest() {
     assert!(!event.cancelled);
 }
 
-#[path = "wire_loopback/arm_pose_registration.rs"]
-mod arm_pose_registration;
-
 #[test]
 fn wire_loopback_mob_submit_hidden_parts_write_back() {
     mod_api::__private::initialize().unwrap();
@@ -2469,8 +2440,6 @@ fn world_phase_messages_round_trip_returns_filter_decision() {
     );
 }
 
-#[path = "wire_loopback/level_ticking.rs"]
-mod level_ticking;
 #[test]
 fn wire_loopback_block_entity_data_received_preserves_tag_and_handle() {
     thread_local! { static CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
@@ -2576,18 +2545,3 @@ fn datapack_sync_recipient_and_answer_cross_the_wire() {
         );
     }
 }
-#[path = "wire_loopback/chunk_queries.rs"]
-mod chunk_queries;
-
-#[path = "wire_loopback/client_fireworks.rs"]
-mod client_fireworks;
-#[path = "wire_loopback/play_hit_sound.rs"]
-mod play_hit_sound;
-#[path = "wire_loopback/server_has_time.rs"]
-mod server_has_time;
-
-#[path = "wire_loopback/datafix_upgrades.rs"]
-mod datafix_upgrades;
-
-#[path = "wire_loopback/friction.rs"]
-mod friction;
