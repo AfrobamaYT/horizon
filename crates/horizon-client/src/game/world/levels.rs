@@ -650,6 +650,10 @@ impl Game<'_> {
             self.level_shapes.get(dim.id()),
             self.level.seed,
             &self.level.enabled_features,
+            self.world_biomes
+                .as_ref()
+                .unwrap_or_else(|| self.res.biomes())
+                .clone(),
         )?;
         save.install_profession_snapshot(self.stations().professions.clone());
         let mut world = Game::world_for_mods(self.res.facts().air, self.level.seed);

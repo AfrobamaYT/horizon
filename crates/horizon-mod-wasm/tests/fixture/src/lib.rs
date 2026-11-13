@@ -5,6 +5,7 @@ static ENTITY_PRE_CALLS: AtomicU32 = AtomicU32::new(0);
 static ENTITY_POST_CALLS: AtomicU32 = AtomicU32::new(0);
 
 pub mod area_macros;
+pub mod cauldron;
 pub mod datapack;
 pub mod game_payload;
 pub mod interaction;
@@ -96,14 +97,19 @@ impl Hooks for Mod {
             mod_api::Command::new("wasmentity <target:entity>"),
             mod_api::Command::new("wasmentities <targets:entities>"),
             mod_api::Command::new("wasmplayer <target:player>"),
+            mod_api::Command::new("wasmcauldron"),
         ]);
     }
 
     fn run_mod_command(
         &self,
-        _: &mut dyn mod_api::ServerHost,
+        host: &mut dyn mod_api::ServerHost,
         event: &mut mod_api::RunModCommandEvent<'_>,
     ) -> mod_api::Flow {
+        if event.command.literals.first().map(String::as_str) == Some("wasmcauldron") {
+            cauldron::read(host);
+            return mod_api::Flow::Cancel;
+        }
         selector_command::run(event)
     }
 
@@ -192,6 +198,7 @@ impl Hooks for Mod {
         runtime_environment::register(cx);
         game_payload::register(registrar);
         interaction::register(registrar);
+        cauldron::register(registrar);
         registrar
             .declare_datapack_registry(
                 "spell",

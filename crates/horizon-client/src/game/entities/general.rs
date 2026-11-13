@@ -20,6 +20,7 @@ use horizon_client::join_seq::{JoinList, JoinSeq};
 use horizon_core::fast_hash::{FxHashMap, FxHashSet};
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_core::nbt::Tag;
+use horizon_world::move_gate::MoveGate;
 use std::borrow::Cow;
 use std::collections::HashSet;
 
@@ -1028,6 +1029,15 @@ impl Entity for GeneralRow {
     }
     fn reset_fall_distance(&mut self) {
         self.fall_distance = 0.0;
+    }
+    /// A stage 2 row never joins a world, so only a push reaches it, and it
+    /// carries no physics of its own: the move is a plain displacement.
+    fn move_entity(&mut self, gate: &mut MoveGate, movement: Vec3) {
+        if gate.skipped() {
+            return;
+        }
+        let position = self.position_mut();
+        *position = position.add_vector(movement);
     }
     fn rotation(&self) -> [f32; 2] {
         self.rotation

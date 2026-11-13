@@ -846,11 +846,14 @@ impl Game<'_> {
         #[cfg(test)]
         nested_spawn_tests::after_lift(self, nested_spawn_tests::Point::RemoteRocket);
         for r in &mut rockets {
-            r.remote_step(&mut SceneCollisions {
-                world: &self.world,
-                binding: self.collision,
-                subject: None,
-            });
+            r.remote_step(
+                &mut SceneCollisions {
+                    world: &self.world,
+                    binding: self.collision,
+                    subject: None,
+                },
+                &self.loop_context,
+            );
             if let Some(target) = r.attached_to {
                 if me == Some(target) {
                     continue;

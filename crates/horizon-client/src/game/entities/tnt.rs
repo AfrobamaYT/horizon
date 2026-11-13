@@ -214,7 +214,18 @@ impl PrimedTnt {
     ) -> Result<(Vec<BlockPos>, bool)> {
         self.previous = self.position;
         self.velocity.y -= self.get_gravity();
-        let mut wanted = self.velocity;
+        let wanted = self.velocity;
+        // The TNT's Entity.move goes through the move gate (#2414), armed
+        // before the stuck multiplier of the move itself; PR 1a records the
+        // movement unchanged.
+        let mut gate = horizon_client::move_gate::armed(
+            context,
+            self.id,
+            "minecraft:tnt",
+            horizon_world::entity_move::MoverType::SelfMovement,
+            wanted,
+        );
+        let mut wanted = gate.delta();
         if let Some(multiplier) = self.take_stuck() {
             wanted = wanted.multiply(multiplier);
         }
@@ -226,12 +237,14 @@ impl PrimedTnt {
         // Entity.collide: the world border's walls and the entities that
         // `canBeCollidedWith` it (a boat, a shulker) stop it too.
         let border = border.map(|b| (b, [self.position.x, self.position.z]));
-        let moved = horizon_client::collisions::EntityCollisions {
+        let mut collisions = horizon_client::collisions::EntityCollisions {
             blocks: scene,
             entities,
             border,
-        }
-        .resolve_with_context(
+        };
+        let moved = horizon_client::move_gate::entities_resolve_with_context(
+            &mut gate,
+            &mut collisions,
             self.bounds(),
             wanted,
             0.0,

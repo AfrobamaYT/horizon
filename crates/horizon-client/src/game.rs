@@ -204,6 +204,7 @@ use {
     horizon_world::{
         block_collision::BlockCollisionRegistry,
         collision_context::{CollisionContext, CollisionEntity, CollisionItem},
+        entity_move::MoverType,
         entity_obstruction::{EntityIdentity, EntityObstructionWorld, ObstructionEntity},
         fluid::FluidState,
         level::{
@@ -1075,7 +1076,7 @@ struct WorldTables {
     /// The pack files the tables were built from (a native mod's among
     /// them), for the advancement tree reload and the loot data.
     files: Vec<(String, Vec<Vec<u8>>)>,
-    items: Items,
+    items: Arc<Items>,
     recipes: Recipes,
     stations: horizon_client::stations::StationData,
     reload_sources: Option<Arc<horizon_client::crafting::ResolvedSources>>,
@@ -3703,32 +3704,8 @@ impl Game<'_> {
     ) -> [f64; 3] {
         let mut random = random.unwrap_or_else(|| spill::prepare_item_random(velocity));
         random.state.age = age;
-        let item = stack.item.clone();
-        let count = stack.count as i32;
-        self.next_entity += 1;
-        let p = Vec3::new(position[0], position[1], position[2]);
-        self.persist.uuids.insert(self.next_entity, random.uuid);
-        let (bob, yaw) = (random.bob, random.yaw);
-        let velocity = velocity.unwrap_or(random.velocity);
-        self.dropped.push(random.state.apply(ItemEntity {
-            attachment_lifetime: Default::default(),
-            fall_distance: 0.0,
-            rotation: [yaw, 0.0],
-            pickup_delay: i64::from(pickup_delay),
-            random: random.own.into(),
-            age,
-            ..ItemEntity::new(
-                self.next_entity,
-                stack,
-                p,
-                Vec3::new(velocity[0], velocity[1], velocity[2]),
-                bob,
-            )
-        }));
-        // ServerLevel.addFreshEntity.
-        if self.native_joins_flush(false, self.next_entity) {
-            self.native_item_spawn(self.next_entity, &item, count, position);
-        }
+        let velocity = self.push_item_entity(stack, position, velocity, pickup_delay, Some(random));
+        self.join_item_entity(self.next_entity, position);
         velocity
     }
     /// The block entity at `pos` saved with its id and position
@@ -3827,21 +3804,6 @@ impl Game<'_> {
         }
         self.spawn_item(stack, p, v, 10);
     }
-    /// Player.drop: thrown from the eyes along the view direction.
-    fn drop_held(&mut self, all: bool) {
-        if self.eye_position().is_none() {
-            return;
-        }
-        let spectator = self.spectator();
-        let Some(thrown) = horizon_client::items::take_held_drop(
-            &mut self.inventory[self.selected],
-            all,
-            spectator,
-        ) else {
-            return;
-        };
-        self.player_drop(thrown);
-    }
     /// `Player.drop`: the statistics and a thrown item entity in front of the player.
     pub(super) fn player_drop(&mut self, thrown: ItemStack) -> Option<u32> {
         let eye = self.eye_position()?;
@@ -3885,20 +3847,16 @@ impl Game<'_> {
     ) -> Option<u32> {
         let r = &mut self.world.random;
         let v = horizon_client::entities::drop_motion(r, self.yaw, self.pitch, randomly);
-        let y = eye[1] - f64::from(0.3f32);
-        // ItemTossEvent: a canceled toss never enters the world; what was thrown is gone.
-        // Only `drop(.., false)` tosses fire it: a death's scatter (`randomly`) does not.
-        if !randomly {
-            let player = self.native_acting_id();
-            let mut canceled = false;
-            self.native_item_toss(player, &thrown.item, thrown.count, &mut canceled);
-            if canceled {
-                return None;
-            }
-        }
-        self.spawn_item(thrown, [eye[0], y, eye[2]], v, 40);
+        let at = [eye[0], eye[1] - f64::from(0.3f32), eye[2]];
         let uuid = thrown_from_hand.then(|| self.acting_player_uuid());
-        let item = self.just_spawned_item()?;
+        // Only `drop(.., false)` tosses ask `item_toss`: a death's scatter (`randomly`) does not.
+        let id = if randomly {
+            self.spawn_item(thrown, at, v, 40);
+            self.next_entity
+        } else {
+            self.toss_item(thrown, at, v, uuid)?
+        };
+        let item = self.dropped.iter_mut().rev().find(|d| d.id == id)?;
         item.thrower = uuid;
         Some(item.id)
     }
@@ -5457,176 +5415,6 @@ impl Game<'_> {
         self.set_screen(Screen::Inventory);
         self.capture(false);
         self.right = false;
-    }
-    /// One `FallingBlockEntity.tick` move of `f`.
-    fn fall_step(
-        &mut self,
-        f: &mut FallingBlock,
-        entity_drops: bool,
-        entities: &[Aabb],
-    ) -> Result<FallStep> {
-        if self.res.facts().is_air(f.state) {
-            return Ok(FallStep::Gone);
-        }
-        f.previous = f.position;
-        f.age = f.age.wrapping_add(1);
-        f.velocity.y -= horizon_client::entity_rules::EntityRules::get_gravity(f);
-        let mut wanted = f.velocity;
-        // Entity.move: a cobweb it was in scales this move, which then
-        // starts from rest.
-        if f.stuck.length_squared() > 1.0e-7 {
-            wanted = wanted.multiply(f.stuck);
-            f.stuck = Vec3::ZERO;
-            f.velocity = Vec3::ZERO;
-        }
-        let scene = collisions::SceneCollisions {
-            world: &self.world,
-            binding: self.collision,
-            subject: Some(collisions::PowderSnowSubject {
-                fall_distance: f.fall_distance,
-                falling_block: true,
-                ..Default::default()
-            }),
-        };
-        // Entity.isDescending: only sneaking entities descend through
-        // scaffolding. Falling blocks do not sneak, so descending is always
-        // false (Entity.isDescending returns isShiftKeyDown, fixes #7553).
-        let context = CollisionContext::for_entity(
-            CollisionEntity {
-                identity: EntityIdentity(0),
-                kind: horizon_world::collision_context::EntityContextKind::Other,
-                y: f.position.y,
-                descending: false,
-                main_hand: None,
-            },
-            false,
-        );
-        // On an error the caller keeps the block as it was before this tick.
-        // Entity.collide: the world border's walls and the entities that
-        // `canBeCollidedWith` it (a boat, a shulker) stop it too.
-        let movement = collisions::EntityCollisions {
-            blocks: scene,
-            entities,
-            border: Some((self.border.geometry(), [f.position.x, f.position.z])),
-        }
-        .resolve_with_context(
-            horizon_client::falling_block::bounds(f.position),
-            wanted,
-            0.0,
-            false,
-            context,
-        )?;
-        let next = Vec3::new(
-            f.position.x + movement.x,
-            f.position.y + movement.y,
-            f.position.z + movement.z,
-        );
-        let on_ground = wanted.y < 0.0 && movement.y != wanted.y;
-        f.on_ground = on_ground;
-        if movement.y < 0.0 {
-            f.fall_distance -= f64::from(movement.y as f32);
-        }
-        let from = f.position;
-        f.position = next;
-        // Entity.move stops it on the axes it collided on.
-        if movement.x != wanted.x {
-            f.velocity.x = 0.0;
-        }
-        if movement.y != wanted.y {
-            f.velocity.y = 0.0;
-        }
-        if movement.z != wanted.z {
-            f.velocity.z = 0.0;
-        }
-        if on_ground {
-            self.falling_block_impact(f);
-            if f.fall_distance > 0.0 {
-                self.post_landing_event(
-                    f.position,
-                    horizon_client::falling_block::bounds(f.position),
-                    false,
-                );
-            }
-            f.fall_distance = 0.0;
-        }
-        // applyEffectsFromBlocks: WebBlock.entityInside makes it stuck
-        // (Entity.makeStuckInBlock), BubbleColumnBlock.entityInside lifts or
-        // drags it. Entity.move records the move unless it was blocked short
-        // of a tiny one.
-        let moved = movement.length_squared();
-        let recorded = moved > 1.0e-7 || wanted.length_squared() - moved < 1.0e-7;
-        let world = &self.world;
-        let facts = self.res.facts();
-        let (registry, collision) = (self.pack.assets.registry, self.collision);
-        let mut tops = Vec::new();
-        let stuck = horizon_client::falling_block::apply_effects_from_blocks(
-            from,
-            f.position,
-            recorded.then_some(wanted),
-            &mut f.velocity,
-            &mut f.fall_distance,
-            &mut tops,
-            |p| {
-                use horizon_client::falling_block::Inside;
-                if &*facts.get(world.block(p.x, p.y, p.z)).name == "minecraft:cobweb" {
-                    Inside::Cobweb
-                } else if let Some(column) =
-                    horizon_client::motion::bubble_column_at(world, registry, facts, collision, p)
-                {
-                    Inside::BubbleColumn(column)
-                } else {
-                    Inside::Nothing
-                }
-            },
-        );
-        if let Some(multiplier) = stuck {
-            f.stuck = multiplier;
-        }
-        for pos in tops {
-            self.bubble_column_particles(pos);
-        }
-        self.entity_powder_snow_particles(
-            from,
-            f.position,
-            horizon_client::falling_block::bounds(f.position),
-            f.velocity,
-            false,
-        );
-        // FallingBlockEntity.tick handles its portal after the move's block
-        // effects, before placing/dropping on the floor under an End portal.
-        let teleported = self.falling_through_portal(f);
-        // FallingBlockEntity.forceTickAfterTeleportToDuplicate: crossing
-        // either way through the End deliberately keeps the source's final
-        // placement/drop branch, even though the source entity was removed.
-        if let Some(target) = teleported
-            && self.dim != Dim::End
-            && target != Dim::End
-        {
-            return Ok(FallStep::Gone);
-        }
-        let y = next.y.floor() as i32;
-        let outside = y <= self.world.bottom_y() || y >= self.world.top_y();
-        if !on_ground && (f.age > 100 && outside || f.age > 600) {
-            return Ok(if f.drop_item && entity_drops {
-                FallStep::Dropped(next)
-            } else {
-                FallStep::Gone
-            });
-        }
-        if on_ground {
-            return Ok(FallStep::Landed([
-                f.position.x.floor() as i32,
-                f.position.y.floor() as i32,
-                f.position.z.floor() as i32,
-            ]));
-        }
-        // Entity.scale(getAirDrag()): 0.98F, widened before it scales motion.
-        f.velocity = horizon_client::entity_rules::scale_air_drag(f.velocity);
-        Ok(if teleported.is_some() {
-            FallStep::Gone
-        } else {
-            FallStep::Falling
-        })
     }
     /// `Entity.spawnAtLocation`: an item entity where the block was.
     fn drop_falling_block(&mut self, state: BlockStateId, at: Vec3) {
@@ -10448,6 +10236,7 @@ impl Game<'_> {
             shapes,
             level,
             world,
+            biomes,
             streaming,
             save,
             session_lock,
@@ -10464,9 +10253,8 @@ impl Game<'_> {
         // final save must not run: the lock below only marks tag tables.
         self.world_adopted = false;
         self.owner_migration = owner_migration;
-        // The world's packs over the game's biomes (`Biomes::with_packs`),
-        // the table its chunks were built with.
-        self.world_biomes = self.packed_biomes();
+        // Saves and chunk readers share the same placeholder IDs.
+        self.world_biomes = Some(biomes);
         self.world_biomes_base = self.world_biomes.clone();
         horizon_client::crash::set_detail(
             "World",
@@ -16069,8 +15857,7 @@ pub(crate) fn run_with(
     }
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models(options.execution_role);
-    mods::register_layer_definitions(options.execution_role);
-    mods::register_skull_models(options.execution_role, &vanilla_root);
+    mods::register_layer_definitions(options.execution_role, &vanilla_root);
     mods::register_debug_entries(options.execution_role);
     mods::register_gui_layers(options.execution_role);
     mods::register_map_decoration_types();
@@ -16780,15 +16567,6 @@ mod destroyed_contents_tests {
 #[cfg(test)]
 #[path = "game/interface/tests/sign_chain_tests.rs"]
 mod sign_chain_tests;
-
-impl Game<'_> {
-    pub(super) fn guest_drop_held(&mut self, gi: usize, conn: u32, all: bool) {
-        self.as_guest(conn, |g| g.drop_held(all));
-        if let Some(host) = self.lan.as_mut() {
-            host.hub.guests.update(gi, |g| g.told_selected());
-        }
-    }
-}
 
 impl Game<'_> {
     pub(super) fn apply_crafter_slot_states(&mut self, menu: &horizon_client::menu::Menu) {

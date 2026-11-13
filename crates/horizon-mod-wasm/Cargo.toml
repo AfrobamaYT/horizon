@@ -48,6 +48,11 @@ workspace = true
 test-copy-probe = []
 runtime-fixture = []
 listener-fixture = ["mod_points/listener-fixture", "horizon-mod-api-gen/listener-fixture"]
+mixed-output-fixture = ["mod_api/mixed-output-fixture", "horizon-mod-api-gen/mixed-output-fixture"]
+
+[[test]]
+name = "listener_outputs"
+required-features = ["mixed-output-fixture"]
 
 [[test]]
 name = "real_member"

@@ -15,6 +15,7 @@
 //! `level.dat`) are migrated on open.
 use crate::mod_chunk_tickets::{ModTicket, ModTickets, TicketOwner};
 mod backpressure;
+use backpressure::compress_records;
 pub mod biome_regions;
 mod block_entity_order;
 pub mod level_mods;
@@ -1468,7 +1469,7 @@ pub fn encode_with(
                 biome_packed
                     .palette
                     .iter()
-                    .map(|&b| string(&biomes.get(b as u16).name))
+                    .map(|&b| string(&biomes.saved_name(b as u16)))
                     .collect(),
             ),
         )];
@@ -1799,7 +1800,7 @@ fn decode_column(
             let ids: Vec<u16> = palette
                 .iter()
                 .map(|p| match p {
-                    Tag::String(s) => biomes.id(&s.to_string_lossy()),
+                    Tag::String(s) => biomes.saved_id(&s.to_string_lossy()),
                     _ => 0,
                 })
                 .collect();
@@ -2234,29 +2235,6 @@ const CHUNKS_PER_HELPER: usize = 4;
 /// one. Each chunk's bytes depend only on the chunk, and the writes stay in
 /// order, so the files are the same as from one thread. At most half the
 /// hardware threads help, leaving the rest to the game and its workers.
-fn compress_records(
-    records: &[((i32, i32), &Record)],
-    timestamp: u32,
-) -> Vec<std::io::Result<Option<ChunkRecord>>> {
-    // `RegionFile.getVersion`: the version `region-file-compression` selected
-    // (`RegionFileVersion.getSelected`), zlib unless a dedicated server said
-    // otherwise.
-    let compression = Compression::selected();
-    let compress = |record: &Record| {
-        record
-            .tag()
-            .map(|tag| ChunkRecord::from_nbt(&tag, compression, timestamp, Limits::saved()))
-            .transpose()
-    };
-    let helpers = horizon_threads::worker_count()
-        .div_ceil(2)
-        .min(records.len() / CHUNKS_PER_HELPER);
-    if helpers <= 1 {
-        return records.iter().map(|(_, r)| compress(r)).collect();
-    }
-    share_out(records.len(), helpers, |i| compress(records[i].1), || true)
-}
-
 /// `job(i)` for every `i` below `count`, in order, shared between this thread
 /// and up to `helpers - 1` scoped threads, each taking the next index as it
 /// finishes one. A helper the system refuses to start (`start` false, or a
@@ -3094,6 +3072,7 @@ impl SaveDir {
         registry: &'static BlockRegistry,
         biomes: &Arc<Biomes>,
     ) -> Result<()> {
+        biomes.ensure_saveable()?;
         let encoding = Arc::new(Encoding {
             registry,
             biomes: biomes.clone(),
@@ -3294,6 +3273,7 @@ impl SaveDir {
         registry: &BlockRegistry,
         biomes: &Biomes,
     ) -> Result<usize> {
+        biomes.ensure_saveable()?;
         let tables = self.tables.get().map(|t| &**t);
         let records = chunks
             .iter()
@@ -10249,3 +10229,6 @@ mod calculated_blending_save_tests {
         let _ = fs::remove_dir_all(&dir);
     }
 }
+
+#[cfg(test)]
+mod biome_tests;

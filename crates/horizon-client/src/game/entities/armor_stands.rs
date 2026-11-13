@@ -1212,6 +1212,12 @@ impl Game<'_> {
             Some(self.border.geometry()),
             &nearby,
             travels_after,
+            if shulker.is_some() {
+                horizon_world::entity_move::MoverType::Shulker
+            } else {
+                horizon_world::entity_move::MoverType::ShulkerBox
+            },
+            &self.loop_context,
         );
     }
     /// `Ravager.roar` with `mob_griefing` on: every armor stand in `area` (the
