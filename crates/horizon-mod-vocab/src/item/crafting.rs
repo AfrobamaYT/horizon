@@ -46,6 +46,21 @@ pub struct Ingredient {
     /// stack asks each child its own `test` (a mod's kind among them),
     /// as on NeoForge — the flat list above only names items.
     pub children: Option<(Shape, Vec<Self>)>,
+    /// A concrete-stack built-in predicate.
+    pub rule: Option<IngredientRule>,
+    /// Explicit slot display, independent of membership.
+    pub display: Option<horizon_core::nbt::Compound>,
+}
+/// Built-in predicates evaluated against the concrete stack.
+#[derive(Clone, Debug, PartialEq, horizon_mod_api_macros::Wire)]
+// exhaustive: the parser and engine share this closed set of built-in predicates
+pub enum IngredientRule {
+    /// Exact component patch, with explicit absence requirements.
+    Components {
+        patch: horizon_core::nbt::Compound,
+        removed: Vec<String>,
+        strict: bool,
+    },
 }
 /// How a shape's children combine at match time.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -58,6 +73,8 @@ pub enum Shape {
     Intersection,
     /// The first child must, and the second must not.
     Difference,
+    /// Matching follows the base; presentation uses a separate slot display.
+    CustomDisplay,
 }
 /// Why an ingredient cannot be retained as an exact, component-independent key set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +111,8 @@ impl Ingredient {
             order: items,
             custom: None,
             children: None,
+            rule: None,
+            display: None,
         }
     }
     /// `Ingredient.test`: whether `stack` fits: a stack the list names, and

@@ -166,6 +166,10 @@ fn convert(value: &mod_api::Ingredient) -> Ingredient {
         items: value.items.clone(),
         order: value.order.clone(),
         custom: value.custom.clone(),
+        rule: None,
+        display: value.display.clone(),
+        component_defaults: Default::default(),
+        shown: None,
         children: value
             .children
             .as_ref()

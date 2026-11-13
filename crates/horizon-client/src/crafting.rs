@@ -19,8 +19,11 @@ pub use snapshots::{
 mod ingredient;
 pub mod native_hooks;
 mod repair_item;
+#[path = "crafting/shapeless_matching.rs"]
+mod shapeless_matching;
 pub use ingredient::{Ingredient, Shape};
 use serde_json::Value;
+use shapeless_matching::matches_all;
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
@@ -1307,37 +1310,6 @@ fn shrink(pattern: &[Vec<char>]) -> Vec<Vec<char>> {
         (Some(l), Some(r)) => rows.iter().map(|row| row[l..=r].to_vec()).collect(),
         _ => Vec::new(),
     }
-}
-/// A perfect matching of the ingredients to distinct stacks (`StackedContents.canCraft`).
-fn matches_all(context: &LoopContext, ingredients: &[Ingredient], stacks: &[&ItemStack]) -> bool {
-    fn augment(
-        context: &LoopContext,
-        i: usize,
-        ingredients: &[Ingredient],
-        stacks: &[&ItemStack],
-        owner: &mut [Option<usize>],
-        seen: &mut [bool],
-    ) -> bool {
-        for s in 0..stacks.len() {
-            if seen[s] || !ingredients[i].test_in(context, stacks[s]) {
-                continue;
-            }
-            seen[s] = true;
-            if owner[s].is_none_or(|o| augment(context, o, ingredients, stacks, owner, seen)) {
-                owner[s] = Some(i);
-                return true;
-            }
-        }
-        false
-    }
-    if ingredients.len() != stacks.len() {
-        return false;
-    }
-    let mut owner = vec![None; stacks.len()];
-    (0..ingredients.len()).all(|i| {
-        let mut seen = vec![false; stacks.len()];
-        augment(context, i, ingredients, stacks, &mut owner, &mut seen)
-    })
 }
 pub use horizon_items::recipe_sources::qualified;
 

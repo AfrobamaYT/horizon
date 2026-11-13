@@ -1,12 +1,15 @@
 //! Engine recipe ingredients and stack matching.
+#[path = "ingredient/display.rs"]
+mod display;
 #[path = "ingredient/matching.rs"]
 mod matching;
 use super::native_hooks::native_ingredient;
 use super::{ItemStack, Items};
 use crate::native_stack_hooks::ingredient_test as native_ingredient_test;
+use display::display_stacks;
 use horizon_world::native_load_context::LoadContext;
 use mod_api::__private::{WalkedIngredient, dedup_keep_order, resolved_items};
-pub use mod_api::item::crafting::Shape;
+pub use mod_api::item::crafting::{IngredientRule, Shape};
 use serde_json::Value;
 use std::collections::HashSet;
 /// Where `Ingredient::resolve` leaves the hook's answer inside the occurrence
@@ -28,7 +31,7 @@ fn is_custom(kind: &str) -> bool {
 }
 
 /// A set of accepted items (expanded from an item, list or tag), and the
-/// items in its `HolderSet` order (`Ingredient.display`'s `TagSlotDisplay`).
+/// items in its `HolderSet` order, with built-in component and display rules.
 #[derive(Clone, Debug)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct Ingredient {
@@ -43,8 +46,35 @@ pub struct Ingredient {
     /// stack asks each child its own `test` (a mod's kind among them),
     /// as on NeoForge — the flat list above only names items.
     pub children: Option<(Shape, Vec<Self>)>,
+    /// Built-in predicate evaluated against the concrete stack.
+    pub rule: Option<IngredientRule>,
+    /// Slot display override; membership continues to use `items`.
+    pub display: Option<horizon_core::nbt::Compound>,
+    /// Resolved slot display stacks; never used for placement or matching.
+    pub shown: Option<Vec<ItemStack>>,
+    /// Shared prototypes of the load that parsed this ingredient.
+    pub component_defaults:
+        std::sync::Arc<std::collections::HashMap<String, horizon_core::nbt::Compound>>,
 }
 impl Ingredient {
+    /// Resolve a stored slot display at the owning resource boundary.
+    pub fn resolve_display(
+        display: &horizon_core::nbt::Compound,
+        items: &Items,
+    ) -> Option<Vec<ItemStack>> {
+        display_stacks(display, items)
+    }
+
+    /// Whether item membership fully determines shapeless matching.
+    pub fn is_simple(&self) -> bool {
+        self.rule.is_none()
+            && self.custom.is_none()
+            && self
+                .children
+                .as_ref()
+                .is_none_or(|(_, kids)| kids.iter().all(Self::is_simple))
+    }
+
     /// The items of a list, in order.
     pub fn of(items: Vec<String>) -> Self {
         Self {
@@ -52,6 +82,10 @@ impl Ingredient {
             order: items,
             custom: None,
             children: None,
+            rule: None,
+            display: None,
+            shown: None,
+            component_defaults: Default::default(),
         }
     }
     /// Asks the `ingredient` hook once for each mod kind in `v`, nested ones
@@ -84,6 +118,12 @@ impl Ingredient {
                             }
                         }
                     }
+                    Some("neoforge:custom_display") => {
+                        if let Some(base) = o.get_mut("base") {
+                            changed |= Self::resolve(base, context);
+                        }
+                    }
+                    Some("neoforge:components" | "neoforge:block_tag") => {}
                     Some(k) if is_custom(k) => {
                         let mut list = Vec::new();
                         if mod_api::__private::listened(mod_api::HookId::Ingredient)
@@ -131,33 +171,62 @@ impl Ingredient {
         // A mod's own kind: `resolve` asked the hook once at load and left
         // the item list it matches with the occurrence; one no load
         // resolved fails the file.
-        Self::of_walked(WalkedIngredient::walk(
-            v,
-            &items.item_tag_order,
-            &resolved_items,
-            &|data| crate::json_nbt::json_to_compound(data).ok(),
-        )?)
+        Self::of_walked(
+            WalkedIngredient::walk(
+                v,
+                &items.item_tag_order,
+                &|tag| {
+                    Some(
+                        items
+                            .block_tag_order
+                            .get(tag)?
+                            .iter()
+                            .filter_map(|block| {
+                                let item = items
+                                    .block_items
+                                    .get(block)
+                                    .map(String::as_str)
+                                    .unwrap_or(block);
+                                (item != "minecraft:air" && items.get(item).is_some())
+                                    .then(|| item.to_owned())
+                            })
+                            .collect(),
+                    )
+                },
+                &resolved_items,
+                &|data| crate::json_nbt::json_to_compound(data).ok(),
+            )?,
+            items,
+        )
     }
     /// The walk of an item ingredient's answer: NeoForge's standard shapes
     /// keep their children, and a mod's own kind keeps its kind and NBT metadata,
     /// since the load-time list only names items and matching a concrete
     /// stack (its components) is the match-time hook's.
-    fn of_walked(walked: WalkedIngredient) -> Option<Self> {
+    fn of_walked(walked: WalkedIngredient, items: &Items) -> Option<Self> {
         // The shapes' children walk the same way; a child no wrapper
         // answers fails the file.
         let children = match walked.children {
             Some((shape, kids)) => Some((
                 shape,
                 kids.into_iter()
-                    .map(Self::of_walked)
+                    .map(|kid| Self::of_walked(kid, items))
                     .collect::<Option<_>>()?,
             )),
+            None => None,
+        };
+        let shown = match &walked.display {
+            Some(display) => Some(display_stacks(display, items)?),
             None => None,
         };
         (!walked.order.is_empty()).then(|| Self {
             items: walked.set,
             order: walked.order,
             custom: walked.custom,
+            rule: walked.rule,
+            shown,
+            display: walked.display,
+            component_defaults: items.component_defaults.clone(),
             children,
         })
     }
@@ -166,3 +235,7 @@ impl Ingredient {
 #[cfg(test)]
 #[path = "custom_data_tests.rs"]
 mod custom_data_tests;
+
+#[cfg(test)]
+#[path = "ingredient/builtin_kinds_tests.rs"]
+mod builtin_kinds_tests;
