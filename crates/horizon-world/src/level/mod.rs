@@ -152,6 +152,9 @@ mod infiniburn_tests;
 #[cfg(test)]
 mod piston_carry_tests;
 #[cfg(test)]
+#[path = "tests/state_change.rs"]
+mod state_change_tests;
+#[cfg(test)]
 mod survive_tests;
 #[cfg(test)]
 mod tests;
@@ -634,6 +637,11 @@ pub trait LevelAccess: BlockEntityNeighbors {
     }
     /// Observe a committed `Level.setBlock` state change, before its side effects.
     fn observe_block_changed(&self, _pos: BlockPos, _old: BlockStateId, _new: BlockStateId) {}
+    /// NeoForge's `IBlockExtension.onBlockStateChange`: a `Level.setBlock` that held changed
+    /// the block at `pos` from `old` to `new`, observed at the end of the write
+    /// (`updatePOIOnBlockStateChange`), after the client update, the neighbour updates and the
+    /// neighbours' shape updates. A write whose `on_place` replaced the block is not observed.
+    fn observe_block_state_change(&self, _pos: BlockPos, _old: BlockStateId, _new: BlockStateId) {}
     /// NeoForge's `NeighborNotifyEvent`: the block at `pos` is about to tell
     /// its neighbours it changed (`ServerLevel.updateNeighborsAt`, or
     /// `updateNeighborsAtExceptFromFacing` with the side it skips). True

@@ -101,7 +101,7 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `isScaffolding(state, level, pos, entity)` | Missing | — | Scaffolding is identified by block class; no content field or Part. |
 | `hidesNeighborFace(level, pos, state, neighborState, direction)` | Missing | — | `block_render_visibility` hides a whole state from the mesher, not one face. |
 | `supportsExternalFaceHiding(state)` | Missing | — | No per-face culling query. |
-| `onBlockStateChange(level, pos, oldState, newState)` | Partial | `block_changed` (`hooks/base.rs`, a global server hook) | Fires after the commit but before block side effects and neighbour updates, and only on an authoritative server. It may not modify the level. |
+| `onBlockStateChange(level, pos, oldState, newState)` | Covered | `BlockPart::on_block_state_change` (`hooks/on_block_state_change.rs`) | Heard on both sides with a read-only `LevelSide` where `Level.setBlock` runs `updatePOIOnBlockStateChange`: after the client update, the neighbour updates and the neighbours' shape updates, only when the write held. The parts of the old state's block hear it, then those of the new state's block when the block changed. A client hears the blocks the server sends, its predictions, their settling and its piston replays; its guessed writes and world generation's writes are not heard. The global `block_changed` stays a separate, earlier server moment. |
 | `canBeHydrated(state, level, pos, fluid)` | Missing | — | Farmland hydration is engine-owned; fluid `canHydrate` is data. |
 | `getMapColor(state, level, pos, defaultColor)` | Partial | `BlockProperties.map_color` → `StateFacts.map_color` | Static; no position. |
 | `getAppearance(state, level, pos, direction, neighborState, neighborPos)` | Missing | — | No appearance query. |
@@ -314,7 +314,8 @@ their rows have landed or become partial since and should be narrowed when they 
   plant); `canHarvestBlock` is `can_harvest_block` before `player_harvest_check`; `isLadder` is `is_ladder`;
   `onTreeGrow` is `on_tree_grow`; `getToolModifiedState` is `tool_modified_state` before
   `block_tool_modification`; `onDestroyedByPlayer` is `on_destroyed_by_player`; `canBeConnectedTo` is
-  `can_be_connected_to` (the target) before `connects_to` (the connector).
+  `can_be_connected_to` (the target) before `connects_to` (the connector); `onBlockStateChange` is
+  `on_block_state_change`, after `block_changed`.
 - **Changed on the item side:** `getEquipmentSlot` is `ItemResource::equippable_slot`; `getCraftingRemainder`
   has `ItemPart::crafting_remainder` plus content data and `host.item_crafting_remainder`; `canEquip` is `ItemPart::can_equip`; `getXpRepairRatio` is `ItemPart::xp_repair_ratio`.
 - **Block group rows that still need their own answer:** `getExpDrop`,

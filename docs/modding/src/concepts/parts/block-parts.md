@@ -39,6 +39,22 @@ and `face_solid`, whether your block's face toward it is sturdy. Return `Some(tr
 
 Answer from the event without touching the world: the level host is read-only.
 
+## State changes
+
+`BlockPart::on_block_state_change` hears a block change from `event.old` to `event.new` at
+`event.pos`, at the end of a `Level.setBlock` that held. The parts of the old state's block hear
+it, then, when the block changed, the parts of the new state's block; `event.state` names the
+state whose parts are asked. The host is a read-only `LevelSide`.
+
+| Rule | Behavior |
+| --- | --- |
+| Moment | After the client update, the neighbour updates and the neighbours' shape updates: a fence beside new stone already shows its connection. |
+| Replaced writes | A write whose `on_place` replaced the block is not heard; the write that replaced it is. |
+| Sides | Servers hear every write. Clients hear the blocks the server sends, their predictions and the settled states, and their replays of piston moves; not the guesses made while deciding what an action does. |
+| Not heard | World generation's writes. |
+| `block_changed` | The global server hook hears a change earlier, right after the state is written, and also for replaced writes. |
+| Panics | A panicking part is contained with a warning. |
+
 ## Landing writes
 
 `BlockPart::fall_on` runs at vanilla's landing moment on a read-only level random host.
