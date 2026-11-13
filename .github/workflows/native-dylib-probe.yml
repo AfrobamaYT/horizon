@@ -142,6 +142,7 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           out="${LINKAGE_SCRATCH:-target}/api-source"
+          rm -rf "$out"
           "$PROBE_PYTHON" tools/sdk_api_source.py build "$out"
           "$PROBE_PYTHON" tools/sdk_api_source.py check "$out"
       - name: Probe command log

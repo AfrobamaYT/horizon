@@ -2,6 +2,7 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from tools import sdk_api_source as api_source
 from tools.sdk_api_source import Crate, Refusal
@@ -79,7 +80,8 @@ class ManifestTests(unittest.TestCase):
                     "license": {"workspace": True}, "publish": False},
         "lib": {"name": "mod_api"},
         "dependencies": {"vocab": {"path": "../nested/vocab"}, "log": "0.4",
-                         "glam": {"workspace": True, "features": ["bytemuck"]}},
+                         "glam": {"workspace": True, "features": ["bytemuck"]},
+                         "libm": {"version": "0.2", "default-features": False}},
         "target": {"cfg(unix)": {"dependencies": {"libc": "0.2"}}},
         "build-dependencies": {"horizon-mod-api-gen": {"path": "../horizon-mod-api-gen"}},
         "dev-dependencies": {"helper": {"path": "../helper"}},
@@ -102,15 +104,21 @@ class ManifestTests(unittest.TestCase):
     def test_manifest_keeps_the_library_and_its_normal_dependencies(self):
         crate = Crate("horizon-mod-api", "crates/horizon-mod-api", True)
         crates = {"horizon-mod-api": crate, "vocab": Crate("vocab", "crates/nested/vocab", False)}
+        # The game resolves glam with its defaults and three features, log with its defaults and `std`, and libm
+        # with `arch` and no defaults.
+        resolved = {"glam": ({"default", "std", "bytemuck", "serde"}, True), "log": ({"default", "std"}, True),
+                    "libm": ({"arch"}, False)}
         written = api_source.normalise_manifest(self.API, self.WORKSPACE, crate, crates,
-                                                {"testing": ["vocab/testing"]})
+                                                {"testing": ["vocab/testing"]}, resolved)
         self.assertEqual(tomllib.loads(written), {
             "package": {"name": "horizon-mod-api", "version": "0.1.0", "edition": "2024", "license": "MIT",
                         "publish": False, "autobins": False, "autoexamples": False, "autotests": False,
                         "autobenches": False, "build": "build.rs"},
             "lib": {"name": "mod_api"},
-            "dependencies": {"vocab": {"path": "../nested/vocab"}, "log": "0.4",
-                             "glam": {"version": "0.30", "features": ["bytemuck", "serde"]}},
+            "dependencies": {"vocab": {"path": "../nested/vocab"},
+                             "log": {"version": "0.4", "features": ["std"]},
+                             "glam": {"version": "0.30", "features": ["bytemuck", "serde", "std"]},
+                             "libm": {"version": "0.2", "default-features": False, "features": ["arch"]}},
             "target": {"cfg(unix)": {"dependencies": {"libc": "0.2"}}},
             "features": {"testing": ["vocab/testing"]},
             "lints": {"clippy": {"type_complexity": "allow"}},
@@ -121,8 +129,109 @@ class ManifestTests(unittest.TestCase):
         manifest = {"package": {"name": "vocab", "version": "0.1.0"},
                     "dependencies": {"horizon-items": {"path": "../../horizon-items"}}}
         with self.assertRaises(Refusal) as refused:
-            api_source.normalise_manifest(manifest, self.WORKSPACE, crate, {"vocab": crate}, {})
+            api_source.normalise_manifest(manifest, self.WORKSPACE, crate, {"vocab": crate}, {}, {})
         self.assertEqual(refused.exception.code, "E_PATH_DEPENDENCY")
+
+    def test_asking_for_a_feature_the_game_does_not_resolve_is_refused(self):
+        crate = Crate("vocab", "crates/nested/vocab", False)
+        for spec, resolved in (({"version": "1", "features": ["derive"]}, ({"default", "std"}, True)),
+                               ("1", ({"std"}, False))):
+            manifest = {"package": {"name": "vocab", "version": "0.1.0"}, "dependencies": {"serde": spec}}
+            with self.subTest(spec), self.assertRaises(Refusal) as refused:
+                api_source.normalise_manifest(manifest, self.WORKSPACE, crate, {"vocab": crate}, {},
+                                              {"serde": resolved})
+            self.assertEqual(refused.exception.code, "E_FEATURES")
+
+
+class FeatureTests(unittest.TestCase):
+    TREE = "\n".join([
+        "0horizon-mod-host v0.1.0 (/w/crates/horizon-mod-host)|",
+        "1bytemuck v1.25.2|bytemuck_derive,derive,extern_crate_alloc",
+        "2bytemuck_derive v1.12.1 (proc-macro)|",
+        "3proc-macro2 v1.0.107|default,proc-macro",
+        "4unicode-ident v1.0.26|",
+        "3syn v2.0.119|full",
+        "1serde_json v1.0.151|default,raw_value,std",
+        "2memchr v2.8.3|alloc,std",
+        "1horizon-mod-api-macros v0.1.0 (proc-macro) (/w/crates/horizon-mod-api-macros)|",
+        "2serde_json v1.0.151|default,std",
+        "1memchr v2.8.3|alloc,default,std (*)",
+        "1log v0.4.34|",
+    ])
+
+    def test_target_features_leave_proc_macros_and_their_trees_out(self):
+        self.assertEqual(api_source.target_features(self.TREE), {
+            "horizon-mod-host 0.1.0": set(),
+            "bytemuck 1.25.2": {"bytemuck_derive", "derive", "extern_crate_alloc"},
+            "serde_json 1.0.151": {"default", "raw_value", "std"},
+            "memchr 2.8.3": {"alloc", "default", "std"},
+            "log 0.4.34": set(),
+        })
+
+    def test_a_package_with_other_features_is_named(self):
+        game = {"bytemuck 1.25.2": {"derive", "extern_crate_alloc"}, "log 0.4.34": set(), "zmij 1.0.23": set(),
+                "memchr 2.8.3": {"alloc", "default", "std"}, "itoa 1.0.18": set()}
+        ours = {"bytemuck 1.25.2": {"derive"}, "log 0.4.34": set(), "memchr 2.8.3": {"alloc", "std"}}
+        self.assertEqual(api_source.feature_disagreements(
+            game, ours, {"bytemuck 1.25.2", "log 0.4.34", "memchr 2.8.3", "itoa 1.0.18"}),
+            ["bytemuck 1.25.2: game ['derive', 'extern_crate_alloc'], ours ['derive']",
+             "itoa 1.0.18: game [], ours None"])
+
+
+class CollectTests(unittest.TestCase):
+    """`collect` over fake cargo messages for the three builds, on files in a temporary workspace."""
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.root = Path(self.folder.name)
+        (self.root / "crates/api/src").mkdir(parents=True)
+        (self.root / "crates/api/src/lib.rs").write_text("include!(concat!(env!(\"OUT_DIR\"), \"/gen.rs\"));\n")
+        (self.root / "target").mkdir()
+        self.crates = [Crate("api", "crates/api", True)]
+
+    def tearDown(self):
+        self.folder.cleanup()
+
+    def messages(self, build, generated, reads=("crates/api/src/lib.rs",), cfgs=()):
+        out = self.root / f"target/out-{build}"
+        out.mkdir()
+        (out / "gen.rs").write_text(generated)
+        info = self.root / f"target/api-{build}0.d"
+        info.write_text(f"/t/libapi.rmeta: {' '.join(reads)} {out}/gen.rs\n")
+        package_id = "path+file:///w/crates/api#0.1.0"
+        return [
+            {"reason": "build-script-executed", "package_id": package_id, "out_dir": str(out), "cfgs": list(cfgs),
+             "env": [], "linked_libs": [], "linked_paths": []},
+            {"reason": "compiler-artifact", "package_id": package_id,
+             "manifest_path": str(self.root / "crates/api/Cargo.toml"), "target": {"kind": ["lib"], "name": "api"},
+             "filenames": [str(self.root / f"target/libapi-{build}0.rmeta")]},
+        ]
+
+    def collect(self, *builds):
+        with patch.object(api_source, "build_messages", side_effect=list(builds)):
+            return api_source.collect(self.crates, {"api": {}}, self.root)
+
+    def refusal(self, *builds):
+        with self.assertRaises(Refusal) as refused:
+            self.collect(*builds)
+        return refused.exception.code
+
+    def test_generated_files_the_same_for_every_build_come_with_the_crate(self):
+        files = self.collect(*(self.messages(build, "pub struct Hook;\n") for build in "abc"))
+        self.assertEqual(files, {"crates/api/generated/gen.rs": b"pub struct Hook;\n",
+                                 "crates/api/src/lib.rs": (self.root / "crates/api/src/lib.rs").read_bytes()})
+
+    def test_generated_output_that_differs_between_builds_is_refused(self):
+        self.assertEqual(self.refusal(self.messages("a", "pub struct Hook;\n"),
+                                      self.messages("b", "pub struct Hook(u32);\n"),
+                                      self.messages("c", "pub struct Hook;\n")), "E_TARGET_DEPENDENT")
+
+    def test_a_file_read_outside_the_crate_is_refused(self):
+        outside = self.messages("a", "", reads=("crates/api/src/lib.rs", "crates/horizon-client/src/game.rs"))
+        self.assertEqual(self.refusal(outside), "E_SOURCE_OUTSIDE_CRATE")
+
+    def test_a_build_script_that_sets_cfgs_is_refused(self):
+        self.assertEqual(self.refusal(self.messages("a", "", cfgs=("generated_hooks",))), "E_BUILD_SCRIPT")
 
 
 class PackingTests(unittest.TestCase):

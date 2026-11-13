@@ -10,7 +10,8 @@ wasm32 and with every feature the API source keeps) and refuses when they differ
 carries exactly the source files rustc read for its library (its dep-info), its manifest with workspace keys
 resolved and no dev- or build-dependencies, and, for a crate whose build script runs the generator, a build script
 that copies `generated/` into `OUT_DIR`. The generated files name source files by absolute path; the checkout's
-root is written as ROOT_TOKEN and the build script puts the API source's own root in its place. `Cargo.lock` pins
+root is written as ROOT_TOKEN and the build script puts the API source's own root in its place. `build` runs on a
+POSIX host (CI's Linux leg): it relocates `/`-separated paths only. `Cargo.lock` pins
 the versions the game's lockfile has. Same commit, same bytes.
 """
 
@@ -26,19 +27,27 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import prebuilt_game  # noqa: E402  (beside this file; also when imported as `tools.sdk_api_source`)
+
 ROOT = Path(__file__).resolve().parent.parent
 API = "horizon-mod-api"
+# The crate the prebuilt game is built from: the features its build resolves are the ones players compile with.
+GAME = "horizon-mod-host"
 WASM = "wasm32-unknown-unknown"
 GENERATED = "generated"
 ROOT_TOKEN = "{horizon-api-source-root}"
 TEMPLATE = ROOT / "crates/cargo-horizon-mod/template/native"
 # Where a mod finds the API source (design: the SDK fetched into the mod's `.horizon/sdk/`).
 MOD_PATH = ".horizon/sdk/api"
+# Marks a scratch folder `check` made, which a later check may empty.
+SCRATCH_MARK = ".sdk-api-source-check"
 # The build script of a crate whose generated files come with it. Paths become `/`-separated, valid in Rust
 # string literals on every host.
 BUILD_SCRIPT = f"""\
@@ -106,6 +115,9 @@ def closure(metadata: dict, root: str = API) -> list[Crate]:
         if build and not any(dependency["kind"] == "build" and dependency.get("path")
                              and dependency["name"] == "horizon-mod-api-gen" for dependency in package["dependencies"]):
             raise Refusal("E_BUILD_SCRIPT", f"{package['name']} has a build script that is not the generator")
+        if build and directory.count("/") != 1:
+            # The build script names the workspace root as `../..` from the crate.
+            raise Refusal("E_LAYOUT", f"{package['name']} is at {directory}, not two folders below the root")
         crates.append(Crate(package["name"], directory, build))
         pending.extend(dependency["pkg"] for dependency in nodes[package_id]["deps"]
                        if any(kind["kind"] is None for kind in dependency["dep_kinds"]))
@@ -132,7 +144,8 @@ def feature_value_kept(value: str, crate: str, dependencies: dict, kept: dict, m
     if value.startswith("dep:"):
         return value[4:] in dependencies[crate]
     if "/" not in value:
-        return value in kept[crate]
+        # A bare name is a feature or, for an optional dependency, its implicit feature.
+        return value in kept[crate] or value in dependencies[crate]
     dependency, feature = value.split("/", 1)
     dependency = dependency.rstrip("?")
     if dependency not in dependencies[crate]:
@@ -163,9 +176,11 @@ def resolve_workspace(value, inherited: dict, what: str):
 
 
 def normalise_manifest(manifest: dict, workspace: dict, crate: Crate, crates: dict[str, Crate],
-                       features: dict[str, list[str]]) -> str:
+                       features: dict[str, list[str]], resolved: dict[str, tuple[set[str], bool]]) -> str:
     """The crate's manifest as the API source carries it: workspace keys resolved, path dependencies pointing
-    inside the API source, no dev- or build-dependencies, no targets but the library."""
+    inside the API source, no dev- or build-dependencies, no targets but the library. A registry dependency named
+    in `resolved` (its resolved features, and whether its defaults are on) asks for exactly the features the game's
+    build resolves for it, so an author compiles the API as the player's prebuilt game does."""
     inherited_package = workspace.get("workspace", {}).get("package", {})
     inherited_dependencies = workspace.get("workspace", {}).get("dependencies", {})
     package = {key: resolve_workspace(manifest["package"][key], inherited_package, key)
@@ -182,6 +197,14 @@ def normalise_manifest(manifest: dict, workspace: dict, crate: Crate, crates: di
         written = {}
         for name, spec in entries.items():
             spec = resolve_workspace(spec, inherited_dependencies, name)
+            if name in resolved:
+                spec = dict(spec) if isinstance(spec, dict) else {"version": spec}
+                game, defaults = resolved[name]
+                if set(spec.get("features", [])) - game or (spec.get("default-features", True) and not defaults):
+                    raise Refusal("E_FEATURES", f"{crate.name} asks {name} for more than the game resolves")
+                spec.pop("features", None)
+                if game - {"default"}:
+                    spec["features"] = sorted(game - {"default"})
             if not isinstance(spec, dict):
                 written[name] = spec
                 continue
@@ -228,6 +251,53 @@ def table(name: str, entries: dict) -> str:
     return f"[{name}]\n" + "".join(f"{toml_key(key)} = {toml_value(value)}\n" for key, value in entries.items())
 
 
+def target_features(tree: str) -> dict[str, set[str]]:
+    """Each target package's resolved features, by `name version`, from `cargo tree -e normal --prefix depth -f
+    '{p}|{f}'`. Proc macros and everything under them run on the host and are left out."""
+    resolved: dict[str, set[str]] = {}
+    host_depth = None
+    for line in tree.splitlines():
+        match = re.fullmatch(r"(\d+)(\S+) v(\S+)(.*?)\|(\S*?)( \(\*\))?", line)
+        if match is None:
+            continue
+        depth = int(match[1])
+        if host_depth is not None and depth > host_depth:
+            continue
+        host_depth = depth if "(proc-macro)" in match[4] else None
+        if host_depth is None:
+            resolved.setdefault(f"{match[2]} {match[3]}", set()).update(filter(None, match[5].split(",")))
+    return resolved
+
+
+def requested_features(metadata: dict, crate: Crate, manifest: dict,
+                       game: dict[str, set[str]]) -> dict[str, tuple[set[str], bool]]:
+    """The game's resolved features for each registry dependency of a library crate, by the manifest's name for
+    it, and whether its defaults are on (always, for a package without a `default` feature). A proc macro's
+    dependencies run on the host and keep what the crate asks."""
+    packages = {package["id"]: package for package in metadata["packages"]}
+    package = next(p for p in metadata["packages"] if p["name"] == crate.name and p["source"] is None)
+    if any("proc-macro" in target["kind"] for target in package["targets"]):
+        return {}
+    node = next(node for node in metadata["resolve"]["nodes"] if node["id"] == package["id"])
+    externs = {dependency["name"]: packages[dependency["pkg"]] for dependency in node["deps"]
+               if any(kind["kind"] is None for kind in dependency["dep_kinds"])}
+    requested = {}
+    for name in normal_dependencies(manifest):
+        dependency = externs.get(name.replace("-", "_"))
+        if dependency is None or dependency["source"] is None:
+            continue
+        key = f"{dependency['name']} {dependency['version']}"
+        if key not in game:
+            raise Refusal("E_FEATURES", f"the game's build does not resolve {key}, which {crate.name} uses")
+        requested[name] = (game[key], "default" in game[key] or "default" not in dependency["features"])
+    return requested
+
+
+def tree(folder: Path, package: str, environment: dict | None = None) -> str:
+    return run(["cargo", "tree", "--locked", "--offline", "-p", package, "-e", "normal", "--target",
+                prebuilt_game.rustc_host(), "--prefix", "depth", "-f", "{p}|{f}"], cwd=folder, env=environment)
+
+
 def dep_info(path: Path) -> list[str]:
     """The files rustc read, from the first rule of a Makefile-style dep-info file (`\\ ` escapes a space)."""
     rule = path.read_text().split("\n", 1)[0]
@@ -265,13 +335,25 @@ def check_files(files: dict[str, bytes], crates: list[Crate], tracked: set[str],
             if not allowed:
                 raise Refusal("E_STRAY_FILE", f"{path} is no part of the API source")
         for folder in forbidden:
-            if folder.encode() in data:
+            # The folder itself or a path under it, not any text that starts the same way.
+            if re.search(re.escape(folder.encode()) + rb'(?=[/"\\]|$)', data, re.MULTILINE):
                 raise Refusal("E_ABSOLUTE_PATH", f"{path} names {folder}")
     return sorted(files)
 
 
 def packing_index(files: dict[str, bytes]) -> str:
     return "".join(f"{hashlib.sha256(files[path]).hexdigest()}  {path}\n" for path in sorted(files))
+
+
+def feature_disagreements(game: dict[str, set[str]], ours: dict[str, set[str]], packages: set[str]) -> list[str]:
+    """The packages, among `packages`, whose resolved features differ between the game's build and ours. The name
+    `default` itself is left out: what it turns on is in the resolved set, and a transitive package (memchr under
+    serde_json) can get it from another crate of the game that the API source does not have."""
+    def enabled(features: dict[str, set[str]], package: str) -> list[str] | None:
+        return sorted(features[package] - {"default"}) if package in features else None
+
+    return [f"{package}: game {enabled(game, package)}, ours {enabled(ours, package)}"
+            for package in sorted(packages) if enabled(game, package) != enabled(ours, package)]
 
 
 def lock_disagreements(slice_lock: dict, game_lock: dict) -> list[str]:
@@ -288,50 +370,57 @@ def build_messages(arguments: list[str]) -> list[dict]:
 
 
 def collect(crates: list[Crate], features: dict[str, dict], workspace_root: Path) -> dict[str, bytes]:
-    """Every file rustc read for the crates' libraries, over the host, wasm32 and all kept features."""
+    """The generated files, the same from every build, and every file rustc read for the crates' libraries, over
+    the host, wasm32 and all kept features. A read outside its crate is refused."""
     by_directory = {(workspace_root / crate.directory).resolve(): crate for crate in crates}
     every = [f"{crate.name}/{feature}" for crate in crates for feature in sorted(features[crate.name])]
     builds = {"host": [], WASM: ["--target", WASM], "host, all features": ["--features", ",".join(every)]}
     files: dict[str, bytes] = {}
-    generated: dict[str, tuple[str, bytes]] = {}
+    generated: dict[str, tuple[str, dict[str, bytes]]] = {}
     for label, arguments in builds.items():
         messages = build_messages(arguments)
         out_dirs = {}
         for message in messages:
-            if message["reason"] == "build-script-executed":
-                out_dirs[message["package_id"]] = Path(message["out_dir"])
-                if message["package_id"].startswith("path+") and any(
-                        message[key] for key in ("cfgs", "env", "linked_libs", "linked_paths")):
-                    raise Refusal("E_BUILD_SCRIPT", f"{message['package_id']} sets more than generated files")
+            if message["reason"] != "build-script-executed" or not message["package_id"].startswith("path+"):
+                continue
+            if any(message[key] for key in ("cfgs", "env", "linked_libs", "linked_paths")):
+                raise Refusal("E_BUILD_SCRIPT", f"{message['package_id']} sets more than generated files")
+            out_dirs[message["package_id"]] = Path(message["out_dir"])
         for message in messages:
             if message["reason"] != "compiler-artifact" or "custom-build" in message["target"]["kind"]:
                 continue
             crate = by_directory.get(Path(message["manifest_path"]).resolve().parent)
             if crate is None:
                 continue
+            out_dir = out_dirs.get(message["package_id"])
+            if crate.generated:
+                outputs = {path.name: relocate(path.read_text(), root_forms([workspace_root, ROOT], crate)).encode()
+                           for path in sorted(out_dir.iterdir())}
+                first = generated.setdefault(crate.name, (label, outputs))
+                if first[1] != outputs:
+                    differing = sorted(name for name in first[1].keys() | outputs.keys()
+                                       if first[1].get(name) != outputs.get(name))
+                    raise Refusal("E_TARGET_DEPENDENT", f"{crate.name}: {', '.join(differing)} differ between "
+                                                        f"{first[0]} and {label}")
+                for name, data in outputs.items():
+                    files[f"{crate.directory}/{GENERATED}/{name}"] = data
             artifact = Path(message["filenames"][0])
             digest = artifact.name.split(".")[0].rsplit("-", 1)[1]
             info = artifact.parent / f"{message['target']['name'].replace('-', '_')}-{digest}.d"
-            out_dir = out_dirs.get(message["package_id"])
             for read in dep_info(info):
                 path = Path(os.path.normpath(workspace_root / read))
                 if out_dir is not None and path.parent == out_dir:
-                    data = relocate(path.read_text(), root_forms([workspace_root, ROOT], crate)).encode()
-                    name = f"{crate.directory}/{GENERATED}/{path.name}"
-                    if name in generated and generated[name][1] != data:
-                        raise Refusal("E_TARGET_DEPENDENT", f"{path.name} differs between {generated[name][0]} "
-                                                            f"and {label}")
-                    generated[name] = (label, data)
-                    files[name] = data
-                elif path.is_relative_to(workspace_root / crate.directory):
-                    files[path.relative_to(workspace_root).as_posix()] = path.read_bytes()
-                else:
+                    continue
+                if not path.is_relative_to(workspace_root / crate.directory):
                     raise Refusal("E_SOURCE_OUTSIDE_CRATE", f"{crate.name} reads {path}")
+                files[path.relative_to(workspace_root).as_posix()] = path.read_bytes()
         print(f"{label}: {len(files)} files so far", flush=True)
     return files
 
 
 def build(out: Path) -> dict[str, bytes]:
+    """Write the API source into OUT, which must be missing or empty. Everything is checked in a folder beside
+    it first: a refused build leaves OUT as it was."""
     if out.exists() and any(out.iterdir()):
         raise Refusal("E_OUT_NOT_EMPTY", f"{out} is not empty")
     metadata = json.loads(run(["cargo", "metadata", "--locked", "--format-version", "1"], cwd=ROOT))
@@ -342,42 +431,53 @@ def build(out: Path) -> dict[str, bytes]:
     manifests = {crate.name: tomllib.loads((workspace_root / crate.directory / "Cargo.toml").read_text())
                  for crate in crates}
     features = kept_features(manifests)
+    game = target_features(tree(workspace_root, GAME))
     files = collect(crates, features, workspace_root)
+    tracked = set(filter(None, run(["git", "ls-files", "-z"], cwd=workspace_root).split("\0")))
     for crate in crates:
+        # The whole source tree, so no file a build on another host or profile reads is left behind.
+        for path in sorted(tracked):
+            if path.startswith(f"{crate.directory}/src/"):
+                files[path] = (workspace_root / path).read_bytes()
         files[f"{crate.directory}/Cargo.toml"] = normalise_manifest(
-            manifests[crate.name], workspace, crate, by_name, features[crate.name]).encode()
+            manifests[crate.name], workspace, crate, by_name, features[crate.name],
+            requested_features(metadata, crate, manifests[crate.name], game)).encode()
         if crate.generated:
             files[f"{crate.directory}/build.rs"] = BUILD_SCRIPT.encode()
     resolver = workspace.get("workspace", {}).get("resolver", "2")
     files["Cargo.toml"] = ("# The mod API's source with its generated code, for one game build.\n"
                            + table("workspace", {"resolver": resolver,
                                                  "members": [crate.directory for crate in crates]})).encode()
-    out.mkdir(parents=True, exist_ok=True)
-    for path, data in files.items():
-        (out / path).parent.mkdir(parents=True, exist_ok=True)
-        (out / path).write_bytes(data)
-    # Cargo keeps the game's pins and drops the packages the API does not use.
-    shutil.copyfile(workspace_root / "Cargo.lock", out / "Cargo.lock")
-    run(["cargo", "metadata", "--format-version", "1"], cwd=out, env=isolated())
-    files["Cargo.lock"] = (out / "Cargo.lock").read_bytes()
-    disagreeing = lock_disagreements(tomllib.loads(files["Cargo.lock"].decode()),
-                                     tomllib.loads((workspace_root / "Cargo.lock").read_text()))
-    if disagreeing:
-        raise Refusal("E_LOCK", "pinned differently from the game: " + ", ".join(disagreeing))
-    tracked = set(filter(None, run(["git", "ls-files", "-z"], cwd=workspace_root).split("\0")))
-    check_files(files, crates, tracked, forbidden_folders(workspace_root))
-    (out / "Cargo.lock").write_bytes(files["Cargo.lock"])
+    forbidden = forbidden_folders(workspace_root)
+    check_files(files, crates, tracked, forbidden)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=out.parent, prefix=f".{out.name}.") as staging:
+        staged = Path(staging) / "api"
+        for path, data in files.items():
+            (staged / path).parent.mkdir(parents=True, exist_ok=True)
+            (staged / path).write_bytes(data)
+        # Cargo keeps the game's pins and drops the packages the API does not use.
+        shutil.copyfile(workspace_root / "Cargo.lock", staged / "Cargo.lock")
+        run(["cargo", "metadata", "--format-version", "1"], cwd=staged, env=isolated())
+        files["Cargo.lock"] = (staged / "Cargo.lock").read_bytes()
+        disagreeing = lock_disagreements(tomllib.loads(files["Cargo.lock"].decode()),
+                                         tomllib.loads((workspace_root / "Cargo.lock").read_text()))
+        if disagreeing:
+            raise Refusal("E_LOCK", "pinned differently from the game: " + ", ".join(disagreeing))
+        check_files(files, crates, tracked, forbidden)
+        if out.exists():
+            out.rmdir()
+        staged.rename(out)
     print(f"{len(files)} files, {sum(map(len, files.values()))} bytes; crates: "
           + ", ".join(crate.name for crate in crates), flush=True)
     return files
 
 
 def forbidden_folders(workspace_root: Path) -> list[str]:
-    folders = {str(workspace_root), str(ROOT), str(Path.home())}
-    for variable in ("CARGO_HOME", "CARGO_TARGET_DIR"):
-        if os.environ.get(variable):
-            folders.add(os.environ[variable])
-    return sorted(folder for folder in folders if len(folder) > 1)
+    """The checkout, its target folder and Cargo's home: no file of the API source may name a path under them."""
+    folders = {workspace_root, ROOT, Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo")),
+               Path(os.environ.get("CARGO_TARGET_DIR", workspace_root / "target"))}
+    return sorted(str(folder) for folder in folders if len(folder.parts) > 1)
 
 
 def isolated() -> dict[str, str]:
@@ -416,11 +516,12 @@ def starter_mod(folder: Path) -> None:
 def check(api: Path, scratch: Path) -> None:
     """The starter mod checks against the API source alone, for the host and wasm32, offline after one fetch; the
     API source's crates are the prebuilt game's API closure at the game's versions."""
-    sys.path.insert(0, str(ROOT / "tools"))
-    import prebuilt_game
-
-    if scratch.exists():
+    if scratch.exists() and any(scratch.iterdir()):
+        if not (scratch / SCRATCH_MARK).is_file():
+            raise Refusal("E_SCRATCH", f"{scratch} is not empty and not an earlier check's folder")
         shutil.rmtree(scratch)
+    scratch.mkdir(parents=True, exist_ok=True)
+    (scratch / SCRATCH_MARK).write_text("")
     mod = scratch / "starter"
     starter_mod(mod)
     shutil.copytree(api, mod / MOD_PATH)
@@ -454,11 +555,17 @@ def check(api: Path, scratch: Path) -> None:
     if api_closure(game) != api_closure(ours):
         raise Refusal("E_CLOSURE", f"the prebuilt game's API closure {sorted(api_closure(game) - api_closure(ours))} "
                                    f"against the API source's {sorted(api_closure(ours) - api_closure(game))}")
+    closure_keys = {f"{name} {version}" for name, version in api_closure(game)}
+    differing = feature_disagreements(target_features(tree(ROOT, GAME)),
+                                      target_features(tree(mod, "mod-starter", environment)), closure_keys)
+    if differing:
+        raise Refusal("E_FEATURES", "the starter compiles the API with other features than the game: "
+                      + "; ".join(differing))
     disagreeing = lock_disagreements(tomllib.loads((mod / "Cargo.lock").read_text()),
                                      tomllib.loads((ROOT / "Cargo.lock").read_text()))
     if disagreeing != ["mod-starter 0.1.0"]:
         raise Refusal("E_LOCK", "the starter resolves differently from the game: " + ", ".join(disagreeing))
-    print(f"API closure: {len(api_closure(ours))} crates, as the prebuilt game's")
+    print(f"API closure: {len(api_closure(ours))} crates, as the prebuilt game's, with its features and versions")
     for label, seconds in timings.items():
         print(f"cargo check, {label}: {seconds:.1f}s")
     print("size: " + ", ".join(f"{kind} {size}" for kind, size in archive_sizes(api).items()))
