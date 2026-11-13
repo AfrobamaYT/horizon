@@ -10,7 +10,14 @@ pub(crate) const RELEASE: u32 = 0xffff_ff11;
 static NEXT_GENERATION: AtomicU32 = AtomicU32::new(1);
 
 #[derive(Default)]
-pub(crate) struct Slots(Vec<Option<u32>>);
+pub(crate) struct Slots(Vec<Option<Slot>>);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Slot {
+    Active(u32),
+    Releasing,
+}
+
 impl Slots {
     pub(crate) fn prepare(&mut self) -> Option<(u32, u32)> {
         let generation = NEXT_GENERATION
@@ -23,22 +30,27 @@ impl Slots {
             .unwrap_or(self.0.len());
         let slot = u32::try_from(index).ok()?;
         if index == self.0.len() {
-            self.0.push(Some(generation));
+            self.0.push(Some(Slot::Active(generation)));
         } else {
-            self.0[index] = Some(generation);
+            self.0[index] = Some(Slot::Active(generation));
         }
         Some((slot, generation))
     }
     pub(crate) fn check(&self, slot: u32, generation: u32) -> bool {
         self.0
             .get(slot as usize)
-            .is_some_and(|entry| *entry == Some(generation))
+            .is_some_and(|entry| *entry == Some(Slot::Active(generation)))
     }
     pub(crate) fn release(&mut self, slot: u32, generation: u32) -> bool {
         if !self.check(slot, generation) {
             return false;
         }
-        self.0[slot as usize] = None;
+        self.0[slot as usize] = Some(Slot::Releasing);
         true
+    }
+
+    pub(crate) fn finish_release(&mut self, slot: u32) {
+        debug_assert!(self.0[slot as usize] == Some(Slot::Releasing));
+        self.0[slot as usize] = None;
     }
 }
