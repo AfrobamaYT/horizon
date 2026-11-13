@@ -1577,19 +1577,6 @@ impl Game<'_> {
         self.end.gateways.get(&id).map_or(0, |t| t.cooldown())
     }
 
-    /// `Entity.setPortalCooldown` of an ender pearl: the cooldown of its End
-    /// gateway traveller, the value `pearl_portal_cooldown` reads. A pearl
-    /// with no traveller yet gets one holding only the cooldown, which the
-    /// End's portal pass ticks down.
-    pub(super) fn set_pearl_portal_cooldown(&mut self, id: u32, cooldown: i32) -> bool {
-        self.end
-            .gateways
-            .entry(id)
-            .or_default()
-            .set_cooldown(cooldown);
-        true
-    }
-
     /// `Entity.handlePortal` for the entities in an End gateway: they go
     /// through to the gateway's exit, where they wait for its chunks.
     pub(super) fn handle_end_gateway_portals(&mut self) {
@@ -1879,7 +1866,7 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn a_pearl_reads_the_portal_cooldown_its_end_gateway_gave_it() {
+    fn a_pearl_reads_its_end_gateway_cooldown_and_refuses_the_write() {
         use super::super::native_entity_refs::tests::with_game;
 
         with_game(|game| {
@@ -1891,9 +1878,15 @@ mod tests {
             let id = game.creatures.projectiles[0].id;
             let pearl = game.entity(id).unwrap();
             assert_eq!(pearl.portal_cooldown(game), Some(0));
+            // The write refuses a pearl by name: its cooldown is the End
+            // gateway traveller's, not the level's portal state.
+            assert!(!pearl.set_portal_cooldown(game, 40));
+            assert_eq!(pearl.portal_cooldown(game), Some(0));
             let traveller = game.end.gateways.entry(id).or_default();
             traveller.enter(BlockPos::new(0, 64, 0));
             assert!(traveller.travel(true).is_some());
+            assert_eq!(pearl.portal_cooldown(game), Some(300));
+            assert!(!pearl.set_portal_cooldown(game, 40));
             assert_eq!(pearl.portal_cooldown(game), Some(300));
         });
     }

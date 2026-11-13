@@ -185,32 +185,23 @@ impl Game<'_> {
         Some(self.portals.entities.get(&id).map_or(0, |p| p.cooldown))
     }
     /// `Entity.setPortalCooldown`: writes the value `entity_portal_cooldown`
-    /// reads, where that read keeps it. Server-only; a negative value or a
+    /// reads, where that read keeps it — the level's portal state for the
+    /// kinds its portal walk carries (mobs, items, experience orbs, boats,
+    /// minecarts, primed TNT, fireworks, tridents, arrows and the thrown
+    /// items and fireballs a chunk saves). Server-only; a negative value or a
     /// client-side write is refused. A positive value blocks portal entry on
     /// the next tick (and is refilled while the entity stands in a portal);
-    /// 0 lets it enter at once. False for a kind the read refuses or a stale
-    /// handle.
+    /// 0 lets it enter at once. The write refuses a player, an acting guest,
+    /// a falling block and an ender pearl: their cooldown lives in a store of
+    /// its own (the player and guest portal states, the falling block's saved
+    /// field, an End gateway traveller) that this write does not own, so it
+    /// needs its own owner decision before it can reach them. False for a kind
+    /// the read refuses or a stale handle.
     pub(super) fn entity_set_portal_cooldown(&mut self, entity: EntityRef, ticks: i32) -> bool {
         if ticks < 0 || !self.is_logical_server() {
             return false;
         }
         match self.native_entity_target(entity) {
-            Some(Target::Player) => {
-                self.portals.player.cooldown = ticks;
-                true
-            }
-            Some(Target::Guest(conn)) => self.lan.as_mut().is_some_and(|lan| {
-                lan.play.entry(conn).or_default().portal.cooldown = ticks;
-                true
-            }),
-            Some(Target::Falling(id)) => self
-                .falling
-                .iter()
-                .position(|f| f.id == id)
-                .is_some_and(|index| {
-                    self.falling.update(index, |f| f.portal.cooldown = ticks);
-                    true
-                }),
             Some(Target::Projectile(id)) => {
                 let Some(projectile) = self.creatures.projectiles.iter().find(|p| p.id == id)
                 else {
@@ -219,11 +210,8 @@ impl Game<'_> {
                 if matches!(
                     projectile.kind,
                     horizon_client::projectiles::ProjectileKind::EnderPearl
-                ) {
-                    return self.set_pearl_portal_cooldown(id, ticks);
-                }
-                if !super::nether_portal::is_arrow(projectile)
-                    && !super::nether_portal::is_portal_projectile(projectile)
+                ) || (!super::nether_portal::is_arrow(projectile)
+                    && !super::nether_portal::is_portal_projectile(projectile))
                 {
                     return false;
                 }
@@ -968,12 +956,121 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn portal_cooldown_write_is_refused_on_a_client() {
-        use super::super::native_entity_refs::tests::with_client_game;
-        use mod_api::WorldEpoch;
+    fn portal_cooldown_write_is_refused_for_a_player() {
+        with_player(|game, player| {
+            game.portals.player.cooldown = 7;
+            assert!(!player.set_portal_cooldown(game, 40));
+            assert_eq!(game.portals.player.cooldown, 7);
+            assert_eq!(player.portal_cooldown(game), Some(7));
+        });
+    }
 
-        with_client_game(|game| {
-            let entity = EntityRef::new(WorldEpoch::new(0), 1);
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn portal_cooldown_write_is_refused_for_an_acting_guest() {
+        use super::super::native_guest_turn_tests::with_guests;
+
+        with_guests(|game| {
+            let host = game.lan.as_mut().unwrap();
+            host.play.entry(12).or_default().portal.cooldown = 7;
+            let guest = game.entity(12).unwrap();
+            assert!(!guest.set_portal_cooldown(game, 40));
+            assert_eq!(
+                game.lan
+                    .as_ref()
+                    .unwrap()
+                    .play
+                    .get(&12)
+                    .unwrap()
+                    .portal
+                    .cooldown,
+                7
+            );
+            assert_eq!(guest.portal_cooldown(game), Some(7));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn portal_cooldown_write_is_refused_for_a_falling_block() {
+        use super::super::FallingBlock;
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::nether_portal::PortalState;
+        use horizon_core::{geometry::Vec3, position::BlockPos};
+
+        with_game(|game| {
+            let state = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:sand")
+                .unwrap();
+            game.next_entity += 1;
+            let id = game.next_entity;
+            game.falling.push(FallingBlock {
+                on_ground: false,
+                attachment_lifetime: Default::default(),
+                rotation: [0.0, 0.0],
+                join: Default::default(),
+                id,
+                state,
+                start_pos: BlockPos::default(),
+                position: Vec3::ZERO,
+                previous: Vec3::ZERO,
+                velocity: Vec3::ZERO,
+                age: 0,
+                no_gravity: false,
+                portal: PortalState {
+                    cooldown: 25,
+                    process: None,
+                },
+                drop_item: false,
+                fall_distance: 0.0,
+                stuck: Vec3::ZERO,
+                damage: horizon_client::falling_block::Damage::falling("minecraft:sand"),
+                saved: None,
+            });
+            let falling = game.entity(id).unwrap();
+            assert!(!falling.set_portal_cooldown(game, 40));
+            assert_eq!(
+                game.falling
+                    .iter()
+                    .find(|f| f.id == id)
+                    .unwrap()
+                    .portal
+                    .cooldown,
+                25
+            );
+            assert_eq!(falling.portal_cooldown(game), Some(25));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn portal_cooldown_write_is_refused_on_a_client() {
+        use super::super::execution_role::ExecutionRole;
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::connection::Pipe;
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            game.options.dedicated = None;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "PortalWriteTest").unwrap();
+            let remote = game.remote.as_mut().unwrap();
+            remote.logged_in = true;
+            remote.entity_id = 7;
+            remote.profile = 42;
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.spawn_entity(15, "minecraft:pig", [2.0, 0.0, 0.0], [0.0; 3]);
+            // A handle this client really shows, so the refusal is the client
+            // side's and not a fabricated id that never resolved.
+            let entity = game.entity(15).unwrap();
+            assert!(
+                entity.position(game).is_some(),
+                "the handle is live on this client"
+            );
             assert!(!entity.set_portal_cooldown(game, 5));
             assert!(!entity.set_portal_cooldown(game, 0));
         });
