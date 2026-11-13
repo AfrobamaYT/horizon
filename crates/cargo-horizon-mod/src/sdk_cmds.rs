@@ -367,11 +367,36 @@ pub(crate) fn update_report(
     };
     let new = fetch_build(root, to.unwrap_or("nightly"))?;
     let new_surface = read_surface(&new.surface)?;
+    let notes = migrate_notes(&new.dir);
     print!(
         "{}",
-        report(&name, &old, &new, &uses, &old_surface, &new_surface)
+        report(&name, &old, &new, &uses, &old_surface, &new_surface, &notes)
     );
     Ok(())
+}
+
+/// Each changed id's `migrate` line from the change notes a build's `sdk.json` carries
+/// (`surface.notes`, each `{ ids, why, migrate }`), from the SDK folder `dir`; empty when it
+/// carries none. The fetch verified the file; a note without a `migrate` line adds nothing.
+fn migrate_notes(dir: &Path) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    let Ok(bytes) = std::fs::read(dir.join("sdk.json")) else {
+        return out;
+    };
+    let Ok(index) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return out;
+    };
+    for note in index["surface"]["notes"].as_array().into_iter().flatten() {
+        let Some(migrate) = note["migrate"].as_str() else {
+            continue;
+        };
+        for id in note["ids"].as_array().into_iter().flatten() {
+            if let Some(id) = id.as_str() {
+                out.insert(id.to_owned(), migrate.to_owned());
+            }
+        }
+    }
+    out
 }
 
 /// The text of [`update_report`].
@@ -382,6 +407,7 @@ fn report(
     uses: &mod_surface::uses::Uses,
     old_surface: &Surface,
     new_surface: &Surface,
+    notes: &std::collections::BTreeMap<String, String>,
 ) -> String {
     let total = uses.items.len();
     let misfits = match fit(uses.entries(), new_surface) {
@@ -418,6 +444,9 @@ fn report(
                 format!(" ({})", record.counterparts.join(", "))
             };
             text.push_str(&format!("      closest now: {}{names}\n", record.id));
+        }
+        if let Some(migrate) = notes.get(id) {
+            text.push_str(&format!("      note from the change: \"{migrate}\"\n"));
         }
     }
     text
@@ -540,6 +569,29 @@ mod tests {
         assert_eq!(ids("breakevent"), ["hook:block_broken"]);
         assert_eq!(ids("DAMAGE post"), ["hook:living_damage_post"]);
         assert!(ids("teleport").is_empty());
+    }
+
+    #[test]
+    fn the_update_report_reads_the_change_notes_when_a_build_carries_them() {
+        let dir = std::env::temp_dir().join(format!("horizon-mod-notes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(migrate_notes(&dir).is_empty());
+        std::fs::write(dir.join("sdk.json"), r#"{"surface":{"hash":"h"}}"#).unwrap();
+        assert!(migrate_notes(&dir).is_empty());
+        std::fs::write(
+            dir.join("sdk.json"),
+            r#"{"surface":{"hash":"h","notes":[{"ids":["method:ServerHost::give_item"],"why":"Parts","migrate":"items go through Parts under a transaction"},{"ids":["hook:x"],"why":"only why"}]}}"#,
+        )
+        .unwrap();
+        let notes = migrate_notes(&dir);
+        assert_eq!(
+            notes
+                .get("method:ServerHost::give_item")
+                .map(String::as_str),
+            Some("items go through Parts under a transaction")
+        );
+        assert_eq!(notes.len(), 1);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
