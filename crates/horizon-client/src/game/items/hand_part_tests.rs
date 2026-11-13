@@ -212,3 +212,77 @@ fn without_a_part_the_break_compares_item_and_components() {
         assert!(game.same_destroying_item(&None));
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn remote_mining_component_update_restarts_unless_the_part_refuses() {
+    crate::game::in_own_process(
+        "game::hand_part_tests::remote_mining_component_update_restarts_unless_the_part_refuses",
+        || {
+            for keep in [false, true] {
+                with_stick_part(|game| {
+                    use horizon_client::{chunk::Chunk, motion::PlayerMotion};
+                    use horizon_core::geometry::Vec3;
+                    use horizon_protocol::{
+                        connection::{Connection, Pipe},
+                        packets::play,
+                    };
+                    use std::sync::Arc;
+                    *RESET.lock().unwrap() = keep.then_some(false);
+                    let (client, server) = Pipe::pair();
+                    game.connect_local(client, "HandMiningTest").unwrap();
+                    let mut peer = Connection::local(server);
+                    peer.set_read_timeout(Some(std::time::Duration::from_millis(50)))
+                        .unwrap();
+                    game.set_mode_id(0);
+                    let mut player =
+                        PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 3.5)).unwrap();
+                    player.ground.on_ground = true;
+                    game.player = Some(player);
+                    game.inventory[0] = Some(ItemStack::new("minecraft:stick", 1));
+                    game.selected = 0;
+                    game.world
+                        .chunks
+                        .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                    let stone = game
+                        .pack
+                        .assets
+                        .registry
+                        .default_state("minecraft:stone")
+                        .unwrap();
+                    game.world.set(0, 64, 0, stone).unwrap();
+                    game.tick_hit.set(Some(Some(crate::game::Hit {
+                        pos: [0, 64, 0],
+                        face: [0, 1, 0],
+                        point: [0.5, 65.0, 0.5],
+                        inside: false,
+                    })));
+                    for _ in 0..4 {
+                        game.remote_continue_attack(true);
+                    }
+                    let before = game.mining.as_ref().unwrap().progress;
+                    while peer.recv().is_ok() {}
+                    game.inventory[0].as_mut().unwrap().data_mut().custom_name =
+                        Some(horizon_core::nbt::Tag::String("Wand".into()));
+                    game.remote_continue_attack(true);
+                    let mut actions = Vec::new();
+                    while let Ok((id, bytes)) = peer.recv() {
+                        if let Ok(play::Serverbound::PlayerAction(action)) =
+                            play::Serverbound::decode(id, &bytes)
+                        {
+                            actions.push(action.action);
+                        }
+                    }
+                    let after = game.mining.as_ref().unwrap().progress;
+                    if keep {
+                        assert!(actions.is_empty());
+                        assert!((after - before - 1.0 / 150.0).abs() < 1e-6);
+                    } else {
+                        assert_eq!(actions, [2, 0]);
+                        assert_eq!(after, 0.0);
+                    }
+                });
+            }
+        },
+    );
+}
