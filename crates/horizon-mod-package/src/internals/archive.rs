@@ -208,6 +208,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn reads_only_regular_root_catalogs() {
         let bytes = archive("./internals.json", tar::EntryType::Regular, JSON, Some(PTS));
         let found = catalogs_from_archive(bytes.as_slice()).unwrap();

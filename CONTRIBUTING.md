@@ -122,8 +122,8 @@ It exits non-zero when something fails.
 ### CI tiers
 
 CI is split by how long a test takes and what it needs. Main and rollups run only quick checks and unit tests;
-every test that boots the game runs once a day. Existing in-game tests still in `verify` are being moved by the next
-change of #4022.
+every test that boots the game runs once a day. Existing tests that need prepared resources, a child process or the
+network and are still in `verify` are being moved by the next change of #4022.
 
 | Tier | Runs on | What |
 | --- | --- | --- |
@@ -133,8 +133,9 @@ change of #4022.
 
 **A unit test** uses no prepared resources, boots no game, starts no child process, uses no network and no compiled
 wasm fixture, and finishes in under 2 seconds. Any other test is a daily test: it carries `#[ignore]` and a row in
-`tools/ci/ignored-tests/` (the format is in that folder's README). This is the rule for new tests; existing ones
-are being moved over.
+`tools/ci/ignored-tests/` (the format is in that folder's README). `verify` fails a unit test that takes over 5
+seconds and `verify-static` one that boots the game; existing tests over 2 seconds and those that boot the game are
+already daily tests, and the existing ones that need resources, a child process or the network are being moved over.
 
 - A pull request is reviewed and merged on the push and gate tiers. Nothing else is asked of you.
 - Write a quick test where a quick test can catch the mistake. A test that needs the game or prepared resources is

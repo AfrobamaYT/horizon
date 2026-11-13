@@ -5692,6 +5692,7 @@ fn proxy_forwarding_of(config: &horizon_client::lan::NetConfig) -> &'static str 
 mod network_settings_tests {
     use super::*;
     #[test]
+    #[ignore = "daily"]
     fn server_settings_follow_the_network_config() {
         use horizon_client::lan::{NetConfig, OnlineMode};
         let mut config = NetConfig::loopback(25565, String::new(), 20);
