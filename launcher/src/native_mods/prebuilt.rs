@@ -346,19 +346,9 @@ pub(super) struct Identity {
     /// source is compiled under the same `cfg`s.
     #[serde(default)]
     game_features: Vec<String>,
-    /// The API route's mods library: its crate name and the metadata both builds of it use.
-    #[serde(default)]
-    pub(super) native_mods: Option<NativeMods>,
     /// Which package files the `runtime` and `api` slices hold; every other file is the `engine`'s.
     #[serde(default)]
     pub(super) slices: Option<Slices>,
-}
-
-#[derive(serde::Deserialize)]
-pub(super) struct NativeMods {
-    #[serde(rename = "crate")]
-    pub(super) krate: String,
-    pub(super) metadata: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -691,6 +681,13 @@ pub(super) fn rustc_with(rust: &Toolchain, search: &[&Path], edition: &str) -> C
         "-C",
         OPT_LEVEL,
     ]);
+    if let Some(origin) = match std::env::consts::OS {
+        "linux" => Some("-Wl,-rpath,$ORIGIN"),
+        "macos" => Some("-Wl,-rpath,@loader_path"),
+        _ => None,
+    } {
+        cmd.arg("-C").arg(format!("link-arg={origin}"));
+    }
     for folder in search {
         cmd.arg("-L")
             .arg(format!("dependency={}", folder.display()));
@@ -702,14 +699,13 @@ pub(super) fn rustc_with(rust: &Toolchain, search: &[&Path], edition: &str) -> C
 /// set of mods, and never changed after a failure (SDK design §1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Route {
-    /// Every mod is API-only: the mods become the `horizon_native_mods` library, built from the
-    /// package's `api` files alone and installed beside its prebuilt API executable
-    /// ([`super::api_route`]). The `engine` archive is never read.
+    /// Every mod is API-only: build its own dylib from the package's API metadata.
+    /// The engine archive is never read.
     Api,
     /// A mod has a `[native]` table row (mixin, module, bridge, state, loop) or game internals:
-    /// the executable is generated and linked against the whole package.
+    /// build its dylib against the whole package's metadata.
     Engine,
-    /// A mod depends on a crate outside the game's: the executable is built with Cargo against
+    /// A mod depends on a crate outside the game's: its dylib is built with Cargo against
     /// the whole package ([`super::registry_compile`]).
     Registry,
 }
@@ -969,6 +965,13 @@ pub(super) fn compile(
     ))
 }
 
+pub(super) fn refuse_closure_rlib(id: &str, name: &str, path: &Path) -> Result<(), String> {
+    if path.extension().is_some_and(|ext| ext == "rlib") {
+        return Err(trf("Native mod {mod} links API closure crate {crate} as an rlib. Rebuild the SDK with a shared API closure.", &[("mod", id), ("crate", name)]));
+    }
+    Ok(())
+}
+
 pub(super) fn dylib_name(krate: &str) -> String {
     format!(
         "{}{krate}{}",
@@ -977,6 +980,7 @@ pub(super) fn dylib_name(krate: &str) -> String {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn library_entry(
     template: &str,
     mods: &[&horizon_mod_package::Manifest],
@@ -1004,6 +1008,7 @@ pub(super) fn library_entry(
 /// Compiles `project`'s crate as an rlib into `out` with `rustc` (given the edition: rustc with
 /// the route's search paths), its game packages from `library` and its installed mod dependencies
 /// from `rlibs`. Returns the rlib and the crate's name.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn compile_mod<'a>(
     project: &api::Project<'_>,
     declared: &[dependencies::Dependency],
@@ -1042,7 +1047,9 @@ pub(super) fn compile_mod<'a>(
         .arg("-C")
         .arg(format!("metadata={id}"));
     for name in ["mod_api", "mod_vocab", "mod_points"] {
-        cmd.arg("--extern").arg(format!("{name}={}", library(name).display()));
+        refuse_closure_rlib(id, name, library(name))?;
+        cmd.arg("--extern")
+            .arg(format!("{name}={}", library(name).display()));
     }
     for (name, package) in project.api_dependencies() {
         cmd.arg("--extern")
@@ -1224,6 +1231,25 @@ fn game_dylibs(deps: &Path) -> Result<Vec<PathBuf>, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn closure_rlib_refusal_names_the_mod_and_crate() {
+        let message = super::refuse_closure_rlib(
+            "example",
+            "mod_points",
+            std::path::Path::new("libmod_points.rlib"),
+        )
+        .unwrap_err();
+        assert!(message.contains("example"), "{message}");
+        assert!(message.contains("mod_points"), "{message}");
+        assert!(message.contains("rlib"), "{message}");
+        assert!(super::refuse_closure_rlib(
+            "example",
+            "mod_points",
+            std::path::Path::new("libmod_points.rmeta")
+        )
+        .is_ok());
+    }
+
     use super::*;
 
     #[test]

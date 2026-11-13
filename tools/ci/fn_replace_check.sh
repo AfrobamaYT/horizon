@@ -178,6 +178,23 @@ if [ -n "$resources" ]; then
     layout_mod=$(python3 "$root/tools/ci/mismatch_wasm_layout.py" "$FNR_WASM_LAYOUT_PACKAGE" "$run/horizon-mods/layout-refused.hmod")
     printf 'mod.%s:true\n' "$layout_mod" > "$run/horizon-mods.txt"
   fi
+  # Swapping a library never changes the fixed executable. A separately built replacement
+  # can be supplied by the check set; otherwise exercise replacement with identical bytes.
+  python3 - "$scratch/engine" "${FNR_SWAP_LIBRARY:-}" <<'PYLIB'
+import hashlib, json, pathlib, shutil, sys
+folder = pathlib.Path(sys.argv[1])
+record = folder / "native-mods.json"
+rows = json.loads(record.read_text())
+row = next(r for r in rows["libraries"] if r["kind"] == "mod")
+library = folder / row["file"]
+replacement = pathlib.Path(sys.argv[2]) if sys.argv[2] else library.with_suffix(".swap")
+if not sys.argv[2]:
+    shutil.copyfile(library, replacement)
+shutil.copyfile(replacement, library)
+row["sha256"] = hashlib.sha256(library.read_bytes()).hexdigest()
+record.write_text(json.dumps(rows))
+PYLIB
+  executable_hash=$(sha256sum "$scratch/engine/horizon-engine" | cut -d' ' -f1)
   # A loop mod gets a forced chunk of hoppers handing stone along each row, so the loop visits them,
   # and a row of each loop mod's counters beside them.
   hoppers=
@@ -240,4 +257,22 @@ fill 0 100 0 9 100 9 minecraft:hopper[facing=east]{Items:[{Slot:0b,id:"minecraft
   if [[ " ${FNR_MODS:-alpha beta} " == *" fdshape "* ]]; then
     grep -F 'fnr: native_server_started dedicated=true' "$scratch/server.log"
   fi
+  test "$(sha256sum "$scratch/engine/horizon-engine" | cut -d' ' -f1)" = "$executable_hash"
+  corrupt_mod=$(python3 - "$scratch/engine" <<'PYLIB'
+import json, pathlib, sys
+folder = pathlib.Path(sys.argv[1])
+row = next(r for r in json.loads((folder / "native-mods.json").read_text())["libraries"] if r["kind"] == "mod")
+with (folder / row["file"]).open("ab") as stream:
+    stream.write(b"corrupted-library")
+print(row["mod"])
+PYLIB
+)
+  if (cd "$run" && env "${env_vars[@]}" timeout 30 "$scratch/engine/horizon-engine" --resources "$(realpath "$resources")" --dedicated --nogui) > "$scratch/corrupt.log" 2>&1; then
+    echo "corrupted native library was accepted"; exit 1
+  fi
+  grep -F "$corrupt_mod" "$scratch/corrupt.log"
+  if grep -F 'fnr:' "$scratch/corrupt.log"; then
+    echo "mod code ran before library hashes passed"; exit 1
+  fi
+
 fi

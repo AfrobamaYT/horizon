@@ -121,10 +121,6 @@ pub fn ensure(version: &Path) -> io::Result<PathBuf> {
 // route adds its mods library, `horizon_native_mods`, beside the game's.
 fn runtime_library(name: &str) -> bool {
     name.ends_with(".dylib")
-        && (name.starts_with("libhorizon_mod_")
-            || name == "libhorizon_client.dylib"
-            || name == "libhorizon_native_mods.dylib"
-            || name.starts_with("libstd-"))
 }
 
 fn sync_native_directory(version: &Path, programs: &Path, name: &str) -> io::Result<()> {
