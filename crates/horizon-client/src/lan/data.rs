@@ -829,17 +829,11 @@ impl SyncData {
         let mut own = BTreeMap::new();
         walk(&root.join("tags").join(kind), &mut own);
         for (name, value) in own {
-            if !overlay.conditions.allows_tag(&value, kind, &name) {
-                continue;
-            }
             Self::add_tag_values(files.entry(qualified(&name)).or_default(), &value);
         }
         for (id, packs) in overlay.tag_kind(kind) {
             for bytes in packs {
                 if let Ok(value) = serde_json::from_slice::<Value>(bytes) {
-                    if !overlay.conditions.allows_tag(&value, kind, &id) {
-                        continue;
-                    }
                     Self::add_tag_values(files.entry(id.clone()).or_default(), &value);
                 }
             }
@@ -1080,6 +1074,49 @@ fn changed_dimension_type(name: &str, data: &Tag, levels: &LevelShapes) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn false_conditions_do_not_suppress_lan_tag_operations() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("tags/dialog")).unwrap();
+        std::fs::write(
+            root.path().join("tags/dialog/conditional.json"),
+            r#"{"neoforge:conditions":[{"type":"neoforge:false"}],"values":["minecraft:a"]}"#,
+        )
+        .unwrap();
+        let files = vec![("tags/minecraft:dialog/conditional".into(), vec![br#"{"neoforge:conditions":[{"type":"neoforge:false"}],"values":["minecraft:b"],"remove":["minecraft:a"]}"#.to_vec()])];
+        let dynamic = Dynamic {
+            registries: HashMap::from([(
+                "minecraft:dialog".into(),
+                vec![("minecraft:a".into(), None), ("minecraft:b".into(), None)],
+            )]),
+            ..Default::default()
+        };
+        let mut tags = UpdateTags {
+            registries: Vec::new(),
+        };
+        SyncData::merge_registry_tags(
+            &mut tags,
+            root.path(),
+            &horizon_world::loot::PackOverlay::NONE,
+            &Builtin::default(),
+            &dynamic,
+            "minecraft:dialog",
+            "dialog",
+        );
+        assert_eq!(tags.registries[0].tags[0].ids, [0]);
+        tags.registries.clear();
+        SyncData::merge_registry_tags(
+            &mut tags,
+            root.path(),
+            &horizon_world::loot::PackOverlay::new(&files),
+            &Builtin::default(),
+            &dynamic,
+            "minecraft:dialog",
+            "dialog",
+        );
+        assert_eq!(tags.registries[0].tags[0].ids, [1]);
+    }
 
     #[test]
     fn included_child_can_be_removed_again() {
