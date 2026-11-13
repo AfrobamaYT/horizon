@@ -103,11 +103,13 @@ use horizon_core::{
 };
 use std::{collections::HashMap, io, path::Path, sync::Arc, sync::RwLock};
 
+pub use block_maps::BlockMaps;
 pub mod classes;
 pub mod data;
 pub mod states;
 pub mod ticks;
 
+mod block_maps;
 mod bonemeal;
 mod buckets;
 mod creaking;
@@ -1353,6 +1355,8 @@ pub struct Behaviours {
     dynamic: HashMap<BlockStateId, crate::dynamic_support::DynamicSupport>,
     occlusion_cache: RwLock<HashMap<(i32, i32, u8), bool>>,
     growth: growth::Growth,
+    /// The open world's NeoForge block data maps.
+    block_maps: block_maps::Slot,
 }
 
 impl Behaviours {
