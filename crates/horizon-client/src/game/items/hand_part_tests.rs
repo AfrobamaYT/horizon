@@ -231,7 +231,7 @@ fn remote_mining_component_update_restarts_unless_the_part_refuses() {
                     *RESET.lock().unwrap() = keep.then_some(false);
                     let (client, server) = Pipe::pair();
                     game.connect_local(client, "HandMiningTest").unwrap();
-                    let mut peer = Connection::local(server);
+                    let (mut peer, _writer) = Connection::local(server).split();
                     peer.set_read_timeout(Some(std::time::Duration::from_millis(50)))
                         .unwrap();
                     game.set_mode_id(0);
