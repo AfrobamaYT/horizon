@@ -80,9 +80,20 @@ enum Update {
         skip: Option<Direction>,
         index: usize,
     },
+    /// A nested write's state-change notification, queued behind that write's own updates.
+    Notify {
+        pos: BlockPos,
+        old: BlockStateId,
+        new: BlockStateId,
+    },
 }
 
 enum Step {
+    Notify {
+        pos: BlockPos,
+        old: BlockStateId,
+        new: BlockStateId,
+    },
     Shape {
         direction: Direction,
         neighbor_state: BlockStateId,
@@ -129,6 +140,7 @@ impl Update {
                 },
                 false,
             ),
+            Self::Notify { pos, old, new } => (Step::Notify { pos, old, new }, false),
             Self::Simple {
                 pos,
                 block,
@@ -338,9 +350,20 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 self.update_indirect_neighbour_shapes(state, pos, neighbour_flags, limit - 1);
             }
             // Level.setBlock ends with updatePOIOnBlockStateChange (NeoForge's onBlockStateChange).
-            self.level.observe_block_state_change(pos, old, state);
+            self.notify_state_change(pos, old, state);
         }
         true
+    }
+    /// A write inside a running neighbour update only queued its own updates, so its
+    /// notification goes behind them (and keeps the order of the writes); a write outside one
+    /// has already run them.
+    fn notify_state_change(&mut self, pos: BlockPos, old: BlockStateId, new: BlockStateId) {
+        let updater = &mut self.ticks.updater;
+        if updater.count == 0 {
+            self.level.observe_block_state_change(pos, old, new);
+        } else {
+            updater.added.push(Update::Notify { pos, old, new });
+        }
     }
     /// `LevelChunk.setBlockState`: the previous state when the write happened.
     fn chunk_set_block_state(
@@ -693,6 +716,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     fn execute(&mut self, step: Step) {
         match step {
+            Step::Notify { pos, old, new } => self.level.observe_block_state_change(pos, old, new),
             Step::Shape {
                 direction,
                 neighbor_state,
