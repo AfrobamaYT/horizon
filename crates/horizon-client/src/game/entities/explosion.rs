@@ -2378,6 +2378,7 @@ mod tests {
     fn zombie_type() -> std::sync::Arc<horizon_client::mobs::MobType> {
         use horizon_client::mobs::{Anim, Brain, MobType, Part, Species};
         std::sync::Arc::new(MobType {
+            shadow: None,
             id: "minecraft:zombie".into(),
             species: Species::Zombie,
             width: 0.6,

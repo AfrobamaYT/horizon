@@ -510,7 +510,7 @@ impl OpenNativeScreen {
     /// block its slots are under (a server without `horizon:menu_extra`).
     fn pos(&self) -> Option<[i32; 3]> {
         match &self.extra {
-            Some(extra) => Some(extra.pos),
+            Some(extra) => extra.pos,
             None if self.key.0 != i32::MIN => Some([self.key.0, self.key.1, self.key.2]),
             None => None,
         }
@@ -4186,7 +4186,7 @@ mod tests {
             &root,
             &horizon_mod_package::enabled::EnabledMods::new([(
                 "ruby".into(),
-                horizon_mod_package::Side::Both,
+                mod_api::Side::Both,
             )]),
         )
         .unwrap();

@@ -44,6 +44,7 @@ mod block_changes;
 pub mod chat;
 pub mod chat_filter;
 mod item_particles;
+mod joined;
 mod move_collision;
 mod moves;
 pub mod passage_cross;
@@ -3326,55 +3327,8 @@ impl Hub {
             .is_some_and(|l| l.tracks(id))
     }
 
-    /// Fresh entities that joined during the current tick before the tracking pass:
-    /// paired from their state as they joined (ChunkMap.addEntity), before their first tick.
-    pub fn note_fresh_joined(&mut self, entities: &[EntityState]) {
-        let joined: Vec<_> = entities
-            .iter()
-            .filter(|e| !self.tracks(e.id))
-            .cloned()
-            .collect();
-        if joined.is_empty() {
-            return;
-        }
-        self.fresh_joined
-            .entry(self.config.dimension.clone())
-            .or_default()
-            .extend(joined);
-    }
-
-    /// `ChunkMap.addEntity` for late arrivals, before their sounds are sent.
-    /// Pairing does not run another tracking pass or advance entity clocks.
-    pub fn note_joined(&mut self, entities: &[EntityState]) {
-        if entities.is_empty() {
-            return;
-        }
-        let dimension = &self.config.dimension;
-        let mut outs: Vec<Vec<Vec<u8>>> = self
-            .guests
-            .iter()
-            .filter(|g| self.here(g))
-            .map(|_| Vec::new())
-            .collect();
-        let mut viewers = self.guests.tracking_viewers(
-            |g| g.placed && g.dimension == *dimension,
-            outs.iter_mut().map(|out| (out, None)),
-            false,
-        );
-        let level = self.entities.entry(dimension.clone()).or_default();
-        level.range_percent = Some(self.entity_range_percent);
-        let (types, sync) = (&mut self.entity_types, &self.sync);
-        level.pair_after_tick(entities, &self.riding, &mut viewers, |kind| {
-            entity_type(types, sync, kind)
-        });
-        drop(viewers);
-        for (g, out) in self.guests.iter().filter(|g| self.here(g)).zip(&mut outs) {
-            g.sender.send_many(out.drain(..));
-        }
-    }
-
     /// All entities as one client sees them: the world's and the other players.
-    fn track_entities(&mut self, ctx: &mut TickCtx) {
+    pub(in crate::lan) fn track_entities(&mut self, ctx: &mut TickCtx) {
         let mut all: Vec<EntityState> = Vec::with_capacity(ctx.entities.len() + self.guests.len());
         let modified_particles =
             mod_api::__private::listened(mod_api::HookId::EffectParticleModification);
@@ -3430,8 +3384,9 @@ impl Hub {
         level.synced.clone_from(&self.synced);
         let mut outs = std::mem::take(&mut self.entity_out);
         let dimension = &self.config.dimension;
-        // The viewers include the held players: they are shown the entities
-        // around them, but are not among the entities shown (`track_entities`).
+        // The viewers include the held players: they are shown the entities around them, but are
+        // not among the entities shown; then the clients viewing the level (`viewed_levels`).
+        let mut views = self.view_outs();
         let here = |g: &Guest| {
             g.participates_online() && (g.placed || g.held) && g.dimension == *dimension
         };
@@ -3440,12 +3395,13 @@ impl Hub {
         let recording = self.recording();
         let mut gone = std::mem::take(&mut self.entity_gone);
         gone.resize_with(outs.len(), Vec::new);
-        let mut viewers = self.guests.tracking_viewers(
+        let mut viewers = self.guests.tracking_viewers_and_views(
             here,
             outs.iter_mut()
                 .zip(gone.iter_mut())
                 .map(|(out, gone)| (out, recording.then_some(gone))),
             true,
+            (dimension, &mut views),
         );
         level.range_percent = Some(self.entity_range_percent);
         let (types, sync) = (&mut self.entity_types, &self.sync);
@@ -3478,6 +3434,7 @@ impl Hub {
         });
         self.entity_gone = gone;
         self.entity_out = outs;
+        self.send_view_entities(views);
         self.entities.insert(self.config.dimension.clone(), level);
     }
 
@@ -4835,11 +4792,8 @@ impl Hub {
     /// respawned one as a new entity at the next tick. Their clients would otherwise keep
     /// the dead body, lying down, wherever the player goes.
     pub fn respawned(&mut self, id: i32) {
-        self.guests.update_all(|g| {
-            if g.entity_id != id && g.tracker.forget(id) {
-                g.send(&C::RemoveEntities(play::RemoveEntities { ids: vec![id] }));
-            }
-        });
+        self.guests
+            .update_all(|g| super::viewed_levels::entities::forget_entity(g, id));
     }
 
     /// A respawn point whose block is gone or blocked: the respawning player
@@ -5019,6 +4973,7 @@ impl Hub {
     ) {
         let info = self.spawn_info(i, portal_cooldown, ctx.sea_level);
         self.close_container_for(i);
+        let left = self.guests[i].dimension.clone();
         self.guests.update(i, |g| {
             // Out of the old level with its chunks (ChunkMap.removeEntity).
             super::chunk_watch::unwatch_all(&mut self.chunk_watches, g);
@@ -5027,12 +4982,6 @@ impl Hub {
             g.collision_exclusions.clear();
             // The load timer is not restarted: vanilla resets the client's loaded state on death and
             // respawn only, and covers a level change with its separate `isChangingDimension` term.
-            g.tracker.clear();
-            g.sent_chunks.clear();
-            g.far_sent_chunks.clear();
-            g.chunk_queue.clear();
-            g.far_queue.clear();
-            g.viewed.forget_views();
             g.center = None;
             g.yaw = yaw;
             if let Some(pitch) = pitch {
@@ -5050,6 +4999,8 @@ impl Hub {
                 locked: ctx.difficulty_locked,
             }));
         });
+        // Its chunks, queues and entities left behind, or kept as a viewed level (#3716).
+        self.leave_level(i, &left);
         self.send_permission_level(i);
         if portal {
             // A teleport still pending from the old level is void: its late
@@ -7368,6 +7319,7 @@ mod tests {
     /// A player walking a loop, sending a few chunks a tick: the queue
     /// after every move is the one the scan built.
     #[test]
+    #[ignore = "daily"]
     fn requeue_matches_the_scan() {
         for r in [2, 5, 10, 12, 32] {
             let (mut a, mut b) = (Vec::new(), Vec::new());
