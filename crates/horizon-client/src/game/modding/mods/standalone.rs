@@ -1,5 +1,6 @@
 //! Client-only standalone model registration.
 use super::{ExecutionRole, Game, RegistrationContext};
+use mod_api::__private::game::RegistrationContextNew;
 
 pub(super) fn collect_standalone_models(role: ExecutionRole) -> Option<Vec<String>> {
     if !role.is_client() {
