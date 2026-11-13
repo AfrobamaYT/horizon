@@ -4029,8 +4029,7 @@ impl Hub {
         let sync = self.sync.clone();
         // broadcastAll(ClientboundUpdateTagsPacket).
         self.broadcast(&C::UpdateTags(sync.tags.clone()));
-        // For each player: ClientboundUpdateRecipesPacket, then
-        // sendInitialRecipeBook.
+        // For each player: ClientboundUpdateRecipesPacket, then sendInitialRecipeBook.
         for i in 0..self.guests.len() {
             if !self.guests[i].placed {
                 continue;
