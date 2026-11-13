@@ -12,8 +12,10 @@ permissions:
 # with a manual dispatch on a suspect commit (through a branch pointing at it) when needed. Dispatches
 # queue in their own group per ref and never displace main's runs.
 concurrency:
-  group: wasm-mods-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: false
+  # Main: each push runs at once, beside any other. Elsewhere a newer dispatch on the same branch
+  # replaces the one before, which checked a superseded head.
+  group: wasm-mods-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   fixture:
     runs-on: dyna-large

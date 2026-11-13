@@ -30,9 +30,10 @@ on:
 permissions:
   contents: read
 concurrency:
-  # A new push to a pull request replaces its running checks. Main runs are never cancelled: a run in
-  # progress finishes, and only the newest waiting push runs next, so main is always checked.
-  group: dyna-checks-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main') || github.sha }}
+  # A new push to a pull request replaces its running checks. Each main push runs at once, beside any
+  # other: none of its jobs publishes or writes shared state, so a main run never waits behind another.
+  # A dispatch for a pull request (`pr`) is grouped by that pull request, never by main's head.
+  group: dyna-checks-${{ github.event.pull_request.number || inputs.pr && format('pr-{0}', inputs.pr) || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
