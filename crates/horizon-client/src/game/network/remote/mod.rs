@@ -10814,7 +10814,7 @@ impl Game<'_> {
         let delta = self.world.game_time - r.clock_game_time;
         r.clock_game_time = self.world.game_time;
         for clock in r.clocks.values_mut() {
-            client_level_tick::advance_clock(clock, delta);
+            let _ = client_level_tick::advance_clock(clock, delta);
         }
         self.world.day_time = r.clock_time(r.default_clock);
     }
