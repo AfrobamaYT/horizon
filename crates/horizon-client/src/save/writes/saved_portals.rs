@@ -97,6 +97,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "daily"]
     fn saved_portal_blocks_follow_each_save_of_their_chunk() {
         let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") else {
             return;

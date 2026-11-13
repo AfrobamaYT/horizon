@@ -15,6 +15,7 @@ horizon-client-lib net::tests::lan_login_continues_after_authentication_failure 
 horizon-client-lib pregen::tests::sweeps_every_chunk_of_the_area_once lib daily slow
 horizon-client-lib save::biome_tests::an_exhausted_biome_table_refuses_every_save_before_touching_the_world lib daily slow
 horizon-client-lib save::tests::saved_light_matches_reference_for_layers_and_metadata lib daily slow
+horizon-client-lib save::writes::saved_portals::tests::saved_portal_blocks_follow_each_save_of_their_chunk lib daily resources
 horizon-client-lib server_perf::tests::sampled::a_sampled_capture_reads_back_with_the_entity_shares_of_the_work lib daily slow
 horizon-client-lib ticket_levels::tests::grid_matches_the_map lib daily slow
 horizon-client-lib ticket_levels::tiled_tests::tiles_match_scalar_levels_with_overlaps_and_portals lib daily slow
