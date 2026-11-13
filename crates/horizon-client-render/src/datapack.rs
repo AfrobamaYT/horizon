@@ -966,7 +966,10 @@ impl DataStore {
                 invalid.insert(tag);
                 continue;
             };
-            for (entry, required, _) in entries {
+            for (entry, required, remove) in entries {
+                if *remove {
+                    continue;
+                }
                 if let Some(child) = entry.strip_prefix('#') {
                     pending.push(child);
                     if *required {
@@ -1011,28 +1014,16 @@ impl DataStore {
             if *remove {
                 match e.strip_prefix('#') {
                     Some(inner) => {
-                        // The members the tag holds as it built, each once.
-                        let mut stack = vec![hash_normalize(inner)];
-                        let mut walked = std::collections::HashSet::new();
-                        let mut members: Vec<String> = Vec::new();
-                        while let Some(next) = stack.pop() {
-                            if !walked.insert(next.clone()) {
-                                continue;
-                            }
-                            if let Some(entries) = self.function_tags.get(next.as_str()) {
-                                for (id, _, nested_remove) in entries {
-                                    if *nested_remove {
-                                        continue;
-                                    }
-                                    match id.strip_prefix('#') {
-                                        Some(nested) => stack.push(hash_normalize(nested)),
-                                        None => members.push(id.clone()),
-                                    }
-                                }
-                            }
-                        }
+                        let mut members = Vec::new();
+                        self.expand(
+                            inner,
+                            &mut members,
+                            &mut Default::default(),
+                            seen_tags,
+                            invalid,
+                        );
                         out.retain(|f| !members.contains(f));
-                        seen_fns.retain(|f| !members.contains(&f.to_string()));
+                        seen_fns.retain(|f| !members.iter().any(|member| member == f));
                     }
                     None => {
                         out.retain(|f| f.as_str() != e.as_str());
@@ -1043,7 +1034,18 @@ impl DataStore {
             }
             let _ = required;
             match e.strip_prefix('#') {
-                Some(inner) => self.expand(inner, out, seen_fns, seen_tags, invalid),
+                Some(inner) => {
+                    let mut members = Vec::new();
+                    let mut member_ids = Default::default();
+                    self.expand(inner, &mut members, &mut member_ids, seen_tags, invalid);
+                    for member in members {
+                        if let Some(&id) = member_ids.get(member.as_str()) {
+                            if seen_fns.insert(id) {
+                                out.push(member);
+                            }
+                        }
+                    }
+                }
                 None => {
                     if self.functions.contains_key(e) && seen_fns.insert(e) {
                         out.push(e.clone());
@@ -1051,6 +1053,7 @@ impl DataStore {
                 }
             }
         }
+        seen_tags.remove(id);
     }
 }
 fn normalize(id: &str) -> String {
@@ -1795,6 +1798,37 @@ mod tests {
             [b"{\"min_y\":-128}".to_vec()]
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn function_removals_use_finished_members_and_ignore_missing_ids() {
+        let mut store = DataStore::default();
+        store.functions.insert(
+            "t:f".into(),
+            Function {
+                id: "t:f".into(),
+                lines: Vec::new(),
+                parameters: Vec::new(),
+            },
+        );
+        store.function_tags.insert(
+            "t:child".into(),
+            vec![("t:f".into(), true, false), ("t:f".into(), true, true)],
+        );
+        store.function_tags.insert(
+            "t:parent".into(),
+            vec![
+                ("t:f".into(), true, false),
+                ("#t:child".into(), true, true),
+                ("t:missing".into(), true, true),
+                ("#t:missing".into(), true, true),
+            ],
+        );
+        assert_eq!(store.tag_functions("t:parent"), ["t:f"]);
+        store
+            .function_tags
+            .insert("t:child".into(), vec![("t:f".into(), true, false)]);
+        assert!(store.tag_functions("t:parent").is_empty());
     }
 
     #[test]
