@@ -8056,7 +8056,7 @@ impl Game<'_> {
                     mob.species(),
                     Species::Blaze | Species::MagmaCube | Species::GlowSquid | Species::SulfurCube
                 );
-            let (mut skinned, mut parts, layers) = (None, None, self.mod_layers(mob));
+            let (mut skinned, mut parts, added) = (None, None, self.mod_layers(mob));
             if posable {
                 let mut models = self.skin_models.borrow_mut();
                 let mut frame = self.skin_frame.borrow_mut();
@@ -8070,7 +8070,7 @@ impl Game<'_> {
                     packed,
                     self.res.mob_data(),
                     hidden,
-                    (listened || layers.is_some()).then_some(&mut parts),
+                    (listened || added.is_some()).then_some(&mut parts),
                     out,
                     &mut skin,
                 );
@@ -8085,7 +8085,7 @@ impl Game<'_> {
                         packed,
                         self.res.mob_data(),
                         &armor,
-                        (listened || layers.is_some()).then_some(&mut parts),
+                        (listened || added.is_some()).then_some(&mut parts),
                         out,
                     );
                 } else {
@@ -8098,7 +8098,7 @@ impl Game<'_> {
                         self.res.mob_data(),
                         &armor,
                         hidden,
-                        (listened || layers.is_some()).then_some(&mut parts),
+                        (listened || added.is_some()).then_some(&mut parts),
                         out,
                     );
                 }
@@ -8161,7 +8161,7 @@ impl Game<'_> {
                 let skin = (skinning && silhouette_on_gpu).then_some(&mut skinned);
                 self.mob_block_geometry(mob, camera, alpha, packed, skin, out);
                 // Mods' layers (`register_entity_layers`, `native_mob_layer`), over vanilla's.
-                self.mod_layer_geometry(mob, who, parts, layers, alpha as f32, camera, packed, out);
+                self.mod_layer_geometry(mob, who, parts, added, alpha as f32, camera, packed, out);
             }
             if let Some(rgb) = outline {
                 self.mark_outline(&out[entity_start..], rgb);
