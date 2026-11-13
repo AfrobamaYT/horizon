@@ -14,20 +14,6 @@ class DiffReadingTest(unittest.TestCase):
         self.repo = Repo()
         self.addCleanup(self.repo.close)
 
-    def test_names_added_to_each_brace_list(self):
-        r = self.repo
-        before = ("mod parts;\npub use parts::{Alpha, Beta};\n"
-                  "pub mod __private {\n    pub(crate) use crate::parts::{gamma, delta as d};\n}\n")
-        after = ("mod parts;\npub use parts::{\n    Alpha, Beta, // the two\n    Zeta,\n};\n"
-                 "pub mod __private {\n    pub(crate) use crate::parts::{\n        delta as d, epsilon::{Eta, Theta},\n"
-                 "        gamma,\n    };\n}\n")
-        base = r.commit("main", {"x.rs": before})
-        head = r.commit("pr", {"x.rs": after}, base="main")
-        self.assertEqual(carry.added_names(r.path, base, head, "x.rs"), {
-            ("", "pub", "parts::"): ["Zeta"],
-            ("__private", "pub(crate)", "crate::parts::"): ["epsilon::Eta", "epsilon::Theta"],
-        })
-
     def test_rows_added_to_a_file(self):
         r = self.repo
         base = r.commit("main", {"list.txt": "a 1\nb 2\nc 3\n"})
@@ -72,6 +58,18 @@ class IgnoredTestCarryTest(unittest.TestCase):
             carry.carry_ignored_test(r.path, self.base, head, "added")
         self.assertIn("-pkg a::gone #2", str(e.exception))
         self.assertFalse((self.folder / "added.txt").exists())
+
+    def test_a_row_moved_between_hunks_is_printed_not_dropped(self):
+        r = self.repo
+        old = HEADER + "pkg a::flaky_one #1 flaky\n" + "".join(f"pkg m::t{i} #5\n" for i in range(8)) + "pkg a::gone #2\n"
+        base = r.commit("old", {OLD: old}, base=self.base)
+        head = r.commit("old", {OLD: old.replace("pkg a::flaky_one #1 flaky\n", "").replace(
+            "pkg a::gone #2\n", "pkg a::gone #2\npkg a::flaky_one #1 flaky\n")})
+        r.git("checkout", "-q", "main")
+        with self.assertRaises(carry.CarryError) as e:
+            carry.carry_ignored_test(r.path, base, head, "moved")
+        self.assertIn("moves a row between hunks", str(e.exception))
+        self.assertIn("+pkg a::flaky_one #1 flaky", str(e.exception))
 
     def test_the_kinds_of_later_switches_say_which_pr_brings_them(self):
         err = io.StringIO()

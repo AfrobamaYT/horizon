@@ -9,9 +9,9 @@ out, and carry old-style PRs across a switch. Standard library Python and git on
 | `measure.py` | Ranks files by distinct PRs that changed them and by merges git could not replay (`git merge-tree`, git 2.38 or newer), on rollups, syncs and PR branches. `--days N` or `--since DATE` for a window; the fork's start comes from `--bound` or `--upstream`. `--markdown` (default), `--json`, `--report`. Its docstring defines every count. |
 | `open_prs.py` | Lists the open PRs whose own diff touches a path. Run it before a switch PR; the list goes in that PR's body. |
 | `carry.py` | Writes an old-style PR's addition to a switched list in the new form, into the working tree. |
-| `check_lists.py` | `verify-static`: a `pub use` brace list under `crates/horizon-mod-vocab/src/exports/` names at most 12 items; the longer ones in its table only shrink. |
+| `check_lists.py` | `verify-static`: a `pub use` brace list under `crates/horizon-mod-vocab/src/exports/` names at most 12 items; the longer ones in its table may not grow past their entry (shortening needs no edit). |
 
-The nightly dispatch of `dyna-checks` on main runs `measure.py --days 3 --report` and rewrites the issue
+The nightly schedule of `dyna-checks` runs `measure.py --days 3 --report` and rewrites the issue
 "Conflict hotspots: churn report" (files with 3 or more rollup conflicts or 15 or more PRs in 3 days). It is never a gate.
 
 ## Measuring

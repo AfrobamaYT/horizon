@@ -74,85 +74,6 @@ def hunks(repo, base, head, path):
     return found
 
 
-def show(repo, rev, path):
-    rc, text = git(repo, "show", f"{rev}:{path}", ok=(0, 128))
-    return text if rc == 0 else ""
-
-
-USE = re.compile(r"\b((?:pub(?:\s*\([^)]*\))?\s+)?)use\s+([^;]*);")
-MOD_OPEN = re.compile(r"\bmod\s+(\w+)\s*\{")
-
-
-def strip_comments(source):
-    return re.sub(r"//[^\n]*|/\*.*?\*/", "", source, flags=re.S)
-
-
-def use_leaves(tree, prefix=""):
-    """Leaf paths of a use tree: `a::{b, c::{d as e}}` -> ['a::b', 'a::c::d as e']."""
-    tree = tree.strip()
-    i = tree.find("{")
-    if i < 0:
-        return [prefix + tree] if tree else []
-    head, body = tree[:i], tree[i + 1:tree.rindex("}")]
-    items, depth, start = [], 0, 0
-    for j, ch in enumerate(body):
-        depth += ch == "{"
-        depth -= ch == "}"
-        if ch == "," and depth == 0:
-            items.append(body[start:j])
-            start = j + 1
-    items.append(body[start:])
-    leaves = []
-    for item in items:
-        leaves += use_leaves(item, prefix + head.strip())
-    return [re.sub(r"\s+", " ", x) for x in leaves]
-
-
-def brace_lists(source):
-    """{(scope, visibility, path before the brace): leaf names} for every braced `use` of a Rust source.
-
-    The scope is the chain of inline `mod name {` blocks around the statement, joined with `::`."""
-    source = strip_comments(source)
-    lists = {}
-    stack = []            # (module name or None, depth at which it opened)
-    depth = 0
-    pos = 0
-    events = sorted([(m.start(), "use", m) for m in USE.finditer(source)]
-                    + [(m.end() - 1, "mod", m) for m in MOD_OPEN.finditer(source)], key=lambda e: e[0])
-    for at, kind, m in events + [(len(source), "end", None)]:
-        for ch in source[pos:at]:
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                while stack and stack[-1][1] > depth:
-                    stack.pop()
-        pos = at
-        if kind == "mod":
-            stack.append((m.group(1), depth + 1))
-        elif kind == "use":
-            tree = m.group(2)
-            if "{" in tree:
-                key = ("::".join(s for s, _ in stack), re.sub(r"\s+", "", m.group(1)), tree[:tree.find("{")].strip())
-                names = [x[len(key[2]):] for x in use_leaves(tree)]
-                lists.setdefault(key, []).extend(names)
-            pos = m.end()   # the use's own braces are not module braces
-    return lists
-
-
-def added_names(repo, base, head, path):
-    """{(scope, visibility, path): [names]} the PR added to the brace lists of one Rust file."""
-    before = brace_lists(show(repo, base, path))
-    after = brace_lists(show(repo, head, path))
-    added = {}
-    for key, names in after.items():
-        old = set(before.get(key, ()))
-        new = [n for n in names if n not in old]
-        if new:
-            added[key] = new
-    return added
-
-
 def is_row(line):
     return bool(line.strip()) and not line.lstrip().startswith("#")
 
@@ -181,9 +102,15 @@ def carry_ignored_test(repo, base, head, topic):
 
     target = folder / f"{topic}.txt"
     edits, appended, stuck = [], [], []
-    for hunk in hunks(repo, base, head, IGNORED_OLD):
+    found = hunks(repo, base, head, IGNORED_OLD)
+    for hunk in found:
         added = {row_key(x): x for x in hunk.added if is_row(x)}
         changes, new_rows, reason = [], [], None
+        others = [h for h in found if h is not hunk]
+        moved = {row_key(x) for h in others for x in h.added + h.removed if is_row(x)}
+        if moved & ({row_key(x) for x in hunk.removed if is_row(x)} | set(added)):
+            stuck.append(f"the PR moves a row between hunks:\n{hunk.text()}")
+            continue
         for row in filter(is_row, hunk.removed):
             places = where(row_key(row))
             if len(places) != 1:

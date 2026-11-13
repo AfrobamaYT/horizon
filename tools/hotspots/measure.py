@@ -11,13 +11,16 @@ Units
   is that commit or has it on its own first-parent chain (an earlier head), or the first such PR down the commit's
   own first-parent chain or merged into it (a carry branch: our commits on a PR's head), else the commit's short sha. Merge
   subjects are not read for members. Fetch the PR heads first: git fetch origin '+refs/pull/*/head:refs/pull/*/head'.
-- A rollup merged into the next rollup is not a member and is not replayed: its own chain is walked as a rollup
-  chain instead, so each member merge is counted and replayed once. A second parent is a rollup when it is on a
+- An upstream sync riding a rollup (a second parent that brings upstream commits the rollup did not have, with
+  `--upstream`) is not a PR: its merge and every merge on its own chain are sync conflicts.
+- A rollup merged into the next rollup is not a PR: its merge is replayed once as a rollup conflict, and its own
+  chain is walked as a rollup chain, so each member merge is counted and replayed once. A second parent is a rollup when it is on a
   known rollup's chain (merged into main, or `--open-rollup`), or when its own first-parent chain merges the
   current heads of two or more PRs (`refs/pull/*/head`).
 - A conflict is a merge replayed with `git merge-tree --write-tree`; the files git could not merge are the
   conflicts. Replayed: main's first-parent merges, every merge on a rollup or sync chain, and every other merge
-  with one parent on main's first-parent chain (main merged into a PR branch: "branch"). Nothing is inferred
+  with one parent on main's first-parent chain (main merged into a PR branch: "branch"; upstream merged onto
+  main's commit: "sync"). Nothing is inferred
   from the committed resolution.
 - Fix commits: non-merge commits on a rollup chain ("Rollup resolution", "Carry for", CI fixes): the breakage a
   textual replay cannot see.
@@ -152,13 +155,23 @@ class Measure:
         return sha[:12]
 
     def is_sync(self, p1, p2, branch):
-        if self.upstream:
-            rc, base = self.git.run("merge-base", p2, self.upstream, ok=(0, 1))
-            if rc:
-                return False
-            rc, _ = self.git.run("merge-base", "--is-ancestor", base.strip(), p1, ok=(0, 1))
-            return rc == 1
-        return bool(SYNC_BRANCH.search(branch))
+        """Whether merging p2 into p1 brings upstream commits that neither p1 nor the main commits p2's own chain
+        started from or merged had (by the branch name without --upstream). A PR based on a newer main than p1
+        brings upstream commits only through main, so it is not a sync."""
+        if not self.upstream:
+            return bool(SYNC_BRANCH.search(branch))
+        rc, base = self.git.run("merge-base", p2, self.upstream, ok=(0, 1))
+        if rc:
+            return False
+        base = base.strip()
+        mains = [p1]
+        for line in self.git.out("rev-list", "--first-parent", "--parents", "--max-count=200", p2).splitlines():
+            c, *ps = line.split()
+            if c in self.main_fp:
+                mains.append(c)
+                break
+            mains += [x for x in ps[1:] if x in self.main_fp]
+        return all(self.git.run("merge-base", "--is-ancestor", base, m, ok=(0, 1))[0] == 1 for m in mains)
 
     def is_rollup(self, x, base):
         if x in self.rollup_commits:
@@ -193,7 +206,15 @@ class Measure:
             p1, p2 = ps
             if p2 in self.main_fp:
                 self.replay[h] = (p1, p2, kind, label, t)
+            elif kind == "sync" or self.is_sync(p1, p2, ""):
+                # An upstream sync riding this chain: its merge and its own chain are sync conflicts, not a PR.
+                self.replay[h] = (p1, p2, "sync", label, t)
+                if kind == "rollup":
+                    self.walk(p1, p2, "sync", label)
             elif kind == "rollup" and self.is_rollup(p2, p1):
+                # A rollup merged into the next: its merge is replayed once, as a rollup conflict and not a PR;
+                # its own chain's members are walked (once: a chain already walked is skipped commit by commit).
+                self.replay[h] = (p1, p2, kind, label, t)
                 self.nested.append(h)
                 self.walk(p1, p2, kind, label)
             else:
@@ -232,7 +253,7 @@ class Measure:
         for h, ps, t, _ in commits(self.git, rng, "--merges", *extra):
             if (h not in self.replay and h not in self.seen and len(ps) == 2 and self.in_window(t)
                     and (ps[0] in self.main_own or ps[1] in self.main_own)):
-                self.replay[h] = (ps[0], ps[1], "branch", "", t)
+                self.replay[h] = (ps[0], ps[1], "sync" if self.is_sync(ps[0], ps[1], "") else "branch", "", t)
 
     def pr_files(self, unit):
         _, _, _, p1, p2 = unit
@@ -243,7 +264,7 @@ class Measure:
 
     def merge_tree(self, merge):
         p1, p2 = self.replay[merge][:2]
-        rc, o = self.git.run("merge-tree", "--write-tree", "--name-only", "--no-messages", p1, p2, ok=(0, 1))
+        rc, o = self.git.run("-c", "merge.conflictStyle=merge", "merge-tree", "--write-tree", "--name-only", "--no-messages", p1, p2, ok=(0, 1))
         lines = o.split("\n")
         return lines[0], (sorted(set(x for x in lines[1:] if x)) if rc else [])
 

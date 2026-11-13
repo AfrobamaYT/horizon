@@ -5,10 +5,8 @@ rustfmt re-wraps a brace list on every added name, so two PRs that each add a na
 conflict (tools/hotspots/README.md). Export a module's items with a glob, or put the new names in a fragment of
 their own. A list's length is the number of names in the whole `pub use` (any visibility), nested braces included.
 
-The lists that are longer today are in LONG_LISTS with their current length; an entry may only shrink. The check
-fails when a listed file's longest list is longer than its entry, and when it is shorter, so the entry is lowered
-in the same PR (or removed once the file is at 12 or under). The files in SWITCHED are replaced as a whole by a
-planned PR and are not checked.
+The lists that are longer today are in LONG_LISTS with their length on main as a ceiling: the check fails only when
+a listed file's longest list is longer than its entry, so shortening a list never needs a change here.
 
     python3 tools/hotspots/check_lists.py
 """
@@ -21,21 +19,19 @@ ROOT = Path(__file__).resolve().parents[2]
 EXPORTS = "crates/horizon-mod-vocab/src/exports"
 LIMIT = 12
 
-# file (under EXPORTS): (longest list today, why it stays)
+# file (under EXPORTS): (longest list allowed, why it stays). A list may be shorter than its entry; it may not be longer.
 LONG_LISTS = {
     "built.rs": (17, "no planned PR removes it"),
+    # The design of the conflict hotspots, PR F, turns its type lists into one glob per domain; F removes this entry.
+    "domains.rs": (60, "PR F of the hotspot design"),
     "game.rs": (24, "no planned PR removes it"),
+    # PR G of the same design splits it into one fragment per parts file; G removes this entry.
+    "part_table.rs": (49, "PR G of the hotspot design"),
     "payload.rs": (17, "no planned PR removes it"),
     "payload_codec.rs": (13, "no planned PR removes it"),
     "phase.rs": (15, "no planned PR removes it"),
     "registry_keys.rs": (15, "rename list"),
     "structure_type.rs": (14, "no planned PR removes it"),
-}
-
-# Files a planned switch replaces as a whole (design of the conflict hotspots, PR plan).
-SWITCHED = {
-    "domains.rs": "PR F turns its type lists into one glob per domain",
-    "part_table.rs": "PR G splits it into one fragment per parts file",
 }
 
 USE = re.compile(r"\bpub(?:\s*\([^)]*\))?\s+use\s+([^;]*);")
@@ -59,8 +55,6 @@ def problems(root):
     folder = Path(root) / EXPORTS
     for path in sorted(folder.rglob("*.rs")):
         name = path.relative_to(folder).as_posix()
-        if name in SWITCHED:
-            continue
         n = longest_list(path.read_text(encoding="utf-8"))
         entry = LONG_LISTS.get(name)
         shown = f"{EXPORTS}/{name}"
@@ -72,9 +66,6 @@ def problems(root):
         elif n > entry[0]:
             found.append(f"{shown}: its longest `pub use` list grew to {n} names (at most {entry[0]}, and it may only "
                          "shrink). Put the new names in a `pub use` of their own.")
-        elif n < entry[0]:
-            what = (f"remove its entry from LONG_LISTS" if n <= LIMIT else f"lower its entry in LONG_LISTS to {n}")
-            found.append(f"{shown}: its longest `pub use` list is down to {n} names: {what} in tools/hotspots/check_lists.py.")
     for name in sorted(LONG_LISTS):
         if not (folder / name).exists():
             found.append(f"{EXPORTS}/{name} is gone: remove its entry from LONG_LISTS in tools/hotspots/check_lists.py.")

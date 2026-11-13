@@ -51,7 +51,7 @@ class MeasureTest(unittest.TestCase):
         self.assertIn("- `pub use a::{` (2)", body)
         self.assertNotIn("other.txt", body)
 
-    def test_a_rollup_merged_into_the_next_counts_each_conflict_once(self):
+    def rollup_of_two_conflicting_prs(self):
         r = self.repo
         heads = {n: r.commit(f"p{n}", {"y.txt": f"{n}\n"}, base="main") for n in (21, 22, 24)}
         for n, sha in heads.items():
@@ -63,15 +63,69 @@ class MeasureTest(unittest.TestCase):
         r.merge("fork-review-rollup-2", "p24", "Merge PR #24 into fork-review-rollup-2")
         r.merge("fork-review-rollup-2", "fork-review-rollup-1", "Merge rollup 1 into fork-review-rollup-2",
                 resolve={"y.txt": "21 22 24\n"})
-        r.merge("main", "fork-review-rollup-2", "Merge pull request #30 from o/fork-review-rollup-2")
+
+    def test_a_rollup_merged_into_the_next_is_replayed_once_and_is_no_pr(self):
+        self.rollup_of_two_conflicting_prs()
+        self.repo.merge("main", "fork-review-rollup-2", "Merge pull request #30 from o/fork-review-rollup-2")
 
         _, raw = self.run_measure()
         entry = raw["files"]["y.txt"]
         self.assertEqual(entry["prs"], ["#21", "#22", "#24"])
-        self.assertEqual(measure.counts(entry)["rollup"], 1)
+        # #22 against #21 in rollup 1, and rollup 1 against #24 in rollup 2.
+        self.assertEqual(measure.counts(entry)["rollup"], 2)
         self.assertEqual(raw["nested_rollups"], 1)
-        # main's merge, #24's, #21's and #22's
-        self.assertEqual(raw["replayed"], 4)
+        # main's merge, rollup 1's into rollup 2, #24's, #21's and #22's
+        self.assertEqual(raw["replayed"], 5)
+
+    def test_a_rollup_merged_into_main_and_into_the_next_counts_once(self):
+        self.rollup_of_two_conflicting_prs()
+        r = self.repo
+        r.merge("main", "fork-review-rollup-1", "Merge pull request #30 from o/fork-review-rollup-1")
+        r.merge("fork-review-rollup-2", "main", "Merge main into fork-review-rollup-2")
+        r.merge("main", "fork-review-rollup-2", "Merge pull request #31 from o/fork-review-rollup-2")
+
+        _, raw = self.run_measure()
+        entry = raw["files"]["y.txt"]
+        self.assertEqual(entry["prs"], ["#21", "#22", "#24"])
+        self.assertEqual(measure.counts(entry)["rollup"], 2)
+        self.assertEqual(raw["units"], 3)
+
+    def test_a_sync_riding_a_rollup_is_a_sync_not_a_pr(self):
+        r = self.repo
+        upstream = r.commit("up", {"y.txt": "upstream\n"}, base="main")
+        r.git("update-ref", "refs/remotes/upstream/main", upstream)
+        r.pull(7, r.commit("p7", {"y.txt": "7\n"}, base="main"))
+        r.merge("main", "p7", "Merge pull request #7 from o/p7")
+        r.git("checkout", "-q", "-b", "sync-1", "main")
+        r.merge("sync-1", "up", "Merge upstream", resolve={"y.txt": "7 upstream\n"})
+        r.pull(40, r.git("rev-parse", "sync-1"))
+        r.pull(8, r.commit("p8", {"other.txt": "8\n"}, base="main"))
+        r.git("checkout", "-q", "-b", "fork-review-rollup-3", "main")
+        r.merge("fork-review-rollup-3", "p8", "Merge PR #8 into fork-review-rollup-3")
+        r.merge("fork-review-rollup-3", "sync-1", "Merge PR #40 into fork-review-rollup-3")
+        r.merge("main", "fork-review-rollup-3", "Merge pull request #41 from o/fork-review-rollup-3")
+
+        _, raw = self.run_measure()
+        entry = raw["files"]["y.txt"]
+        self.assertEqual(entry["prs"], ["#7"])
+        c = measure.counts(entry)
+        self.assertEqual((c["sync"], c["rollup"], c["branch"]), (1, 0, 0))
+        self.assertEqual(raw["prs"], 2)
+
+    def test_a_carry_branch_and_an_earlier_head_map_to_their_prs(self):
+        r = self.repo
+        r.pull(5, r.commit("p5", {"a.txt": "5\n"}, base="main"))
+        r.commit("carry-5", {"a.txt": "5 carried\n"}, base="p5")
+        merged = r.commit("p6", {"b.txt": "6\n"}, base="main")
+        r.pull(6, r.commit("p6", {"b.txt": "6 later\n"}))
+        r.git("checkout", "-q", "-b", "fork-review-rollup-4", "main")
+        r.merge("fork-review-rollup-4", "carry-5", "Merge carry into fork-review-rollup-4")
+        r.merge("fork-review-rollup-4", merged, "Merge an earlier head into fork-review-rollup-4")
+        r.merge("main", "fork-review-rollup-4", "Merge pull request #42 from o/fork-review-rollup-4")
+
+        _, raw = self.run_measure()
+        self.assertEqual(raw["files"]["a.txt"]["prs"], ["#5"])
+        self.assertEqual(raw["files"]["b.txt"]["prs"], ["#6"])
 
     def test_the_window_leaves_out_older_merges(self):
         r = self.repo
