@@ -376,8 +376,10 @@ fn three_units_of_a_and_one_of_b_split_the_samples_three_to_one() {
     first_passing_run(|| {
         let c = convert(&profiled("perf-capture-entities", entity_units));
         let by = c.by_entity(false);
-        let total = (by["test:a"] + by["test:b"]) as f64;
-        let (a, b) = (by["test:a"] as f64 / total, by["test:b"] as f64 / total);
+        // A starved run may hold no sample of one entity: that run is rejected, not a panic.
+        let count = |entity: &str| by.get(entity).copied().unwrap_or(0) as f64;
+        let total = count("test:a") + count("test:b");
+        let (a, b) = (count("test:a") / total, count("test:b") / total);
         ensure(total > minimum as f64, || {
             format!("{total} samples, minimum {minimum}")
         })?;
