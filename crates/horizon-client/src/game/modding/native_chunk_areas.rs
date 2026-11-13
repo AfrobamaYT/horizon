@@ -78,6 +78,12 @@ impl Game<'_> {
         if areas.iter().any(|a| a.level.epoch() != epoch) {
             return Err(ChunkAreaRefusal::Unavailable);
         }
+        if areas.len() > engine::MAX_AREAS {
+            return Err(ChunkAreaRefusal::TooManyAreas {
+                asked: areas.len() as u32,
+                max: engine::MAX_AREAS as u32,
+            });
+        }
         let asked = areas
             .iter()
             .map(|a| engine::ChunkArea {
@@ -211,6 +217,12 @@ mod tests {
         {
             let _call = in_mod("portal");
             assert_eq!(player.set_chunk_areas(&mut game, &[portal]), Ok(()));
+            assert_eq!(
+                player.set_chunk_areas(&mut game, &[portal; 33]),
+                Err(R::TooManyAreas { asked: 33, max: 32 })
+            );
+            assert_eq!(held(&game, "portal"), portal_held);
+
             assert_eq!(held(&game, "portal"), portal_held);
 
             let stranger = mod_api::__private::game::player_ref(player.entity(), 3);
