@@ -365,8 +365,22 @@ pub fn worlds_at_stake(name: &str, build: &str, worlds: &[String]) -> String {
         "{mod} doesn't fit {build}.",
         &[("mod", name), ("build", build)],
     );
+    format!("{headline}\n{}", worlds_body(name, worlds))
+}
+
+/// [`worlds_at_stake`] for a mod judged to fit `build` whose compile against it failed.
+pub fn worlds_at_stake_unbuilt(name: &str, build: &str, worlds: &[String]) -> String {
+    let headline = trf(
+        "{mod} looked compatible with {build} but didn't build.",
+        &[("mod", name), ("build", build)],
+    );
+    format!("{headline}\n{}", worlds_body(name, worlds))
+}
+
+/// The worlds saved with mod `name`, and what opening them without it does.
+fn worlds_body(name: &str, worlds: &[String]) -> String {
     let named = list(worlds.iter().map(|world| format!("“{world}”")));
-    let body = if worlds.len() == 1 {
+    if worlds.len() == 1 {
         trf(
             "One of your worlds uses {mod}: {worlds}. Opening it without {mod} removes its blocks and what they hold, for good.",
             &[("mod", name), ("worlds", &named)],
@@ -380,8 +394,7 @@ pub fn worlds_at_stake(name: &str, build: &str, worlds: &[String]) -> String {
                 ("worlds", &named),
             ],
         )
-    };
-    format!("{headline}\n{body}")
+    }
 }
 
 /// The choice that keeps everything as it is, said on its button.

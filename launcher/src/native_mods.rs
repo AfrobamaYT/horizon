@@ -1663,7 +1663,12 @@ fn guard_worlds(
                     .filter(|(_, mods)| mods.contains(&l.id))
                     .map(|(world, _)| world.name.clone())
                     .collect();
-                (!worlds.is_empty()).then(|| fit::worlds_at_stake(&l.id, build, &worlds))
+                (!worlds.is_empty()).then(|| match l.why {
+                    isolate::Why::DidNotBuild => {
+                        fit::worlds_at_stake_unbuilt(&l.id, build, &worlds)
+                    }
+                    _ => fit::worlds_at_stake(&l.id, build, &worlds),
+                })
             })
             .collect::<Vec<_>>()
             .join("\n\n");
@@ -1900,19 +1905,37 @@ fn pipeline(
     }
     // A mod made for another build that fits this one and still doesn't compile is switched off
     // here, and the others build: the compile is the final check.
+    // Switching it off follows the world rules like any other switch-off: when worlds were saved
+    // with it (or with a mod that needs it), the build stops unless the player chose to back
+    // them up.
+    let (worlds, back_up) = (options.worlds, options.back_up);
+    let shown = sdk
+        .as_ref()
+        .map_or_else(|| sdk_cache::shown(&revision, None), |sdk| sdk.shown());
     let blame = |e: String| -> Failed {
         let failed = fitted.iter().find_map(|id| {
             let bundle = mods.iter().find(|b| &b.manifest.id == id)?;
             e.contains(&format!("{} failed", prebuilt::compiling(id)))
                 .then(|| LeftOut::new(bundle, isolate::Why::DidNotBuild))
         });
-        match failed {
-            Some(left) => Failed::Mods {
-                error: format!("{}\n\n{e}", fit::did_not_build(&left.id)),
-                left: vec![left],
-                compiling: true,
-            },
-            None => Failed::Other(e),
+        let Some(left) = failed else {
+            return Failed::Other(e);
+        };
+        if let Some(home) = worlds {
+            let pairs: Vec<(&Bundle, &[dependencies::Dependency])> = mods
+                .iter()
+                .zip(&declared)
+                .map(|(b, d)| (b, d.as_slice()))
+                .collect();
+            let going = isolate::with_dependents(std::slice::from_ref(&left), &pairs);
+            if let Err(stop) = guard_worlds(home, &going, &shown, back_up, progress) {
+                return stop;
+            }
+        }
+        Failed::Mods {
+            error: format!("{}\n\n{e}", fit::did_not_build(&left.id)),
+            left: vec![left],
+            compiling: true,
         }
     };
     let mixins = newest(
@@ -2630,6 +2653,87 @@ mod tests {
         );
         assert_eq!(String::from(result.unwrap_err()), CANCELLED);
         assert_eq!(attempts, 2);
+    }
+
+    #[test]
+    fn a_mod_saved_into_a_world_is_never_switched_off_without_the_players_choice() {
+        use horizon_platform::world::nbt::{self, Limits, Tag};
+        let _guard = TEST_STATE.lock().unwrap();
+        let home = dir("guard-worlds");
+        let world = home.join("saves").join("Home");
+        fs::create_dir_all(&world).unwrap();
+        let record = Tag::compound([
+            ("ModId", Tag::String("greeter".into())),
+            ("ModVersion", Tag::String("1.0.0".into())),
+        ]);
+        let root = Tag::compound([
+            (
+                "Data",
+                Tag::compound([("LevelName", Tag::String("Home".into()))]),
+            ),
+            (
+                "fml",
+                Tag::compound([("LoadingModList", Tag::List(vec![record]))]),
+            ),
+        ]);
+        let bytes = nbt::write_named(
+            &nbt::NamedTag {
+                name: "".into(),
+                tag: root,
+            },
+            Limits::default(),
+        )
+        .unwrap();
+        fs::write(world.join("level.dat"), bytes).unwrap();
+        let left = |why| LeftOut {
+            id: "greeter".into(),
+            version: "1.0.0".into(),
+            why,
+        };
+        let build = "nightly-2026-11-20 (9a8b7c6)";
+        // A mod that fit but didn't compile goes through the same rule as one that doesn't fit.
+        for (why, headline) in [
+            (
+                isolate::Why::DidNotBuild,
+                "greeter looked compatible with nightly-2026-11-20 (9a8b7c6) but didn't build.",
+            ),
+            (
+                isolate::Why::Unfit("why".into()),
+                "greeter doesn't fit nightly-2026-11-20 (9a8b7c6).",
+            ),
+        ] {
+            let stopped = guard_worlds(&home, &[left(why)], build, false, &|_| {});
+            let Err(Failed::Worlds(stake)) = stopped else {
+                panic!("a world saved with the mod must stop the build");
+            };
+            assert!(stake.text.starts_with(headline), "{}", stake.text);
+            assert_eq!(stake.worlds, ["Home"]);
+            assert_eq!(stake.backups, home.join("backups"));
+            assert!(
+                !home.join("backups").exists(),
+                "nothing is backed up unasked"
+            );
+        }
+        // Chosen: the world is backed up first, then the build may go on without the mod.
+        let said = std::cell::RefCell::new(Vec::new());
+        guard_worlds(
+            &home,
+            &[left(isolate::Why::DidNotBuild)],
+            build,
+            true,
+            &|step| said.borrow_mut().push(step),
+        )
+        .unwrap();
+        assert_eq!(fs::read_dir(home.join("backups")).unwrap().count(), 1);
+        assert!(matches!(said.borrow().as_slice(), [Step::BackedUp(_)]));
+        // A mod no world was saved with is switched off with no question.
+        let other = LeftOut {
+            id: "other".into(),
+            version: "1.0.0".into(),
+            why: isolate::Why::DidNotBuild,
+        };
+        assert!(guard_worlds(&home, &[other], build, false, &|_| {}).is_ok());
+        fs::remove_dir_all(home).unwrap();
     }
 
     #[test]

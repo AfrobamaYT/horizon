@@ -375,6 +375,29 @@ fn a_game_release_names_its_build_through_its_signed_index() {
     // Kept: known offline.
     fs::remove_dir_all(&base).unwrap();
     assert_eq!(read(version).unwrap(), COMMIT);
+    // The Nightly being served, under `nightly`: read there, signed for its own version.
+    let current = "nightly-2026-11-14-0123456";
+    publish(
+        &base,
+        horizon_release_sign::NIGHTLY,
+        current,
+        &fixture.key,
+        index.as_bytes(),
+        &[],
+    );
+    assert_eq!(read(current).unwrap(), COMMIT);
+    // `nightly` serving another version doesn't pass for this one; its dated tag is read next.
+    let older = "nightly-2026-11-12-0123456";
+    assert!(matches!(read(older), Err(Refusal::NoSdk { .. })));
+    publish(
+        &base,
+        "nightly-2026-11-12",
+        older,
+        &fixture.key,
+        index.as_bytes(),
+        &[],
+    );
+    assert_eq!(read(older).unwrap(), COMMIT);
     // A Nightly whose index names another commit than its version: refused.
     let other = "nightly-2026-11-13-abcdef0";
     publish(

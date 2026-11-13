@@ -319,8 +319,10 @@ fn index_in(root: &Path, base: &Base, commit: &str, keys: &[PublicKey]) -> Resul
         build: build.clone(),
         why,
     };
-    let signed = horizon_release_sign::signed_digest(
-        &tag,
+    // Signed for exactly `sdk-<build id>`: neither a game release's sums nor another build's SDK
+    // pass for it.
+    let signed = horizon_release_sign::sdk_digest(
+        commit,
         INDEX,
         sums.as_deref(),
         signature.as_deref(),
@@ -730,17 +732,72 @@ fn build_of_in(
         }
     }
     let nightly = horizon_release_sign::is_nightly_build(version);
-    let tag = match horizon_release_sign::nightly_date(version) {
-        Some(date) if nightly => format!("nightly-{date}"),
-        _ => version.to_owned(),
+    // The Nightly being served is published as `nightly` and renamed `nightly-<date>` when the
+    // next one goes out: the current tag is tried first. Its v2 signature binds the exact
+    // version, so whichever tag serves it, only that version's index is accepted.
+    let tags: Vec<String> = match horizon_release_sign::nightly_date(version) {
+        Some(date) if nightly => vec![
+            horizon_release_sign::NIGHTLY.to_owned(),
+            format!("nightly-{date}"),
+        ],
+        _ => vec![version.to_owned()],
     };
+    let mut bytes = None;
+    let mut last = Refusal::NoSdk {
+        build: version.to_owned(),
+    };
+    for tag in &tags {
+        match signed_game_index(base, tag, version, nightly, keys) {
+            Ok(found) => {
+                bytes = Some(found);
+                break;
+            }
+            // Offline is offline whichever tag: no use trying the next.
+            Err(refusal @ Refusal::Offline { .. }) => return Err(refusal),
+            Err(refusal) => last = refusal,
+        }
+    }
+    let Some(bytes) = bytes else {
+        return Err(last);
+    };
+    let build = Index::build_of(&bytes).map_err(|refusal| match refusal {
+        sdk::Refusal::Schema(schema) => Refusal::UpdateLauncher {
+            build: version.to_owned(),
+            what: trf("SDK schema {schema}", &[("schema", &schema.to_string())]),
+        },
+        other => refused(other.to_string()),
+    })?;
+    let commit = build.commit;
+    let named = version.rsplit('-').next().unwrap_or_default();
+    if !super::is_revision(&commit) || (nightly && !commit.starts_with(named)) {
+        return Err(refused(trf(
+            "its index names build {commit}, not {version}'s",
+            &[("commit", &commit), ("version", version)],
+        )));
+    }
+    write_whole(&file, commit.as_bytes())?;
+    Ok(commit)
+}
+
+/// The game release `tag`'s copy of its SDK index, checked against the release's signed sums:
+/// for a Nightly, signed for exactly `version` (`SHA256SUMS.v2.sig`); for a release, for `tag`.
+fn signed_game_index(
+    base: &Base,
+    tag: &str,
+    version: &str,
+    nightly: bool,
+    keys: &[PublicKey],
+) -> Result<Vec<u8>, Refusal> {
     let read = |name: &str| {
-        base.small(&tag, name).map_err(|unread| match unread {
+        base.small(tag, name).map_err(|unread| match unread {
             Unread::Offline => Refusal::Offline {
                 build: version.to_owned(),
                 bytes: None,
             },
-            Unread::Failed(why) => refused(why),
+            Unread::Failed(why) => Refusal::Refused {
+                build: version.to_owned(),
+                why,
+            },
         })
     };
     let bytes = read(INDEX)?.ok_or_else(|| Refusal::NoSdk {
@@ -762,33 +819,11 @@ fn build_of_in(
         )
     } else {
         let signature = read(SIGNATURE)?.map(|b| String::from_utf8_lossy(&b).into_owned());
-        horizon_release_sign::signed_digest(
-            &tag,
-            INDEX,
-            sums.as_deref(),
-            signature.as_deref(),
-            keys,
-        )
+        horizon_release_sign::signed_digest(tag, INDEX, sums.as_deref(), signature.as_deref(), keys)
     }
     .map_err(unsigned)?;
     horizon_release_sign::check(INDEX, &signed, &sha256(&bytes)).map_err(unsigned)?;
-    let build = Index::build_of(&bytes).map_err(|refusal| match refusal {
-        sdk::Refusal::Schema(schema) => Refusal::UpdateLauncher {
-            build: version.to_owned(),
-            what: trf("SDK schema {schema}", &[("schema", &schema.to_string())]),
-        },
-        other => refused(other.to_string()),
-    })?;
-    let commit = build.commit;
-    let named = version.rsplit('-').next().unwrap_or_default();
-    if !super::is_revision(&commit) || (nightly && !commit.starts_with(named)) {
-        return Err(refused(trf(
-            "its index names build {commit}, not {version}'s",
-            &[("commit", &commit), ("version", version)],
-        )));
-    }
-    write_whole(&file, commit.as_bytes())?;
-    Ok(commit)
+    Ok(bytes)
 }
 
 #[cfg(test)]
