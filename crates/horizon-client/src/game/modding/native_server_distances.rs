@@ -16,8 +16,7 @@ impl Game<'_> {
     }
     /// `PlayerList.setViewDistance` on a dedicated server; the tickets read the settings.
     pub(super) fn server_set_view_distance(&mut self, distance: i32) -> bool {
-        if !(2..=32).contains(&distance) || self.options.dedicated.is_none() || self.lan.is_none()
-        {
+        if !(2..=32).contains(&distance) || self.options.dedicated.is_none() || self.lan.is_none() {
             return false;
         }
         self.set_view_distance(distance);
@@ -26,8 +25,7 @@ impl Game<'_> {
     }
     /// `PlayerList.setSimulationDistance` on a dedicated server.
     pub(super) fn server_set_simulation_distance(&mut self, distance: i32) -> bool {
-        if !(2..=32).contains(&distance) || self.options.dedicated.is_none() || self.lan.is_none()
-        {
+        if !(2..=32).contains(&distance) || self.options.dedicated.is_none() || self.lan.is_none() {
             return false;
         }
         self.set_simulation_distance(distance);

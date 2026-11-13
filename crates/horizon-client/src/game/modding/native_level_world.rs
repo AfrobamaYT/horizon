@@ -641,7 +641,11 @@ mod tests {
             assert!(game.level_set_game_rule(level, "random_tick_speed", gamerules::Value::Int(9)));
             assert!(!game.level_set_game_rule(level, "missing:rule", gamerules::Value::Bool(true)));
             assert!(!game.level_set_game_rule(level, "keep_inventory", gamerules::Value::Int(1)));
-            assert!(!game.level_set_game_rule(level, "random_tick_speed", gamerules::Value::Int(-1)));
+            assert!(!game.level_set_game_rule(
+                level,
+                "random_tick_speed",
+                gamerules::Value::Int(-1)
+            ));
             assert_eq!(
                 game.ui.rules.get("random_tick_speed"),
                 Some(gamerules::Value::Int(9))
@@ -655,7 +659,11 @@ mod tests {
             let stale =
                 mod_api::LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
             assert!(!game.level_set_clock_time(stale, 1));
-            assert!(!game.level_set_game_rule(stale, "keep_inventory", gamerules::Value::Bool(false)));
+            assert!(!game.level_set_game_rule(
+                stale,
+                "keep_inventory",
+                gamerules::Value::Bool(false)
+            ));
         });
     }
 
