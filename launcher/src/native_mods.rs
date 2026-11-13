@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use horizon_mod_package::dependencies;
+use horizon_mod_package::mod_surface;
 
 mod api;
 mod api_route;
@@ -2091,6 +2092,7 @@ fn pipeline(
             &rust,
             game,
             &root().join("prebuilt-build"),
+            folder,
             route,
             &projects,
             &declared,
