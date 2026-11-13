@@ -1,7 +1,7 @@
 name: dyna-checks
 run-name: ${{ github.event.pull_request.title || github.event.head_commit.message || github.workflow }}
 # A contributor's pull request (its head in a fork) gets the cheap checks (verify-static, format); the heavy ones
-# (everything that compiles) run on main's pushes, dispatches, and pull requests from this repository's own branches
+# (everything that compiles) run on main's pushes, dispatches, and same-repository rollup or sync pull requests
 # (tools/ci/pr_gate.py, docs/ci-runners.md).
 # Keep upstream's workflows byte-identical; disable checks (ci.yml) in the fork's Actions
 # settings after this workflow's verify passes on main.
@@ -92,6 +92,8 @@ jobs:
           EVENT: ${{ github.event_name }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           PR: ${{ inputs.pr }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: python3 tools/ci/pr_gate.py >> "$GITHUB_OUTPUT"
       - name: Fetch this commit's history for selection
         if: github.event_name == 'pull_request'

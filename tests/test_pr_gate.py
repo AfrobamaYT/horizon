@@ -1,4 +1,4 @@
-"""A contributor's pull request gets only the cheap checks; ours, main and dispatches get the heavy ones."""
+"""A contributor's pull request gets only the cheap checks; rollups, syncs, main and dispatches get the heavy ones."""
 
 import importlib.util
 import itertools
@@ -24,17 +24,29 @@ def never_read(_):
 
 
 class GateTests(unittest.TestCase):
-    def test_a_fork_pull_request_is_cheap_and_ours_are_heavy(self):
-        self.assertEqual(pr_gate.outputs("pull_request", False, "", never_read)["heavy"], "false")
-        self.assertEqual(pr_gate.outputs("pull_request", True, "", never_read)["heavy"], "true")
-        for event in ("push", "workflow_dispatch"):
+    def test_pull_request_gate(self):
+        cases = [
+            (True, ["rollup"], "work", "true"),
+            (True, [], "fork-review-rollup-42", "true"),
+            (True, ["sync"], "work", "true"),
+            (True, [], "sync-28-35", "true"),
+            (True, ["bug"], "ci-gate", "false"),
+            (False, ["rollup", "sync"], "fork-review-rollup-42", "false"),
+        ]
+        for same, labels, branch, expected in cases:
+            with self.subTest(same=same, labels=labels, branch=branch):
+                result = pr_gate.outputs("pull_request", same, "", never_read,
+                                         labels=labels, head_ref=branch)
+                self.assertEqual(result, {"heavy": expected, "pr_sha": "", "trusted": ""})
+                # An empty trusted output preserves the workflow's repository-based trust fallback.
+        for event in ("push", "schedule", "workflow_dispatch"):
             self.assertEqual(pr_gate.outputs(event, False, "", never_read)["heavy"], "true")
 
     def test_a_dispatch_with_pr_runs_that_head_and_keeps_a_fork_off_our_runners(self):
         fork = pr_gate.outputs("workflow_dispatch", True, "3665", lambda n: {"sha": SHA, "same_repository": False})
         self.assertEqual(fork, {"heavy": "true", "pr_sha": SHA, "trusted": "false"})
         ours = pr_gate.outputs("workflow_dispatch", True, "3672", lambda n: {"sha": SHA, "same_repository": True})
-        self.assertEqual(ours["trusted"], "true")
+        self.assertEqual(ours, {"heavy": "true", "pr_sha": SHA, "trusted": "true"})
 
     def test_pr_must_be_a_number(self):
         for bad in ("0", "12a", "1;id", "refs/pull/1/head", "-1"):
