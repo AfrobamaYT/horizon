@@ -27,7 +27,15 @@ python3 tools/hotspots/open_prs.py --from-gh crates/horizon-mod-vocab/src/export
 
 ## In a rollup, after a switch
 
-A member PR written against a switched list conflicts on the old file. Take main's side of that file, then:
+A member PR written against a switched list conflicts on the old file.
+
+The vocabulary's type lists in `crates/horizon-mod-vocab/src/exports/domains.rs` are one glob per domain
+(`pub use <domain>::types::*;`): every `pub` item of a `<domain>/types.rs` is API by its keyword. A member PR that
+added a name to one of the removed lists conflicts in that list: take main's side of the list after checking that the
+PR's diff defines the name as a `pub` item in that `types.rs`. No carry script is needed. Any other hunk of the PR in
+`domains.rs` (a `mod` line, a `backend` or `runtime` re-export) is outside the lists and merges as before.
+
+For the other switched lists, take main's side of the old file, then:
 
 ```sh
 git fetch origin pull/<N>/head:refs/pull/<N>/head

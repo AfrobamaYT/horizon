@@ -6,8 +6,8 @@ conflict (tools/hotspots/README.md). Export a module's items with a glob, or put
 their own. A list's length is the number of names in the whole `pub use` (any visibility), nested braces included.
 
 The lists that are longer today are in LONG_LISTS with their length on main as a ceiling: the check fails when a
-listed file's longest list is longer than its entry, so shortening a list needs no change here. Two files a planned
-PR removes have no ceiling. The table is edited only to remove an entry, which the check asks for once the file has
+listed file's longest list is longer than its entry, so shortening a list needs no change here. A file a planned
+PR removes has no ceiling. The table is edited only to remove an entry, which the check asks for once the file has
 no list over 12 names.
 
     python3 tools/hotspots/check_lists.py
@@ -26,8 +26,6 @@ LIMIT = 12
 # until it is removed, so an exemption ends with its list.
 LONG_LISTS = {
     "built.rs": (17, "no planned PR removes it"),
-    # The design of the conflict hotspots, PR F, turns its type lists into one glob per domain; F removes this entry.
-    "domains.rs": (None, "pending removal by PR F of the hotspot design"),
     "game.rs": (24, "no planned PR removes it"),
     # PR G of the same design splits it into one fragment per parts file; G removes this entry.
     "part_table.rs": (None, "pending removal by PR G of the hotspot design"),
