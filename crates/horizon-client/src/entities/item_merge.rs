@@ -54,8 +54,9 @@ impl ItemCells {
         out.sort_unstable();
     }
 }
-/// `ItemEntity.mergeWithNeighbours` for `items[i]`, which has just moved in
-/// its tick (its `age` already counts this tick; vanilla's doesn't yet): each
+/// `ItemEntity.mergeWithNeighbours` for `items[i]`. When `age_is_ticked`, it
+/// has just moved in its tick (its `age` already counts this tick; vanilla's
+/// doesn't yet). Teleport arrivals have not ticked. Each
 /// mergeable item whose box meets this one's grown by 0.5 sideways takes this
 /// stack or gives it its own, the smaller into the larger
 /// (`ItemEntity.tryToMerge`), until this item is used up. An emptied item is
@@ -65,12 +66,13 @@ pub fn merge_with_neighbours<I>(
     removed: &mut [bool],
     cells: &mut ItemCells,
     i: usize,
+    age_is_ticked: bool,
     max_stack: &dyn Fn(&ItemStack) -> u32,
 ) where
     I: AsRef<[ItemEntity]> + std::ops::IndexMut<usize, Output = ItemEntity> + ?Sized,
 {
     let age = |items: &[ItemEntity], j: usize| {
-        if j == i && items[j].age != i16::MIN as i32 {
+        if age_is_ticked && j == i && items[j].age != i16::MIN as i32 {
             items[j].age.wrapping_sub(1)
         } else {
             items[j].age
@@ -119,8 +121,10 @@ pub fn merge_with_neighbours<I>(
         );
         let to_item = &mut items[to];
         to_item.pickup_delay = to_item.pickup_delay.max(delay);
-        // This item's age goes up once its tick ends.
-        to_item.age = to_age.min(from_age).wrapping_add(i32::from(to == i));
+        // Only the tick caller has already counted this item's next age increment.
+        to_item.age = to_age
+            .min(from_age)
+            .wrapping_add(i32::from(age_is_ticked && to == i));
         if items[from].stack.count == 0 {
             removed[from] = true;
             cells.remove(from, items[from].position);

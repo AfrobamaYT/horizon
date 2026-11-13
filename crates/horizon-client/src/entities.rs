@@ -3021,7 +3021,7 @@ mod merge_tests {
     fn merge(items: &mut [ItemEntity], i: usize) -> Vec<Option<u32>> {
         let mut removed = vec![false; items.len()];
         let mut cells = ItemCells::new(items);
-        merge_with_neighbours(items, &mut removed, &mut cells, i, &max_stack);
+        merge_with_neighbours(items, &mut removed, &mut cells, i, true, &max_stack);
         items
             .iter()
             .zip(removed)
@@ -3041,7 +3041,7 @@ mod merge_tests {
         let joins: Vec<_> = items.iter().map(|item| item.join).collect();
         let mut removed = [false; 3];
         let mut cells = ItemCells::new(&items);
-        merge_with_neighbours(&mut items, &mut removed, &mut cells, 0, &max_stack);
+        merge_with_neighbours(&mut items, &mut removed, &mut cells, 0, true, &max_stack);
         let mut removed = removed.into_iter();
         items.retain(|_| !removed.next().unwrap());
         assert_eq!(items.len(), 2);
@@ -3090,7 +3090,7 @@ mod merge_tests {
             items[1].pickup_delay = 30;
             let mut removed = [false; 2];
             let mut cells = ItemCells::new(&items);
-            merge_with_neighbours(&mut items, &mut removed, &mut cells, 0, &|_| 99);
+            merge_with_neighbours(&mut items, &mut removed, &mut cells, 0, true, &|_| 99);
             assert_eq!([items[0].stack.count, items[1].stack.count], expected);
             assert_eq!(removed, [false, false]);
             assert_eq!(items[0].pickup_delay, 30);
@@ -3210,7 +3210,7 @@ mod merge_tests {
         let from = items[1].position;
         items[1].position.x = 0.9;
         cells.moved(1, from, items[1].position);
-        merge_with_neighbours(&mut items, &mut removed, &mut cells, 0, &max_stack);
+        merge_with_neighbours(&mut items, &mut removed, &mut cells, 0, true, &max_stack);
         assert_eq!(removed, [true, false]);
         assert_eq!(items[1].stack.count, 2);
     }
