@@ -134,6 +134,22 @@ fn components_map_id_decodes_signed_numbers_and_matches_live_values() {
     assert!(ingredient.test_in(&context, &inherited));
     inherited.data_mut().map_id = Some(-6);
     assert!(!ingredient.test_in(&context, &inherited));
+
+    let absence_source = r#"{"type":"neoforge:components","items":"minecraft:filled_map","components":{"!minecraft:map_id":{}}}"#;
+    let absence = parse(absence_source, &defaults);
+    let mut removed = ItemStack::new("minecraft:filled_map", 1);
+    assert!(!absence.test_in(&context, &removed));
+    removed.data_mut().set_other(
+        "!minecraft:map_id",
+        Some(Tag::compound([] as [(&str, Tag); 0])),
+    );
+    assert!(absence.test_in(&context, &removed));
+    assert!(!ingredient.test_in(&context, &removed));
+    let no_default_absence = parse(absence_source, &items);
+    let mut bare = ItemStack::new("minecraft:filled_map", 1);
+    assert!(no_default_absence.test_in(&context, &bare));
+    bare.data_mut().map_id = Some(-7);
+    assert!(!no_default_absence.test_in(&context, &bare));
 }
 #[test]
 #[ignore = "requires prepared resources"]
