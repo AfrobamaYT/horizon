@@ -285,6 +285,7 @@ class SdkAssetTests(unittest.TestCase):
 
 
 class PointCatalogTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("cargo"), "needs cargo")
     def test_the_api_slice_holds_one_crate_defining_point_id(self):
         """A crate defines `PointId` when its source has the enum, or its build script runs a point generator and it
         does not re-export another crate's. Two in the slice would be #3643's index mismatch: whichever of #3643 and

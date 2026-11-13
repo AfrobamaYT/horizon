@@ -12,7 +12,7 @@ mod registry_installation;
 /// `horizon_native_mods` library, built from the API slice alone, can name it.
 pub mod native {
     /// One native mod compiled into the executable.
-    #[derive(Clone, Copy, Debug, PartialEq)]
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
     pub struct BuiltMod {
         pub id: &'static str,
         pub version: &'static str,
