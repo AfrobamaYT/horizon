@@ -125,7 +125,7 @@ impl Game<'_> {
                     );
                     let sky_light = dimension.has_skylight;
                     let decode: terrain::DecodeChunk =
-                        Box::new(move |root: &horizon_world::nbt::NamedTag| {
+                        Box::new(move |root: &horizon_core::nbt::NamedTag| {
                             horizon_client::save::decode_lit(
                                 root, registry, &biomes, layout, sky_light,
                             )
@@ -181,11 +181,8 @@ impl Game<'_> {
                 }
             }
         }
-        if self.lod.is_some() {
-            for &((x, _, z), _, _) in &self.world.light_edits {
-                self.lod_observe.insert((x >> 4, z >> 4));
-            }
-        }
+        self.observe_light_edits();
+        self.ask_edited_light_emission();
         if let (Some(map), Some(p), Some(lod)) = (&self.lod_blue_map, &self.player, &mut self.lod) {
             map.set_center(p.position.x.floor() as i32, p.position.z.floor() as i32);
             for change in map.take_changed() {
@@ -210,14 +207,51 @@ impl Game<'_> {
             .extra
             .extend(waiting.into_iter().map(|chunk| (chunk, 0)));
         self.streaming.upload_backlog = self.pending_uploads.len();
-        let (uploads, unloaded) =
-            horizon_client::spans::time("streaming", || self.streaming.update(&mut self.world));
-        self.streaming.extra.truncate(areas);
-        horizon_client::spans::time("spawn_fresh_chunks", || self.spawn_fresh_chunks());
-        // Before the unloaded chunks' block entities are written and dropped.
-        horizon_client::spans::time("mods_chunks_changed", || {
-            self.native_chunks_changed(&unloaded)
+        let plan = horizon_client::spans::time("streaming_plan", || {
+            let mut step = self.streaming.begin_plan_update(&mut self.world);
+            loop {
+                match step {
+                    horizon_client::streaming::PlanStep::Ready(plan) => break plan,
+                    horizon_client::streaming::PlanStep::Save { chunk, resume } => {
+                        self.native_late_full_chunk_snapshot(&chunk);
+                        self.streaming.save_finished(chunk);
+                        step = self.streaming.resume_plan_update(&mut self.world, resume);
+                    }
+                }
+            }
         });
+        let (commit, protos) = self.streaming.prepare_commit(&mut self.world, plan);
+        self.native_proto_snapshots(&protos);
+        self.streaming.submit_protos(protos);
+        let (uploads, unloaded) = horizon_client::spans::time("streaming", || {
+            self.streaming.complete_commit(&mut self.world, commit)
+        });
+        self.streaming.extra.truncate(areas);
+        let dirty: Vec<_> = unloaded
+            .iter()
+            .filter(|c| self.world.modified.remove(&(c.x, c.z)))
+            .cloned()
+            .collect();
+        let modified = horizon_client::spans::time("with_entities", || self.with_entities(&dirty));
+        self.native_full_chunk_snapshots(&modified);
+        if !modified.is_empty()
+            && let Err(e) = horizon_client::spans::time("save_chunks", || {
+                self.save
+                    .save_later(&modified, self.pack.assets.registry, world_biomes!(self))
+            })
+        {
+            log::warn!("Horizon: failed to save unloaded chunks: {e}");
+        }
+        horizon_client::spans::time("spawn_fresh_chunks", || self.spawn_fresh_chunks());
+        self.ask_loaded_light_emission();
+        // Vanilla saves the chunk before its unload hook and drops its block entities afterwards.
+        horizon_client::spans::time("mods_chunks_changed", || {
+            self.native_chunks_loaded();
+            self.native_chunks_unloaded(&unloaded);
+        });
+        for chunk in &unloaded {
+            self.world.modified.unloaded(&(chunk.x, chunk.z));
+        }
         if let Some(lod) = &mut self.lod {
             self.lod_observe
                 .extend(uploads.iter().map(|(key, _)| (key.0, key.2)));
@@ -244,12 +278,6 @@ impl Game<'_> {
         for chunk in &unloaded {
             self.world.modified.unloaded(&(chunk.x, chunk.z));
         }
-        let dirty: Vec<_> = unloaded
-            .iter()
-            .filter(|c| self.world.modified.remove(&(c.x, c.z)))
-            .cloned()
-            .collect();
-        let modified = horizon_client::spans::time("with_entities", || self.with_entities(&dirty));
         horizon_client::spans::time("unload_entities", || self.unload_entities(&unloaded));
         if !unloaded.is_empty() {
             let _span = horizon_client::spans::guard("unload_block_entities");
@@ -261,14 +289,6 @@ impl Game<'_> {
             self.world
                 .block_names
                 .retain(|p, _| !gone.contains(&(p.0 >> 4, p.2 >> 4)));
-        }
-        if !modified.is_empty()
-            && let Err(e) = horizon_client::spans::time("save_chunks", || {
-                self.save
-                    .save_later(&modified, self.pack.assets.registry, world_biomes!(self))
-            })
-        {
-            log::warn!("Horizon: failed to save unloaded chunks: {e}");
         }
         // LevelChunk.registerTickContainerInLevel: a chunk that became
         // resident has its tick containers before a command can schedule into
@@ -302,15 +322,7 @@ impl Game<'_> {
             .as_ref()
             .map(|p| [p.position.x, p.position.y, p.position.z])
             .and_then(|camera| self.lod_aim(camera));
-        // A mod's hold on the terrain's picture, before this frame's uploads (`native_world_hold`).
-        let world_hold = self
-            .renderer
-            .is_some()
-            .then(|| self.native_world_hold_now());
         if let Some(renderer) = self.renderer.as_mut() {
-            if let Some(hold) = &world_hold {
-                renderer.hold_world(hold);
-            }
             // Far terrain takes in the columns the hold let go of, as the sections show.
             if !self.lod_held.is_empty() {
                 let let_go: Vec<_> = self
