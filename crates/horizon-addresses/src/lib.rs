@@ -76,3 +76,8 @@ pub const HORIZON_MIXINS_SOURCE: &str =
 
 /// Where the fork releases the prebuilt horizon-mixins tool; a release's tag and file follow.
 pub const MIXINS_TOOL_RELEASES: &str = "https://github.com/arismoko/horizon/releases/download";
+
+/// Where the fork publishes each game build's mod SDK (`sdk-<build id>`) and the game releases
+/// whose `sdk.json` names their build; a release's tag and file follow. `HORIZON_SDK_BASE`
+/// overrides it.
+pub const SDK_RELEASES: &str = "https://github.com/arismoko/horizon/releases/download";
