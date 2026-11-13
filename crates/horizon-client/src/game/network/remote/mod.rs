@@ -3592,9 +3592,19 @@ impl Game<'_> {
                 self.remote_attachment_sync(&p.data);
             }
             // A mod menu type's block and its mod's bytes, just before the
-            // menu's `OpenScreen`.
+            // menu's `OpenScreen`. A server that asked no revision query in
+            // configuration (an older Horizon server) serves the legacy layout.
             C::CustomPayload(p) if p.channel == horizon_protocol::menu_extra::CHANNEL => {
-                match horizon_protocol::menu_extra::decode(&p.data) {
+                let revision = self
+                    .remote
+                    .as_ref()
+                    .map_or(0, |r| r.registries.menu_extra_revision);
+                let decoded = if revision >= 1 {
+                    horizon_protocol::menu_extra::decode(&p.data)
+                } else {
+                    horizon_protocol::menu_extra::decode_legacy(&p.data)
+                };
+                match decoded {
                     Ok(extra) => {
                         if let Some(r) = self.remote.as_mut() {
                             r.menu_extra = Some(extra);

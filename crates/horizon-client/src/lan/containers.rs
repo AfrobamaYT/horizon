@@ -362,7 +362,14 @@ impl Hub {
                     pos: pos.map(|p| [p.0, p.1, p.2]),
                     data,
                 };
-                match horizon_protocol::menu_extra::encode(&message) {
+                // A client that answered no revision query (an older Horizon build)
+                // reads the legacy layout, which has no way to say "no block".
+                let sent = if g.sender.menu_extra_rev >= 1 {
+                    horizon_protocol::menu_extra::encode(&message)
+                } else {
+                    horizon_protocol::menu_extra::encode_legacy(&message)
+                };
+                match sent {
                     Ok(data) => g.send(&C::CustomPayload(CustomPayload {
                         channel: horizon_protocol::menu_extra::CHANNEL.into(),
                         data,
