@@ -1,6 +1,6 @@
 //! What a mod uses of a surface, and whether it fits another build's surface (design §10.3).
 //!
-//! [`uses`] scans a mod's Rust source ([`crate::scan`]) and lists the surface records it names,
+//! [`uses_contained`] scans a mod's Rust source ([`crate::scan`]) and lists the surface records it names,
 //! then every record their signatures reference, transitively ([`Surface::closure`]). A record
 //! counts when its name occurs as an identifier in the source or the manifest names it, with two
 //! narrowings:
@@ -251,16 +251,18 @@ fn path_starts(tokens: &Tokens<'_>) -> Vec<usize> {
 }
 
 /// For each token that opens a bracket, the index of the token that closes it, if it closes;
-/// and, for braces, whether their contents end in `..` at their own level: a base or a rest.
-/// In parentheses `..` may as well be a range (`Pos(0, ..)`), so it counts as nothing there.
-/// One pass.
-fn brackets(tokens: &Tokens<'_>) -> (Vec<Option<usize>>, Vec<bool>) {
+/// for braces, whether their contents end in `..` at their own level: a base or a rest (in
+/// parentheses `..` may as well be a range, `Pos(0, ..)`, so it counts as nothing there); and
+/// for each token, the innermost bracket open around it. One pass.
+fn brackets(tokens: &Tokens<'_>) -> (Vec<Option<usize>>, Vec<bool>, Vec<Option<usize>>) {
     let mut closers = vec![None; tokens.len()];
     let mut rests = vec![false; tokens.len()];
+    let mut enclosing = vec![None; tokens.len()];
     // Each open bracket with the previous token at its own level.
     let mut open: Vec<(usize, Token<'_>)> = Vec::new();
     for at in 0..tokens.len() {
         let token = tokens[at].0;
+        enclosing[at] = open.last().map(|(start, _)| *start);
         match token {
             Token::Punct(b'(' | b'[' | b'{') => {
                 open.push((at, token));
@@ -286,7 +288,7 @@ fn brackets(tokens: &Tokens<'_>) -> (Vec<Option<usize>>, Vec<bool>) {
             last.1 = token;
         }
     }
-    (closers, rests)
+    (closers, rests, enclosing)
 }
 
 /// Whether the brace at `open` holds what a struct literal or pattern holds: nothing, `..`, or a
@@ -389,6 +391,8 @@ struct FileFacts<'t> {
     /// Each opening bracket's closer and whether it ends in `..` ([`brackets`]).
     closers: Vec<Option<usize>>,
     rests: Vec<bool>,
+    /// Each token's innermost open bracket.
+    enclosing: Vec<Option<usize>>,
     /// The parser's impls ordered by where their bodies start, each with the innermost impl
     /// whose body holds it.
     impls: Vec<(usize, Option<usize>)>,
@@ -437,12 +441,14 @@ pub enum ScanError {
     /// The parser's own stack could not be had (always so on wasm), so the file was not parsed.
     NoStack { file: String },
     /// The child process that parses first ([`crate::child`]) died, by a signal, an overflow or
-    /// its memory limit, while parsing this file (none: before it began).
+    /// a limit on its memory or processor time, while parsing this file (none: before it
+    /// began).
     ParserDied { file: Option<String> },
     /// The child process was still parsing this file (none: had not begun) when
     /// [`crate::child::CHILD_WAIT`] ran out.
     ParserTimedOut { file: Option<String> },
-    /// The child process could not be started: the program cannot run itself here.
+    /// The child process could not be started, or the program started is not a scan's child:
+    /// the program cannot run itself here.
     NoChild,
 }
 
@@ -468,7 +474,7 @@ impl std::fmt::Display for ScanError {
             ),
             Self::ParserDied { file } => write!(
                 f,
-                "{}the scan's parser stopped (out of stack or memory); the mod's source cannot be judged",
+                "{}the scan's parser stopped (out of stack, memory or processor time); the mod's source cannot be judged",
                 file.as_ref()
                     .map_or(String::new(), |file| format!("{file}: "))
             ),
@@ -529,7 +535,7 @@ fn file_facts<'t>(file: &str, text: &'t str) -> Result<FileFacts<'t>, ScanError>
     })?;
     let in_macro = in_macro_bodies(&starts, &syntax);
     let path_starts = path_starts(&tokens);
-    let (closers, rests) = brackets(&tokens);
+    let (closers, rests, enclosing) = brackets(&tokens);
     let impls = impl_order(&syntax);
     let (chains, macro_types, mut type_aliases) =
         macro_bodies(&tokens, &in_macro, &in_use, &path_starts);
@@ -547,6 +553,7 @@ fn file_facts<'t>(file: &str, text: &'t str) -> Result<FileFacts<'t>, ScanError>
         path_starts,
         closers,
         rests,
+        enclosing,
         impls,
         imported,
         syntax,
@@ -878,7 +885,11 @@ fn mod_facts<'t>(files: &[FileFacts<'t>], api_prefixes: &BTreeSet<String>) -> Mo
             let first = path[0];
             let api = facts.roots.contains(first);
             if *name == "*" {
-                facts.rebound_all |= !api && !matches!(first, "crate" | "self" | "super");
+                // A glob of one of the mod's own modules is like `crate::module::*`: what that
+                // module binds is read in its own file.
+                facts.rebound_all |= !api
+                    && !matches!(first, "crate" | "self" | "super")
+                    && !facts.modules.contains(first);
                 continue;
             }
             if !api {
@@ -1609,7 +1620,7 @@ impl<'s, 't> Walk<'_, '_, 's, 't> {
                 // A `Self` in a macro body may belong to an impl the macro writes, which the
                 // parser does not read: `Self { … }` there builds a struct the scan cannot place.
                 "Self" if file.in_macro[at] => {
-                    if opens {
+                    if opens || bare_value(file, at) {
                         found.mark_unsure(place);
                     }
                     continue;
@@ -1806,11 +1817,12 @@ impl<'s, 't> Walk<'_, '_, 's, 't> {
 }
 
 /// What a macro body, which the parser does not read, builds with API struct `id` at `at`.
-/// Where a type alone stands (after `->`, `impl`, `for`, `dyn`, a definition keyword or `<`)
-/// or in a `use`, nothing. Elsewhere a name followed by `{` or `(` is a build, in full unless it
-/// ends in `..`, and a tuple or unit struct's name is one too (`.map(Pos)`, `{ Marker }`,
-/// `|_| Pos`, `&Marker`, `make: Pos`). Tokens cannot tell a field's type from its value, so
-/// after `:` it counts.
+/// A name followed by `(` builds or matches it wherever it stands (`a < Pos(1, 2)`,
+/// `for Pos(x, y) in v`), and so does one followed by `{`, except where only a type stands and
+/// the brace holds no fields (`impl Tr for Marker {}`) or follows `->` (a function's body). Each
+/// is in full unless it ends in `..`. A tuple or unit struct's name with no bracket after it is
+/// a full build where it stands as a value ([`bare_value`]: `.map(Pos)`, `{ Marker }`,
+/// `make: Pos`).
 fn macro_body<'s, 't>(
     found: &mut Found<'s, 't>,
     api: &Index<'s>,
@@ -1820,10 +1832,47 @@ fn macro_body<'s, 't>(
     place: Place<'t>,
 ) {
     let tokens = &file.tokens;
+    if file.in_use[at] {
+        return;
+    }
     let kind = api.kind(id);
     let start = file.path_starts[at];
     let open = at + 1;
-    let type_only = file.in_use[at]
+    let brace = punct(tokens, open, b'{');
+    let after_arrow =
+        start >= 2 && punct(tokens, start - 1, b'>') && punct(tokens, start - 2, b'-');
+    let opens = punct(tokens, open, b'(')
+        || (brace && (!only_a_type(file, start) || (holds_fields(tokens, open) && !after_arrow)));
+    if opens {
+        let full = !file.rests[open] && kind != Some(TypeKind::Union);
+        found.build(id, place, full, brace);
+    } else if !brace
+        && matches!(kind, Some(TypeKind::TupleStruct | TypeKind::UnitStruct))
+        && bare_value(file, at)
+    {
+        found.build(id, place, true, false);
+    }
+}
+
+/// Whether the brace at `open` starts with a field: a name or position followed by `,`, `}` or
+/// `:`, or `..`.
+fn holds_fields(tokens: &Tokens<'_>, open: usize) -> bool {
+    match tokens.get(open + 1).map(|(t, _)| *t) {
+        Some(Token::Ident(_) | Token::Literal(_)) => {
+            punct(tokens, open + 2, b',')
+                || punct(tokens, open + 2, b'}')
+                || (punct(tokens, open + 2, b':') && !punct(tokens, open + 3, b':'))
+        }
+        Some(Token::Punct(b'.')) => punct(tokens, open + 2, b'.'),
+        _ => false,
+    }
+}
+
+/// Whether the path starting at `start` in a macro body stands where only a type can: in a
+/// `use`, or after `->`, `impl`, `dyn`, `for`, `as`, `where`, a definition keyword or `<`.
+fn only_a_type(file: &FileFacts<'_>, start: usize) -> bool {
+    let tokens = &file.tokens;
+    file.in_use[start]
         || start
             .checked_sub(1)
             .is_some_and(|before| match tokens[before].0 {
@@ -1845,28 +1894,70 @@ fn macro_body<'s, 't>(
                 Token::Punct(b'<') => true,
                 Token::Punct(b'>') => before >= 1 && punct(tokens, before - 1, b'-'),
                 _ => false,
-            });
-    if type_only {
-        return;
-    }
-    if punct(tokens, open, b'{') || punct(tokens, open, b'(') {
-        let full = !file.rests[open] && kind != Some(TypeKind::Union);
-        found.build(id, place, full, punct(tokens, open, b'{'));
-    } else if matches!(kind, Some(TypeKind::TupleStruct | TypeKind::UnitStruct))
-        && !(punct(tokens, open, b':') && punct(tokens, open + 1, b':'))
-        && !punct(tokens, open, b'!')
-    {
-        found.build(id, place, true, false);
-    }
+            })
 }
 
-/// [`uses`], with each file parsed first in a child process ([`crate::child`]), so a parse that
-/// runs out of stack or memory, or does not end, leaves the source "cannot judge" instead of
-/// ending the caller. The checks before parsing run first, then one child parses every file;
-/// the scan then parses them again itself, on a stack of the same size, where the same parse
-/// of the same text reaches the same depth. The program must call [`crate::child::child_entry`]
-/// first in `main`.
+/// Whether the path starting at `start` in a macro body is a type written after `name:` (`&`,
+/// `mut` and lifetimes between them): in a function's parameters (inside parentheses), a
+/// closure's first parameter, a `let`, or a struct's or union's field list. Anything else after
+/// `:` (a struct literal's field, for one) may be a value.
+fn annotation(file: &FileFacts<'_>, start: usize) -> bool {
+    let tokens = &file.tokens;
+    let mut before = start;
+    while let Some(previous) = before.checked_sub(1)
+        && matches!(
+            tokens[previous].0,
+            Token::Punct(b'&') | Token::Lifetime | Token::Ident("mut")
+        )
+    {
+        before = previous;
+    }
+    let Some(colon) = before.checked_sub(1) else {
+        return false;
+    };
+    if !punct(tokens, colon, b':') || (colon >= 1 && punct(tokens, colon - 1, b':')) {
+        return false;
+    }
+    let Some(name) = colon.checked_sub(1) else {
+        return false;
+    };
+    let word = |at: Option<usize>| at.and_then(|at| ident(tokens, at));
+    let bound_by_let = word(name.checked_sub(1)) == Some("let")
+        || (word(name.checked_sub(1)) == Some("mut") && word(name.checked_sub(2)) == Some("let"));
+    let closure_parameter = name >= 1 && punct(tokens, name - 1, b'|');
+    let enclosing = file.enclosing[colon];
+    let parameter = enclosing.is_some_and(|open| punct(tokens, open, b'('));
+    let field = enclosing.is_some_and(|open| {
+        punct(tokens, open, b'{')
+            && open >= 2
+            && ident(tokens, open - 1).is_some()
+            && matches!(ident(tokens, open - 2), Some("struct" | "union"))
+    });
+    bound_by_let || closure_parameter || parameter || field
+}
+
+/// Whether the name at `at` in a macro body, with no bracket after it, stands as a value: not
+/// where only a type can, not a type after `name:`, and not followed by `::` or `!`.
+fn bare_value(file: &FileFacts<'_>, at: usize) -> bool {
+    let tokens = &file.tokens;
+    let start = file.path_starts[at];
+    !only_a_type(file, start)
+        && !annotation(file, start)
+        && !(punct(tokens, at + 1, b':') && punct(tokens, at + 2, b':'))
+        && !punct(tokens, at + 1, b'!')
+}
+
+/// The records `sources` (each a path and its Rust text) and `manifest` bring in, with
+/// everything their signatures reference; [`ScanError`] when the source cannot be judged.
+///
+/// Each file is parsed first in a child process ([`crate::child`]), so a parse that runs out of
+/// stack or memory, or does not end, leaves the source "cannot judge" instead of ending the
+/// caller. The checks before parsing run first, then one child parses every file, on half the
+/// scan's own parser stack; the scan then parses them itself, with megabytes to spare over
+/// whatever the child needed. `entry` is what [`crate::child::child_entry`] returns, so a
+/// program that has not called it first in `main` does not compile.
 pub fn uses_contained<'t>(
+    entry: crate::child::ChildEntry,
     sources: impl IntoIterator<Item = (&'t str, &'t str)>,
     manifest: &ManifestFacts,
     surface: &Surface,
@@ -1881,10 +1972,11 @@ pub fn uses_contained<'t>(
         at.and_then(|at| sources.get(at))
             .map(|(f, _)| (*f).to_owned())
     };
+    let _ = entry;
     crate::child::parse_in_child(
         &program,
         &texts,
-        syntax::PARSER_STACK,
+        syntax::PARSER_STACK / 2,
         crate::child::CHILD_WAIT,
     )
     .map_err(|contained| match contained {
@@ -1895,9 +1987,9 @@ pub fn uses_contained<'t>(
     uses(sources, manifest, surface)
 }
 
-/// The records `sources` (each a path and its Rust text) and `manifest` bring in, with
-/// everything their signatures reference; [`ScanError`] when the source cannot be judged.
-pub fn uses<'t>(
+/// [`uses_contained`] without the child process: a parse that overflows aborts the caller, so
+/// only the crate's own tests call it.
+pub(crate) fn uses<'t>(
     sources: impl IntoIterator<Item = (&'t str, &'t str)>,
     manifest: &ManifestFacts,
     surface: &Surface,

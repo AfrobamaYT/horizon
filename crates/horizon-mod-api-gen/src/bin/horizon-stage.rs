@@ -77,7 +77,7 @@ fn read_surface(path: &std::path::Path) -> Surface {
     Surface::read(&bytes).unwrap_or_else(|e| fail(format!("{}: {e}", path.display())))
 }
 
-fn uses_command(args: &[PathBuf]) {
+fn uses_command(entry: mod_surface::child::ChildEntry, args: &[PathBuf]) {
     let [surface, dir, options @ ..] = args else {
         fail("usage: horizon-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]")
     };
@@ -101,6 +101,7 @@ fn uses_command(args: &[PathBuf]) {
         hook_versions: Default::default(),
     };
     let uses = uses_contained(
+        entry,
         input.sources.iter().map(|(p, t)| (p.as_str(), t.as_str())),
         &manifest,
         &surface,
@@ -227,10 +228,10 @@ fn surface_diff(args: &[PathBuf]) -> ! {
 
 fn main() {
     // The uses scan parses in a child, this program started again: run its part and exit.
-    mod_surface::child::child_entry();
+    let entry = mod_surface::child::child_entry();
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
     match args.first().and_then(|c| c.to_str()) {
-        Some("uses") => return uses_command(&args[1..]),
+        Some("uses") => return uses_command(entry, &args[1..]),
         Some("fits") => fits_command(&args[1..]),
         Some("surface-diff") => surface_diff(&args[1..]),
         _ => {}
