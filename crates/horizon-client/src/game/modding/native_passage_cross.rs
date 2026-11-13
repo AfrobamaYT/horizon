@@ -5,7 +5,7 @@
 //! works out where the player comes out itself and follows with a position packet that
 //! changes nothing, or puts the player back.
 use super::Game;
-use horizon_client::lan::hub::passage_cross::{REACH, refusal_named};
+use horizon_client::lan::hub::passage_cross::{REACH, crossing_source, refusal_named};
 use horizon_core::geometry::Vec3 as Motion;
 use horizon_protocol::packets::{configuration::CustomPayload, play::Serverbound as S};
 use horizon_protocol::passage_sync::{CROSS_CHANNEL, Cross, decode_cross, encode_cross};
@@ -138,11 +138,10 @@ impl Game<'_> {
         self.passages.refused = Some((PassageId::from_raw(id), why));
     }
 
-    /// A guest's crossing that passed the hub's move check (`Hub::passage_leg`): the passage
-    /// is the guest's level's, where it crossed from is within reach of the opening, both
-    /// ends are loaded and tracked for the guest, and no mod cancels; the hub then follows
-    /// to where the server works out the player comes out. Otherwise refused by name, and
-    /// the player is put back where the server has it.
+    /// A guest's crossing that passed the hub's move check (`Hub::passage_leg`), decided
+    /// from the `from` it names (`decide_passage_cross`): the hub then follows to where the
+    /// server works out the player comes out. Otherwise refused by name, and the player is
+    /// put back where the server has it.
     pub(in crate::game) fn guest_passage_cross(&mut self, conn: u32, data: &[u8]) {
         let Ok(cross) = decode_cross(data) else {
             return;
@@ -155,7 +154,8 @@ impl Game<'_> {
         else {
             return;
         };
-        let decided = self.decide_passage_cross(gi, id);
+        let from = crossing_source(cross.from);
+        let decided = self.decide_passage_cross(gi, id, from);
         let host = self.lan.as_mut().expect("the guest was found in the hub");
         match decided {
             Ok((p, to)) => host
@@ -165,15 +165,18 @@ impl Game<'_> {
         }
     }
 
-    /// The game's checks of guest `gi`'s crossing of `id` from where the hub has it now,
-    /// the veto, then the same checks again: a listener that removed the passage or moved
-    /// the player refuses the crossing. The passage and where the player comes out.
+    /// Guest `gi`'s crossing of `id` from `from`: the whole check, the veto, the whole
+    /// check again (a listener that removed the passage, moved the player or made it
+    /// ineligible refuses the crossing), and only then where the player comes out, whose
+    /// chunk must be loaded and tracked too (ruling 10 on #3775: the server computes `to`
+    /// after the veto).
     fn decide_passage_cross(
         &mut self,
         gi: usize,
         id: PassageId,
+        from: [f64; 3],
     ) -> Result<(Passage, [f64; 3]), Refusal> {
-        let (passage, from, to) = self.check_passage_cross(gi, id)?;
+        self.check_passage_cross(gi, id, from)?;
         let host = self.lan.as_ref().expect("checked");
         let g = &host.hub.guests[gi];
         let epoch = self
@@ -190,49 +193,60 @@ impl Game<'_> {
         if cancel {
             return Err(Refusal::Vetoed);
         }
-        if self.check_passage_cross(gi, id)? != (passage, from, to) {
-            return Err(Refusal::Pending);
+        let p = self.check_passage_cross(gi, id, from)?;
+        let to = carried(&p, from);
+        if !self.guest_holds_chunk(gi, chunk_of(to)) {
+            return Err(Refusal::FarEndNotTracked);
         }
-        Ok((passage, to))
+        Ok((p, to))
     }
 
-    /// The passage, where the guest crosses from and where it comes out; or why not.
+    /// Whether guest `gi` may cross `id` from `from` before the destination is worked out:
+    /// eligible as the hub's leg checks it (`Hub::passage_refusal`), at `from` on the
+    /// server, the passage its level's, `from` within reach, and the opening's chunk and
+    /// the destination's loaded and tracked for the guest. The passage, or why not.
     fn check_passage_cross(
         &self,
         gi: usize,
         id: PassageId,
-    ) -> Result<(Passage, [f64; 3], [f64; 3]), Refusal> {
+        from: [f64; 3],
+    ) -> Result<Passage, Refusal> {
         let host = self.lan.as_ref().ok_or(Refusal::UnknownPassage)?;
         let g = &host.hub.guests[gi];
+        if let Some(why) = host.hub.passage_refusal(gi) {
+            return Err(why);
+        }
+        if g.position != from {
+            return Err(Refusal::MoveRefused);
+        }
         let level = self.level(&g.dimension).ok_or(Refusal::UnknownPassage)?;
         let p = self
             .passages
             .find(level.dimension(), id)
             .ok_or(Refusal::UnknownPassage)?;
-        if g.dead {
-            return Err(Refusal::Dead);
-        }
-        if g.awaiting_teleport.is_some() {
-            return Err(Refusal::Pending);
-        }
-        let from = g.position;
         if !within_reach(&p, from) {
             return Err(Refusal::TooFar { limit: REACH });
         }
-        let to = carried(&p, from);
-        let held = |chunk: (i32, i32)| {
-            g.tracks_chunk(&g.dimension, chunk)
-                && g.dimension == self.dim.id()
-                && self.world.chunks.contains_key(&chunk)
-        };
         let [cx, cz] = p.chunk();
-        if !held((cx, cz)) {
+        if !self.guest_holds_chunk(gi, (cx, cz)) {
             return Err(Refusal::NearEndNotTracked);
         }
-        if !held(chunk_of(to)) {
+        let d = p.destination;
+        if !self.guest_holds_chunk(gi, chunk_of([d.x, d.y, d.z])) {
             return Err(Refusal::FarEndNotTracked);
         }
-        Ok((p, from, to))
+        Ok(p)
+    }
+
+    /// Whether the server holds `chunk` in guest `gi`'s level and the guest tracks it.
+    fn guest_holds_chunk(&self, gi: usize, chunk: (i32, i32)) -> bool {
+        let Some(host) = self.lan.as_ref() else {
+            return false;
+        };
+        let g = &host.hub.guests[gi];
+        g.tracks_chunk(&g.dimension, chunk)
+            && g.dimension == self.dim.id()
+            && self.world.chunks.contains_key(&chunk)
     }
 }
 
@@ -447,6 +461,43 @@ mod tests {
                 assert!(position_packets(&packets(&rx)).is_empty(), "no correction");
             });
         }
+    }
+
+    /// Two crossings in one inbox from different places, no move behind them: the first is
+    /// decided from its own `from` before the hub reads the second, and is followed; the
+    /// second, read the next tick while the first's acceptance waits, is refused `Pending`.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn two_crossings_in_a_row_are_decided_each_from_its_own_source() {
+        with_guests(|game| {
+            let rx = scene(game, [0.5, 65.0, 8.25]);
+            tick(
+                game,
+                vec![cross(1, [0.5, 65.0, 8.25]), cross(1, [0.5, 65.0, 8.0])],
+            );
+            let g = guest(game);
+            assert_eq!(g.position, [24.75, 65.0, 8.5]);
+            let (teleport, awaited) = g.awaiting_teleport.expect("the first is followed");
+            assert_eq!(awaited, [24.75, 65.0, 8.5]);
+            let sent = packets(&rx);
+            assert!(refusals(&sent).is_empty());
+            let accepted = position_packets(&sent);
+            assert_eq!(accepted.len(), 1);
+            assert_eq!(
+                (accepted[0].teleport, accepted[0].relatives),
+                (teleport, ALL)
+            );
+            tick(game, Vec::new());
+            let sent = packets(&rx);
+            let reason = refusal_code(Refusal::Pending);
+            assert_eq!(refusals(&sent), [Message::Refused { id: 1, reason }]);
+            let back = position_packets(&sent);
+            assert_eq!(back.len(), 1);
+            assert_eq!(
+                (back[0].position, back[0].relatives),
+                ([24.75, 65.0, 8.5], 0)
+            );
+        });
     }
 
     /// Each refusal is told by name, then the player is put back where the server has it:

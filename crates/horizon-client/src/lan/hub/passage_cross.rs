@@ -26,6 +26,16 @@ const REFUSALS: [Refusal; 11] = [
     Refusal::Vetoed,
 ];
 
+/// Where a crossing starts on the server: the client's `from` clamped as a move's position
+/// is (`ServerGamePacketListenerImpl.clampHorizontal`, `clampVertical`).
+pub fn crossing_source(from: [f64; 3]) -> [f64; 3] {
+    [
+        from[0].clamp(-3.0E7, 3.0E7),
+        from[1].clamp(-2.0E7, 2.0E7),
+        from[2].clamp(-3.0E7, 3.0E7),
+    ]
+}
+
 /// The refusal's code on `horizon:passage_sync`.
 pub fn refusal_code(refusal: Refusal) -> u8 {
     REFUSALS.iter().position(|r| *r == refusal).unwrap_or(0) as u8
@@ -40,8 +50,8 @@ impl Hub {
     /// A guest's `horizon:passage_cross` payload, in its place among the guest's packets:
     /// the move to where it crossed from is checked as a move packet would be (vanilla's
     /// numbers, from the server's last good position, on the ground the server has it on),
-    /// though it is no client tick's move. Passed, the crossing goes to the game; true then
-    /// when a move queued behind it must wait for the game (`move_queued`). Refused, the
+    /// though it is no client tick's move. Passed, the crossing goes to the game and true is
+    /// returned: the rest of the guest's packets wait for the next tick. Refused, the
     /// client is told why and put back where the server has the player. Malformed or not
     /// a number: kicked, as a move with invalid values is.
     pub(super) fn passage_leg(
@@ -59,8 +69,35 @@ impl Hub {
                 return false;
             }
         };
+        if let Some(why) = self.passage_refusal(i) {
+            self.refuse_passage(i, cross.id, why);
+            return false;
+        }
+        // No client tick: the prediction's record starts again at the confirmation.
         let g = &self.guests[i];
-        let refused = if g.dead {
+        let flags = u8::from(g.on_ground);
+        let rot = (g.yaw, g.pitch);
+        self.position_change(i, cross.from, rot, flags, ctx, events);
+        let g = &self.guests[i];
+        if g.awaiting_teleport.is_some() || g.position != crossing_source(cross.from) {
+            // The move check sent its own correction, or kept the player where they were.
+            if g.awaiting_teleport.is_none() {
+                self.resend_teleport(i, None);
+            }
+            self.tell_refusal(i, cross.id, Refusal::MoveRefused);
+            return false;
+        }
+        events.push(HostEvent::Packet(conn, Box::new(S::CustomPayload(payload))));
+        // Nothing of the guest's overtakes the game's decision, a second crossing least of
+        // all: it would move the player before the first is decided from its own `from`.
+        true
+    }
+
+    /// Why guest `i` may not cross a passage now, whatever the passage: the checks before
+    /// the move to where it crossed from, which the game makes again after the mods' veto.
+    pub fn passage_refusal(&self, i: usize) -> Option<Refusal> {
+        let g = &self.guests[i];
+        if g.dead {
             Some(Refusal::Dead)
         } else if g.landing || !g.client_loaded() {
             Some(Refusal::NotLoaded)
@@ -72,31 +109,7 @@ impl Hub {
             Some(Refusal::Sleeping)
         } else {
             None
-        };
-        if let Some(why) = refused {
-            self.refuse_passage(i, cross.id, why);
-            return false;
         }
-        // No client tick: the prediction's record starts again at the confirmation.
-        let flags = u8::from(g.on_ground);
-        let rot = (g.yaw, g.pitch);
-        self.position_change(i, cross.from, rot, flags, ctx, events);
-        let clamped = [
-            cross.from[0].clamp(-3.0E7, 3.0E7),
-            cross.from[1].clamp(-2.0E7, 2.0E7),
-            cross.from[2].clamp(-3.0E7, 3.0E7),
-        ];
-        let g = &self.guests[i];
-        if g.awaiting_teleport.is_some() || g.position != clamped {
-            // The move check sent its own correction, or kept the player where they were.
-            if g.awaiting_teleport.is_none() {
-                self.resend_teleport(i, None);
-            }
-            self.tell_refusal(i, cross.id, Refusal::MoveRefused);
-            return false;
-        }
-        events.push(HostEvent::Packet(conn, Box::new(S::CustomPayload(payload))));
-        self.move_queued(i)
     }
 
     /// The game accepted guest `i`'s crossing: the server moves the player to `to`, turns

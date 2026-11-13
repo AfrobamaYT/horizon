@@ -2489,6 +2489,8 @@ mod chunk_queries;
 
 #[path = "wire_loopback/client_fireworks.rs"]
 mod client_fireworks;
+#[path = "wire_loopback/passage_cross.rs"]
+mod passage_cross;
 #[path = "wire_loopback/play_hit_sound.rs"]
 mod play_hit_sound;
 #[path = "wire_loopback/server_has_time.rs"]
