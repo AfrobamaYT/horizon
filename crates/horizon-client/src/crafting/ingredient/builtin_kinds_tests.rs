@@ -946,4 +946,21 @@ fn minimum_attack_charge_recipe_decodes_and_matches_float_values() {
         assert!(error.contains(ID), "{error}");
         assert!(error.contains("within range [0.0;1.0]"), "{error}");
     }
+    let absence = parse(
+        r#"{"type":"neoforge:components","items":["minecraft:diamond_sword","minecraft:iron_sword"],"components":{"!minecraft:minimum_attack_charge":{}}}"#,
+        &items,
+    );
+    let positive = parse(
+        r#"{"type":"neoforge:components","items":["minecraft:diamond_sword","minecraft:iron_sword"],"components":{"minecraft:minimum_attack_charge":0.35}}"#,
+        &items,
+    );
+    let mut removed = ItemStack::new("minecraft:diamond_sword", 1);
+    assert!(!absence.test_in(&context, &removed));
+    removed.data_mut().set_loot_component(ID, &None);
+    assert!(absence.test_in(&context, &removed));
+    assert!(!positive.test_in(&context, &removed));
+    assert!(!absence.test_in(&context, &stack(Tag::Float(0.35_f32.to_bits()))));
+    let no_default = ItemStack::new("minecraft:iron_sword", 1);
+    assert!(absence.test_in(&context, &no_default));
+    assert!(!positive.test_in(&context, &no_default));
 }
