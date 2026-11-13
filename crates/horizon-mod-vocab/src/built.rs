@@ -500,3 +500,34 @@ impl From<EntityRenderState> for super::EntityRenderState {
         }
     }
 }
+
+// exhaustive: the game builds it with a literal; mods only read it
+// no wire: borrowed game-to-hook adapter; its call fields cross separately.
+pub struct ContainerLootFilled<'a> {
+    pub table: &'a str,
+    pub dimension: &'a str,
+    pub origin: [f64; 3],
+    pub block: Option<[i32; 3]>,
+    pub entity: Option<u32>,
+    pub opener: Option<u128>,
+}
+impl<'a> From<ContainerLootFilled<'a>> for super::ContainerLootFilled<'a> {
+    fn from(v: ContainerLootFilled<'a>) -> Self {
+        let ContainerLootFilled {
+            table,
+            dimension,
+            origin,
+            block,
+            entity,
+            opener,
+        } = v;
+        Self {
+            table,
+            dimension,
+            origin,
+            block,
+            entity,
+            opener,
+        }
+    }
+}

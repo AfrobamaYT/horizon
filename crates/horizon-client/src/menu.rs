@@ -21,7 +21,7 @@ pub use mod_api::item::menu::{LogicalSide, MenuButtonContext};
 mod models;
 pub use models::{
     AnvilCraft, AnvilUpdate, AnvilVanilla, CarriedAccess, GrindstonePlace, GrindstoneTake,
-    SlotView, StackedOnOther,
+    SlotRules, SlotView, StackedOnOther,
 };
 use std::sync::Arc;
 
@@ -121,6 +121,9 @@ pub struct Env<'a> {
     pub limited_crafting: bool,
     /// The recipes the player knows (`ServerPlayer.getRecipeBook().contains(id)`).
     pub known_recipes: Option<&'a dyn KnownRecipes>,
+    /// The mods' `menu_slot_rules`, lent by the game with the read-only `Host` behind it (none
+    /// keeps every slot's own answer: a data-only consumer, or a click made without the game).
+    pub slot_rules: Option<&'a dyn SlotRules>,
 }
 
 /// The maps of the level a menu is in.
@@ -493,24 +496,11 @@ fn tidy(slot: &mut Option<ItemStack>) {
     }
 }
 
-/// Dispatch registered vanilla and mod menu slot placement and maximum stack rules.
-/// The slot is its backing container index. The shared application bounds the
-/// final maximum.
-#[inline(always)]
-pub fn native_menu_slot_rules(
-    context: &LoopContext,
-    menu: &str,
-    slot: usize,
-    stack: &ItemStack,
-    may_place: &mut bool,
-    max_stack: &mut u32,
-) {
-    crate::native_client_hooks::menu_slot_rules(context, menu, slot, stack, may_place, max_stack);
-}
-
-/// Apply the scoped rule to a slot's own answers, then enforce its item cap.
+/// Apply the scoped rule to a slot's own answers, then enforce its item cap. The rules are asked
+/// here, while the click plans, and only for a menu type a part answers; with none lent the
+/// slot's answers stand.
 pub fn apply_menu_slot_rules(
-    context: &LoopContext,
+    rules: Option<&dyn SlotRules>,
     menu: &str,
     slot: usize,
     stack: &ItemStack,
@@ -518,7 +508,9 @@ pub fn apply_menu_slot_rules(
     mut max_stack: u32,
     item_max: u32,
 ) -> (bool, u32) {
-    native_menu_slot_rules(context, menu, slot, stack, &mut may_place, &mut max_stack);
+    if let Some(rules) = rules.filter(|rules| rules.listens(menu)) {
+        rules.rule(menu, slot, stack, &mut may_place, &mut max_stack);
+    }
     (may_place, max_stack.clamp(1, CONTAINER_MAX).min(item_max))
 }
 
@@ -1806,7 +1798,7 @@ impl Menu {
             return (own, max.min(Self::max_stack(env, stack)));
         };
         apply_menu_slot_rules(
-            env.loop_context,
+            env.slot_rules,
             id,
             self.state.slots[s].index,
             stack,
@@ -2548,7 +2540,7 @@ impl Menu {
                     true
                 } else if let Some(id) = self.registry_id() {
                     !apply_menu_slot_rules(
-                        env.loop_context,
+                        env.slot_rules,
                         id,
                         self.state.slots[dest].index,
                         stack,
@@ -3406,6 +3398,7 @@ pub(crate) mod tests {
             limited_crafting: false,
             can_equip: None,
             known_recipes: None,
+            slot_rules: None,
         };
         let mut menu = Menu::new(kind);
         menu.creative = true;
@@ -3554,6 +3547,7 @@ pub(crate) mod tests {
             limited_crafting: false,
             can_equip: None,
             known_recipes: None,
+            slot_rules: None,
         };
         let mut fuel = ItemStack::new("minecraft:stone", 2);
         fuel.data_mut().set_loot_component(
@@ -3602,6 +3596,7 @@ pub(crate) mod tests {
             limited_crafting: false,
             can_equip: None,
             known_recipes: None,
+            slot_rules: None,
         };
         for (input, payment) in [
             (Input::Pickup, 8),
@@ -3804,6 +3799,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let (banners, station_recipes) = (Default::default(), Default::default());
         let (enchantments, names) = (Default::default(), Default::default());
+        let rules = ContextRules(loop_context);
         test(&Env {
             crafting_remainder: None,
             player: Some(7),
@@ -3821,7 +3817,33 @@ pub(crate) mod tests {
             limited_crafting: false,
             can_equip: None,
             known_recipes: None,
+            slot_rules: Some(&rules),
         });
+    }
+
+    /// The `menu_slot_rules` answers a mod menu `test:rules` gives in the tests: slot 0 takes
+    /// a stack on a server only, and holds what the `rules_mod` setting says (7 without it).
+    struct ContextRules<'a>(&'a LoopContext);
+    impl SlotRules for ContextRules<'_> {
+        fn listens(&self, menu: &str) -> bool {
+            menu == "test:rules"
+        }
+        fn rule(
+            &self,
+            menu: &str,
+            slot: usize,
+            _: &ItemStack,
+            may_place: &mut bool,
+            max_stack: &mut u32,
+        ) {
+            if menu == "test:rules" && slot == 0 {
+                *may_place = self.0.side() == LoopSide::Server;
+                *max_stack = self
+                    .0
+                    .setting("rules_mod", "stack")
+                    .map_or(7, |value| value.parse().unwrap());
+            }
+        }
     }
 
     /// `AnvilUpdateEvent`: not asked without a left input, and once per
@@ -4393,14 +4415,6 @@ pub(crate) mod tests {
             std::sync::atomic::AtomicUsize::new(0);
         let installed =
             crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
-                menu_slot_rules: |context, menu, slot, _, may_place, max_stack| {
-                    if menu == "test:rules" && slot == 0 {
-                        *may_place = context.side() == LoopSide::Server;
-                        *max_stack = context
-                            .setting("rules_mod", "stack")
-                            .map_or(7, |value| value.parse().unwrap());
-                    }
-                },
                 menu_still_valid: |context, player, menu, _, eye, valid| {
                     STILL_VALID_ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if menu == "test:rules" && player == 2 && eye[2] == 0.0 {
@@ -4907,6 +4921,7 @@ pub(crate) mod tests {
             limited_crafting: false,
             can_equip: None,
             known_recipes: None,
+            slot_rules: None,
         };
         // Both a pick-up onto the cursor and a shift-click into the inventory.
         for input in [Input::Pickup, Input::QuickMove] {
@@ -4997,6 +5012,7 @@ pub(crate) mod tests {
             limited_crafting: false,
             can_equip: None,
             known_recipes: None,
+            slot_rules: None,
         };
         let menu = &mut Menu::new(mod_menu());
         {
@@ -5403,6 +5419,7 @@ pub(crate) mod tests {
             limited_crafting: false,
             can_equip: None,
             known_recipes: None,
+            slot_rules: None,
         };
 
         let mut menu = Menu::new(Kind::Inventory);
@@ -5458,6 +5475,7 @@ pub(crate) mod tests {
             limited_crafting: true,
             can_equip: None,
             known_recipes: Some(&known),
+            slot_rules: None,
         };
 
         let mut menu = Menu::new(Kind::Inventory);
@@ -5513,6 +5531,7 @@ pub(crate) mod tests {
             limited_crafting: true,
             can_equip: None,
             known_recipes: Some(&known),
+            slot_rules: None,
         };
 
         let mut menu = Menu::new(Kind::Inventory);
@@ -5572,6 +5591,7 @@ pub(crate) mod tests {
             limited_crafting: true,
             can_equip: None,
             known_recipes: Some(&known),
+            slot_rules: None,
         };
 
         let mut menu = Menu::new(Kind::Inventory);
@@ -5621,6 +5641,7 @@ pub(crate) mod tests {
             limited_crafting: false,
             can_equip: None,
             known_recipes: None,
+            slot_rules: None,
         };
         let potion = ItemStack::new("minecraft:potion", 1);
         let mut seen = Vec::new();

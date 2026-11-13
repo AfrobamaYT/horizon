@@ -425,6 +425,13 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
                 event.value = mod_api::GameRuleValue::Bool(false);
             }
         }
+        fn container_loot_filled(
+            &self,
+            _: &dyn mod_api::LevelHost,
+            event: &mut mod_api::ContainerLootFilledEvent<'_>,
+        ) {
+            container_loot_filled::listen(event);
+        }
         fn item_fished(
             &self,
             _: &mut dyn mod_api::ServerHost,

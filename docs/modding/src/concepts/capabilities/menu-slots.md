@@ -19,11 +19,11 @@ struct PotInput;
 impl mod_api::MenuPart for PotInput {
     fn menu_slot_rules(
         &self,
-        context: &dyn mod_api::LoopContext,
+        host: &dyn mod_api::Host,
         event: &mut mod_api::MenuSlotRulesEvent<'_>,
     ) {
         if event.slot == 0 {
-            event.may_place &= context.mod_recipe_property_contains(
+            event.may_place &= host.mod_recipe_property_contains(
                 "farmersdelight:cooking_pot_input", event.stack.item(),
             );
         }
@@ -33,13 +33,15 @@ impl mod_api::MenuPart for PotInput {
 // registrar.menu_part("farmersdelight:cooking_pot", PotInput);
 ```
 
-The Host exposes the same `mod_recipe_property_contains(set, ItemKey)` query outside
-restricted menu callbacks. This query covers mod-created sets only: unknown sets, unknown
+The `Host` exposes the `mod_recipe_property_contains(set, ItemKey)` query, and `menu_slot_rules` receives it (the read-only `Host`). This query covers mod-created sets only: unknown sets, unknown
 items and vanilla set keys return false. Existing vanilla station acceptance is unchanged.
 The server reads its owning load; the client reads local preload sets before its first
 `UpdateRecipes`, then the authoritative server generation. A packet replaces the entire
 generation, including an empty one. Closing a screen or changing dimension retains it;
 disconnecting discards it. Reads allocate nothing and do not rescan recipes or registries.
+
+Parts that read `context.setting(..)` or `side()` have no counterpart on the Host.
+Named injections for `menu_slot_rules` request `hook_version = 3`.
 
 ## Keeping a block menu open
 

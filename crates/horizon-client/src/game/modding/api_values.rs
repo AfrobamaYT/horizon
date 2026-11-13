@@ -425,6 +425,10 @@ where
 mod content_declarations;
 pub(in crate::game) use content_declarations::push_reaction;
 
+#[path = "api_values/stack_count.rs"]
+mod stack_count;
+pub(crate) use stack_count::TryIntoEnginePreservingCount;
+
 pub(crate) trait TryIntoEngine<Context: ?Sized = Items> {
     type Engine;
     type Error;
@@ -814,71 +818,6 @@ fn encode_stack(
     Ok(stack)
 }
 
-impl TryIntoEngine for ApiStack {
-    type Engine = EngineStack;
-    type Error = StackWriteError;
-
-    fn try_into_engine(&self, items: &Items) -> Result<EngineStack, Self::Error> {
-        let id =
-            mod_api::__private::item_key_id(self.item()).ok_or(StackWriteError::UnknownItem)?;
-        let (id, definition) = items
-            .items
-            .get_key_value(id)
-            .ok_or(StackWriteError::UnknownItem)?;
-        let stack = encode_stack(self, id.clone())?;
-        let effective = |name: &str, default: u32| -> Result<u32, StackWriteError> {
-            match stack.data().and_then(|data| data.other(name)) {
-                Some(Tag::Int(value)) => {
-                    u32::try_from(*value).map_err(|_| StackWriteError::InvalidMaximum)
-                }
-                Some(_) => Err(StackWriteError::InvalidMaximum),
-                None => Ok(default),
-            }
-        };
-        let maximum = if stack.carries_component(Some(definition), "minecraft:max_stack_size") {
-            effective("minecraft:max_stack_size", definition.max_stack)?
-        } else {
-            1
-        };
-        if !(1..=99).contains(&maximum) {
-            return Err(StackWriteError::InvalidMaximum);
-        }
-        if !horizon_world::item_template::durability_allows_stack_size(
-            stack.carries_component(Some(definition), "minecraft:max_damage"),
-            i64::from(maximum),
-        ) {
-            return Err(StackWriteError::StackableDamageable);
-        }
-        if stack.count > maximum {
-            return Err(StackWriteError::CountExceeded { maximum });
-        }
-        let maximum = if stack.carries_component(Some(definition), "minecraft:max_damage") {
-            effective("minecraft:max_damage", definition.max_damage)?
-        } else {
-            0
-        };
-        let damage = self.damage_component().map_or_else(
-            || {
-                u32::try_from(stack.effective_damage(Some(definition))).map_err(|_| {
-                    StackWriteError::InvalidComponents {
-                        reason: mod_api::StackError::InvalidDamage,
-                    }
-                })
-            },
-            Ok,
-        )?;
-        if damage > maximum {
-            return Err(StackWriteError::DamageExceeded { maximum });
-        }
-        if i32::try_from(damage).is_err() {
-            return Err(StackWriteError::InvalidComponents {
-                reason: mod_api::StackError::InvalidDamage,
-            });
-        }
-        Ok(stack)
-    }
-}
-
 impl TryIntoApi for crate::crafting::RecipeRule {
     type Api = mod_api::RecipeRule;
     type Error = StackReadError;
@@ -1204,26 +1143,6 @@ impl mod_api::item::menu::SlotView for ApiSlot<'_> {
         }
     }
 }
-/// Adapt a synchronous slot event; engine slot rules still own every write.
-pub(crate) fn menu_slot_rules(
-    context: &horizon_world::native_load_context::LoopContext,
-    menu: &str,
-    slot: usize,
-    stack: &EngineStack,
-    may_place: &mut bool,
-    max_stack: &mut u32,
-) {
-    if !mod_api::__private::has_part_hook(mod_api::HookId::MenuSlotRules) {
-        return;
-    }
-    let Ok(stack) = stack.try_into_api() else {
-        return;
-    };
-    let reader = horizon_client_render::api_context::LoopReader(context);
-    let context = reader.context();
-    mod_api::dispatch_menu_slot_rules(&context, menu, slot, &stack, may_place, max_stack);
-}
-
 /// Adapt a player's block menu `stillValid` check; the game asks only for a menu
 /// whose type has a part answering it (`menu_still_valid_listens`, when it opened).
 pub(crate) fn menu_still_valid(
