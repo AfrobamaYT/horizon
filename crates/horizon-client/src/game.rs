@@ -1682,16 +1682,15 @@ struct Game<'a> {
     died: horizon_client::fast_hash::FxHashSet<u32>,
     /// Client-ticked block-entity animation state (`game/blocks/block_entity_anims.rs`).
     be_anims: horizon_client::block_entity_anim::BlockEntityAnims,
-    /// Item being used (eaten): hotbar slot and ticks used.
+    /// Item being used (eaten): hotbar slot and ticks used, and `useItem`, the stack in use.
     using: Option<(usize, u32)>,
-    /// `getUseDuration` when that use started, as a mod left it
-    /// (`game/items/item_use.rs`): consumables and mod items count to it.
+    use_item: Option<ItemStack>,
+    /// `getUseDuration` at the use's start, as a mod left it (`game/items/item_use.rs`).
     use_duration: i32,
     /// A mod's `Start` or `Tick` set that use's ticks left (`game/items/item_use.rs`).
     use_ticks_set: bool,
-    /// The crossbow charge's start and middle loading sounds played so far
-    /// (`game/items/crossbow.rs`): each charge plays each of them once, however
-    /// far a mod's tick moved the charge at a time.
+    /// The crossbow charge's start and middle loading sounds played (`game/items/crossbow.rs`):
+    /// each charge plays each once, however far a mod's tick moved the charge at a time.
     crossbow_sounds: [bool; 2],
     /// Camera.oldFovModifier / fovModifier.
     /// `Camera` (eye height and field-of-view easing, view placement).
@@ -14733,6 +14732,7 @@ impl<'a> Game<'a> {
                 anims
             },
             using: None,
+            use_item: None,
             use_duration: 0,
             use_ticks_set: false,
             crossbow_sounds: [false; 2],
