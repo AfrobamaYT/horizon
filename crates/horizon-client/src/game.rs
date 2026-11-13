@@ -2053,7 +2053,7 @@ struct Game<'a> {
     /// Meshed sections waiting for an upload budget (Horizon settings).
     pending_uploads: Vec<((i32, i32, i32), horizon_client::mesher::SectionMesh)>,
     /// This frame's view frustum, for culling entities and block entities.
-    view_frustum: Option<horizon_client::gfx::Frustum>,
+    view_frustum: Option<horizon_client::gfx::JoinedFrusta>,
     /// Whether the renderer's section-occlusion graph is active for this view.
     entity_section_visibility_valid: bool,
     /// The camera section in the current world layout.
@@ -8008,7 +8008,7 @@ impl Game<'_> {
         &mut self,
         camera: glam::DVec3,
         alpha: f64,
-        billboard_frustum: Option<horizon_client::gfx::Frustum>,
+        billboard_frustum: Option<horizon_client::gfx::JoinedFrusta>,
         mut out: Vec<Vertex>,
     ) -> (
         Vec<Vertex>,
@@ -8639,7 +8639,7 @@ impl Game<'_> {
         &self,
         camera: glam::DVec3,
         orbs: impl Iterator<Item = (&'a horizon_client::entities::ExperienceOrb, [f64; 3], f32)>,
-        orb_view: Option<&horizon_client::gfx::Frustum>,
+        orb_view: Option<&horizon_client::gfx::JoinedFrusta>,
         out: &mut Vec<Vertex>,
     ) {
         if let Some(r) = self
@@ -12595,8 +12595,8 @@ impl Game<'_> {
         };
         self.view_frustum = self
             .renderer
-            .as_ref()
-            .map(|r| r.camera_frustum(fov_degrees, yaw, pitch, bob * spin, depth_far));
+            .as_mut()
+            .map(|r| r.camera_frustum(camera, fov_degrees, yaw, pitch, bob * spin, depth_far));
         let billboard_frustum = if self.settings.horizon.taa {
             self.renderer.as_ref().map(|r| {
                 r.camera_frustum_with_jitter(fov_degrees, yaw, pitch, bob * spin, depth_far)

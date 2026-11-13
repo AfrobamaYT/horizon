@@ -271,8 +271,8 @@ pub struct WorldViewDrawn<'a> {
     pub camera: DVec3,
 }
 
-/// Asked as each frame is built and drawn (not on the title screen's panorama), more than once:
-/// push the world views your mod wants drawn this frame, the same each time. The first
+/// Asked once as each frame is built (not on the title screen's panorama): push the world views
+/// your mod wants drawn this frame. The first
 /// [`MAX_WORLD_VIEWS`] valid ones draw; one with a value out of range (its clip plane's too,
 /// [`WorldView::with_clip_plane`]), or an `id` already asked for, is left out. Keep it cheap.
 #[inline(never)]

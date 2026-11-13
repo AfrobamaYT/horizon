@@ -1203,7 +1203,7 @@ impl ParticleSectionFrustumCache {
         world: [f64; 3],
         camera: DVec3,
         radius: f64,
-        frustum: &crate::gfx::Frustum,
+        frustum: &crate::gfx::JoinedFrusta,
     ) -> SectionFrustumResult {
         let Some(section) = world_section(world) else {
             return SectionFrustumResult::Intersects;
@@ -4602,7 +4602,7 @@ impl ParticleEngine {
         partial: f32,
         pixel_focal_length: f32,
         culling_enabled: bool,
-        frustum: Option<&crate::gfx::Frustum>,
+        frustum: Option<&crate::gfx::JoinedFrusta>,
         mut occluded: impl FnMut([f64; 3], [f64; 3]) -> bool,
         light_at: &dyn Fn([i32; 3]) -> u8,
         out: &mut Vec<Vertex>,
@@ -4639,7 +4639,7 @@ impl ParticleEngine {
         base: Quat,
         partial: f32,
         pixel_focal_length: f32,
-        frustum: Option<&crate::gfx::Frustum>,
+        frustum: Option<&crate::gfx::JoinedFrusta>,
         occluded: &mut dyn FnMut([f64; 3], [f64; 3]) -> bool,
         light_at: &dyn Fn([i32; 3]) -> u8,
         out: &mut Vec<Vertex>,
