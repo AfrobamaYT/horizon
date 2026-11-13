@@ -6,27 +6,10 @@ mod ahead;
 
 impl Game<'_> {
     pub(super) fn tick_items(&mut self) {
-        // EntityTickEvent.Pre for the items about to tick, and the Post after them.
-        let mut round = self.native_tick_round();
-        if round.listening() {
-            let ticking = self.entity_ticking_area();
-            let merging = self.remote.is_none();
-            let mut i = 0;
-            while let Some(item) = self.dropped.get(i) {
-                let (id, x, z) = (
-                    item.id,
-                    item.position.x.floor() as i32,
-                    item.position.z.floor() as i32,
-                );
-                if !(merging && self.joined_during_entity_pass(id)) && ticking(x, z) {
-                    let kind = native_ticks::TickKind::Fixed("minecraft:item");
-                    self.native_tick_pre_batch(&mut round, id, kind);
-                }
-                i += 1;
-            }
-        }
+        let mut round = self.item_update_round();
         self.tick_dropped_items(&mut round);
         horizon_threads::work::clear_work();
+        self.drain_entity_inside();
         self.native_tick_post_batch(round);
     }
     /// An item that joined during this tick's entity pass: it first ticks on
@@ -35,7 +18,7 @@ impl Game<'_> {
         id > self.ticked_entities_through || self.contact_drops.contains(&id)
     }
     pub(super) fn tick_dropped_items(&mut self, round: &mut native_ticks::TickRound) {
-        let mut items = std::mem::take(&mut self.dropped);
+        let mut items = self.dropped.lift();
         // ServerLevel.tick: only entities in entity-ticking chunks tick.
         let ticking = self.entity_ticking_area();
         let mut removed = vec![false; items.len()];
@@ -66,19 +49,21 @@ impl Game<'_> {
                 round.not_ticked(items[i].id);
                 continue;
             }
-            let item = &mut items[i];
             // `addFreshEntity` during the entity pass: the item ticks from the
             // next tick on (`EntityTickList`).
-            if merging && self.joined_during_entity_pass(item.id) {
+            if merging && self.joined_during_entity_pass(items[i].id) {
                 continue;
             }
             if !ticking(
-                item.position.x.floor() as i32,
-                item.position.z.floor() as i32,
-            ) || round.canceled(item.id)
+                items[i].position.x.floor() as i32,
+                items[i].position.z.floor() as i32,
+            ) || round.canceled(items[i].id)
+                || round.halted(items[i].id)
             {
                 continue;
             }
+            self.tick_saved_invulnerable_time(items[i].id);
+            let item = &mut items[i];
             let mut at_turn = |item: &mut ItemEntity| {
                 // `getEntityCollisions(entity, bounds.expandTowards(movement))`: the boxes around
                 // where the item can reach this tick.
@@ -158,6 +143,7 @@ impl Game<'_> {
                     &mut removed,
                     &mut cells,
                     i,
+                    true,
                     &max_stack,
                 );
             }
@@ -183,11 +169,51 @@ impl Game<'_> {
                 cells.remove(i, item.position);
                 continue;
             }
-            let environment = item.environment_tick(
-                &self.world,
+            let item_id = item.id;
+            let saved = native_components::ITEM_ENVIRONMENT_DAMAGE
+                .map(|damage| self.saved_refuses_damage(item_id, damage, false));
+            let tags = world_items!(self);
+            let registry = self.pack.assets.registry;
+            let block_registries = &self.pack.block_registries;
+            let hooks = &self.damage_hooks;
+            let environment = item.environment_tick_with_hook(
+                &mut self.world,
                 self.res.facts(),
-                self.pack.assets.registry,
-                world_items!(self),
+                registry,
+                &native_components::item_damage_resolver(
+                    &self.pack.item_renderer.models,
+                    &self.health_resources.damage,
+                ),
+                |world, damage| {
+                    let vanilla = match damage {
+                        "minecraft:on_fire" => saved[0],
+                        "minecraft:lava" => saved[1],
+                        "minecraft:in_fire" => saved[2],
+                        "minecraft:cactus" => saved[3],
+                        _ => false,
+                    };
+                    let source = horizon_client::health::HurtSource {
+                        damage_type: damage,
+                        causing: 0,
+                        direct: 0,
+                        position: None,
+                    };
+                    horizon_client::health::DamageLevel::of(
+                        world,
+                        registry,
+                        Some(tags),
+                        Some(block_registries),
+                        hooks,
+                    )
+                    .invulnerability_check(
+                        horizon_client::health::Hurting::Entity(
+                            item_id as i32,
+                            "minecraft:item",
+                            source,
+                        ),
+                        vanilla,
+                    )
+                },
             );
             if environment.should_play_lava_hurt_sound(item.ticks) {
                 let pitch = 2.0 + self.world.random.next_float() * 0.4;
@@ -212,123 +238,36 @@ impl Game<'_> {
         let mut removed = removed.into_iter();
         items.retain(|_| !removed.next().unwrap_or(false));
         let Some(p) = self.player.as_ref() else {
-            self.restore_item_batch(items);
+            self.put_back_dropped(items);
             self.spawn_destroyed_contents(destroyed);
             return;
         };
         if p.health.dead_or_dying() || self.spectator() {
-            self.restore_item_batch(items);
+            self.put_back_dropped(items);
             self.spawn_destroyed_contents(destroyed);
             return;
         }
-        // Player.aiStep: standing, the pickup area is the player's box
-        // inflated by (1, 0.5, 1); riding, the union with the vehicle's box
-        // inflated by (1, 0, 1).
         let w = f64::from(p.dimensions.width) / 2.0;
-        let own_box = Aabb::new(
-            Vec3::new(p.position.x - w, p.position.y, p.position.z - w),
-            Vec3::new(
-                p.position.x + w,
-                p.position.y + f64::from(p.dimensions.height),
-                p.position.z + w,
-            ),
-        );
-        let area = match self.riding_box() {
-            Some(vehicle) => own_box
-                .union_bounds(vehicle)
-                .inflate(Vec3::new(1.0, 0.0, 1.0)),
-            None => own_box.inflate(Vec3::new(1.0, 0.5, 1.0)),
-        };
         let (min, max) = (
             [
-                area.min_position().x,
-                area.min_position().y,
-                area.min_position().z,
+                p.position.x - w - 1.0,
+                p.position.y - 0.5,
+                p.position.z - w - 1.0,
             ],
             [
-                area.max_position().x,
-                area.max_position().y,
-                area.max_position().z,
+                p.position.x + w + 1.0,
+                p.position.y + f64::from(p.dimensions.height) + 0.5,
+                p.position.z + w + 1.0,
             ],
         );
         let feet = [p.position.x, p.position.y, p.position.z];
         let own = self.level.ensure_player_uuid();
-        let mut kept = Vec::with_capacity(items.len());
-        for mut item in items {
-            let b = item.bounds();
-            let touching = b.min_position().x < max[0]
-                && b.max_position().x > min[0]
-                && b.min_position().y < max[1]
-                && b.max_position().y > min[1]
-                && b.min_position().z < max[2]
-                && b.max_position().z > min[2];
-            // ItemEntity.playerTouch: no pickup delay, and the target (if any) is this player.
-            if touching && item.pickup_delay == 0 && item.target.is_none_or(|t| t == own) {
-                if self.native_pickup_refused(&item.stack, item.thrower, item.position) {
-                    item.pickup_delay = 10;
-                    kept.push(item);
-                    continue;
-                }
-                let before = item.stack.count;
-                let kind = item.stack.item.clone();
-                let thrower = item.thrower;
-                match self.give(item.stack.clone()) {
-                    None => {
-                        self.award_stat("picked_up", &kind, before as i32);
-                        if let Some(thrower) = thrower {
-                            self.trigger_thrown_picked_up_by_player(&item.stack, thrower);
-                        }
-                        self.add_pickup(
-                            pickups::Taken::Item(Box::new(item)),
-                            pickups::Collector::Player,
-                        );
-                        let pitch = ((self.world.random.next_float()
-                            - self.world.random.next_float())
-                            * 0.7
-                            + 1.0)
-                            * 2.0;
-                        self.audio
-                            .play("minecraft:entity.item.pickup", Some(feet), 0.2, pitch);
-                        continue;
-                    }
-                    Some(rest) => {
-                        // ItemEntity.playerTouch: `Inventory.add` is true once any
-                        // of the stack went in, so a partial pickup still takes
-                        // (animation and sound) and awards the stat with the
-                        // count the stack had before it (`take(this, count)`,
-                        // `awardStat(..., count)`).
-                        if rest.count < before {
-                            self.award_stat("picked_up", &kind, before as i32);
-                            if let Some(thrower) = thrower {
-                                self.trigger_thrown_picked_up_by_player(&rest, thrower);
-                            }
-                            self.add_pickup(
-                                pickups::Taken::Item(Box::new(item.clone())),
-                                pickups::Collector::Player,
-                            );
-                            // handleTakeItemEntity: the random pitch of a full pickup.
-                            let pitch = ((self.world.random.next_float()
-                                - self.world.random.next_float())
-                                * 0.7
-                                + 1.0)
-                                * 2.0;
-                            self.audio
-                                .play("minecraft:entity.item.pickup", Some(feet), 0.2, pitch);
-                        }
-                        item.stack = rest;
-                    }
-                }
-            }
-            kept.push(item);
-        }
-        self.restore_item_batch(kept.into());
+        self.native_player_pickups(&mut items, (min, max), feet, own);
+        self.put_back_dropped(items);
         self.spawn_destroyed_contents(destroyed);
     }
-    /// `ItemUtils.onContainerDestroyed`: each stack a destroyed item held
-    /// becomes an item entity where that item lay, made by
-    /// `new ItemEntity(level, x, y, z, stack)`: its motion is that
-    /// constructor's own, 0.2 up and ±0.1 sideways from the item's random,
-    /// and it is pickable at once.
+    /// `ItemUtils.onContainerDestroyed`: spilled stacks use their own constructor
+    /// motion (0.2 up and ±0.1 sideways), leaving the level random untouched.
     pub(super) fn spawn_destroyed_contents(&mut self, destroyed: Vec<(ItemStack, Vec3)>) {
         for (stack, at) in destroyed {
             self.spawn_item_own(stack, [at.x, at.y, at.z], 0);
@@ -376,7 +315,7 @@ impl Game<'_> {
                 }
                 let vanilla = o.can_merge(merge_id as u32, value as i32);
                 let (id, orb_value) = (o.id, o.points());
-                if self.orb_merges(id, orb_value, 0, value, vanilla) {
+                if self.orb_merges(id, orb_value as i32, 0, value as i32, vanilla) {
                     target = Some(i);
                     break;
                 }
@@ -395,9 +334,9 @@ impl Game<'_> {
     pub(super) fn orb_merges(
         &mut self,
         into: u32,
-        into_value: u32,
+        into_value: i32,
         from: u32,
-        from_value: u32,
+        from_value: i32,
         vanilla: bool,
     ) -> bool {
         let dimension = self.dim.id();
@@ -417,44 +356,52 @@ impl Game<'_> {
         self.native_experience_orb_merge(dimension, into, from, from_value, &mut canceled);
         !canceled
     }
-    /// `ExperienceOrb.tick`'s scanForMerges for one orb, in its own turn
-    /// before the move: it absorbs the orbs that `canMerge` within 0.5 blocks
-    /// of its box, adding their counts and keeping the smaller age. Server
-    /// only, as the caller checks. An orb absorbed here is gone before its
-    /// own turn finds it.
+    /// `ExperienceOrb.tick`'s scan before movement, once every twenty ticks.
+    /// Hooks can change the resident list, so retain join identities, not indices.
     pub(super) fn merge_orb(&mut self, i: usize) {
-        // `tickCount % 20 == 1`, with `tickCount` the increment `tick` adds
-        // later in the turn: at the scan's moment the stored count is one
-        // behind, so the cadence reads `tickCount - 1` a whole 20.
         if !self.orbs[i].ticks.is_multiple_of(20) {
             return;
         }
+        let into_join = self.orbs[i].join;
         let area = self.orbs[i].bounds().inflate(Vec3::new(0.5, 0.5, 0.5));
-        let mut absorbed = Vec::new();
-        for j in 0..self.orbs.len() {
-            if j == i || !self.orbs[j].bounds().intersects(area) {
-                continue;
-            }
-            let (vanilla, into, into_value, from, from_value, count, age) = {
-                let (a, b) = (&self.orbs[i], &self.orbs[j]);
-                (
-                    b.can_merge(a.id, a.value),
-                    a.id,
-                    a.points(),
-                    b.id,
-                    b.points(),
-                    b.count,
-                    b.age,
-                )
+        let candidates: Vec<_> = self
+            .orbs
+            .iter()
+            .filter(|o| o.join != into_join && o.bounds().intersects(area))
+            .map(|o| o.join)
+            .collect();
+        for from_join in candidates {
+            let Some(i) = self.orbs.locate(into_join) else {
+                return;
             };
+            let Some(j) = self.orbs.locate(from_join) else {
+                continue;
+            };
+            let (a, b) = (&self.orbs[i], &self.orbs[j]);
+            let (into, into_value, from, from_value, vanilla) =
+                (a.id, a.value, b.id, b.value, b.can_merge(a.id, a.value));
             if !self.orb_merges(into, into_value, from, from_value, vanilla) {
                 continue;
             }
+            let Some(i) = self.orbs.locate(into_join) else {
+                return;
+            };
+            let Some(j) = self.orbs.locate(from_join) else {
+                continue;
+            };
+            // Refuse a stale decision rather than merging a changed pair.
+            let (a, b) = (&self.orbs[i], &self.orbs[j]);
+            if a.value != into_value
+                || b.value != from_value
+                || !b
+                    .bounds()
+                    .intersects(a.bounds().inflate(Vec3::new(0.5, 0.5, 0.5)))
+            {
+                continue;
+            }
+            let (count, age) = (b.count, b.age);
             self.orbs[i].count = self.orbs[i].count.saturating_add(count);
             self.orbs[i].age = self.orbs[i].age.min(age);
-            absorbed.push(j);
-        }
-        for j in absorbed.into_iter().rev() {
             self.orbs.remove(j);
         }
     }
@@ -502,6 +449,7 @@ impl Game<'_> {
         }
         self.next_entity += 1;
         self.orbs.push(ExperienceOrb {
+            attachment_lifetime: Default::default(),
             fall_distance: 0.0,
             rotation: [0.0, 0.0],
             join: Default::default(),
@@ -523,9 +471,9 @@ impl Game<'_> {
         // ServerLevel.addFreshEntity.
         self.native_joins_flush(false, 0);
     }
-    /// The orbs' tick, but for the movement: that is `tick_ordered_before`'s,
+    /// The orbs' tick, but for the movement: that is `run_ordered_ticks`'s,
     /// in join order with the other kinds.
-    pub(super) fn tick_experience(&mut self) {
+    pub(in crate::game) fn tick_experience(&mut self) {
         if self.xp_delay > 0 {
             self.xp_delay -= 1;
         }
@@ -564,7 +512,9 @@ impl Game<'_> {
                 ],
             )
         });
-        let mut orbs = std::mem::take(&mut self.orbs);
+        let mut orbs = self.orbs.lift();
+        #[cfg(test)]
+        crate::game::entity::taken_pass_tests::after_take(self);
         let mut gained = 0;
         let mut taken = Vec::new();
         if let Some((min, max)) = bounds {
@@ -587,7 +537,8 @@ impl Game<'_> {
                 true
             });
         }
-        self.orbs = orbs;
+        self.orbs
+            .restore(orbs, horizon_client::join_seq::RestoreOrder::SurvivorsFirst);
         if gained > 0 {
             gained = self.mending(gained);
         }
@@ -603,43 +554,42 @@ impl Game<'_> {
                 0.1,
                 pitch,
             );
-            self.add_pickup(pickups::Taken::Orb(Box::new(o)), pickups::Collector::Player);
+            self.add_pickup(
+                crate::game::pickups::Taken::Orb(Box::new(o)),
+                crate::game::pickups::Collector::Player,
+            );
         }
         if gained > 0 {
-            self.give_orb_points(gained);
+            self.give_experience_points(gained as i32);
         }
     }
 
     /// `Player.dropEquipment` for the player who died: unless keep_inventory
     /// is on, `destroyVanishingCursedItems`, then `Inventory.dropAll` from
     /// `at` (the eyes less 0.3): slots 0..36, armor feet to head (36..39),
-    /// the off hand (40), each thrown in a random direction. The mods
-    /// (`native_loot_drops`, the dying player `who`: uuid and entity id)
-    /// may add to, change or take out the stacks before they are thrown.
-    pub(super) fn drop_inventory(&mut self, at: [f64; 3], who: (u128, i32)) {
-        if self.ui.rules.bool("keep_inventory") {
-            return;
+    /// the off hand (40), each thrown in a random direction. The mods hear
+    /// the drops (`native_living_drops`) before they join the level.
+    pub(super) fn drop_inventory(&mut self, at: [f64; 3], dying: &creatures::DyingDrops<'_>) {
+        let mut stacks: Vec<ItemStack> = Vec::new();
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::KEEP_INVENTORY)
+        {
+            stacks.extend(self.inventory.iter_mut().filter_map(Option::take));
+            stacks.extend(self.armor.iter_mut().rev().filter_map(Option::take));
+            stacks.extend(self.offhand.take());
+            stacks.extend(self.equipment.take_all());
+            stacks.retain(|s| s.enchantment_level("minecraft:vanishing_curse") == 0);
+            self.apply_equipment();
         }
-        let mut stacks = death_drops(&mut self.inventory, &mut self.offhand, &mut self.armor);
-        self.apply_equipment();
-        let context = horizon_client::mod_api::NativeLootDrops {
-            table: "",
-            dimension: self.dim.id(),
-            origin: at,
-            block: None,
-            entity: Some((who.1 as u32, "minecraft:player")),
-            player: Some(who.0),
-            tool: None,
-            explosion: None,
-            used: false,
-        };
-        self.native_loot_drops(&context, &mut stacks);
-        stacks.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
-        for stack in stacks {
-            let r = &mut self.world.random;
-            let v = horizon_client::entities::drop_motion(r, self.yaw, self.pitch, true);
-            self.spawn_item(stack, at, v, 40);
-        }
+        let stacks = stacks.into_iter().map(|stack| (stack, at, 0)).collect();
+        self.drop_death_items(dying, stacks, 40, |game| {
+            let r = &mut game.world.random;
+            let strength = f64::from(r.next_float()) * 0.5;
+            let angle = f64::from(r.next_float()) * std::f64::consts::TAU;
+            Some([-angle.sin() * strength, 0.2, angle.cos() * strength])
+        });
     }
 
     /// Item entity `i` leaves the level (`Entity.discard`); mods hear it.
@@ -685,16 +635,15 @@ impl Game<'_> {
         self.add_item_entity(stack, position, None, pickup_delay)
     }
 
-    /// `DefaultDispenseItemBehavior.spawnItem`: `new ItemEntity(level, x, y, z,
-    /// stack)` draws its default motion from the item's own random, then
-    /// `setDeltaMovement` throws it with `velocity` before `addFreshEntity`.
+    /// The dispenser constructs default motion before replacing it with the throw.
     pub(super) fn spawn_item_thrown(
         &mut self,
         stack: ItemStack,
         position: [f64; 3],
         velocity: [f64; 3],
     ) {
-        self.add_item_entity_drawn(stack, position, Some(velocity), true, 0, 0);
+        let random = spill::prepare_item_random(None);
+        self.add_item_entity_prepared(stack, position, Some(velocity), 0, Some(random));
     }
 
     pub(super) fn add_item_entity(
@@ -704,14 +653,7 @@ impl Game<'_> {
         velocity: Option<[f64; 3]>,
         pickup_delay: u32,
     ) -> [f64; 3] {
-        self.add_item_entity_drawn(
-            stack,
-            position,
-            velocity,
-            velocity.is_none(),
-            pickup_delay,
-            0,
-        )
+        self.add_item_entity_prepared(stack, position, velocity, pickup_delay, None)
     }
 
     /// `spawnAtLocation` for a drop that then calls
@@ -776,7 +718,11 @@ impl Game<'_> {
         // motion is `new ItemEntity(..)`'s own, from the item's random.
         let p = spill::pop_position(&mut self.world.random, pos);
         // Block.popResource draws its offsets before the private overload checks the gamerule.
-        if !self.ui.rules.bool("block_drops") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
+        {
             return;
         }
         self.spawn_item_own(stack, p, 10);
@@ -793,40 +739,49 @@ impl Game<'_> {
         self.pending.attach(pos, &mut stack);
         let (p, v) = spill::pop_position_from_face(&mut self.world.random, pos, face);
         // The private overload checks the gamerule after the offsets are drawn.
-        if !self.ui.rules.bool("block_drops") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
+        {
             return;
         }
         self.spawn_item(stack, p, v, 10);
     }
 
-    /// Player.drop: thrown from the eyes along the view direction.
-    pub(super) fn drop_held(&mut self, all: bool) {
+    /// Player.drop: thrown from the eyes along the view direction. True when
+    /// the selected stack's `on_dropped_by_player` Part kept it in the slot
+    /// (`ServerPlayer.drop(boolean)`, as NeoForge asks it).
+    pub(in crate::game) fn drop_held(&mut self, all: bool) -> bool {
         if self.eye_position().is_none() {
-            return;
+            return false;
         }
         let spectator = self.spectator();
+        if !spectator && self.native_dropped_by_player_event(all) {
+            return true;
+        }
         let Some(thrown) = horizon_client::items::take_held_drop(
             &mut self.inventory[self.selected],
             all,
             spectator,
         ) else {
-            return;
+            return false;
         };
         self.player_drop(thrown);
+        false
     }
 
-    /// `ServerPlayer.drop(boolean)` for the guest `conn` (`gi` in the hub): the
-    /// drop key's throw, then `setRemoteSlot` on the selected slot so a pickup
-    /// that refills the stack is sent to the client that predicted the drop.
-    pub(super) fn guest_drop_held(
-        &mut self,
-        host: &mut super::lan::LanHost,
-        gi: usize,
-        conn: u32,
-        all: bool,
-    ) {
-        self.as_guest(host, conn, |g| g.drop_held(all));
-        host.hub.guests[gi].told_selected();
+    /// A guest's drop key. A drop the held item's Part refused sends the
+    /// inventory back, undoing the removal the client predicted.
+    pub(in crate::game) fn guest_drop_held(&mut self, gi: usize, conn: u32, all: bool) {
+        let kept = self.as_guest(conn, |g| g.drop_held(all)) == Some(true);
+        if let Some(host) = self.lan.as_mut() {
+            if kept {
+                host.hub.send_inventory(gi);
+            } else {
+                host.hub.guests.update(gi, |g| g.told_selected());
+            }
+        }
     }
 
     /// `Player.createItemStackToDrop`: an item entity thrown from the eyes
@@ -837,20 +792,23 @@ impl Game<'_> {
         &mut self,
         thrown: ItemStack,
         eye: [f64; 3],
+        randomly: bool,
         thrown_from_hand: bool,
-    ) {
+    ) -> Option<u32> {
         let r = &mut self.world.random;
-        let v = horizon_client::entities::drop_motion(r, self.yaw, self.pitch, false);
-        // `getEyeY() - 0.3F`.
-        let y = eye[1] - f64::from(0.3f32);
-        self.spawn_item(thrown, [eye[0], y, eye[2]], v, 40);
-        // A native mod can keep the item out of the level (native_entity_join_level).
-        if thrown_from_hand {
-            let uuid = self.acting_player_uuid();
-            if let Some(item) = self.just_spawned_item() {
-                item.thrower = Some(uuid);
-            }
-        }
+        let v = horizon_client::entities::drop_motion(r, self.yaw, self.pitch, randomly);
+        let at = [eye[0], eye[1] - f64::from(0.3f32), eye[2]];
+        let uuid = thrown_from_hand.then(|| self.acting_player_uuid());
+        // Only `drop(.., false)` tosses ask `item_toss`: a death's scatter (`randomly`) does not.
+        let id = if randomly {
+            self.spawn_item(thrown, at, v, 40);
+            self.next_entity
+        } else {
+            self.toss_item(thrown, at, v, uuid)?
+        };
+        let item = self.dropped.iter_mut().rev().find(|d| d.id == id)?;
+        item.thrower = uuid;
+        Some(item.id)
     }
 
     /// DropExperienceBlock / RedStoneOreBlock / SculkBlock experience ranges.
@@ -946,7 +904,8 @@ mod destroyed_contents_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn spilled_stacks_rise_from_their_own_randoms() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         let at = Vec3::new(8.5, 70.0, 8.5);
         let stacks = ["minecraft:stone", "minecraft:dirt", "minecraft:glass"]
             .into_iter()
@@ -975,7 +934,8 @@ mod destroyed_contents_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_damaged_shulker_box_spills_its_stacks_upward() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         game.build_registries();
         game.set_allow_commands(true);
         game.world.chunks.insert(
@@ -1024,19 +984,19 @@ mod escape_tests {
     use horizon_core::random::RandomSource;
     use std::sync::Arc;
 
-    /// `Entity.moveTowardsClosestSpace` takes an item's escape speed from the
-    /// item's own random, the one its constructor drew from, and leaves the
-    /// level's random as it was (#13043).
+    /// `Entity.moveTowardsClosestSpace` uses the item's own random, never the
+    /// level's random. Seeded Java values pin vanilla's float arithmetic (#13043).
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn an_item_escapes_a_block_at_its_own_randoms_speed() {
-        let mut game = server_game();
+        let mut game_resources = None;
+        let mut game = server_game(&mut game_resources);
         let feet = horizon_core::geometry::Vec3::new(8.5, 70.0, 8.5);
         game.player = Some(horizon_client::motion::PlayerMotion::new(game.motion, feet).unwrap());
-        game.world
-            .chunks
-            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-        game.load_ticking_neighbourhood(0, 0);
+        super::native_entity_refs::tests::prepare_entity_ticking_neighborhood(
+            &mut game,
+            horizon_core::position::ChunkPos::new(0, 0),
+        );
         game.update_chunk_tickets();
         assert!(game.entity_ticking_area()(8, 8));
         let stone = game
@@ -1048,19 +1008,16 @@ mod escape_tests {
         game.world.set(8, 64, 8, stone).unwrap();
         let stack = ItemStack::new("minecraft:stone", 2);
         game.spawn_item(stack, [8.5, 64.4, 8.5], [0.0, 0.0, 0.0], 10);
-        let item = game.dropped.last().unwrap();
-        let expected = f64::from(item.random.clone().next_float() * 0.2 + 0.1);
-        let mut own = item.random.clone();
-        own.next_float();
+        let item = game.dropped.last_mut().unwrap();
+        item.random = horizon_core::random::LegacyRandom::new(12345);
         let mut level = game.world.random.clone();
         game.ticked_entities_through = u32::MAX;
         game.tick_items();
         let item = game.dropped.last().unwrap();
-        // Up is the nearest open side from the middle of the block.
-        // The push replaces the fall's velocity; then the 0.98 drag.
-        // Entity.getAirDrag returns 0.98F, promoted to double for the drag.
-        assert_eq!(item.velocity.y, expected * f64::from(0.98_f32));
-        assert_eq!(item.random.clone().next_int(), own.next_int());
+        // Up is the nearest open side. Independent Java Random(12345):
+        // nextFloat()*0.2F+0.1F, widened before multiplying by widened 0.98F.
+        assert_eq!(item.velocity.y, f64::from_bits(0x3fc5_9ef4_570f_5500));
+        assert_eq!(item.random.clone().next_float().to_bits(), 0x3f03_61b3);
         assert_eq!(game.world.random.next_float(), level.next_float());
     }
 }
