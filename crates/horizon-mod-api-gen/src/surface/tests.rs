@@ -370,7 +370,9 @@ fn masked(value: serde_json::Value) -> serde_json::Value {
         serde_json::Value::Object(map) => serde_json::Value::Object(
             map.into_iter()
                 .map(|(key, value)| match key.as_str() {
-                    "hash" | "shape" if !value.is_null() => (key, serde_json::Value::from("*")),
+                    "hash" | "shape" | "fields_hash" if !value.is_null() => {
+                        (key, serde_json::Value::from("*"))
+                    }
                     _ => (key, masked(value)),
                 })
                 .collect(),
@@ -461,14 +463,14 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
             &["fn:first"],
         ),
         (
-            "a field added to a constructible struct",
+            "a field added to a constructible struct: its fields_hash, not its hash",
             &[(
                 LIB,
                 "    pub y: i32,\n",
                 "    pub y: i32,\n    pub z: i32,\n",
             )],
             HOOKS,
-            &["type:Point"],
+            &[],
         ),
         (
             "a variant added to an exhaustive enum",
@@ -483,10 +485,10 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
             &["type:Mode"],
         ),
         (
-            "a derive added",
+            "a derive added: one more of its impls, outside its hash",
             &[(LIB, "/// A mode.\n", "/// A mode.\n#[derive(Debug)]\n")],
             HOOKS,
-            &["type:Mode"],
+            &[],
         ),
         (
             "a required method added to a trait mods implement",
@@ -497,6 +499,16 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
             )],
             HOOKS,
             &["trait:Hooks"],
+        ),
+        (
+            "a required method added to a trait the boundary lists do not name (role none)",
+            &[(
+                LIB,
+                "pub trait BlockPart {}",
+                "pub trait BlockPart {\n    fn tick(&self);\n}",
+            )],
+            HOOKS,
+            &["trait:BlockPart"],
         ),
         (
             "a handle method's return type",
@@ -515,24 +527,36 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
             &["hook:ping"],
         ),
         (
-            "a hook argument's type",
+            "an argument added to a hook",
             &[(
                 LIB,
                 "pub cancelled: bool,",
                 "pub cancelled: bool,\n        pub extra: u8,",
             )],
             HOOKS,
-            &["hook:ping", "type:PingEvent"],
+            &[],
         ),
         (
-            "a supertrait bound",
+            "a hook argument's type",
+            &[(LIB, "pub cancelled: bool,", "pub cancelled: u8,")],
+            HOOKS,
+            &["hook:ping.cancelled", "type:PingEvent.cancelled"],
+        ),
+        (
+            "a supertrait bound on a trait mods call",
             &[(
                 LIB,
                 "pub trait ServerHost: Host {",
                 "pub trait ServerHost: Host + Send {",
             )],
             HOOKS,
-            &["trait:ServerHost"],
+            &[],
+        ),
+        (
+            "a supertrait bound on a trait mods implement",
+            &[(LIB, "pub trait Hooks {", "pub trait Hooks: Send {")],
+            HOOKS,
+            &["trait:Hooks"],
         ),
         (
             "a defaulted method becoming required on a trait mods implement",
@@ -571,14 +595,14 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
             &["hook:ping"],
         ),
         (
-            "a trait impl added",
+            "a trait impl added: outside the hash",
             &[(
                 LIB,
                 "/// A mode.\npub enum Mode {",
                 "impl Default for Mode {\n    fn default() -> Self {\n        Self::On\n    }\n}\n/// A mode.\npub enum Mode {",
             )],
             HOOKS,
-            &["type:Mode"],
+            &[],
         ),
         (
             "a handle's impl bounds",
@@ -819,4 +843,120 @@ fn the_real_tree_exports() {
         );
     }
     assert!(read.traits.iter().any(|t| t.id == "trait:Hooks"));
+}
+
+#[test]
+fn a_derive_and_a_hand_written_impl_are_the_same_impl() {
+    let point = |export: &Export| {
+        export
+            .surface
+            .types
+            .iter()
+            .find(|t| t.id == "type:Point")
+            .cloned()
+            .unwrap()
+    };
+    let before = point(&export_fixture(&[], HOOKS));
+    let derived = point(&export_fixture(
+        &[
+            (
+                LIB,
+                "#[derive(Clone, Copy, Wire)]\npub struct Point",
+                "#[derive(Clone, Copy, Default, Wire)]\npub struct Point",
+            ),
+            (
+                LIB,
+                "impl Default for Point {\n    fn default() -> Self {\n        Self { x: 0, y: 0 }\n    }\n}\n",
+                "",
+            ),
+        ],
+        HOOKS,
+    ));
+    assert_eq!(before.impls, ["Clone", "Copy", "Default"]);
+    assert_eq!(derived.impls, before.impls);
+    assert_eq!(derived.hash, before.hash);
+}
+
+#[test]
+fn how_a_type_crosses_changes_its_shape_and_not_its_hash() {
+    let text = |export: &Export| {
+        export
+            .surface
+            .types
+            .iter()
+            .find(|t| t.id == "type:Text")
+            .cloned()
+            .unwrap()
+    };
+    let before = text(&export_fixture(&[], HOOKS));
+    // From a derive to crossing as a string.
+    let via = text(&export_fixture(
+        &[
+            (
+                LIB,
+                "#[derive(Clone, Debug, Wire)]\npub struct Text",
+                "#[derive(Clone, Debug)]\npub struct Text",
+            ),
+            (
+                LIB,
+                "/// A name that crosses as a string.",
+                "impl Wire for Text {\n    fn layout(visiting: &mut Vec<&'static str>) -> u64 {\n        String::layout(visiting)\n    }\n}\n/// A name that crosses as a string.",
+            ),
+        ],
+        HOOKS,
+    ));
+    assert_eq!(before.contract.wire_form.as_deref(), Some("derive"));
+    assert_eq!(via.contract.wire_form.as_deref(), Some("via:String"));
+    assert_eq!(via.hash, before.hash);
+    assert!(before.shape.is_some() && via.shape.is_some());
+    assert_ne!(via.shape, before.shape);
+}
+
+#[test]
+fn a_hidden_public_field_is_part_of_the_field_set() {
+    let point = |edits: &[(&str, &str, &str)]| {
+        export_fixture(edits, HOOKS)
+            .surface
+            .types
+            .iter()
+            .find(|t| t.id == "type:Point")
+            .cloned()
+            .unwrap()
+    };
+    let before = point(&[]);
+    let hidden = point(&[(
+        LIB,
+        "    pub y: i32,\n",
+        "    pub y: i32,\n    #[doc(hidden)]\n    pub z: i32,\n",
+    )]);
+    assert_eq!(hidden.fields.len(), before.fields.len());
+    assert_eq!(hidden.hash, before.hash);
+    assert_ne!(hidden.fields_hash, before.fields_hash);
+    // A private field changes neither, and makes the struct unbuildable.
+    let private = point(&[(LIB, "    pub y: i32,\n", "    pub y: i32,\n    z: i32,\n")]);
+    assert_eq!(private.hash, before.hash);
+    assert_eq!(private.fields_hash, before.fields_hash);
+    assert!(before.contract.constructible && !private.contract.constructible);
+}
+
+#[test]
+fn a_listed_boundary_trait_an_older_tree_lacks_is_a_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    for (path, text) in FILES {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    let catalog = Catalog::parse(&[("hooks/ping.rs".into(), HOOKS.into())]).unwrap();
+    let mut index = Index::new(root, &[]);
+    let mut listed = boundary();
+    listed.roles.push(("FluidsHost".into(), Role::Call));
+    let export = build(root, &mut index, &catalog.hooks, &listed).unwrap();
+    assert!(
+        export.notes.iter().any(|note| note
+            == "boundary trait FluidsHost: not found in mod_api, its role is not recorded"),
+        "{:?}",
+        export.notes
+    );
 }
