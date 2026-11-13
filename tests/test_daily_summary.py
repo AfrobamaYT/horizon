@@ -184,6 +184,36 @@ class DailySummaryTests(unittest.TestCase):
         self.assertIn("`Refusals by name`", bodies)
         self.assertIn("no daily run has been green yet", bodies)
 
+    def test_a_shard_killed_for_memory_says_by_what_with_its_memory_time_and_running_tests(self):
+        stuck = [f"game::slow::case_{n}" for n in range(7)]
+        incomplete = {"shard": "horizon-world", "reason": "a test process crashed", "ended_by": "signal 9 (SIGKILL)",
+                      "cargo_exit": 101, "wall_seconds": 4454, "memory_peak_bytes": 34359738368,
+                      "memory_max_bytes": 34359738368, "oom_kills": 1, "still_running": stuck,
+                      "still_running_more": 0, "never_reported": None}
+        jobs = [job("shards / ignored-tests-shards (horizon-world)", "failure",
+                    ["Run the ignored tests that need prepared data"])] + GREEN_JOBS[2:]
+        api = Api(jobs)
+        self.run_summary(api, [shard_report(incomplete=[incomplete])], results=dict(LEGS, shards={"result": "failure"}))
+        body = next(body["body"] for _, path, body in api.writes if path == "issues")
+        self.assertIn("a test run did not complete: `horizon-world` killed by signal 9 (SIGKILL), out of memory "
+                      "(1 kill by the kernel); job memory peak 32.0 GiB of 32.0 GiB; after 74 min; still running past "
+                      "60 s: `game::slow::case_0`, `game::slow::case_1`, `game::slow::case_2`, `game::slow::case_3`, "
+                      "`game::slow::case_4` and 2 more.", body)
+
+    def test_what_a_stopped_run_reports_is_shown_only_as_names_and_numbers(self):
+        self.assertEqual(summary.stopped_text({"shard": "horizon-client#2of2", "in_progress": True}),
+                         "`horizon-client#2of2` was still running when the leg ended (its time limit, a cancel, or a "
+                         "lost runner); which tests were running and the process's end are not known")
+        self.assertEqual(summary.stopped_text({"shard": "x", "reason": "listed tests never reported a result",
+                                               "cargo_exit": 0, "wall_seconds": 30, "never_reported": 2}),
+                         "`x`: listed tests never reported a result (cargo exit 0); after 30 s; "
+                         "2 listed tests never reported")
+        text = summary.stopped_text({"shard": "x`<b>", "reason": "PRIVATE: payload", "ended_by": "signal 9; rm",
+                                     "still_running": ["ok::name", "not a name", "ghp_x y"], "wall_seconds": "9",
+                                     "memory_peak_bytes": True, "oom_kills": -1})
+        self.assertEqual(text, "a run did not complete; still running past 60 s: `ok::name`")
+        self.assertEqual(summary.stopped_text({"shard": "x"}), "`x` did not complete")
+
     def test_a_skipped_leg_with_no_jobs_is_not_green(self):
         api = Api([job for job in GREEN_JOBS if not job["name"].startswith("shards")])
         _, out = self.run_summary(api, [], results=dict(LEGS, shards={"result": "skipped"}))

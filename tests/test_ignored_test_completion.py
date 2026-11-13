@@ -73,7 +73,54 @@ class IgnoredTests(unittest.TestCase):
                 patch.object(ignored_tests, "run", return_value=None), contextlib.redirect_stdout(io.StringIO()):
             path = Path(folder) / "report.json"
             self.assertEqual(ignored_tests.main(["example"], str(path)), 1)
-            self.assertEqual(json.loads(path.read_text())["incomplete"], ["example"])
+            self.assertEqual(json.loads(path.read_text())["incomplete"], [{"shard": "example"}])
+
+    def test_a_test_process_killed_for_memory_reports_signal_memory_time_and_what_still_ran(self):
+        # The shape of the first daily's horizon-client#1of2 (run 43499359519): the library's test process killed by
+        # the out-of-memory killer with one test past 60 s; the later targets finished; cargo exits 101.
+        stuck = "game::native_datafix_tests::a_mods_host_upgrades_old_data_and_refuses_by_name"
+        output = ("     Running unittests src/lib.rs (target/debug/deps/horizon_client-0123)\nrunning 3 tests\n"
+                  "test game::a ... ok\ntest game::b ... ok\n"
+                  f"test {stuck} has been running for over 60 seconds\n"
+                  "error: test failed, to rerun pass `--lib`\n\nCaused by:\n  process didn't exit successfully: "
+                  "`/w/target/debug/deps/horizon_client-0123 --include-ignored --exact` (signal: 9, SIGKILL: kill)\n"
+                  + target(1, "test other::c ... ok\n", summary(passed=1)))
+        gib = 32 * 1024 ** 3
+        with tempfile.TemporaryDirectory() as cgroup:
+            Path(cgroup, "memory.peak").write_text(f"{gib}\n")
+            Path(cgroup, "memory.max").write_text(f"{gib}\n")
+            events = Path(cgroup, "memory.events")
+            events.write_text("low 0\nhigh 0\nmax 812\noom 1\noom_kill 2\n")
+
+            def execute(command, **_):
+                events.write_text("low 0\nhigh 0\nmax 990\noom 2\noom_kill 3\n")
+                return subprocess.CompletedProcess(command, 101, output)
+
+            with patch.object(ignored_tests, "CGROUP", Path(cgroup)), \
+                    patch.object(ignored_tests.subprocess, "run", side_effect=execute), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertIsNone(ignored_tests.run("horizon-client", []))
+        why = dict(ignored_tests._stopped)
+        self.assertGreaterEqual(why.pop("wall_seconds"), 0)
+        self.assertEqual(why, {
+            "reason": "a test process crashed", "ended_by": "signal 9 (SIGKILL)", "cargo_exit": 101,
+            "memory_peak_bytes": gib, "memory_max_bytes": gib, "oom_kills": 1,
+            "still_running": [stuck], "still_running_more": 0, "never_reported": None})
+
+    def test_the_report_names_the_run_in_progress_before_it_ends(self):
+        # A job stopped at its time limit kills this script too: what it wrote before the run is what is uploaded.
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "report.json"
+
+            def run(package, skip, number=None, count=None):
+                pending = json.loads(path.read_text())["incomplete"]
+                self.assertEqual([(item["shard"], item["in_progress"]) for item in pending], [("example", True)])
+                return {"fine": True}
+
+            with patch.object(ignored_tests, "known_failures", return_value={}), \
+                    patch.object(ignored_tests, "run", side_effect=run), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(ignored_tests.main(["example"], str(path)), 0)
+            self.assertEqual(json.loads(path.read_text())["incomplete"], [])
 
     def test_client_lib_halves_run_serially_and_preserve_failure_policy(self):
         package = "horizon-client-lib"

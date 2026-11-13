@@ -7,7 +7,9 @@ files (tools/ci/ignored_tests.py --report: test identity, kind, panic location, 
 - a failing test: files `Daily: <crate> <test>` (label `bug`) with its panic location, this run as the first that
   saw it and the pull requests merged since the last green daily as suspects, or comments on the open one;
 - a leg that failed without a test name (build error, timeout, killed, cancelled, skipped, or a leg with no
-  sanitised verdict): one issue per leg, `Daily: <leg> did not complete`, naming the failed steps;
+  sanitised verdict): one issue per leg, `Daily: <leg> did not complete`, naming the failed steps and, for a shard,
+  why each run stopped as its verdict file says (signal or exit status, memory peak and limit, wall time, the tests
+  still running past 60 s; stopped_text);
 - a test (or leg) green again: closes its open issue with a comment.
 A job it does not know, or an expected leg with no job, is a red leg ("did not report"), never green. Each comment
 names this run's URL, and none is posted twice for one run (a rerun of failed jobs, or a retry after a partial
@@ -122,6 +124,56 @@ def known(name):
             or name.split(" / ", 1)[0] in LEGS and " / " in name)
 
 
+# A run's name and a test's name as ignored_tests.py writes them; anything else in a report is not shown.
+SHARD_NAME = re.compile(r"[\w#:.-]{1,200}")
+TEST_NAME = re.compile(r"(?:r#)?[^\W\d]\w*(?:::(?:r#)?[^\W\d]\w*)*")
+STILL_RUNNING_SHOWN = 5
+
+
+def number(value):
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def gib(size):
+    return f"{size / 1024 ** 3:.1f} GiB"
+
+
+def stopped_text(entry):
+    """Why one run of a shard did not complete (ignored_tests.py's report: names and numbers only), as one sentence:
+    "`horizon-client#1of2` killed by signal 9 (SIGKILL), out of memory (1 kill); memory peak 32.0 GiB of 32.0 GiB;
+    after 70 min; still running: `a::b`". Unknown fields are left out, never guessed."""
+    shard = entry.get("shard")
+    name = f"`{shard}`" if isinstance(shard, str) and SHARD_NAME.fullmatch(shard) else "a run"
+    if entry.get("in_progress") is True:
+        return (f"{name} was still running when the leg ended (its time limit, a cancel, or a lost runner); which "
+                "tests were running and the process's end are not known")
+    parts = []
+    ended = entry.get("ended_by")
+    if isinstance(ended, str) and re.fullmatch(r"(?:signal|exit status) \d{1,5}(?: \(SIG[A-Z0-9]{1,10}\))?", ended):
+        parts.append(f"{name} killed by {ended}" if ended.startswith("signal") else f"{name} ended with {ended}")
+    else:
+        reason = entry.get("reason")
+        parts.append(f"{name}: {reason}" if isinstance(reason, str) and re.fullmatch(r"[a-z ()]{1,120}", reason)
+                     else f"{name} did not complete")
+        if (code := number(entry.get("cargo_exit"))) is not None:
+            parts[-1] += f" (cargo exit {code})"
+    if kills := number(entry.get("oom_kills")):
+        parts[-1] += f", out of memory ({kills} kill{'s' if kills > 1 else ''} by the kernel)"
+    peak, limit = number(entry.get("memory_peak_bytes")), number(entry.get("memory_max_bytes"))
+    if peak is not None:
+        parts.append(f"job memory peak {gib(peak)}" + (f" of {gib(limit)}" if limit is not None else ""))
+    if (seconds := number(entry.get("wall_seconds"))) is not None:
+        parts.append(f"after {seconds // 60} min" if seconds >= 120 else f"after {seconds} s")
+    still = [test for test in entry.get("still_running") or () if isinstance(test, str) and TEST_NAME.fullmatch(test)]
+    if still:
+        more = len(still) - STILL_RUNNING_SHOWN + (number(entry.get("still_running_more")) or 0)
+        parts.append("still running past 60 s: " + ", ".join(f"`{test}`" for test in still[:STILL_RUNNING_SHOWN])
+                     + (f" and {more} more" if more > 0 else ""))
+    if never := number(entry.get("never_reported")):
+        parts.append(f"{never} listed test{'s' if never > 1 else ''} never reported")
+    return "; ".join(parts)
+
+
 def named(problem):
     return not problem["test"].startswith("identity withheld")
 
@@ -151,7 +203,9 @@ def verdicts(jobs, reports, results):
             if report is None:
                 unfinished.append((job["name"], job["conclusion"], steps, "no verdict file: the leg ended before its tests reported"))
             elif report["incomplete"] or len(by_name) < len(problems) or not problems:
-                reason = ("a test run did not complete" if report["incomplete"] else
+                reason = ("a test run did not complete: " + ". ".join(
+                    stopped_text(entry if isinstance(entry, dict) else {}) for entry in report["incomplete"])
+                          if report["incomplete"] else
                           "failed tests whose names are withheld" if problems else "failed outside its tests")
                 unfinished.append((job["name"], job["conclusion"], steps, reason))
         elif job["name"] == "wasm-mods / fixture" and steps == [FIXTURE_TESTS_STEP] and by_name:

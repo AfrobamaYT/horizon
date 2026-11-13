@@ -34,8 +34,10 @@ TEST...` per package and target.
 (`--list` prints those commands instead), and fails unless every run reports exactly one test passed: a
 renamed test would otherwise match nothing and pass. Every test runs, then the step fails if any did.
 `--report FILE` also writes the run's verdict as JSON for the daily run's summary (tools/ci/daily_summary.py): each
-problem's package, test identity, kind, panic location and policy file, the tests that passed, and the shards that
-did not complete. It holds only what this script prints anyway, never test output.
+problem's package, test identity, kind, panic location and policy file, the tests that passed, and the runs that
+did not complete with why (stopped()). It is written before each run too, naming that run as in progress, so a job
+stopped at its time limit still leaves one. It holds only names and numbers this script prints anyway, never test
+output.
 
 Every reader refuses a malformed row, a test listed twice, a folder with no rows or with a file other than `*.txt`
 and README.md, and a file at the retired single-list path (tools/ci/check_ignored_test_rows.py checks this alone).
@@ -52,6 +54,7 @@ import io
 from functools import lru_cache
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -547,6 +550,48 @@ def failure_diagnostics(output):
 
 RUNNING_LONG = re.compile(r"^test (\S+) has been running for over 60 seconds$")
 CRASH_NAMES = 20
+# The job's cgroup (v2): the whole job's memory, compilation and file cache included, as the data-leg lines print it.
+CGROUP = Path("/sys/fs/cgroup")
+# Why the last run() returned None, for --report: names and numbers only (stopped()).
+_stopped = {}
+
+
+def cgroup_memory():
+    """The job cgroup's memory peak and limit in bytes (None where unreadable or unlimited) and its out-of-memory
+    kills so far (None where unreadable)."""
+    def read(name):
+        try:
+            return (CGROUP / name).read_text()
+        except OSError:
+            return ""
+    peak, limit = read("memory.peak").strip(), read("memory.max").strip()
+    kills = re.search(r"^oom_kill (\d+)$", read("memory.events"), re.M)
+    return {"memory_peak_bytes": int(peak) if peak.isdigit() else None,
+            "memory_max_bytes": int(limit) if limit.isdigit() else None,
+            "oom_kills": int(kills[1]) if kills else None}
+
+
+def stopped(reason, started, kills_before, process=None, results=(), expected=(), ended_by=None):
+    """Record why a run did not complete (`_stopped`), and return None: the run's verdict.
+
+    The reason; what ended the test process (`signal 9 (SIGKILL)`, `exit status 3`); cargo's exit; the wall time
+    since the run started; the job's memory peak and limit and the out-of-memory kills during the run; the tests
+    still running past 60 s (libtest's own notice; a test that started less than 60 s before the end is not known)
+    and how many listed tests never reported. Test names pass safe_identity."""
+    memory = cgroup_memory()
+    output = process.stdout if process is not None else ""
+    long = dict.fromkeys(found[1] for line in output.splitlines() if (found := RUNNING_LONG.match(line.strip())))
+    still = [name for name in long if name not in results]
+    kills = memory.pop("oom_kills")
+    _stopped.clear()
+    _stopped.update({
+        "reason": reason, "ended_by": ended_by, "cargo_exit": process.returncode if process is not None else None,
+        "wall_seconds": round(time.monotonic() - started), **memory,
+        "oom_kills": kills - kills_before if kills is not None and kills_before is not None else None,
+        "still_running": [safe_identity(name) for name in still[:CRASH_NAMES]],
+        "still_running_more": max(0, len(still) - CRASH_NAMES),
+        "never_reported": len(set(expected) - set(results)) if expected else None,
+    })
 
 
 def crash_report(package, output, expected, results):
@@ -625,7 +670,10 @@ def listed_result_records(line, expected, max_name_length):
 def run(package, skip, number=None, count=None, only=None):
     """Each test's result in `package`'s ignored library tests but `skip` (and, with a leg, the other legs'), or None if they didn't build.
 
-    `only=(target, tests)` runs just those ignored tests of one target (`lib`, `bin:NAME`, `test:NAME`) instead."""
+    `only=(target, tests)` runs just those ignored tests of one target (`lib`, `bin:NAME`, `test:NAME`) instead.
+    When it returns None, `_stopped` says why (stopped())."""
+    started = time.monotonic()
+    kills_before = cgroup_memory()["oom_kills"]
     # Resource-backed fixtures need a fresh home, not the runner user's game files.
     with tempfile.TemporaryDirectory(prefix="horizon-ignored-") as scratch:
         homes = {}
@@ -667,7 +715,7 @@ def run(package, skip, number=None, count=None, only=None):
             if listing.returncode or not names:
                 print(f"{package}: could not list the tests to split into legs (cargo exit {listing.returncode})")
                 compile_diagnostics(listing.stderr)
-                return None
+                return stopped("the tests could not be listed (a build or listing failure)", started, kills_before)
             others = sorted(name for name in names if not in_leg(name, number, count))
             # Every test this leg owns and does not skip must report a result.
             expected = set(names) - set(others) - set(skip)
@@ -709,6 +757,10 @@ def run(package, skip, number=None, count=None, only=None):
     # executable print their own summaries first, from inside a parent test; the parent's comes after them.
     last_summary = None
     crashed = cargo_failure = False
+    ended_by = None
+
+    def stop(reason):
+        return stopped(reason, started, kills_before, process, results, expected, ended_by)
 
     def finish_target():
         nonlocal incomplete, target_count, last_summary
@@ -745,7 +797,12 @@ def run(package, skip, number=None, count=None, only=None):
             # Cargo's own line for a test process that ended: 101 is libtest's "tests failed"; a signal or any
             # other status is a crash, whatever summaries came before it.
             if cargo_failure and "process didn't exit successfully" in line:
-                crashed |= status[1] == "signal" or status[2] != "101"
+                crash = status[1] == "signal" or status[2] != "101"
+                if crash and ended_by is None:
+                    number = int(status[2])
+                    name = signal.Signals(number).name if status[1] == "signal" and number in signal.valid_signals() else None
+                    ended_by = f"{status[1]} {number}" + (f" ({name})" if name else "")
+                crashed |= crash
                 cargo_failure = False
         if line.startswith("error: test failed, to rerun pass "):
             # Cargo's report on a test executable; text a test prints can't be told from it otherwise.
@@ -764,7 +821,7 @@ def run(package, skip, number=None, count=None, only=None):
     if crashed:
         print(f"{package}: a test process crashed (cargo exit {process.returncode})")
         crash_report(package, process.stdout, expected, results)
-        return None
+        return stop("a test process crashed")
     # A fixture that reruns its own test executable (`run_fresh_cases`, the death-weapon cases) prints the
     # child's result record for the same name beside the parent's. Several records for one name are expected
     # and combined above, so a FAILED among them fails the test; only an unreadable record is a framing problem.
@@ -777,15 +834,15 @@ def run(package, skip, number=None, count=None, only=None):
         for name, category in sorted(framing_problems.items()):
             bounded_record(f"  {safe_identity(name)}; category={category}\n", remaining)
         print(f"{package}: {len(framing_problems)} listed identities have ambiguous result framing")
-        return None
+        return stop("results whose lines could not be read")
     if incomplete or awaiting_count:
         print(f"{package}: test target did not finish (cargo exit {process.returncode})")
-        return None
+        return stop("a test target did not finish")
     if process.returncode and not target_number:
         compile_diagnostics(process.stdout)
     if process.returncode and all(results.values()):
         print(f"{package}: cargo exited {process.returncode} without a parsed test failure")
-        return None
+        return stop("cargo failed without a test failure (a build failure, or a process that ended early)")
     if missing := sorted(expected - results.keys()):
         print(f"{package}: {len(missing)} listed tests of this leg never reported a result:")
         remaining = _active_budget if _active_budget is not None else [FAILURE_TOTAL_BYTES]
@@ -798,12 +855,12 @@ def run(package, skip, number=None, count=None, only=None):
                 f"  {safe_identity(name)}; category=missing-result; {framing}\n", remaining)
             shown += emitted
         print(f"{len(missing) - shown} missing identities not shown (shared total byte budget)")
-        return None
+        return stop("listed tests never reported a result")
     if not summaries:
         # Unknown output is not necessarily a compiler diagnostic: never forward
         # a malformed test process's captured payload to public CI logs.
         print(f"{package}: no completed test-target summary; raw output withheld")
-        return None
+        return stop("no test target finished")
     return results
 
 
@@ -840,6 +897,11 @@ def main(shards, report=None):
         )
     ]
     for shard in selections:
+        # Written before the run, so a job stopped meanwhile (its time limit, a cancel) still uploads a report that
+        # names the run in progress; the run's own outcome replaces it.
+        write_report(report, dict(verdict, incomplete=[*verdict["incomplete"], {
+            "shard": shard, "in_progress": True, "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}]))
+        _stopped.clear()
         if shard.startswith(f"{ignored_shards.DAILY_ROWS}:"):
             _, package, target = shard.split(":", 2)
             print(f"{package} {target}: {len(groups[package, target])} daily tests", flush=True)
@@ -856,8 +918,9 @@ def main(shards, report=None):
                     skip.append(test)
             results = run(package, skip, number, count) if number is not None else run(package, skip)
         if results is None:
+            print(f"{shard}: did not complete: " + json.dumps(_stopped, sort_keys=True), flush=True)
             problems.append(f"{shard}: the test run did not complete")
-            verdict["incomplete"].append(shard)
+            verdict["incomplete"].append({"shard": shard, **_stopped})
             continue
         for test, passed in sorted(results.items()):
             listed = (package, test) in known
