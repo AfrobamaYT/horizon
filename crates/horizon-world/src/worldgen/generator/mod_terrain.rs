@@ -12,6 +12,7 @@ use crate::worldgen::terrain::TerrainError;
 pub(super) struct ModTerrain {
     /// The registered generator's id, for the refusals.
     id: String,
+    level: Box<str>,
     generator: Arc<dyn ModChunkGenerator>,
     pub(super) stages: VanillaStages,
 }
@@ -30,6 +31,7 @@ impl ModTerrain {
         self.generator.build_terrain(&mut Filling {
             chunk,
             registry,
+            level: &self.level,
             seed,
             min_y,
             height,
@@ -42,6 +44,7 @@ impl ModTerrain {
 struct Filling<'a, 'r> {
     chunk: &'a mut TerrainChunk<'r, GenBlockStates>,
     registry: &'static BlockRegistry,
+    level: &'a str,
     seed: i64,
     min_y: i32,
     height: i32,
@@ -53,6 +56,9 @@ impl ChunkAccess for Filling<'_, '_> {
     }
     fn pos(&self) -> ChunkPos {
         self.chunk.position()
+    }
+    fn level(&self) -> &str {
+        self.level
     }
     fn seed(&self) -> i64 {
         self.seed
@@ -149,6 +155,7 @@ impl OverworldGenerator {
     pub fn for_mod(
         data: Arc<GeneratorData>,
         seed: i64,
+        level: &str,
         stem: &Value,
         generator: Arc<dyn ModChunkGenerator>,
         structures: bool,
@@ -171,6 +178,7 @@ impl OverworldGenerator {
         stages.structures &= structures;
         let terrain = ModTerrain {
             id: id.to_owned(),
+            level: level.into(),
             generator,
             stages,
         };
@@ -217,7 +225,15 @@ mod tests {
     /// settings, at seed 12345.
     fn level(stages: VanillaStages) -> OverworldGenerator {
         let stem = stem(Value::from("minecraft:overworld"));
-        OverworldGenerator::for_mod(data(), 12345, &stem, Arc::new(Slab(stages)), true).unwrap()
+        OverworldGenerator::for_mod(
+            data(),
+            12345,
+            "minecraft:overworld",
+            &stem,
+            Arc::new(Slab(stages)),
+            true,
+        )
+        .unwrap()
     }
 
     fn stem(settings: Value) -> Value {
@@ -332,7 +348,14 @@ mod tests {
                 surface: true,
                 ..Default::default()
             }));
-            match OverworldGenerator::for_mod(data(), 0, &stem(settings), slab, true) {
+            match OverworldGenerator::for_mod(
+                data(),
+                0,
+                "minecraft:overworld",
+                &stem(settings),
+                slab,
+                true,
+            ) {
                 Ok(_) => panic!("opened"),
                 Err(e) => e.to_string(),
             }
@@ -373,7 +396,15 @@ mod tests {
             }
         }
         let stem = stem(Value::from("minecraft:nether"));
-        let level = OverworldGenerator::for_mod(data(), 0, &stem, Arc::new(Column), true).unwrap();
+        let level = OverworldGenerator::for_mod(
+            data(),
+            0,
+            "minecraft:overworld",
+            &stem,
+            Arc::new(Column),
+            true,
+        )
+        .unwrap();
         let chunk = level.worker().generate_proto(ChunkPos::new(0, 0)).unwrap();
         assert_eq!(chunk.terrain.min_y(), -64);
         for (y, block) in [
@@ -384,6 +415,32 @@ mod tests {
             (128, "minecraft:air"),
         ] {
             assert_eq!(chunk.block_name(0, y, 0), block, "y {y}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn staged_mod_terrain_receives_its_level_id() {
+        struct Pocket;
+        impl ModChunkGenerator for Pocket {
+            fn build_terrain(&self, chunk: &mut dyn ChunkAccess) {
+                if chunk.level() == "test:pocket" {
+                    let pos = chunk.pos();
+                    let stone = chunk.state("stone");
+                    assert!(chunk.set_block([pos.x * 16, 64, pos.z * 16], stone));
+                }
+            }
+        }
+        let stem = stem(Value::from("minecraft:overworld"));
+        for (id, expected) in [
+            ("test:pocket", "minecraft:stone"),
+            ("test:other", "minecraft:air"),
+        ] {
+            let level =
+                OverworldGenerator::for_mod(data(), 12345, id, &stem, Arc::new(Pocket), true)
+                    .unwrap();
+            let chunk = level.worker().generate_proto(ChunkPos::new(0, 0)).unwrap();
+            assert_eq!(chunk.block_name(0, 64, 0), expected, "level {id}");
         }
     }
 
@@ -404,7 +461,14 @@ mod tests {
         fields.structure_resources = None;
         let open = |stages| {
             let stem = stem(Value::from("minecraft:overworld"));
-            OverworldGenerator::for_mod(bare.clone(), 12345, &stem, Arc::new(Slab(stages)), true)
+            OverworldGenerator::for_mod(
+                bare.clone(),
+                12345,
+                "minecraft:overworld",
+                &stem,
+                Arc::new(Slab(stages)),
+                true,
+            )
         };
         let surface = VanillaStages {
             surface: true,
@@ -576,7 +640,16 @@ mod tests {
         let mut stem = stem(Value::from("minecraft:overworld"));
         stem["generator"]["biome_source"] =
             serde_json::json!({"type": "minecraft:multi_noise", "preset": "minecraft:overworld"});
-        let open = || OverworldGenerator::for_mod(data(), 12345, &stem, Arc::new(Hills), true);
+        let open = || {
+            OverworldGenerator::for_mod(
+                data(),
+                12345,
+                "minecraft:overworld",
+                &stem,
+                Arc::new(Hills),
+                true,
+            )
+        };
         let centers = [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(x, z)| ChunkPos::new(x, z));
         let first = open().unwrap();
         let mut worker = first.worker();

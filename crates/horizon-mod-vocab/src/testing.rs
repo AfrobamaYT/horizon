@@ -78,6 +78,68 @@ pub fn with_dispatch<R>(mods: Mods, f: impl FnOnce() -> R) -> R {
     f()
 }
 
+/// Rebuild a fixture's Parts snapshot from a fresh registration epoch on this thread.
+///
+/// On success the replacement stays installed. An error or unwinding restores the previous snapshot.
+/// Production registries remain frozen; only game fixtures that need a complete key table
+/// after their initial synthetic registration should use this.
+// hidden: only the shared game fixtures in horizon-mod-api rebuild their Parts epoch; not API.
+#[doc(hidden)]
+pub fn rebuild_parts<R, E>(f: impl FnOnce() -> Result<R, E>) -> Result<R, E> {
+    struct Restore {
+        previous: Option<&'static crate::parts::Installed>,
+        committed: bool,
+    }
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            if !self.committed {
+                crate::parts::TEST_PARTS.set(self.previous);
+            }
+        }
+    }
+    let mut restore = Restore {
+        previous: crate::parts::TEST_PARTS.replace(None),
+        committed: false,
+    };
+    let result = f();
+    restore.committed = result.is_ok();
+    result
+}
+
+#[cfg(test)]
+#[test]
+fn rebuilding_fixture_parts_commits_success_and_restores_on_error_or_unwind() {
+    use crate::parts::{custom_stat_declarations, install_input, installation::InstalledInput};
+    let install = |id: &str| {
+        install_input(InstalledInput {
+            custom_stats: vec![id.into()],
+            ..Default::default()
+        });
+    };
+    install("fixture:old");
+    let result: Result<(), ()> = rebuild_parts(|| {
+        assert!(custom_stat_declarations().is_empty());
+        install("fixture:new");
+        Ok(())
+    });
+    assert_eq!(result, Ok(()));
+    assert_eq!(custom_stat_declarations(), ["fixture:new"]);
+    let result: Result<(), &str> = rebuild_parts(|| {
+        install("fixture:failed");
+        Err("fixture refused")
+    });
+    assert_eq!(result, Err("fixture refused"));
+    assert_eq!(custom_stat_declarations(), ["fixture:new"]);
+    let panic = std::panic::catch_unwind(|| {
+        let _: Result<(), ()> = rebuild_parts(|| {
+            install("fixture:panicked");
+            panic!("fixture refused");
+        });
+    });
+    assert!(panic.is_err());
+    assert_eq!(custom_stat_declarations(), ["fixture:new"]);
+}
+
 /// Capture this thread's test installation for work sent to another thread.
 ///
 /// Production installations are process-wide. Tests isolate them per thread; a worker
