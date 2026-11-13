@@ -369,3 +369,10 @@ shearing when no part answers. Entity parts are native-only, so wasm mods do not
 | `isValidRailShape(shape)` | **Covered** | Server `BlockPart::rail_valid_shape` (`hooks/rail_valid_shape.rs`), with the rail's state, asked before `RailState` writes a shape; a refused shape keeps the current one. It starts false for a value the rail's `shape` property lacks, as NeoForge's default answers. |
 
 A minecart now treats any block in `#minecraft:rails` built on `BaseRailBlock` as track (`BaseRailBlock.isRail`), where it used to accept only the four vanilla rail names.
+
+## Container loot results
+
+| Surface | Status | Contract |
+|---|---|---|
+| `container_loot_filled` | Implemented; Horizon addition | Server-side rolled list before shuffle and placement; blocks, chest minecarts and chest boats; each double-chest half separately. Only a player open that starts the fill names an opener. Oversized counts are trimmed and excess stacks discarded. |
+| Global loot modifier data files (#1270) | Separate work | This hook exposes container results and does not load NeoForge modifier data files. |
