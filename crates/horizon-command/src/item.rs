@@ -33,6 +33,7 @@ pub const DECODED_COMPONENTS: &[&str] = &[
     "minecraft:custom_name",
     "minecraft:item_name",
     "minecraft:block_entity_data",
+    "minecraft:potion_duration_scale",
 ];
 
 /// Validate and decode a component into the value representation shared with stacks.
@@ -41,6 +42,9 @@ pub const DECODED_COMPONENTS: &[&str] = &[
 pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Result<Tag, String> {
     if !DECODED_COMPONENTS.contains(&id) {
         return Ok(value.clone());
+    }
+    if id == "minecraft:potion_duration_scale" {
+        return potion_duration_scale(value).map(|value| Tag::Float(value.to_bits()));
     }
     decode_component(id, value, reg)?;
     if id == "minecraft:block_entity_data" {
@@ -104,6 +108,7 @@ pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), Strin
             }
             Ok(())
         }
+        "minecraft:potion_duration_scale" => potion_duration_scale(t).map(|_| ()),
         "minecraft:rarity" => match t {
             Tag::String(s) => {
                 let s = s.to_string_lossy();
@@ -141,6 +146,25 @@ pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), Strin
             _ => Ok(()),
         },
         _ => Ok(()),
+    }
+}
+
+/// `ExtraCodecs.NON_NEGATIVE_FLOAT`: boxed `Number.floatValue`, then `Float.compareTo`.
+/// The inclusive bounds reject negative zero, NaN, and both infinities.
+fn potion_duration_scale(t: &Tag) -> Result<f32, String> {
+    let value = match t {
+        Tag::Byte(value) => f32::from(*value),
+        Tag::Short(value) => f32::from(*value),
+        Tag::Int(value) => *value as f32,
+        Tag::Long(value) => *value as f32,
+        Tag::Float(value) => f32::from_bits(*value),
+        Tag::Double(value) => f64::from_bits(*value) as f32,
+        _ => return Err("Not a number".into()),
+    };
+    if value.is_finite() && !value.is_sign_negative() {
+        Ok(value)
+    } else {
+        Err(format!("Value must be non-negative: {value}"))
     }
 }
 /// `ItemEnchantments.CODEC`: registry keys and boxed-number levels in 1..=255.

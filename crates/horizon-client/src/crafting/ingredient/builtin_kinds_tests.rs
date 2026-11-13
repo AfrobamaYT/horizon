@@ -241,3 +241,136 @@ fn recipe_book_and_placement_use_component_ingredient_item_lists() {
         ["minecraft:diamond_sword"]
     );
 }
+
+#[test]
+fn potion_duration_scale_decodes_and_matches_float_values() {
+    const ID: &str = "minecraft:potion_duration_scale";
+    let mut items = Items::empty();
+    items.component_defaults = std::sync::Arc::new(std::collections::HashMap::from([(
+        "minecraft:potion".into(),
+        horizon_core::nbt::Compound::from_iter([(ID.into(), Tag::Double(1.5f64.to_bits()))]),
+    )]));
+    let load = load();
+    let context = load.loop_context(LoopSide::Server, []);
+    let positive = parse(
+        r#"{"type":"neoforge:components","items":"minecraft:potion","components":{"minecraft:potion_duration_scale":1.5}}"#,
+        &items,
+    );
+    let mut stack = ItemStack::new("minecraft:potion", 1);
+    assert!(positive.test_in(&context, &stack), "borrowed item default");
+    for value in [
+        Tag::Float(1.5f32.to_bits()),
+        Tag::Double(1.50000000001f64.to_bits()),
+    ] {
+        stack.data_mut().set_loot_component(ID, &Some(value));
+        assert!(positive.test_in(&context, &stack), "floatValue rounding");
+    }
+    stack
+        .data_mut()
+        .set_loot_component(ID, &Some(Tag::Float(1.25f32.to_bits())));
+    assert!(!positive.test_in(&context, &stack));
+
+    let one = parse(
+        r#"{"type":"neoforge:components","items":"minecraft:potion","components":{"minecraft:potion_duration_scale":1}}"#,
+        &items,
+    );
+    for value in [
+        Tag::Byte(1),
+        Tag::Short(1),
+        Tag::Int(1),
+        Tag::Long(1),
+        Tag::Float(1.0f32.to_bits()),
+        Tag::Double(1.0f64.to_bits()),
+    ] {
+        assert_eq!(
+            horizon_command::item::decoded_component_value(ID, &value, &items.component_registry)
+                .unwrap(),
+            Tag::Float(0x3f80_0000),
+        );
+        stack.data_mut().set_loot_component(ID, &Some(value));
+        assert!(one.test_in(&context, &stack));
+    }
+    let large = parse(
+        r#"{"type":"neoforge:components","items":"minecraft:potion","components":{"minecraft:potion_duration_scale":4294967296}}"#,
+        &items,
+    );
+    stack
+        .data_mut()
+        .set_loot_component(ID, &Some(Tag::Long(4_294_967_296)));
+    assert!(
+        large.test_in(&context, &stack),
+        "boxed Long does not truncate"
+    );
+
+    let zero = parse(
+        r#"{"type":"neoforge:components","items":"minecraft:potion","components":{"minecraft:potion_duration_scale":0}}"#,
+        &items,
+    );
+    // JsonOps converts the integral decimal -0.0 to a zero byte before decoding.
+    let json_zero = parse(
+        r#"{"type":"neoforge:components","items":"minecraft:potion","components":{"minecraft:potion_duration_scale":-0.0}}"#,
+        &items,
+    );
+    for value in [Tag::Byte(0), Tag::Double(f64::MIN_POSITIVE.to_bits())] {
+        assert_eq!(
+            horizon_command::item::decoded_component_value(ID, &value, &items.component_registry)
+                .unwrap(),
+            Tag::Float(0),
+        );
+        stack.data_mut().set_loot_component(ID, &Some(value));
+        assert!(zero.test_in(&context, &stack));
+        assert!(json_zero.test_in(&context, &stack));
+    }
+    stack
+        .data_mut()
+        .set_loot_component(ID, &Some(Tag::Float((-0.0f32).to_bits())));
+    assert!(
+        !zero.test_in(&context, &stack),
+        "Float.equals distinguishes zero signs"
+    );
+
+    for source in [
+        r#"{"type":"neoforge:components","items":"minecraft:potion","components":{"minecraft:potion_duration_scale":-1}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:potion","components":{"minecraft:potion_duration_scale":"fast"}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:potion","components":{"minecraft:potion_duration_scale":{}}}"#,
+    ] {
+        let json: Value = serde_json::from_str(source).unwrap();
+        assert!(Ingredient::parse(&json, &items).is_none(), "{source}");
+        let rule = IngredientRule::Components {
+            patch: crate::json_nbt::json_to_compound(json["components"].as_object().unwrap())
+                .unwrap(),
+            removed: Vec::new(),
+            strict: false,
+        };
+        let error = components::validate(&rule, &items).unwrap_err();
+        assert!(error.contains(ID), "{error}");
+    }
+    for value in [
+        Tag::Float((-0.0f32).to_bits()),
+        Tag::Double((-0.0f64).to_bits()),
+        Tag::Double((-f64::MIN_POSITIVE).to_bits()),
+        Tag::Float(f32::NAN.to_bits()),
+        Tag::Float(0x7f80_0001),
+        Tag::Double(f64::NAN.to_bits()),
+        Tag::Float(f32::INFINITY.to_bits()),
+        Tag::Float(f32::NEG_INFINITY.to_bits()),
+        Tag::Double(f64::MAX.to_bits()),
+    ] {
+        let rule = IngredientRule::Components {
+            patch: horizon_core::nbt::Compound::from_iter([(ID.into(), value)]),
+            removed: Vec::new(),
+            strict: false,
+        };
+        let error = components::validate(&rule, &items).unwrap_err();
+        assert!(error.contains(ID), "{error}");
+    }
+    assert_eq!(
+        horizon_command::item::decoded_component_value(
+            ID,
+            &Tag::Float(f32::MAX.to_bits()),
+            &items.component_registry,
+        )
+        .unwrap(),
+        Tag::Float(0x7f7f_ffff),
+    );
+}
