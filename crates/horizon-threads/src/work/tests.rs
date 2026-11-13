@@ -55,23 +55,41 @@ fn sampled(name: &'static str, body: fn()) -> Vec<Record> {
     records
 }
 
+/// The CPU samples of `body` run under `name`, run again (up to five times) until there are more
+/// than `at_least` of them. A thread's CPU timer fires on the scheduler's tick while the thread
+/// runs, so on a loaded runner, where the thread runs in short slices between other work, a run
+/// can collect far fewer samples than its CPU time is worth; the shares are judged on a run that
+/// has enough.
+fn enough_cpu_samples(name: &'static str, body: fn(), at_least: u64) -> Vec<Record> {
+    let mut counts = Vec::new();
+    for _ in 0..5 {
+        let samples: Vec<_> = sampled(name, body)
+            .into_iter()
+            .filter(|r| r.kind == Kind::Cpu)
+            .collect();
+        if samples.len() as u64 > at_least {
+            return samples;
+        }
+        counts.push(samples.len());
+    }
+    panic!("never more than {at_least} samples in five runs: {counts:?}");
+}
+
 #[test]
 fn entity_samples_split_by_the_work_done_under_each_type() {
-    let records = sampled("p-entity", || {
-        let (a, b) = (entity_id("p-test:a"), entity_id("p-test:b"));
-        for _ in 0..8 {
-            set_entity(a);
-            spin(30);
-            set_entity(b);
-            spin(10);
-        }
-        clear_work();
-    });
-    let samples: Vec<_> = records.iter().filter(|r| r.kind == Kind::Cpu).collect();
-    assert!(
-        samples.len() as u64 > cpu_count(200),
-        "{} samples",
-        samples.len()
+    let samples = enough_cpu_samples(
+        "p-entity",
+        || {
+            let (a, b) = (entity_id("p-test:a"), entity_id("p-test:b"));
+            for _ in 0..8 {
+                set_entity(a);
+                spin(30);
+                set_entity(b);
+                spin(10);
+            }
+            clear_work();
+        },
+        cpu_count(200),
     );
     let share = |n: &str| {
         let hits = samples
@@ -90,17 +108,20 @@ fn entity_samples_split_by_the_work_done_under_each_type() {
 
 #[test]
 fn spans_nest_and_restore_the_outer_one() {
-    let records = sampled("p-span", || {
-        let outer = enter_span("p-test-outer");
-        spin(20);
-        let inner = enter_span("p-test-inner");
-        spin(20);
-        leave_span(inner);
-        spin(20);
-        leave_span(outer);
-        spin(20);
-    });
-    let samples: Vec<_> = records.iter().filter(|r| r.kind == Kind::Cpu).collect();
+    let samples = enough_cpu_samples(
+        "p-span",
+        || {
+            let outer = enter_span("p-test-outer");
+            spin(20);
+            let inner = enter_span("p-test-inner");
+            spin(20);
+            leave_span(inner);
+            spin(20);
+            leave_span(outer);
+            spin(20);
+        },
+        cpu_count(50),
+    );
     let share = |n: Option<&str>| {
         let hits = samples
             .iter()
@@ -108,11 +129,6 @@ fn spans_nest_and_restore_the_outer_one() {
             .count();
         hits as f64 / samples.len() as f64
     };
-    assert!(
-        samples.len() as u64 > cpu_count(50),
-        "{} samples",
-        samples.len()
-    );
     assert!(
         (share(Some("p-test-outer")) - 0.5).abs() < 0.15,
         "{}",
