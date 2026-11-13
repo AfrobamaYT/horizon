@@ -807,6 +807,9 @@ impl Package {
             return Err(format!("{MANIFEST}: over {} MiB", MAX_MANIFEST >> 20));
         }
         let mut package = Self::from_parts(&toml, icon, has_cargo, has_source, has_wasm)?;
+        if uses && package.manifest.native.is_none() && package.manifest.wasm.is_none() {
+            return Err(format!("a content mod has no code, so no {USES}"));
+        }
         if let Some(wasm) = &package.manifest.wasm {
             let mut bytes = Vec::new();
             zip.by_name(WASM)
@@ -1498,8 +1501,17 @@ capabilities = ["registries"]
             .unwrap_err()
             .contains(USES)
         );
-        // A content mod has no code to scan, so no table either.
+        // A content mod has no code to scan, so no table either, written or read.
         assert!(Package::write_files(EXAMPLE, &[(USES, table)]).is_err());
+        use std::io::Write;
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (name, bytes) in [(MANIFEST, EXAMPLE.as_bytes()), (USES, table)] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        let mut archive = zip::ZipArchive::new(zip.finish().unwrap()).unwrap();
+        assert!(Package::read_zip(&mut archive).unwrap_err().contains(USES));
     }
 
     #[test]
