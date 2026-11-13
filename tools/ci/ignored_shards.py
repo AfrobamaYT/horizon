@@ -3,6 +3,8 @@
 
 Usage:
   ignored_shards.py --matrix --all      `matrix=`, every shard and the daily-rows legs (the daily run)
+  ignored_shards.py --prepare PACKAGE [ARG...]   run what PACKAGE's tests need built first (PREPARE), with ARGs
+                                                 appended (`-j2`); nothing when it needs nothing
   ignored_shards.py --matrix BASE HEAD  `matrix=`, the shards this pull request must run
 
 The ignored-tests check is a matrix with one package per shard; this file is the single
@@ -15,6 +17,7 @@ workspace (launcher/Cargo.lock) and selects nothing.
 """
 
 import json
+import subprocess
 import sys
 import tomllib
 from functools import lru_cache
@@ -39,6 +42,14 @@ DAILY_ROWS = "daily-rows"
 # workspace builds GPUI and the launcher from nothing (25 minutes on 8 cores, measured cold), which does not fit beside
 # the other packages' groups in one 60-minute leg. Coverage, not spreading a slow job.
 DAILY_ROWS_LEGS = {".": DAILY_ROWS, "launcher": "daily-rows-launcher"}
+# What a package's tests need built that `cargo test` does not build itself, by package: the one command, run
+# before its tests by `verify` (dyna-ci.yml), the launcher job and the daily run (tools/ci/ignored_tests.py), so they
+# cannot drift. horizon-mod-package's holder tests start the `holder_actor` example from beside their test executable
+# (target/debug/examples, the test profile's folder).
+PREPARE = {
+    "horizon-mod-package": ["cargo", "build", "--locked", "--profile", "test", "-p", "horizon-mod-package",
+                            "--features", "runtime-process", "--example", "holder_actor"],
+}
 # A package too big for one test process's memory runs as several legs, `PACKAGE#NofM` (tools/ci/ignored_tests.py
 # gives each test to exactly one leg). horizon-client's single process was killed (signal 9) on three main runs.
 LEGS = {"horizon-client": 2}
@@ -158,6 +169,12 @@ def select(paths, dependencies):
 
 if __name__ == "__main__":
     arguments = sys.argv[1:]
+    if arguments[:1] == ["--prepare"] and len(arguments) >= 2:
+        command = PREPARE.get(arguments[1])
+        if command:
+            print("$ " + " ".join([*command, *arguments[2:]]), flush=True)
+            sys.exit(subprocess.run([*command, *arguments[2:]], cwd=ROOT).returncode)
+        sys.exit(0)
     every = arguments[:2] == ["--matrix", "--all"]
     selected = len(arguments) == 3 and arguments[0] == "--matrix"
     if every:

@@ -734,6 +734,14 @@ def run(package, skip, number=None, count=None, only=None):
         if client_half:
             # The runner's own cap (tools/ci/cargo_jobs.py --cap) when set, else the old fixed one.
             command.append(f"--jobs={os.environ.get('CI_JOBS', '8')}")
+        # What the package's tests need built first (ignored_shards.PREPARE: the command verify runs too).
+        if prepare := ignored_shards.PREPARE.get(package):
+            built = subprocess.run(prepare, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                   errors="replace", env=env, cwd=ROOT / workspace)
+            if built.returncode:
+                print(f"{package}: building what its tests need failed (cargo exit {built.returncode})")
+                compile_diagnostics(built.stdout)
+                return stopped("what the tests need could not be built", started, kills_before)
         expected = set()
         timing = os.environ.get("HORIZON_DATA_LEG_TIMING") == "1"
         phase = f"{package}#{number}of{count}" if number is not None else package
@@ -1018,7 +1026,8 @@ if __name__ == "__main__":
                         help="print the daily rows' tests of one package's target, one per line")
     args = parser.parse_args()
     if args.daily_tests:
-        print("\n".join(daily_tests(*args.daily_tests)))
+        # Nothing at all for no rows: an empty line would read as one empty name.
+        sys.stdout.write("".join(f"{test}\n" for test in daily_tests(*args.daily_tests)))
     elif args.needs and args.list:
         print("\n".join(shlex.join(command) for command in needs_commands(args.needs, args.jobs)))
     elif args.needs and args.one_process_each:
