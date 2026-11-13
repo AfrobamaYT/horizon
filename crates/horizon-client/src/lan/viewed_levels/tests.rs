@@ -40,7 +40,13 @@ fn hub_answered(uuids: &[u128], answer: Answer) -> (Hub, Vec<Receiver<Out>>) {
         announce: false,
         ..crate::lan::NetConfig::loopback(0, "ViewedLevelsTest".into(), 4)
     };
-    let sync = std::sync::Arc::new(SyncData::empty());
+    // Players are an entity type its clients know, so the levels' players are tracked.
+    let mut sync = SyncData::empty();
+    sync.builtin.registries.insert(
+        "minecraft:entity_type".into(),
+        horizon_protocol::registry::Ids::from_names(vec!["minecraft:player".into()]),
+    );
+    let sync = std::sync::Arc::new(sync);
     let lan = crate::lan::Lan::start_with(sync.clone(), config).unwrap();
     let encoder = crate::lan::chunks::ChunkEncoder::new(
         [] as [(std::sync::Arc<str>, bool); 0],
@@ -755,4 +761,65 @@ fn a_revision_1_client_is_not_switched() {
             .iter()
             .any(|g| matches!(g, Got::Open(_) | Got::Close(_)))
     );
+}
+
+/// The entity ids of `kind` (`AddEntity` or `RemoveEntities`) the client was sent wrapped in the
+/// Nether's runs, in order.
+fn wrapped_entities(got: &[Got], kind: i32) -> Vec<i32> {
+    got.iter()
+        .filter_map(|g| match g {
+            Got::Wrapped { level, id, body } if *level == NETHER_INDEX && *id == kind => {
+                match C::decode(*id, body).unwrap() {
+                    C::AddEntity(p) => Some(vec![p.id]),
+                    C::RemoveEntities(p) => Some(p.ids),
+                    other => panic!("{other:?}"),
+                }
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+/// A player of a viewed level that respawns (`ServerEntity.removePairing`, then a new entity):
+/// the viewer's view forgets it and is sent its removal, wrapped, then a fresh `AddEntity`.
+#[test]
+fn a_respawned_player_is_removed_from_a_view_and_added_again() {
+    let (mut hub, rx) = hub_with(&[1, 2], 2);
+    hub.set_viewed_areas(1, "test:portal", nether(1)).unwrap();
+    hub.guests.update(1, |g| {
+        g.dimension = NETHER.into();
+        g.position = [8.5, 64.0, 8.5];
+    });
+    hub.set_dimension(NETHER);
+    let mut world = lit_columns(1);
+    for _ in 0..2 {
+        run_level(&mut hub, &mut world);
+        hub.ticks += 1;
+    }
+    let player = hub.guests[1].entity_id;
+    let tracked = |hub: &Hub| {
+        let view = hub.guests[0].viewed.view(NETHER).unwrap();
+        view.tracker.is_tracking(player)
+    };
+    assert!(tracked(&hub), "the viewer's view tracks the player");
+    assert!(wrapped_entities(&got(&rx[0]), ids::ADD_ENTITY).contains(&player));
+    hub.respawned(player);
+    assert!(!tracked(&hub));
+    let removed = got(&rx[0]);
+    assert_eq!(
+        wrapped_entities(&removed, ids::REMOVE_ENTITIES),
+        vec![player]
+    );
+    assert!(
+        !removed.contains(&Got::Plain(ids::REMOVE_ENTITIES)),
+        "not its own level's"
+    );
+    run_level(&mut hub, &mut world);
+    assert_eq!(
+        wrapped_entities(&got(&rx[0]), ids::ADD_ENTITY),
+        vec![player],
+        "a fresh AddEntity"
+    );
+    assert!(tracked(&hub));
 }

@@ -4793,11 +4793,8 @@ impl Hub {
     /// respawned one as a new entity at the next tick. Their clients would otherwise keep
     /// the dead body, lying down, wherever the player goes.
     pub fn respawned(&mut self, id: i32) {
-        self.guests.update_all(|g| {
-            if g.entity_id != id && g.tracker.forget(id) {
-                g.send(&C::RemoveEntities(play::RemoveEntities { ids: vec![id] }));
-            }
-        });
+        self.guests
+            .update_all(|g| super::viewed_levels::entities::forget_entity(g, id));
     }
 
     /// A respawn point whose block is gone or blocked: the respawning player

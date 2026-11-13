@@ -281,6 +281,38 @@ mod tests {
         assert!(nether.world.block_entities.contains_key(&(83, 70, 85)));
     }
 
+    /// The client's server names the chest's block entity type 0: the chest's state.
+    fn with_chests(game: &mut Game) -> horizon_world::registry::BlockStateId {
+        std::sync::Arc::make_mut(&mut game.remote.as_mut().unwrap().builtin)
+            .registries
+            .insert(
+                "minecraft:block_entity_type".into(),
+                horizon_protocol::registry::Ids::from_names(vec!["minecraft:chest".into()]),
+            );
+        (game.pack.assets.registry)
+            .default_state("minecraft:chest")
+            .unwrap()
+    }
+
+    /// A chest's data at `pos`: 7 diamonds in slot 3.
+    fn diamonds(pos: [i32; 3]) -> C {
+        let items =
+            horizon_core::nbt::parse_snbt(r#"{Items:[{Slot:3b,id:"minecraft:diamond",count:7}]}"#);
+        C::BlockEntityData(play::BlockEntityData {
+            pos,
+            kind: 0,
+            tag: items.unwrap().0,
+        })
+    }
+
+    /// The diamonds of the chest at `pos` in the player's world, if it has them.
+    fn diamonds_at(game: &Game, pos: (i32, i32, i32)) -> Option<u32> {
+        let chest = game.world.block_entities.get(&pos).expect("a chest");
+        let item = chest.slots()[3].as_ref()?;
+        assert_eq!(item.item.as_ref(), "minecraft:diamond");
+        Some(item.count)
+    }
+
     /// A chest placed in a viewed column after its chunk packet keeps the data sent for it: an
     /// empty position, then the chest's block update and data, then the travel, and the chest in
     /// the new world holds its diamonds. Data for a position whose block has no block entity is
@@ -290,26 +322,7 @@ mod tests {
     fn a_chest_placed_in_a_viewed_column_keeps_its_data_through_the_travel() {
         let mut resources = None;
         let mut game = client(&mut resources);
-        std::sync::Arc::make_mut(&mut game.remote.as_mut().unwrap().builtin)
-            .registries
-            .insert(
-                "minecraft:block_entity_type".into(),
-                horizon_protocol::registry::Ids::from_names(vec!["minecraft:chest".into()]),
-            );
-        let chest = (game.pack.assets.registry)
-            .default_state("minecraft:chest")
-            .unwrap();
-        let items =
-            horizon_core::nbt::parse_snbt(r#"{Items:[{Slot:3b,id:"minecraft:diamond",count:7}]}"#)
-                .unwrap()
-                .0;
-        let data = |pos| {
-            C::BlockEntityData(play::BlockEntityData {
-                pos,
-                kind: 0,
-                tag: items.clone(),
-            })
-        };
+        let chest = with_chests(&mut game);
         game.handle_packet(open(1, NETHER)).unwrap();
         game.handle_packet(run(1, &[column(5, 5)])).unwrap();
         game.handle_packet(run(1, &[block(83, 70, 85, AIR)]))
@@ -318,8 +331,8 @@ mod tests {
             1,
             &[
                 block(83, 70, 85, chest),
-                data([83, 70, 85]),
-                data([84, 70, 85]),
+                diamonds([83, 70, 85]),
+                diamonds([84, 70, 85]),
             ],
         ))
         .unwrap();
@@ -334,13 +347,46 @@ mod tests {
             "the chest's, not the stone's"
         );
         game.handle_packet(respawn(NETHER, 3)).unwrap();
-        let placed = game
-            .world
-            .block_entities
-            .get(&(83, 70, 85))
-            .expect("its chest");
-        let item = placed.slots()[3].as_ref().expect("its data");
-        assert_eq!((item.item.as_ref(), item.count), ("minecraft:diamond", 7));
+        assert_eq!(diamonds_at(&game, (83, 70, 85)), Some(7));
+    }
+
+    /// Another block replacing a viewed block entity takes its data with it: a chest with data,
+    /// then air, then a chest again with none, is an empty chest after the travel. A chest's own
+    /// state change (another facing) keeps the data.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_block_replacing_a_viewed_block_entity_takes_its_data() {
+        let mut resources = None;
+        let mut game = client(&mut resources);
+        let chest = with_chests(&mut game);
+        let turned = horizon_world::registry::BlockStateId(chest.0 + 1);
+        assert_eq!(&*game.res.facts().get(turned).name, "minecraft:chest");
+        game.handle_packet(open(1, NETHER)).unwrap();
+        game.handle_packet(run(1, &[column(5, 5)])).unwrap();
+        game.handle_packet(run(
+            1,
+            &[
+                block(83, 70, 85, chest),
+                diamonds([83, 70, 85]),
+                block(83, 70, 85, AIR),
+                block(83, 70, 85, chest),
+                block(86, 70, 85, chest),
+                diamonds([86, 70, 85]),
+                block(86, 70, 85, turned),
+            ],
+        ))
+        .unwrap();
+        game.handle_packet(respawn(NETHER, 3)).unwrap();
+        assert_eq!(
+            diamonds_at(&game, (83, 70, 85)),
+            None,
+            "the new chest is empty"
+        );
+        assert_eq!(
+            diamonds_at(&game, (86, 70, 85)),
+            Some(7),
+            "the turned chest keeps them"
+        );
     }
 
     /// A travel into a level the client does not view enters it afresh: every viewed world goes,

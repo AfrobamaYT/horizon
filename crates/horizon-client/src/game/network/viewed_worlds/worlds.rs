@@ -144,9 +144,17 @@ impl ViewedWorld {
     /// A server's block: a state the client lacks (a server with mods it lacks) reads as air,
     /// as in its chunks.
     fn set_block(&mut self, [x, y, z]: [i32; 3], state: i32) {
-        let state = state.max(0) as u32;
-        let state = BlockStateId(if known_block_state(state) { state } else { 0 });
-        self.world.set_stored(x, y, z, state);
+        self.world.set_stored(x, y, z, stored_state(state));
+    }
+
+    /// `LevelChunk.setBlockState` with another block at `pos`: the block entity there goes, with
+    /// the data kept for it (a block's own state change keeps them).
+    pub(super) fn forget_block_entity(&mut self, [x, y, z]: [i32; 3]) {
+        let packed_xz = ((x & 15) << 4 | (z & 15)) as i8;
+        if let Some(infos) = self.block_entities.get_mut(&(x >> 4, z >> 4)) {
+            infos.retain(|info| (info.packed_xz, i32::from(info.y)) != (packed_xz, y));
+        }
+        self.world.block_entities.remove(&(x, y, z));
     }
 
     /// The column `key` goes, or is sent again: so do its block entities.
@@ -157,6 +165,17 @@ impl ViewedWorld {
                 .block_entities
                 .unload(|p| (p.0 >> 4, p.2 >> 4) == key);
         }
+    }
+
+    /// A block with a block entity placed at `pos` (`LevelChunk.setBlockState`): the travel makes
+    /// its block entity, with the data sent for it since, if any.
+    pub(super) fn placed_block_entity(&mut self, pos: [i32; 3]) {
+        let placed = play::BlockEntityData {
+            pos,
+            kind: -1,
+            tag: horizon_core::nbt::Tag::End,
+        };
+        self.block_entity_data(placed, true);
     }
 
     /// `handleBlockEntityData`: a block entity's data, kept for the column that holds it, when
@@ -187,6 +206,12 @@ impl ViewedWorld {
             None => {}
         }
     }
+}
+
+/// The state a server's block update leaves: one the client lacks reads as air.
+pub(super) fn stored_state(state: i32) -> BlockStateId {
+    let state = state.max(0) as u32;
+    BlockStateId(if known_block_state(state) { state } else { 0 })
 }
 
 /// The worlds a connection views (`Remote::viewed`), by the level's index in the Login packet's

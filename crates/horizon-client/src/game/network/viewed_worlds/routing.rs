@@ -3,8 +3,9 @@
 //! drops it. A payload the protocol refuses closes the connection with its named reason.
 use super::{
     entities::MAX_TABLE,
-    worlds::{MAX_COLUMNS, ViewedWorld},
+    worlds::{MAX_COLUMNS, ViewedWorld, stored_state},
 };
+use crate::game::remote_chunks::section_blocks;
 use crate::game::{Game, remote::Remote};
 use horizon_client::blocks::BlockFacts;
 use horizon_client::{text::Text, viewed_levels_net::MAX_LEVELS, world::World};
@@ -88,6 +89,22 @@ fn block_entity_block(facts: &BlockFacts, state: BlockStateId) -> bool {
         || horizon_client::containers::BlockEntity::for_block(&block.name).is_some()
 }
 
+/// Where a block update puts another block than `world` holds, and its state: the block entity
+/// there goes and the new block's comes (`LevelChunk.setBlockState`); a block's own state change
+/// keeps it.
+fn other_blocks(facts: &BlockFacts, world: &World, packet: &C) -> Vec<([i32; 3], BlockStateId)> {
+    let changes: Vec<([i32; 3], i32)> = match packet {
+        C::BlockUpdate(p) => vec![(p.pos, p.state)],
+        C::SectionBlocksUpdate(p) => section_blocks(p).collect(),
+        _ => return Vec::new(),
+    };
+    let name = |state| &facts.get(state).name;
+    (changes.into_iter())
+        .map(|(pos, state)| (pos, stored_state(state)))
+        .filter(|&([x, y, z], state)| name(world.block(x, y, z)) != name(state))
+        .collect()
+}
+
 /// The id of the world clock a level of `dimension` follows (its `default_clock`) in the
 /// server's registry.
 pub(super) fn default_clock(r: &Remote, dimension: &DimensionType) -> Option<i32> {
@@ -129,6 +146,12 @@ impl Game<'_> {
                         let entity_block = block_entity_block(facts, world.world.block(x, y, z));
                         world.block_entity_data(p, entity_block);
                         continue;
+                    }
+                    for (pos, state) in other_blocks(facts, &world.world, &packet) {
+                        world.forget_block_entity(pos);
+                        if block_entity_block(facts, state) {
+                            world.placed_block_entity(pos);
+                        }
                     }
                     world.apply(packet)?;
                 }
