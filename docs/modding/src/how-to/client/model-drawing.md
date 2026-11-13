@@ -159,6 +159,10 @@ Each mob and player in view gets the render hook pair once a frame, NeoForge's
 4. `render_living_post(entity, parts, draw)`;
 5. `render_player_post(player, who, parts, draw)`, for a player only.
 
+The order today: the model and the layers are drawn before the post hooks; the entity's name tag, leash, flames
+and shadow are drawn in the frame's later passes, after them. The reference draws the leash and the name tag
+before the post (and queues the flames and the shadow after it): tracked in #3915.
+
 `draw` starts at the entity's feet, turned with its body (+z the way it faces, +x its left, +y up,
 in blocks), and keeps what each hook draws. Setting `canceled` in a pre hook skips everything else
 of that entity this frame: its model, its layers, its name tag, shadow, flames, leash and glowing

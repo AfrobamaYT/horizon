@@ -8,8 +8,10 @@ pub trait Hooks {
     /// humanoid model's parts as vanilla posed them this frame (`HumanoidModel.setupAnim`), taken
     /// from the body's own draw, so a part a pre hook hid reads as not visible; read-only: attach
     /// geometry to an arm or the head without animating it again; None for a model that isn't
-    /// humanoid. Its name tag and leash are drawn in the frame's later passes. For a player, its
-    /// `render_player_post` follows.
+    /// humanoid. The order today: before this hook its model, its vanilla layers and the mods'
+    /// layers are drawn; after it, in the frame's later passes, its name tag, its leash, its
+    /// flames and its shadow (the reference draws the leash and the name tag first, #3915). For a
+    /// player, its `render_player_post` follows.
     #[hook(
         side = "client",
         contract = "listen",
