@@ -101,9 +101,20 @@ pub struct Surface {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub changes: Vec<String>,
     /// The change notes attached to them (`crates/horizon-mod-vocab/changes/*.toml`, read by the
-    /// surface diff), once each: `<file>: <why>`, then ` Migrate: <migrate>` when the note says how.
+    /// surface diff), once each, in the notes files' own shape.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub notes: Vec<String>,
+    pub notes: Vec<ChangeNote>,
+}
+
+/// One change note, as its file says it: the ids it explains, why they changed, and how a mod
+/// moves on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChangeNote {
+    /// The changed records it names (those of them this comparison found changed).
+    pub ids: Vec<String>,
+    pub why: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migrate: Option<String>,
 }
 
 /// A surface comparison's verdict (`horizon-stage surface-diff`'s `verdict`).
@@ -590,14 +601,22 @@ impl Index {
                 diff.new, self.surface.hash
             )));
         }
-        let mut notes = Vec::new();
-        for note in diff.changes.iter().flat_map(|change| &change.notes) {
-            let mut line = format!("{}: {}", note.file, note.why);
-            if let Some(migrate) = &note.migrate {
-                line += &format!(" Migrate: {migrate}");
-            }
-            if !notes.contains(&line) {
-                notes.push(line);
+        // One entry per note file, with every change it is attached to.
+        let mut files: Vec<&str> = Vec::new();
+        let mut notes: Vec<ChangeNote> = Vec::new();
+        for change in &diff.changes {
+            for note in &change.notes {
+                match files.iter().position(|file| *file == note.file) {
+                    Some(at) => notes[at].ids.push(change.id.clone()),
+                    None => {
+                        files.push(&note.file);
+                        notes.push(ChangeNote {
+                            ids: vec![change.id.clone()],
+                            why: note.why.clone(),
+                            migrate: note.migrate.clone(),
+                        });
+                    }
+                }
             }
         }
         self.surface.previous = Some(previous.to_owned());

@@ -92,9 +92,22 @@ fn the_comparison_with_the_previous_sdk_is_written_and_read_back() {
     assert_eq!(surface.previous.as_deref(), Some("f".repeat(40).as_str()));
     assert_eq!(surface.source, Some(Verdict::Breaking));
     assert_eq!(surface.changes, ["hook.a", "type.b"]);
+    // One per note file, in the notes files' shape, with every id it is attached to.
+    let note = |ids: &[&str], why: &str, migrate: Option<&str>| ChangeNote {
+        ids: ids.iter().map(|id| id.to_string()).collect(),
+        why: why.into(),
+        migrate: migrate.map(Into::into),
+    };
     assert_eq!(
         surface.notes,
-        ["a.toml: merged into b", "b.toml: renamed Migrate: use c"]
+        [
+            note(&["hook.a", "type.b"], "merged into b", None),
+            note(&["type.b"], "renamed", Some("use c")),
+        ]
+    );
+    assert_eq!(
+        json(&written)["surface"]["notes"][1],
+        serde_json::json!({"ids": ["type.b"], "why": "renamed", "migrate": "use c"})
     );
     assert_eq!(read(&json(&written)).unwrap(), written);
     // A diff of another surface, or one that is not a diff, is refused.
