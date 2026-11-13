@@ -19,6 +19,7 @@ pub mod item;
 pub mod menu_extra;
 pub mod mod_list;
 pub mod packets;
+pub mod passage_sync;
 pub mod payload_negotiation;
 pub mod quiet;
 pub mod registry;

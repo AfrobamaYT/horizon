@@ -16,6 +16,7 @@ use horizon_protocol::{
         configuration::{ClientInformation, CustomPayload},
         play,
     },
+    passage_sync,
 };
 use std::{
     collections::VecDeque,
@@ -839,6 +840,21 @@ impl Guest {
                 data,
             })),
             Err(e) => log::debug!("Horizon: attachment sync not sent: {e}"),
+        }
+    }
+    /// Passages to hold or forget (#3775), if the guest is on a Horizon client, the only
+    /// one that reads them, and placed or held (a hand-over's arrival is sent its chunks,
+    /// so their passages too); a message that cannot be written is not sent.
+    pub fn send_passage_sync(&self, message: &passage_sync::Message) {
+        if !(self.placed || self.held) || self.brand != "horizon" {
+            return;
+        }
+        match passage_sync::encode(message) {
+            Ok(data) => self.send(&play::Clientbound::CustomPayload(CustomPayload {
+                channel: passage_sync::CHANNEL.into(),
+                data,
+            })),
+            Err(e) => log::debug!("Horizon: passage sync not sent: {e}"),
         }
     }
     /// [`Self::send`] of a `ChunksBiomes` whose body is `packet.encode()`, the same
