@@ -20,13 +20,15 @@ pub struct ModTerrain {
     registry: &'static BlockRegistry,
     shape: LevelShape,
     biome: u16,
+    level: Box<str>,
     seed: i64,
 }
 
 impl ModTerrain {
-    /// The terrain of the level with stem `stem`, if `generators` has the
+    /// The terrain of the level `level` with stem `stem`, if `generators` has the
     /// generator it names. `biome_id` numbers the stem's one biome.
     pub fn for_stem(
+        level: &str,
         stem: &serde_json::Value,
         generators: &ModChunkGenerators,
         registry: &'static BlockRegistry,
@@ -43,6 +45,7 @@ impl ModTerrain {
             registry,
             shape,
             biome: biome_id(biome),
+            level: level.into(),
             seed,
         })
     }
@@ -61,6 +64,9 @@ impl ChunkAccess for Filling<'_> {
     }
     fn pos(&self) -> ChunkPos {
         self.pos
+    }
+    fn level(&self) -> &str {
+        &self.terrain.level
     }
     fn seed(&self) -> i64 {
         self.terrain.seed
@@ -172,7 +178,15 @@ mod tests {
 
     fn terrain(stem: &serde_json::Value, shape: LevelShape, seed: i64) -> Option<ModTerrain> {
         let biome = |name: &str| u16::from(name == "minecraft:lush_caves") * 7;
-        ModTerrain::for_stem(stem, &generators(), registry(), biome, shape, seed)
+        ModTerrain::for_stem(
+            "test:pocket",
+            stem,
+            &generators(),
+            registry(),
+            biome,
+            shape,
+            seed,
+        )
     }
 
     fn chunk(terrain: &ModTerrain, x: i32, z: i32) -> Chunk {
@@ -190,6 +204,49 @@ mod tests {
         assert_eq!(chunk.block(0, 319, 0), BEDROCK);
         assert_eq!(chunk.block(1, 319, 0), BlockStateId(0));
         assert_eq!(chunk.sections[0].biomes.get(0), 7);
+    }
+
+    /// One stateless generator serves two levels and tells them apart by `level()`.
+    #[test]
+    fn a_generator_is_told_the_level_it_fills() {
+        struct ByLevel;
+        impl ModChunkGenerator for ByLevel {
+            fn build_terrain(&self, chunk: &mut dyn ChunkAccess) {
+                let y = match chunk.level() {
+                    "test:alpha" => -59,
+                    "test:beta" => -58,
+                    other => panic!("unexpected level {other}"),
+                };
+                let stone = chunk.state("stone");
+                assert!(chunk.set_block([0, y, 0], stone));
+            }
+        }
+        let generators = ModChunkGenerators::from([(
+            "test:by_level".to_owned(),
+            Arc::new(ByLevel) as Arc<dyn ModChunkGenerator>,
+        )]);
+        let open = |level: &str| {
+            let biome = |_: &str| 0;
+            let stem = stem("test:by_level");
+            ModTerrain::for_stem(
+                level,
+                &stem,
+                &generators,
+                registry(),
+                biome,
+                LevelShape::OVERWORLD,
+                5,
+            )
+            .unwrap()
+        };
+        let (alpha, beta) = (
+            chunk(&open("test:alpha"), 0, 0),
+            chunk(&open("test:beta"), 0, 0),
+        );
+        assert_eq!(alpha.block(0, -59, 0), STONE);
+        assert_eq!(alpha.block(0, -58, 0), BlockStateId(0));
+        assert_eq!(beta.block(0, -58, 0), STONE);
+        assert_eq!(beta.block(0, -59, 0), BlockStateId(0));
     }
 
     #[test]

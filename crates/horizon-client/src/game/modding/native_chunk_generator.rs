@@ -31,6 +31,9 @@ impl ChunkAccess for Converting<'_> {
     fn pos(&self) -> ChunkPos {
         self.inner.pos()
     }
+    fn level(&self) -> &str {
+        self.inner.level()
+    }
     fn seed(&self) -> i64 {
         self.inner.seed()
     }

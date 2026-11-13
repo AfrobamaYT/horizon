@@ -941,6 +941,7 @@ fn mod_terrain(
                 .map(|stem| horizon_client::scoreboard::tag_to_json(&stem))
         })?;
     horizon_client::modgen::ModTerrain::for_stem(
+        dim.id(),
         &stem,
         generators,
         registry,
