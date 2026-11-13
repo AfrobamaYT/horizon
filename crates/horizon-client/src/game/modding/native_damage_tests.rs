@@ -246,7 +246,18 @@ fn survival_player(game: &mut super::Game<'_>, id: u32) {
 fn post_fires_for_a_player_hit_that_absorption_took_whole() {
     let heard = heard(|game| {
         survival_player(game, 227001);
-        game.player.as_mut().unwrap().set_health(2.0, true).unwrap();
+        // Absorption is cut to `max_absorption`, 0 without a modifier.
+        let player = game.player.as_mut().unwrap();
+        player
+            .set_modifier(
+                "minecraft:max_absorption",
+                "test:absorption",
+                10.0,
+                "add_value",
+                true,
+            )
+            .unwrap();
+        player.set_health(2.0, true).unwrap();
         assert!(game.hurt_player_from(2.0, None, "minecraft:generic", Some(None), false));
         let health = &game.player.as_ref().unwrap().health;
         assert_eq!((health.health(), health.absorption()), (20.0, 0.0));
