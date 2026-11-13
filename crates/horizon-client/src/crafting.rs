@@ -2811,9 +2811,16 @@ mod tests {
             file("minecraft:from_a_later_version", "x"),
         )
         .unwrap();
+        // A vanilla type needs ingredients the loader accepts to be a recipe at all.
+        let cutting = |tag: &str| {
+            format!(
+                r#"{{"type":"minecraft:stonecutting","tag":"{tag}","ingredient":"minecraft:stone","result":{{"id":"minecraft:stone_bricks"}}}}"#
+            )
+            .into_bytes()
+        };
         fs::write(
             root.join("data/minecraft/recipe/iron_ingot.json"),
-            file("minecraft:stonecutting", "vanilla-iron"),
+            cutting("vanilla-iron"),
         )
         .unwrap();
         let items = Items::for_tests(HashMap::new());
@@ -2850,7 +2857,7 @@ mod tests {
             ("recipe/pack:d".to_owned(), vec![file("mymod:crusher", "d")]),
             (
                 "recipe/minecraft:iron_ingot".to_owned(),
-                vec![file("minecraft:stonecutting", "pack-iron")],
+                vec![cutting("pack-iron")],
             ),
             (
                 "recipe/minecraft:p".to_owned(),
