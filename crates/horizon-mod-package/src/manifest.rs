@@ -24,6 +24,12 @@ use std::{
 pub const MANIFEST: &str = "horizon-mod.toml";
 /// Executable components are not content and are refused in a `.hmod`.
 pub const WASM: &str = "mod.wasm";
+/// The uses table a code mod's package carries: what it uses of the surface, with each item's
+/// hash at the build it was made for (`horizon-mod-surface`'s `UsesTable`, which the reader
+/// parses). The package only bounds it.
+pub const USES: &str = "uses.json";
+/// The largest uses table a package may carry: `horizon-mod-surface`'s `MAX_USES_BYTES`.
+pub const MAX_USES: u64 = 4 << 20;
 /// The content manifest API this build loads.
 pub const API: &str = "0.2";
 /// Namespaces no mod may claim: vanilla's, the convention tags' (mods add
@@ -732,6 +738,7 @@ impl Package {
         let mut has_wasm = false;
         let mut entries = Vec::new();
         let mut layouts = None;
+        let mut uses = false;
         for i in 0..zip.len() {
             let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
             let name = entry.name().map_err(|e| e.to_string())?.into_owned();
@@ -759,6 +766,16 @@ impl Package {
                     return Err("duplicate layouts.json".into());
                 }
                 layouts = Some(crate::layouts::Layouts::read(&mut entry)?);
+                continue;
+            }
+            if name == USES && matches!(mode & 0o170000, 0 | 0o100000) {
+                if uses {
+                    return Err(format!("duplicate {USES}"));
+                }
+                if entry.size() > MAX_USES {
+                    return Err(format!("{USES} exceeds {} MiB", MAX_USES >> 20));
+                }
+                uses = true;
                 continue;
             }
             check_file(&name, mode, || Ok(&mut entry)).map_err(|e| e.to_string())?;
@@ -817,6 +834,7 @@ impl Package {
                 if !directory {
                     if name != MANIFEST
                         && name != crate::layouts::FILE
+                        && name != USES
                         && name != "icon.png"
                         && !(name == WASM && package.manifest.wasm.is_some())
                         && !name.starts_with("assets/")
@@ -975,8 +993,39 @@ impl Package {
     /// Pack a flat project, selecting its source and resource files deterministically.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn pack_directory(root: &Path) -> Result<Vec<u8>, String> {
+        Self::pack_directory_with(root, None)
+    }
+
+    /// The bytes of entry `name` in the `.hmod` at `path`, refused past `most` bytes; `None` when
+    /// it has no such entry.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn entry(path: &Path, name: &str, most: u64) -> Result<Option<Vec<u8>>, String> {
+        let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut zip = zip::ZipArchive::new(file).map_err(|e| format!("{}: {e}", path.display()))?;
+        let entry = match zip.by_name(name) {
+            Ok(entry) => entry,
+            Err(zip::result::ZipError::FileNotFound) => return Ok(None),
+            Err(e) => return Err(format!("{}: {e}", path.display())),
+        };
+        let mut bytes = Vec::new();
+        entry
+            .take(most + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("{name}: {e}"))?;
+        if bytes.len() as u64 > most {
+            return Err(format!("{name}: over {most} bytes"));
+        }
+        Ok(Some(bytes))
+    }
+
+    /// [`Package::pack_directory`], carrying `uses` as the package's [`USES`] table when given.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn pack_directory_with(root: &Path, uses: Option<&[u8]>) -> Result<Vec<u8>, String> {
         let package = Self::read(root)?;
         let mut files = package.directory_files(root)?;
+        if let Some(uses) = uses {
+            files.insert(USES.to_owned(), uses.to_vec());
+        }
         let text = String::from_utf8(files.remove(MANIFEST).expect("selected manifest"))
             .map_err(|e| e.to_string())?;
         let files: Vec<_> = files
@@ -1008,6 +1057,13 @@ impl Package {
                 continue;
             }
             if *name == WASM && manifest.wasm.is_some() {
+                put(name, bytes)?;
+                continue;
+            }
+            if *name == USES && code {
+                if bytes.len() as u64 > MAX_USES {
+                    return Err(format!("{USES} exceeds {} MiB", MAX_USES >> 20));
+                }
                 put(name, bytes)?;
                 continue;
             }
@@ -1407,6 +1463,39 @@ capabilities = ["registries"]
         ] {
             assert!(Manifest::parse(&bad).is_err());
         }
+    }
+
+    #[test]
+    fn a_code_mod_carries_one_bounded_uses_table_and_a_content_mod_none() {
+        let native = format!(
+            "{EXAMPLE}[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        let cargo = b"[package]\nname = 'ruby'\n".as_slice();
+        let lib = b"pub fn f() {}\n".as_slice();
+        let table = br#"{"schema":1,"made_for":"x","entries":[]}"#.as_slice();
+        let bytes = Package::write_files(
+            &native,
+            &[("Cargo.toml", cargo), ("src/lib.rs", lib), (USES, table)],
+        )
+        .unwrap();
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        Package::read_zip(&mut zip).unwrap();
+        let mut read = Vec::new();
+        zip.by_name(USES).unwrap().read_to_end(&mut read).unwrap();
+        assert_eq!(read, table);
+        let large = vec![b' '; MAX_USES as usize + 1];
+        assert!(
+            Package::write_files(
+                &native,
+                &[("Cargo.toml", cargo), ("src/lib.rs", lib), (USES, &large)],
+            )
+            .unwrap_err()
+            .contains(USES)
+        );
+        // A content mod has no code to scan, so no table either.
+        assert!(Package::write_files(EXAMPLE, &[(USES, table)]).is_err());
     }
 
     #[test]
