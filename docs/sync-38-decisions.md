@@ -102,3 +102,9 @@ The initial transfer-order implementation mistakenly called nonexistent Command:
 
 ## Extraction measurement
 Zero genuine remnants. The nine retained name-only clashes are render_with, in_own_process, level, key, all, stage, sea_level, native, exists (983 function lines). game.rs is unchanged from the fork base, 12248 physical lines by the measurement tool.
+
+## Current-main integration
+
+Merged fork main 959c0df470e (including the SDK stack) without conflicts. Main's generated catalog export, prebuilt package layout, launcher game/holder routing and workflow changes are retained; no upstream compatibility route replaces them. The upstream pin remains d1b6cd286ea4ebafd4e454829e199a867937b77a.
+
+Helper-thread profiling call sites are retained in creatures/mob_islands.rs. The fork builds that loop only with `upstream-parallel-mobs`, so sampling/Sums/helper merge functions use the same feature condition (also available to their unit tests). The unused legacy mod span bit is test-only for span-user arbitration coverage; obsolete native diagnostics remain absent.
