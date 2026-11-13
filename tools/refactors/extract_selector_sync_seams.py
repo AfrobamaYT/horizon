@@ -22,6 +22,6 @@ move("crates/horizon-client/src/lan/hub.rs",
      "crates/horizon-client/src/lan/hub/selector_sync.rs", "use super::*;\n\nimpl Hub {\n", "}\n",
      "mod selector_sync;\n")
 move("crates/horizon-client/src/game/network/remote/mod.rs",
-     "/// The hurt sound of a `ClientboundDamageEventPacket`", "/// The live entity a bound sound names", 
+     "/// The hurt sound of a `ClientboundDamageEventPacket`", "/// The live entity a bound sound names",
      "crates/horizon-client/src/game/network/remote/selector_metadata.rs", "use super::*;\n\n", "",
      "mod selector_metadata;\nuse selector_metadata::hurt_sound_for;\n")

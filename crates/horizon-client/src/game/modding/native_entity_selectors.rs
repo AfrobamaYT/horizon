@@ -119,6 +119,20 @@ mod tests {
             assert_eq!(game.ui.registries.selector_tokens, tokens);
             game.build_registries();
             assert_eq!(game.ui.registries.selector_tokens, tokens);
+            for data in [
+                vec![2],
+                vec![9],
+                horizon_client::lan::commands::selector_sync::encode(&tokens),
+            ] {
+                game.apply_packet(horizon_protocol::packets::play::Clientbound::CustomPayload(
+                    horizon_protocol::packets::configuration::CustomPayload {
+                        channel: horizon_client::lan::commands::selector_sync::CHANNEL.into(),
+                        data,
+                    },
+                ))
+                .unwrap();
+                assert!(game.ui.registries.selector_tokens.is_empty());
+            }
         });
     }
 

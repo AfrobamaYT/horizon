@@ -22,6 +22,8 @@ impl dyn Registrar + '_ {
     /// `p a r s e n`, or registered by any mod already refuses the mods at startup, naming the
     /// mod. Names must fit 32767 ASCII bytes. The base is read once here; a panic,
     /// zero limit or tooltip exceeding 32767 UTF-16 units also refuses registration.
+    /// Horizon bounds the complete encoded selector metadata to 256 KiB; a token that
+    /// would exceed that total is refused by name without changing earlier records.
     pub fn register_entity_selector<T: crate::EntitySelectorType>(
         &mut self,
         name: &str,

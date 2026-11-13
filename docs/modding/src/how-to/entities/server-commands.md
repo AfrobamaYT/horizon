@@ -167,7 +167,10 @@ is never `@a`, and an unregistered word still fails with
 and `_`, one of `p a r s e n`, or already registered by any mod refuses the mods at
 startup. The base is evaluated once at registration; a panic or zero limit refuses
 registration. Token names and tooltip keys must fit the protocol string boundary
-(32767 ASCII bytes for names, 32767 UTF-16 units for tooltip keys).
+(32767 ASCII bytes for names, 32767 UTF-16 units for tooltip keys). Horizon also
+bounds the complete encoded metadata to 256 KiB and refuses the token that would exceed
+that total by name, without changing earlier records. The payload's revision is 1; an
+unsupported revision disables token metadata for that connection with one log line.
 
 The server sends frozen token metadata alongside each command tree to connected Horizon
 clients, including the single-player window. Their command parser and completion use the

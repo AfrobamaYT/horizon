@@ -654,6 +654,7 @@ pub(super) struct Remote {
     /// plus the commands native mods own (`chat::chat_tree_for`). Rebuilt where
     /// that base changes, not at each keystroke.
     pub chat_tree: horizon_client::command::Dispatcher,
+    selector_metadata_supported: bool,
     /// Whether a `ClientboundCommandsPacket` has supplied the server's tree.
     /// The local fallback is for UI completion only; vanilla signs command
     /// arguments against an empty tree until the server sends one.
@@ -1103,6 +1104,7 @@ impl Game<'_> {
             });
         self.ui.registries.selector_tokens.clear();
         self.remote = Some(Remote {
+            selector_metadata_supported: true,
             professions: self.client_professions()?,
             session,
             brand: "unknown".into(),
@@ -1347,6 +1349,7 @@ impl Game<'_> {
 
         self.ui.registries.selector_tokens.clear();
         self.remote = Some(Remote {
+            selector_metadata_supported: true,
             professions: self.client_professions()?,
             session,
             brand: "horizon-studio".into(),

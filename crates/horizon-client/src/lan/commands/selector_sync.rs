@@ -5,8 +5,14 @@ use horizon_protocol::{
     buf::{Reader, Writer},
 };
 pub const CHANNEL: &str = "horizon:selector_tokens";
+#[derive(Debug, PartialEq, Eq)]
+pub enum Snapshot {
+    Tokens(Vec<SelectorToken>),
+    Unsupported(u8),
+}
 pub fn encode(tokens: &[SelectorToken]) -> Vec<u8> {
     let mut w = Writer::new();
+    w.u8(1);
     w.varint(tokens.len() as i32);
     for token in tokens {
         w.string(&token.name);
@@ -25,8 +31,17 @@ pub fn encode(tokens: &[SelectorToken]) -> Vec<u8> {
     }
     w.data
 }
-pub fn decode(data: &[u8]) -> Result<Vec<SelectorToken>> {
+pub fn decode(data: &[u8]) -> Result<Snapshot> {
     let mut r = Reader::new(data);
+    let revision = r.u8()?;
+    if revision != 1 {
+        return Ok(Snapshot::Unsupported(revision));
+    }
+    if data.len() > 256 * 1024 {
+        return Err(Error::new(
+            "selector tokens: Horizon's 256 KiB metadata limit exceeded",
+        ));
+    }
     let count = r.varint()?;
     if count < 0 || count as usize > r.remaining() {
         return Err(Error::new("selector tokens: invalid count"));
@@ -74,7 +89,7 @@ pub fn decode(data: &[u8]) -> Result<Vec<SelectorToken>> {
     if r.remaining() != 0 {
         return Err(Error::new("selector tokens: trailing bytes"));
     }
-    Ok(tokens)
+    Ok(Snapshot::Tokens(tokens))
 }
 #[cfg(test)]
 mod tests {
@@ -89,7 +104,8 @@ mod tests {
             sort: "nearest",
         }];
         let data = encode(&tokens);
-        assert_eq!(decode(&data).unwrap(), tokens);
+        assert_eq!(data[0], 1);
+        assert_eq!(decode(&data).unwrap(), Snapshot::Tokens(tokens.clone()));
         for end in 0..data.len() {
             assert!(decode(&data[..end]).is_err());
         }
@@ -97,6 +113,29 @@ mod tests {
         trailing.push(0);
         assert!(decode(&trailing).is_err());
         assert!(decode(&encode(&[tokens[0].clone(), tokens[0].clone()])).is_err());
-        assert!(decode(&encode(&[])).unwrap().is_empty());
+        assert_eq!(decode(&encode(&[])).unwrap(), Snapshot::Tokens(Vec::new()));
+        assert_eq!(decode(&[2, 255, 255]).unwrap(), Snapshot::Unsupported(2));
+        let large = (0..7)
+            .map(|n| SelectorToken {
+                name: format!("t{n}"),
+                tooltip: "x".repeat(32767),
+                players_only: false,
+                limit: 1,
+                sort: "nearest",
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(encode(&large).len(), 229462);
+        assert!(encode(&large).len() < 256 * 1024);
+        assert!(encode(&large).len() < 1_048_576);
+        let mut oversized = large;
+        oversized.push(SelectorToken {
+            name: "t7".into(),
+            tooltip: "x".repeat(32767),
+            players_only: false,
+            limit: 1,
+            sort: "nearest",
+        });
+        assert!(decode(&encode(&oversized)).is_err());
+        assert!(horizon_protocol::packets::custom_payload::is_reserved_channel(CHANNEL));
     }
 }
