@@ -267,9 +267,8 @@ pub trait LevelsBackend {
     /// cannot resolve until the level is in place, and for a bound that is not
     /// finite (NaN or infinite). A minimum above its maximum is the same box
     /// with the two swapped, as vanilla's `AABB`. On a client (`ClientLevel`),
-    /// the entities the server tracks to it and the window's own player, with
-    /// the same walk; other players are left out, as their handles do not
-    /// resolve there .
+    /// the entities the server tracks to it, other players among them, and the
+    /// window's own player, with the same walk.
     /// None there before login and for a level it does not show. The walk
     /// is in entity-list order followed by players. Every entity list is walked
     /// once per call: O(entities) regardless of the box. Each overlapping mob
