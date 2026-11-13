@@ -245,5 +245,20 @@ mod tests {
             ClipFluid::None,
         );
         assert_eq!(ray, None);
+        // The same-level Respawn retains the epoch, but not the previous world's blocks.
+        game.handle_packet(open(1, NETHER)).unwrap();
+        game.handle_packet(run(1, &[layered(0, 0, 0)])).unwrap();
+        assert_eq!(state(&game, viewed, [3, 71, 5]), Some(0));
+
+        game.handle_packet(C::Respawn(play::Respawn {
+            spawn: spawn("minecraft:the_end"),
+            keep: 0,
+        }))
+        .unwrap();
+        game.handle_packet(open(1, NETHER)).unwrap();
+        game.handle_packet(run(1, &[column(0, 0)])).unwrap();
+        assert_eq!(state(&game, viewed, [3, 71, 5]), None);
+        let reopened = game.level(NETHER).unwrap();
+        assert_eq!(state(&game, reopened, [3, 71, 5]), Some(1));
     }
 }
