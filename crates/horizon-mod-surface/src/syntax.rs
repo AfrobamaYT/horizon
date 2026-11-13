@@ -453,7 +453,7 @@ pub(crate) fn too_deep(tokens: &[(Token<'_>, usize)]) -> Option<usize> {
 /// references, `fn` types, assignments, `return`, `@`, `else if`, qualified paths after a
 /// comparison, prefix operators on method calls, mixes of them), the deepest
 /// needs 1.6 MiB in a release build and 1.5 MiB in a test build; this leaves a tenfold margin.
-const PARSER_STACK: usize = 16 << 20;
+pub(crate) const PARSER_STACK: usize = 16 << 20;
 
 /// Why a file was not read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -489,7 +489,7 @@ pub(crate) fn read(text: &str) -> Result<Syntax<'_>, Unread> {
     }
 }
 
-fn parse(text: &str) -> Result<Syntax<'_>, Unread> {
+pub(crate) fn parse(text: &str) -> Result<Syntax<'_>, Unread> {
     // The parser skips a byte-order mark and a shebang line itself, which would shift every
     // byte it reports; blank them in a copy of the same length instead.
     let mut copy = text.to_owned();

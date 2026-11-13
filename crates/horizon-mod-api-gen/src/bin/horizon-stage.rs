@@ -21,7 +21,7 @@
 use horizon_mod_api_gen::mod_uses;
 use horizon_mod_api_gen::staging::{self, Mode};
 use mod_surface::Surface;
-use mod_surface::uses::{Fit, ManifestFacts, Origin, UsesTable, fits, uses};
+use mod_surface::uses::{Fit, ManifestFacts, Origin, UsesTable, fits, uses_contained};
 use std::path::PathBuf;
 
 fn surface(root: &std::path::Path, out: &std::path::Path) {
@@ -99,7 +99,7 @@ fn uses_command(args: &[PathBuf]) {
         names: input.manifest_names,
         hook_versions: Default::default(),
     };
-    let uses = uses(
+    let uses = uses_contained(
         input.sources.iter().map(|(p, t)| (p.as_str(), t.as_str())),
         &manifest,
         &surface,
@@ -225,6 +225,8 @@ fn surface_diff(args: &[PathBuf]) -> ! {
 }
 
 fn main() {
+    // The uses scan parses in a child, this program started again: run its part and exit.
+    mod_surface::child::child_entry();
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
     match args.first().and_then(|c| c.to_str()) {
         Some("uses") => return uses_command(&args[1..]),

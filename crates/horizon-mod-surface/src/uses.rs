@@ -436,6 +436,14 @@ pub enum ScanError {
     TooDeep { file: String, line: usize },
     /// The parser's own stack could not be had (always so on wasm), so the file was not parsed.
     NoStack { file: String },
+    /// The child process that parses first ([`crate::child`]) died, by a signal, an overflow or
+    /// its memory limit, while parsing this file (none: before it began).
+    ParserDied { file: Option<String> },
+    /// The child process was still parsing this file (none: had not begun) when
+    /// [`crate::child::CHILD_WAIT`] ran out.
+    ParserTimedOut { file: Option<String> },
+    /// The child process could not be started: the program cannot run itself here.
+    NoChild,
 }
 
 impl std::fmt::Display for ScanError {
@@ -458,28 +466,58 @@ impl std::fmt::Display for ScanError {
                 f,
                 "{file}:{line}: the file does not parse as Rust; the mod's source cannot be judged"
             ),
+            Self::ParserDied { file } => write!(
+                f,
+                "{}the scan's parser stopped (out of stack or memory); the mod's source cannot be judged",
+                file.as_ref()
+                    .map_or(String::new(), |file| format!("{file}: "))
+            ),
+            Self::ParserTimedOut { file } => write!(
+                f,
+                "{}the scan's parser took longer than {} s; the mod's source cannot be judged",
+                file.as_ref()
+                    .map_or(String::new(), |file| format!("{file}: ")),
+                crate::child::CHILD_WAIT.as_secs()
+            ),
+            Self::NoChild => write!(
+                f,
+                "the scan could not start its parser process; the mod's source cannot be judged"
+            ),
         }
     }
 }
 
 impl std::error::Error for ScanError {}
 
-/// A file's facts, or why it cannot be judged.
-/// A file's facts, or why it cannot be judged.
-fn file_facts<'t>(file: &str, text: &'t str) -> Result<FileFacts<'t>, ScanError> {
+/// The `use` statements a file's tokens hold: each import, whether each token is in one, and
+/// whether one holds a macro metavariable.
+type UseStatements<'t> = (Vec<(Vec<&'t str>, &'t str)>, Vec<bool>, bool);
+
+/// A file's tokens, each with its line and its first byte, and its `use` statements; or why it
+/// cannot be judged before it is parsed.
+fn checked_tokens<'t>(
+    file: &str,
+    text: &'t str,
+) -> Result<(Vec<(Token<'t>, usize)>, Vec<usize>, UseStatements<'t>), ScanError> {
     let mut stream = scan::tokens(text);
     let (mut tokens, mut starts) = (Vec::new(), Vec::new());
     while let Some((token, line, start)) = stream.spanned() {
         tokens.push((token, line));
         starts.push(start);
     }
-    let (imports, in_use, use_metavariable) = use_statements(file, &tokens)?;
+    let statements = use_statements(file, &tokens)?;
     if let Some(line) = syntax::too_deep(&tokens) {
         return Err(ScanError::TooDeep {
             file: file.to_owned(),
             line,
         });
     }
+    Ok((tokens, starts, statements))
+}
+
+/// A file's facts, or why it cannot be judged.
+fn file_facts<'t>(file: &str, text: &'t str) -> Result<FileFacts<'t>, ScanError> {
+    let (tokens, starts, (imports, in_use, use_metavariable)) = checked_tokens(file, text)?;
     let syntax = syntax::read(text).map_err(|unread| match unread {
         syntax::Unread::Parse(line) => ScanError::Parse {
             file: file.to_owned(),
@@ -527,10 +565,7 @@ fn file_facts<'t>(file: &str, text: &'t str) -> Result<FileFacts<'t>, ScanError>
 /// Every `use` statement's imports, which tokens lie in one, and whether one holds a
 /// metavariable; a `use` nested deeper than [`MAX_USE_NESTING`] cannot be judged.
 #[allow(clippy::type_complexity)]
-fn use_statements<'t>(
-    file: &str,
-    tokens: &Tokens<'t>,
-) -> Result<(Vec<(Vec<&'t str>, &'t str)>, Vec<bool>, bool), ScanError> {
+fn use_statements<'t>(file: &str, tokens: &Tokens<'t>) -> Result<UseStatements<'t>, ScanError> {
     let mut in_use = vec![false; tokens.len()];
     let mut imports = Vec::new();
     let mut use_metavariable = false;
@@ -1823,6 +1858,41 @@ fn macro_body<'s, 't>(
     {
         found.build(id, place, true, false);
     }
+}
+
+/// [`uses`], with each file parsed first in a child process ([`crate::child`]), so a parse that
+/// runs out of stack or memory, or does not end, leaves the source "cannot judge" instead of
+/// ending the caller. The checks before parsing run first, then one child parses every file;
+/// the scan then parses them again itself, on a stack of the same size, where the same parse
+/// of the same text reaches the same depth. The program must call [`crate::child::child_entry`]
+/// first in `main`.
+pub fn uses_contained<'t>(
+    sources: impl IntoIterator<Item = (&'t str, &'t str)>,
+    manifest: &ManifestFacts,
+    surface: &Surface,
+) -> Result<Uses, ScanError> {
+    let sources: Vec<(&str, &str)> = sources.into_iter().collect();
+    for (file, text) in &sources {
+        checked_tokens(file, text)?;
+    }
+    let program = std::env::current_exe().map_err(|_| ScanError::NoChild)?;
+    let texts: Vec<&str> = sources.iter().map(|(_, text)| *text).collect();
+    let file = |at: Option<usize>| {
+        at.and_then(|at| sources.get(at))
+            .map(|(f, _)| (*f).to_owned())
+    };
+    crate::child::parse_in_child(
+        &program,
+        &texts,
+        syntax::PARSER_STACK,
+        crate::child::CHILD_WAIT,
+    )
+    .map_err(|contained| match contained {
+        crate::child::Contained::Died(at) => ScanError::ParserDied { file: file(at) },
+        crate::child::Contained::TimedOut(at) => ScanError::ParserTimedOut { file: file(at) },
+        crate::child::Contained::NoChild => ScanError::NoChild,
+    })?;
+    uses(sources, manifest, surface)
 }
 
 /// The records `sources` (each a path and its Rust text) and `manifest` bring in, with
