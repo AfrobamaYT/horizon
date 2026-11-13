@@ -219,7 +219,7 @@ fn creator_flags_remain_cloexec_until_child_callback() {
     // after fork. Reading a regular file cannot wait on an unrelated inherited writer.
     let mut observations = tempfile::tempfile().unwrap();
     let callback_log = observations.try_clone().unwrap();
-    let mut command = Command::new("/bin/true");
+    let mut command = Command::new("/usr/bin/true");
     // This callback precedes the transfer callback and sees the fork's untouched flags.
     unsafe {
         command.pre_exec(move || {
