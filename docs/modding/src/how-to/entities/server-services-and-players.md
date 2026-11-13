@@ -82,3 +82,28 @@ Reads accept `Host`; writes accept `ServerHost`.
 | `sleep_ignored(host)` | Reads the sleep-count exclusion setting. |
 | `counts_for_sleep(host)` | Reports whether the player counts toward the night skip. |
 | `sleep_timer(host)` / `set_sleep_timer(host, ticks)` | Reads or writes `Player.sleepCounter`, from 0 to 109; 100 means slept long enough. The write refuses larger values, fake players, guests in another level and stale players. |
+
+## Text conversions
+
+`host.text_from_json(json)` reads one JSON or SNBT component the way `/tellraw`
+does and returns `Result<Option<Text>, TextFormError>`: `Ok(None)` when the
+input is not a single component, `Err` when the text is over the size or
+nesting limits. `host.text_from_legacy("§cRed")` reads `§` formatting codes as
+the font draws them; `&` codes are not read, so replace `&` with `§` first.
+Both work on either side.
+
+## Server clock, rules and distances
+
+`level.set_clock_time(host, ticks)` does what `/time set` does in that level's
+default clock; `time_skip` fires with cause `mod` and a mod can keep the old
+time. `level.set_game_rule(host, "keep_inventory", GameRuleValue::Bool(true))`
+does what `/gamerule` does and fires `game_rule_changed` with no actor. Both
+return `false` for a stale handle, a client, or a value the rule refuses.
+
+On a server, `host.tick_times()` returns the last 100 tick durations in
+nanoseconds (the tick numbered `n` at index `n % 100`; `tick_stats()` has the
+average). `host.server_view_distance()` and `host.server_simulation_distance()`
+read the distances in chunks; `host.server_set_view_distance(d)` and
+`host.server_set_simulation_distance(d)` change them live for 2 to 32 on a
+dedicated server and return `false` otherwise. `server.properties` is not
+written.
