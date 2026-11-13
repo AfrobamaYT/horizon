@@ -144,8 +144,12 @@ fn leaves_are_what_a_mod_writes() {
 #[test]
 fn the_reader_refuses_with_a_typed_error() {
     let text = sample().to_json();
-    let newer = text.replacen("\"schema\": 1", "\"schema\": 2", 1);
-    assert_eq!(Surface::read(newer.as_bytes()), Err(ReadError::Schema(2)));
+    let older = text.replacen("\"schema\": 2", "\"schema\": 1", 1);
+    assert_eq!(Surface::read(older.as_bytes()), Err(ReadError::Schema(1)));
+    assert_eq!(
+        ReadError::Schema(1).to_string(),
+        "surface schema 1, this tool reads 2"
+    );
     assert!(matches!(
         Surface::read(&text.as_bytes()[..text.len() / 2]),
         Err(ReadError::Json(_))
@@ -204,7 +208,7 @@ fn the_contract_hash_leaves_out_doc_and_info_fields() {
 #[test]
 fn deeply_nested_json_neither_overflows_nor_passes_as_records() {
     let deep = |field: &str| {
-        let mut text = format!("{{\"schema\": 1, \"hash\": \"\", \"{field}\": ");
+        let mut text = format!("{{\"schema\": {SCHEMA}, \"hash\": \"\", \"{field}\": ");
         text.push_str(&"[".repeat(100_000));
         text.push_str(&"]".repeat(100_000));
         text.push('}');
@@ -463,6 +467,9 @@ fn a_structs_field_set_is_its_fields_hash_not_its_own_hash() {
         .map(|b| format!("{b:02x}"))
         .collect();
     assert_eq!(before.fields_hash.as_deref(), Some(expected.as_str()));
+    // A literal names fields in any order: moving one changes nothing.
+    let moved = plain_struct(&[("sky", "bool"), ("height", "i32")]);
+    assert_eq!(moved.fields_hash, after.fields_hash);
     // Its trait impls are a set beside the hash.
     let mut with_impl = plain_struct(&[("height", "i32")]);
     with_impl.impls = vec!["Hash".into()];
@@ -552,4 +559,39 @@ fn how_a_type_crosses_and_whether_a_struct_can_be_built_are_outside_its_hash() {
         Type::new("type:Settings", "", None, contract, vec![], vec![]).hash
     };
     assert_ne!(enum_with(true), enum_with(false));
+}
+
+#[test]
+fn an_argument_references_only_the_items_its_own_type_names_by_path() {
+    let mut contract = hook_with(1, &[]).contract;
+    contract.arguments = vec![
+        Argument {
+            name: "left".into(),
+            ty: "a::Item".into(),
+        },
+        Argument {
+            name: "right".into(),
+            ty: "&'a mut Vec<b::Item>".into(),
+        },
+    ];
+    contract.refs = vec!["type:a::Item".into(), "type:b::Item".into()];
+    let hook = Hook::new(
+        "hook:joined",
+        "",
+        HookEngine::default(),
+        Counterparts::default(),
+        contract,
+    );
+    let refs: Vec<&[String]> = hook
+        .fields
+        .iter()
+        .map(|f| f.contract.refs.as_slice())
+        .collect();
+    assert_eq!(
+        refs,
+        [
+            &["hook:joined".to_owned(), "type:a::Item".to_owned()][..],
+            &["hook:joined".to_owned(), "type:b::Item".to_owned()][..],
+        ]
+    );
 }
