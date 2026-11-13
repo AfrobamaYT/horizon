@@ -1036,10 +1036,10 @@ impl Game<'_> {
     ) {
         self.fire_enchant_effect(enchantment, kind, data, level, victim);
     }
-    /// Block `block`'s block entity has item slots (a `WorldlyContainer`):
-    /// set `container` when the block is yours. Asked once for each mod
-    /// block when the ticking table is built; at most 256 slots, and slot
-    /// numbers past the count are left out. Its `menu`, one of
+    /// Block `block`'s registered item slots (`WorldlyContainer`), read from
+    /// its per-block declaration when the ticking table is built.
+    /// At most 256 slots, with slot numbers past the count left out.
+    /// Its menu must be one of the supported menus:
     /// `containers::MOD_MENUS` or a content mod's menu type
     /// (`data/<id>/horizon/menu/`) with as many
     /// slots, opens when the block is used (its template must open a menu, as
@@ -1050,12 +1050,11 @@ impl Game<'_> {
         block: &str,
         container: &mut Option<ModContainer>,
     ) {
-        self.fire_block_entity_container(block, container);
+        *container = mod_api::__private::parts_installation::block_container(block);
     }
-    /// Block `block`'s block entity has fluid tanks: set `fluids` when the
-    /// block is yours, in the container's shape — each tank's capacity in
+    /// Block `block`'s registered fluid tanks: each tank's capacity in
     /// millibuckets, the tanks each face reaches, and the tanks a fill may
-    /// reach and a drain may take. Asked once for each mod block when the
+    /// reach and a drain may take. Read from its per-block declaration when the
     /// ticking table is built; at most 16 tanks, capacities clamped to
     /// 1..=1 000 000, and tank numbers past the count are left out. The tanks'
     /// contents are kept in the entity's saved compound, under `fluids`, and
@@ -1065,13 +1064,12 @@ impl Game<'_> {
         block: &str,
         fluids: &mut Option<ModFluidTanks>,
     ) {
-        self.fire_block_entity_fluids(block, fluids);
+        *fluids = mod_api::__private::parts_installation::block_fluids(block);
     }
-    /// Block `block`'s block entity has an energy buffer
-    /// (`Capabilities.Energy.BLOCK`): set `energy` when the block is yours,
-    /// as `SimpleEnergyHandler` is built: its capacity, the most one insert
-    /// and one extract moves, and the faces a fill may come through and a
-    /// drain may leave by. Asked once for each mod block when the ticking
+    /// Block `block`'s registered energy buffer (`Capabilities.Energy.BLOCK`):
+    /// its capacity, the most one insert and one extract moves, and the faces
+    /// a fill may come through and a drain may leave by.
+    /// Read from its per-block declaration when the ticking
     /// table is built; a capacity under 1 leaves the buffer out, and the
     /// limits are clamped to 0..=capacity. The amount is kept in the entity's
     /// saved compound, as the int `energy`, and the energy helpers below read
@@ -1081,7 +1079,7 @@ impl Game<'_> {
         block: &str,
         energy: &mut Option<ModEnergyBuffer>,
     ) {
-        self.fire_block_entity_energy(block, energy);
+        *energy = mod_api::__private::parts_installation::block_energy(block);
     }
     /// A consumable's effect of a mod's own kind: the item's `on_consume_effects`
     /// entry is of a type in a namespace of its own, and the loader kept it

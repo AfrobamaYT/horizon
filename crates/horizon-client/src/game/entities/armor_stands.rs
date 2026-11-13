@@ -21,7 +21,7 @@ use horizon_core::{
     random::RandomSource,
 };
 use std::{collections::HashMap, sync::Arc};
-
+pub(super) const TYPE_ID: &str = "minecraft:armor_stand";
 /// Build the living-drops input at the loot-source boundary, before equipment pops.
 fn armor_stand_dying_drops<'a>(
     stand: &ArmorStand,
