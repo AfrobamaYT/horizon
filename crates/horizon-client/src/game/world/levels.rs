@@ -1481,6 +1481,7 @@ impl Game<'_> {
             self.native_level_unload(dim.id());
         }
         self.attachment_indexes.remove(&dim);
+        self.passages.retire_level(dim.key());
     }
 
     /// Every level still open closes with the server, however it ends

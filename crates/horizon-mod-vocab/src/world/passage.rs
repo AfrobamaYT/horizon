@@ -66,7 +66,7 @@ pub enum PassageTurn {
 }
 
 /// A registered passage, from `register_passage`: what `remove_passage` takes, and what a
-/// client names when it crosses. Never reused while the world is open.
+/// client names when it crosses. Never given again while the game runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 // exhaustive: its field is private, so mods cannot build or destructure it
 #[derive(horizon_mod_api_macros::Wire)]

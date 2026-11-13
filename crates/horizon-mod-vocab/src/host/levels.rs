@@ -761,9 +761,11 @@ pub trait LevelsBackendMut {
     /// Registers `passage` in the level ([`Passage`], #3775) and numbers it. The engine
     /// tells it to every Horizon client holding its chunk ([`Passage::chunk`]) at the end of
     /// the server's tick, and to a client that gets the chunk later as the chunk is sent
-    /// (`chunk_sent`); a client forgets it with the chunk. Passages are not saved: they
-    /// hold until `remove_passage` or until the world closes, so a mod registers its own
-    /// again in `level_load`. A level holds 256 at most and a chunk 8. Refused with nothing
+    /// (`chunk_sent`); a client forgets it with the chunk. Passages are not saved and a
+    /// datapack reload does not bring them back: they hold until `remove_passage`, the
+    /// level's close or the world's, so a mod registers its own again in `level_load`. An
+    /// id is never given again while the game runs. A level holds 256 at most and a chunk 8.
+    /// A passage removed before the tick's end is never told. Refused with nothing
     /// registered for a stale handle, a client, a passage that isn't a finite rectangle
     /// with unit axes at a right angle and sides above 0 and at most 32 blocks, one with a
     /// corner past vanilla's position limits, and a full level or chunk.
