@@ -8,8 +8,13 @@ use mod_surface::{Surface, leaf};
 use std::collections::BTreeMap;
 use std::path::Path;
 
+/// The surface export a fetched SDK folder holds.
+pub(crate) fn surface_of(sdk: &PinnedSdk) -> Result<Surface, String> {
+    read_surface(&sdk.dir.join("surface.json"))
+}
+
 /// A surface file read and checked.
-pub(crate) fn read_surface(path: &Path) -> Result<Surface, String> {
+fn read_surface(path: &Path) -> Result<Surface, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     Surface::read(&bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
@@ -48,7 +53,7 @@ pub(crate) fn table(
     root: &Path,
     sdk: &PinnedSdk,
 ) -> Result<Option<UsesTable>, String> {
-    let surface = read_surface(&sdk.surface)?;
+    let surface = surface_of(sdk)?;
     Ok(scan(entry, root, &surface)?.map(|uses| uses.table(sdk.build.clone())))
 }
 
@@ -170,7 +175,6 @@ mod tests {
             build: "a".repeat(40),
             name: "nightly-2026-11-13 (afe471c)".into(),
             dir: "sdk".into(),
-            surface: "sdk/surface.json".into(),
         };
         assert_eq!(
             summary("Greeter", &uses, &sdk),

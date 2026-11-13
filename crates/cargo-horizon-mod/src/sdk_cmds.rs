@@ -1,9 +1,9 @@
 //! The commands that read the SDK's data (design §4, design-fit.md 10.2): `check` of a mod
 //! folder, `hooks <text>`, `sdk diff <a> <b>`, `fits` and the report `update` prints before it
 //! repins. Each reads the pinned build's `surface.json` from `.horizon/sdk/`, or another build's
-//! small files through [`crate::sdk_fetch::fetch_build`]; none links the generator's catalog.
-use crate::sdk_fetch::{PinnedSdk, ensure_sdk, fetch_build};
-use crate::uses_table::{self, read_surface};
+//! small files through [`fetch_build`]; none links the generator's catalog.
+use crate::sdk_fetch::{Base, PinnedSdk, ensure_sdk, fetch, keys, resolve};
+use crate::uses_table::{self, surface_of};
 use horizon_mod_package::{
     Manifest, Package,
     manifest::{MANIFEST, MAX_MANIFEST, MAX_USES, USES},
@@ -13,6 +13,15 @@ use mod_surface::uses::{Change, Fit, UsesTable, fits as fit};
 use mod_surface::{Surface, leaf};
 use std::path::Path;
 use std::process::{Command, ExitCode};
+
+/// `text` (a Nightly name or a sha)'s build, its small files only (`sdk.json`, `surface.json`),
+/// in the project's `.horizon/cache/<build>/`, verified as the pinned SDK is, without repinning.
+pub(crate) fn fetch_build(project: &Path, text: &str) -> Result<PinnedSdk, String> {
+    let base = Base::from_env();
+    let build = resolve(&base, text)?;
+    let dir = project.join(".horizon/cache").join(&build);
+    fetch(&base, &keys(), &build, &dir, false)
+}
 
 /// One searchable record: its id, its doc text and its names in other mod APIs.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -155,7 +164,7 @@ pub(crate) fn hooks(args: &[String]) -> Result<(), String> {
         return Err("cargo horizon-mod hooks <text> [--all]".into());
     }
     let sdk = ensure_sdk(Path::new("."))?;
-    let surface = read_surface(&sdk.surface)?;
+    let surface = surface_of(&sdk)?;
     let found = search(&surface, &text, !all);
     if found.is_empty() {
         let what = if all { "item" } else { "hook" };
@@ -190,7 +199,7 @@ pub(crate) fn sdk(args: &[String]) -> Result<(), String> {
     let project = Path::new(".");
     let old = fetch_build(project, a)?;
     let new = fetch_build(project, b)?;
-    let diff = mod_surface::diff(&read_surface(&old.surface)?, &read_surface(&new.surface)?);
+    let diff = mod_surface::diff(&surface_of(&old)?, &surface_of(&new)?);
     println!("{} to {}", old.name, new.name);
     print!("{}", diff.to_text());
     Ok(())
@@ -300,7 +309,7 @@ fn fits_lines(entry: ChildEntry, args: &[String]) -> Result<bool, String> {
             println!("{}  made for", target.name);
             continue;
         }
-        match fit(&table.entries, &read_surface(&target.surface)?) {
+        match fit(&table.entries, &surface_of(&target)?) {
             Fit::Fits => println!("{}  fits", target.name),
             Fit::DoesNotFit(misfits) => {
                 all = false;
@@ -360,13 +369,13 @@ pub(crate) fn update_report(
         std::fs::read_to_string(root.join(MANIFEST)).map_err(|e| format!("{MANIFEST}: {e}"))?;
     let name = display_name(&manifest)?;
     let old = ensure_sdk(root)?;
-    let old_surface = read_surface(&old.surface)?;
+    let old_surface = surface_of(&old)?;
     let Some(uses) = uses_table::scan(entry, root, &old_surface)? else {
         println!("{name} is made for exactly one build; its declarations are checked as it moves.");
         return Ok(());
     };
     let new = fetch_build(root, to.unwrap_or("nightly"))?;
-    let new_surface = read_surface(&new.surface)?;
+    let new_surface = surface_of(&new)?;
     let notes = migrate_notes(&new.dir);
     print!(
         "{}",
@@ -478,7 +487,7 @@ pub(crate) fn check_mod(entry: ChildEntry, args: &[String]) -> Result<(), String
         }
     }
     let sdk = ensure_sdk(root)?;
-    let surface = read_surface(&sdk.surface)?;
+    let surface = surface_of(&sdk)?;
     match uses_table::scan(entry, root, &surface)? {
         Some(uses) => {
             print!(
