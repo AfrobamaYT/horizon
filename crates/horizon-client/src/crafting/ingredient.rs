@@ -37,9 +37,9 @@ fn is_custom(kind: &str) -> bool {
 #[derive(Clone, Debug)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct Ingredient {
-    /// The items it accepts, however the source shape named them.
+    /// Full candidate set; a non-simple predicate tests each concrete stack.
     pub items: HashSet<String>,
-    /// The same items in `HolderSet` order (`display`).
+    /// Default-stack display/simple-match order; may be empty for non-simple kinds.
     pub order: Vec<String>,
     /// A mod's own kind, for matching at craft time: the kind and its
     /// NBT compound, as the load-time hook saw them (`native_ingredient_test`).
@@ -69,10 +69,10 @@ impl Ingredient {
     pub fn prepare_components(&mut self, items: &Items) -> Option<()> {
         if let Some(rule) = &self.rule {
             let compiled = std::sync::Arc::new(
-                components::ComponentPredicate::compile(rule, &self.order, items).ok()?,
+                components::ComponentPredicate::compile(rule, &self.items, items).ok()?,
             );
             if self.display.is_none() {
-                self.shown = Some(compiled.shown(rule, &self.order));
+                self.shown = Some(compiled.shown(&self.order));
             }
             self.compiled = Some(compiled);
         }
@@ -271,20 +271,27 @@ impl Ingredient {
             children,
         };
         ingredient.prepare_components(items)?;
-        if matches!(
-            ingredient.children,
-            Some((Shape::Difference | Shape::Intersection, _))
-        ) {
-            let order = ingredient
+        let order: Vec<String> = match &ingredient.children {
+            Some((Shape::Difference, kids)) => ingredient
+                .order
+                .iter()
+                .filter(|id| !kids[1].default_matches(&ItemStack::new(id, 1)))
+                .cloned()
+                .collect(),
+            Some((Shape::Intersection, _)) => ingredient
                 .order
                 .iter()
                 .filter(|id| ingredient.default_matches(&ItemStack::new(id, 1)))
                 .cloned()
-                .collect::<Vec<_>>();
+                .collect(),
+            _ => return (!ingredient.order.is_empty()).then_some(ingredient),
+        };
+        if ingredient.is_simple() {
             ingredient.items = order.iter().cloned().collect();
-            ingredient.order = order;
         }
-        (!ingredient.order.is_empty()).then_some(ingredient)
+        ingredient.order = order;
+        (!ingredient.items.is_empty() && (!ingredient.is_simple() || !ingredient.order.is_empty()))
+            .then_some(ingredient)
     }
 }
 
@@ -299,3 +306,7 @@ mod builtin_kinds_tests;
 #[cfg(test)]
 #[path = "ingredient/review_tests.rs"]
 mod review_tests;
+
+#[cfg(test)]
+#[path = "ingredient/second_review_tests.rs"]
+mod second_review_tests;

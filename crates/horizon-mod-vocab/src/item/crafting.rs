@@ -36,9 +36,9 @@ impl RecipePropertyAddition {
 // exhaustive: placement providers and the game construct complete ingredient values
 #[derive(horizon_mod_api_macros::Wire)]
 pub struct Ingredient {
-    /// The items it accepts, however the source shape named them.
+    /// Full candidate set; non-simple predicates test the concrete stack.
     pub items: HashSet<String>,
-    /// The same items in `HolderSet` order (`display`).
+    /// Default-stack display/simple-match order; non-simple kinds may have none.
     pub order: Vec<String>,
     /// A mod's own kind, for matching at craft time: the kind and its
     /// NBT compound, as the load-time hook saw them (`ingredient_test`).

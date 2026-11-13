@@ -70,8 +70,117 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
         ),
         "minecraft:item_name" => item_name_equal(a, b),
         "minecraft:rarity" => rarity(a) == rarity(b),
-        _ => a.data().and_then(|d| d.other(id)) == b.data().and_then(|d| d.other(id)),
+        _ => stored_component_equal(id, a, b),
     }
+}
+
+/// Exact stored-value comparison, including the fields removed from `other` by decoding.
+pub fn stored_component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
+    if id == "minecraft:damage" {
+        return a.damage == b.damage;
+    }
+    if !MODELLED.contains(&id) {
+        return a.data().and_then(|d| d.other(id)) == b.data().and_then(|d| d.other(id));
+    }
+    let raw_a = a.data().and_then(|data| {
+        data.other
+            .iter()
+            .find(|(key, _)| key == id)
+            .map(|(_, value)| value)
+    });
+    let raw_b = b.data().and_then(|data| {
+        data.other
+            .iter()
+            .find(|(key, _)| key == id)
+            .map(|(_, value)| value)
+    });
+    // Empty/malformed retained values are not interchangeable with a populated modelled field.
+    if raw_a.is_some() || raw_b.is_some() {
+        return raw_a == raw_b;
+    }
+    let empty = StackData::default();
+    let a = a.data().unwrap_or(&empty);
+    let b = b.data().unwrap_or(&empty);
+    match id {
+        "minecraft:potion_contents" => {
+            a.potion == b.potion
+                && a.potion_extra.len() == b.potion_extra.len()
+                && a.potion_extra
+                    .iter()
+                    .all(|entry| b.potion_extra.contains(entry))
+        }
+        "minecraft:bundle_contents" => stacks_equal(&a.bundle_contents, &b.bundle_contents),
+        "minecraft:charged_projectiles" => stacks_equal(&a.charged, &b.charged),
+        "minecraft:container" => {
+            a.container.len() == b.container.len()
+                && a.container
+                    .iter()
+                    .zip(&b.container)
+                    .all(|((slot, stack), (other, value))| slot == other && stack.matches(value))
+        }
+        "minecraft:trim" => a.trim == b.trim,
+        "minecraft:fireworks" => a.fireworks == b.fireworks,
+        "minecraft:firework_explosion" => a.firework_explosion == b.firework_explosion,
+        "minecraft:map_id" => a.map_id == b.map_id,
+        "minecraft:base_color" => a.base_color == b.base_color,
+        "minecraft:dyed_color" => a.dyed_color == b.dyed_color,
+        "minecraft:ominous_bottle_amplifier" => a.ominous_amplifier == b.ominous_amplifier,
+        "minecraft:map_post_processing" => a.map_post_processing == b.map_post_processing,
+        "minecraft:writable_book_content" => a.writable_pages == b.writable_pages,
+        "minecraft:written_book_content" => a.written == b.written,
+        "minecraft:suspicious_stew_effects" => a.stew_effects == b.stew_effects,
+        "minecraft:pot_decorations" => match (&a.pot_decorations, &b.pot_decorations) {
+            (Some(a), Some(b)) => a.iter().zip(b.iter()).all(|(a, b)| match (a, b) {
+                (Some(a), Some(b)) => a.matches(b),
+                (None, None) => true,
+                _ => false,
+            }),
+            (None, None) => true,
+            _ => false,
+        },
+        "minecraft:banner_patterns" => banner_equal(a, b),
+        "minecraft:consumable" => {
+            a.consumable.as_ref().map(|value| &value.raw)
+                == b.consumable.as_ref().map(|value| &value.raw)
+        }
+        "minecraft:kinetic_weapon" => {
+            a.kinetic_weapon.as_ref().map(|value| value.raw())
+                == b.kinetic_weapon.as_ref().map(|value| value.raw())
+        }
+        // These have shared decoders; keep this helper complete for direct users too.
+        "minecraft:repair_cost" => a.repair_cost == b.repair_cost,
+        "minecraft:enchantments" => levels_equal(&a.enchantments, &b.enchantments),
+        "minecraft:stored_enchantments" => {
+            levels_equal(&a.stored_enchantments, &b.stored_enchantments)
+        }
+        "minecraft:custom_name" => a.custom_name == b.custom_name,
+        _ => unreachable!("every modelled component has a borrowed comparison"),
+    }
+}
+fn stacks_equal(a: &[ItemStack], b: &[ItemStack]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.matches(b))
+}
+fn banner_equal(a: &StackData, b: &StackData) -> bool {
+    match (a.ominous_banner, b.ominous_banner) {
+        (true, true) => true,
+        (false, false) => a.banner_patterns == b.banner_patterns,
+        (true, false) => ominous_layers(&b.banner_patterns),
+        (false, true) => ominous_layers(&a.banner_patterns),
+    }
+}
+fn ominous_layers(layers: &[crate::banner_layer::BannerLayer]) -> bool {
+    layers.len() == OMINOUS_LAYERS.len()
+        && layers
+            .iter()
+            .zip(OMINOUS_LAYERS)
+            .all(|(layer, (pattern, color))| {
+                layer
+                    .pattern
+                    .strip_prefix("minecraft:")
+                    .unwrap_or(&layer.pattern)
+                    == pattern
+                    && layer.color.as_ref() == color
+            })
 }
 
 fn java_is(value: &JavaString, text: &str) -> bool {

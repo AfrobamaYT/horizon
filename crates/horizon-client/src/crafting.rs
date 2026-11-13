@@ -1266,7 +1266,9 @@ pub struct Recipes {
     /// What mods added to the recipe property sets this load (`property_set`).
     property_additions: PropertyAdditions,
 }
-type CookIndex = HashMap<String, crate::fast_hash::FxHashMap<String, Vec<usize>>>;
+#[path = "crafting/cooking_index.rs"]
+mod cooking_index;
+use cooking_index::CookIndex;
 /// `MinMaxBounds.Ints` as (min, max) with the given defaults.
 /// `TransmuteRecipe`'s `material_count` as the recipe parser reads it: a
 /// number is exact, an object's missing ends are 1 and 8, both kept in 1..8.
@@ -1594,9 +1596,6 @@ impl Recipes {
             station,
         ) in sources.recipes.iter().zip(sources.station_recipes(items))
         {
-            if !Ingredient::validate_recipe(resolved, items, name) {
-                continue;
-            }
             let mut entry = None;
             if let Some(kind) = json["type"]
                 .as_str()
@@ -1613,6 +1612,9 @@ impl Recipes {
                 if let Some(entry) = entry {
                     by_type.entry(entry.kind.clone()).or_default().push(entry);
                 }
+                continue;
+            }
+            if !Ingredient::validate_recipe(resolved, items, name) {
                 continue;
             }
             let v = &**resolved;
@@ -2089,23 +2091,9 @@ impl Recipes {
             .map_or(0.0, |c| c.experience)
     }
     pub fn cook(&self, context: &LoopContext, kind: &str, input: &ItemStack) -> Option<&Cooking> {
-        // Every recipe an item names, not just the first: a mod's match-time
-        // hook may refuse the one the first recipe would take (`Ingredient::test`).
-        let index = self.cook_index.get_or_init(|| {
-            let mut index = CookIndex::new();
-            for (i, c) in self.cooking.iter().enumerate() {
-                let of_kind = index.entry(c.kind.clone()).or_default();
-                for item in &c.ingredient.items {
-                    of_kind.entry(item.clone()).or_default().push(i);
-                }
-            }
-            index
-        });
-        index.get(kind)?.get(&*input.item)?.iter().find_map(|i| {
-            self.cooking
-                .get(*i)
-                .filter(|c| c.ingredient.test_in(context, input))
-        })
+        self.cook_index
+            .get_or_init(|| CookIndex::build(&self.cooking))
+            .find(&self.cooking, context, kind, input)
     }
     /// The mod-created sets of this load, with fully qualified keys.
     pub fn custom_property_sets(&self) -> impl Iterator<Item = (&str, &HashSet<String>)> {

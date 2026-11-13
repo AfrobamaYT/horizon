@@ -43,7 +43,9 @@ fn intersection_filters_default_stacks_without_losing_concrete_predicate() {
             &items,
         )
     };
-    assert!(parse(5).is_none());
+    let only_damaged = parse(5).unwrap();
+    assert!(only_damaged.order.is_empty());
+    assert!(only_damaged.items.contains("minecraft:diamond_sword"));
     let ingredient = parse(0).unwrap();
     assert!(!ingredient.is_simple());
     let load = context();
@@ -52,10 +54,13 @@ fn intersection_filters_default_stacks_without_losing_concrete_predicate() {
     assert!(ingredient.test_in(&ctx, &sword));
     sword.damage = 5;
     assert!(!ingredient.test_in(&ctx, &sword));
+    assert!(only_damaged.test_in(&ctx, &sword));
+    sword.damage = 0;
+    assert!(!only_damaged.test_in(&ctx, &sword));
 }
 #[test]
 #[ignore = "requires prepared resources"]
-fn malformed_unknown_and_unsupported_component_patches_reject_whole_recipe() {
+fn malformed_and_unknown_component_patches_reject_whole_recipe() {
     let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let defaults = horizon_world::item_defaults::read(&root).unwrap();
     let items = Items::catalog(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
@@ -63,8 +68,6 @@ fn malformed_unknown_and_unsupported_component_patches_reject_whole_recipe() {
     for patch in [
         serde_json::json!({"!fixture:not_registered":{}}),
         serde_json::json!({"minecraft:damage":"not a number"}),
-        serde_json::json!({"minecraft:unbreakable":{}}),
-        serde_json::json!({"minecraft:map_post_processing":1}),
     ] {
         let ingredient = serde_json::json!({"type":"neoforge:components","items":"minecraft:diamond_sword","components":patch});
         assert!(Ingredient::parse(&ingredient, &items).is_none());

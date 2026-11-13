@@ -20,11 +20,7 @@ fn resolve(display: &Value, items: &Items) -> Option<Vec<ItemStack>> {
         "minecraft:item_stack" => {
             vec![super::super::Template::parse(display.get("item")?)?.create()]
         }
-        "minecraft:tag" => Ingredient::parse(display.get("tag")?, items)?
-            .order
-            .iter()
-            .map(|id| ItemStack::new(id, 1))
-            .collect(),
+        "minecraft:tag" => holder_stacks(display.get("tag")?, items)?,
         "minecraft:composite" => {
             let mut stacks = Vec::new();
             for child in display.get("contents")?.as_array()? {
@@ -45,4 +41,27 @@ fn resolve(display: &Value, items: &Items) -> Option<Vec<ItemStack>> {
         "minecraft:with_remainder" => resolve(display.get("input")?, items)?,
         _ => return None,
     })
+}
+
+fn holder_stacks(value: &Value, items: &Items) -> Option<Vec<ItemStack>> {
+    match value {
+        Value::String(id) => Some(match id.strip_prefix('#') {
+            Some(tag) => items
+                .item_tag_order
+                .get(tag)
+                .into_iter()
+                .flatten()
+                .map(|id| ItemStack::new(id, 1))
+                .collect(),
+            None => vec![ItemStack::new(id, 1)],
+        }),
+        Value::Array(values) => {
+            let mut out = Vec::new();
+            for value in values {
+                out.extend(holder_stacks(value, items)?);
+            }
+            Some(out)
+        }
+        _ => None,
+    }
 }

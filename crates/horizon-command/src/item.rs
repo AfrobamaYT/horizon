@@ -36,10 +36,11 @@ pub const DECODED_COMPONENTS: &[&str] = &[
 ];
 
 /// Validate and decode a component into the value representation shared with stacks.
-/// Unsupported built-ins are refused, rather than using the command parser's permissive fallback.
+/// Registered components without a shared decoder retain their exact stored value.
+/// Registration is checked by the caller; this helper only rejects failed decodes.
 pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Result<Tag, String> {
     if !DECODED_COMPONENTS.contains(&id) {
-        return Err(format!("component {id} has no implemented payload decoder"));
+        return Ok(value.clone());
     }
     decode_component(id, value, reg)?;
     if id == "minecraft:block_entity_data" {
@@ -730,7 +731,7 @@ mod tests {
     use super::decode_component;
 
     #[test]
-    fn decoded_component_values_use_codec_numbers_and_refuse_unsupported_types() {
+    fn decoded_component_values_use_codec_numbers_and_retain_stored_values() {
         use super::{Registries, Tag, decoded_component_value};
         let registry = Registries::default();
         assert_eq!(
@@ -759,14 +760,14 @@ mod tests {
             )
             .is_err()
         );
-        assert!(
+        assert_eq!(
             decoded_component_value(
                 "minecraft:unbreakable",
                 &Tag::compound([] as [(&str, Tag); 0]),
                 &registry
             )
-            .unwrap_err()
-            .contains("minecraft:unbreakable")
+            .unwrap(),
+            Tag::compound([] as [(&str, Tag); 0])
         );
         assert!(
             decoded_component_value(

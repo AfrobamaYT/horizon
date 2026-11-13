@@ -8,6 +8,7 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 pub struct ComponentPredicate {
     expected: ItemStack,
+    retained: Compound,
     patched: HashSet<String>,
     removed: Vec<String>,
     strict: bool,
@@ -56,18 +57,10 @@ pub(super) fn validate(rule: &IngredientRule, items: &Items) -> Result<(), Strin
         if !known(&id) {
             return Err(format!("unregistered component {id}"));
         }
-        if id.starts_with("minecraft:")
-            && !horizon_command::item::DECODED_COMPONENTS.contains(&id.as_str())
-        {
-            return Err(format!("component {id} has no implemented payload decoder"));
-        }
     }
     for (id, value) in patch {
         let id = component_id(&id.to_string_lossy())?;
         if id.starts_with("minecraft:") {
-            if !horizon_command::item::DECODED_COMPONENTS.contains(&id.as_str()) {
-                return Err(format!("component {id} has no implemented payload decoder"));
-            }
             horizon_command::item::decoded_component_value(&id, value, &items.component_registry)
                 .map_err(|error| format!("component {id}: {error}"))?;
         } else {
@@ -81,7 +74,7 @@ pub(super) fn validate(rule: &IngredientRule, items: &Items) -> Result<(), Strin
 impl ComponentPredicate {
     pub(super) fn compile(
         rule: &IngredientRule,
-        order: &[String],
+        candidates: &HashSet<String>,
         items: &Items,
     ) -> Result<Self, String> {
         validate(rule, items)?;
@@ -106,8 +99,8 @@ impl ComponentPredicate {
                 Ok((name.as_str().into(), value))
             })
             .collect::<Result<Compound, String>>()?;
-        let expected = decode(decoded);
-        let defaults = order
+        let expected = decode(decoded.clone());
+        let defaults = candidates
             .iter()
             .map(|id| {
                 let values = items
@@ -121,6 +114,7 @@ impl ComponentPredicate {
             .collect();
         Ok(Self {
             expected,
+            retained: decoded,
             patched: patch
                 .keys()
                 .map(|key| component_id(&key.to_string_lossy()))
@@ -170,19 +164,12 @@ impl ComponentPredicate {
         }
         true
     }
-    pub(super) fn shown(&self, rule: &IngredientRule, order: &[String]) -> Vec<ItemStack> {
-        let IngredientRule::Components { patch, .. } = rule;
+    pub(super) fn shown(&self, order: &[String]) -> Vec<ItemStack> {
         order
             .iter()
             .map(|id| {
                 // ItemStack carries a patch: its renderer reads the prototype itself.
-                let mut values = match crate::item_data::components_tag(
-                    self.expected.damage,
-                    self.expected.data(),
-                ) {
-                    Some(Tag::Compound(values)) => values,
-                    _ => patch.clone(),
-                };
+                let mut values = self.retained.clone();
                 for id in &self.removed {
                     values.insert(
                         format!("!{id}").as_str().into(),
