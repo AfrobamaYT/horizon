@@ -175,7 +175,7 @@ impl View {
     /// bookshelf's books and a jukebox's disc, else vanilla's default.
     fn slot_limit(&self) -> u32 {
         match self.kind {
-            Kind::Bookshelf | Kind::Jukebox => 1,
+            Kind::Bookshelf | Kind::Jukebox | Kind::Composter(_) => 1,
             _ => 99,
         }
     }
@@ -458,6 +458,15 @@ impl Containers<'_> {
             return c.inputs.contains(&slot);
         }
         match view.kind {
+            // ComposterBlock.InputContainer.canPlaceItemThroughFace; output never accepts.
+            Kind::Composter(level) => {
+                level < 7
+                    && slot == 0
+                    && self
+                        .items
+                        .get(&stack.item)
+                        .is_some_and(|i| i.compostable.is_some())
+            }
             // ShulkerBoxBlockEntity.canPlaceItemThroughFace
             Kind::Shulker => !is_shulker_box(&stack.item),
             Kind::Crafter => match self.world.block_entities.get(&view.parts[0].0) {

@@ -10,7 +10,7 @@
 //! waiting work, which nothing outside had seen.
 //!
 //! Covered here: block entities (slots, saved compound, custom name, lock, loot roll, attachments), a hopper's cooldown and
-//! cauldron block states. The attachment map of every other holder (an entity, a player, a
+//! cauldron and composter block states. The attachment map of every other holder (an entity, a player, a
 //! chunk, the level) is kept on the first access to it through `attachment_map`. A block's tentative state is stored only (`World::set_stored`): the
 //! one real write, with its remesh, relight and logs, is at the root commit. A jukebox is
 //! told at the root commit from its record before and after, so a disc swapped in one
@@ -34,6 +34,8 @@ use std::collections::HashMap;
 pub(in crate::game) mod decision;
 
 type Pos = (i32, i32, i32);
+type ComposterRandoms =
+    HashMap<(mod_api::DimensionKey, (i32, i32)), HashMap<Pos, horizon_core::random::LegacyRandom>>;
 
 /// The open transactions, innermost last, and which close is running, if any: what
 /// `transaction_lifecycle` reads.
@@ -41,6 +43,9 @@ type Pos = (i32, i32, i32);
 pub(super) struct OpenTransactions {
     levels: Vec<Level>,
     closing: Option<TransactionLifecycle>,
+    composter_epoch: Option<mod_api::WorldEpoch>,
+    /// Each composter port owns its transactional random stream, independently of Level.random.
+    composter_randoms: ComposterRandoms,
 }
 
 impl std::ops::Deref for OpenTransactions {
@@ -86,6 +91,8 @@ pub(super) struct Level {
     slots: HashMap<(Pos, usize), KeptSlot>,
     /// Each block's state before this transaction first wrote it.
     blocks: HashMap<Pos, BlockStateId>,
+    /// Composter-local random streams before this depth first evaluated their layers.
+    composter_randoms: ComposterRandoms,
     /// Each quart cell before this transaction first wrote it.
     biomes: HashMap<Pos, u16>,
     /// Each player's inventory before this transaction first wrote it, by UUID.
@@ -194,6 +201,7 @@ pub(super) enum After {
     /// A mod's validated vanilla packet, bound to its physical protocol incarnation.
     Packet(horizon_client::net::PreparedPacket),
     Cauldron(super::cauldron_interactions::Effects),
+    Composter(super::composter::Effects),
     /// `BlockEntity.setChanged`.
     Changed(Pos),
     /// `BlockEntity.setChanged` and `Level.sendBlockUpdated` after its data was loaded.
@@ -388,6 +396,12 @@ impl Game<'_> {
                 for (pos, state) in level.blocks {
                     outer.blocks.entry(pos).or_insert(state);
                 }
+                for (chunk, randoms) in level.composter_randoms {
+                    let kept = outer.composter_randoms.entry(chunk).or_default();
+                    for (pos, random) in randoms {
+                        kept.entry(pos).or_insert(random);
+                    }
+                }
                 for (pos, biome) in level.biomes {
                     outer.biomes.entry(pos).or_insert(biome);
                 }
@@ -430,6 +444,70 @@ impl Game<'_> {
     pub(super) fn abort_open_transactions(&mut self) {
         while !self.transactions.is_empty() {
             self.close_storage_transaction(false);
+        }
+    }
+
+    /// `ComposterWrapper.transactionalRandom`: snapshot only the position's private owner,
+    /// including its initial state on a first access that later aborts.
+    pub(super) fn take_composter_random(
+        &mut self,
+        pos: [i32; 3],
+    ) -> horizon_core::random::LegacyRandom {
+        let epoch = self.native_lifecycle.epoch();
+        if self.transactions.composter_epoch != epoch {
+            self.clear_composter_randoms();
+            self.transactions.composter_epoch = epoch;
+        }
+        let chunk = (self.dim.key(), (pos[0] >> 4, pos[2] >> 4));
+        let key = (pos[0], pos[1], pos[2]);
+        let random = self
+            .transactions
+            .composter_randoms
+            .entry(chunk)
+            .or_default()
+            .remove(&key)
+            .unwrap_or_else(|| (*self.world.random).clone());
+        if let Some(level) = self.transactions.last_mut() {
+            level
+                .composter_randoms
+                .entry(chunk)
+                .or_default()
+                .entry(key)
+                .or_insert_with(|| random.clone());
+        }
+        random
+    }
+
+    pub(super) fn put_composter_random(
+        &mut self,
+        pos: [i32; 3],
+        random: horizon_core::random::LegacyRandom,
+    ) {
+        self.transactions
+            .composter_randoms
+            .entry((self.dim.key(), (pos[0] >> 4, pos[2] >> 4)))
+            .or_default()
+            .insert((pos[0], pos[1], pos[2]), random);
+    }
+
+    /// Retire only an unloading chunk's cached owners and their pending savepoints.
+    pub(super) fn forget_composter_chunk(
+        &mut self,
+        dimension: mod_api::DimensionKey,
+        chunk: [i32; 2],
+    ) {
+        let key = (dimension, (chunk[0], chunk[1]));
+        self.transactions.composter_randoms.remove(&key);
+        for level in &mut self.transactions.levels {
+            level.composter_randoms.remove(&key);
+        }
+    }
+
+    pub(super) fn clear_composter_randoms(&mut self) {
+        self.transactions.composter_epoch = None;
+        self.transactions.composter_randoms.clear();
+        for level in &mut self.transactions.levels {
+            level.composter_randoms.clear();
         }
     }
     /// Keeps the block entity at `pos` as it is, with its attachments and a hopper's
@@ -663,6 +741,7 @@ impl Game<'_> {
             After::Payload(payload) => payload.publish(),
             After::Packet(packet) => packet.publish(),
             After::Cauldron(effects) => self.commit_cauldron_effects(effects),
+            After::Composter(effects) => self.commit_composter_effects(effects),
             After::Changed(pos) => self.container_changed(pos),
             After::Updated(pos) => self.block_entity_updated(pos),
             After::NotifyClients(pos) => self.notify_block_clients(pos),
@@ -857,6 +936,13 @@ impl Game<'_> {
         }
         for (pos, state) in level.blocks {
             self.world.set_stored(pos.0, pos.1, pos.2, state);
+        }
+        for (chunk, randoms) in level.composter_randoms {
+            self.transactions
+                .composter_randoms
+                .entry(chunk)
+                .or_default()
+                .extend(randoms);
         }
         for (id, kept) in level.entities {
             self.edit_entity_slots(id, |slots, _| {

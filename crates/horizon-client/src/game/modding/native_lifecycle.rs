@@ -272,6 +272,7 @@ impl Game<'_> {
         self.attachment_indexes.clear();
         self.resident_entities.table.get_mut().reset();
         super::cauldron_interactions::clear();
+        self.clear_composter_randoms();
         mod_api::__private::clear_game_parts();
     }
 
