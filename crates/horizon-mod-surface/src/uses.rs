@@ -251,8 +251,9 @@ fn path_starts(tokens: &Tokens<'_>) -> Vec<usize> {
 }
 
 /// For each token that opens a bracket, the index of the token that closes it, if it closes;
-/// and whether its contents end in `..` at their own level: a base or rest in braces, a rest
-/// in parentheses (`..` before `)` or `,`; after it anything else is a range). One pass.
+/// and, for braces, whether their contents end in `..` at their own level: a base or a rest.
+/// In parentheses `..` may as well be a range (`Pos(0, ..)`), so it counts as nothing there.
+/// One pass.
 fn brackets(tokens: &Tokens<'_>) -> (Vec<Option<usize>>, Vec<bool>) {
     let mut closers = vec![None; tokens.len()];
     let mut rests = vec![false; tokens.len()];
@@ -273,12 +274,8 @@ fn brackets(tokens: &Tokens<'_>) -> (Vec<Option<usize>>, Vec<bool>) {
             Token::Punct(b'.') => {
                 if let Some((start, previous)) = open.last().copied()
                     && punct(tokens, at + 1, b'.')
-                    && matches!(previous, Token::Punct(b'{' | b'(' | b','))
-                    && (punct(tokens, start, b'{')
-                        || matches!(
-                            tokens.get(at + 2).map(|(t, _)| *t),
-                            Some(Token::Punct(b')' | b','))
-                        ))
+                    && matches!(previous, Token::Punct(b'{' | b','))
+                    && punct(tokens, start, b'{')
                 {
                     rests[start] = true;
                 }
@@ -795,6 +792,9 @@ struct ModFacts<'t> {
     /// The mod's own `macro_rules!` names that no `use` binds to something else: the scan reads
     /// their bodies.
     own_macros: BTreeSet<&'t str>,
+    /// The modules the mod declares (`mod api;`): a path that starts at one is the mod's own,
+    /// like one after `crate::`.
+    modules: BTreeSet<&'t str>,
 }
 
 fn mod_facts<'t>(files: &[FileFacts<'t>], api_prefixes: &BTreeSet<String>) -> ModFacts<'t> {
@@ -827,6 +827,10 @@ fn mod_facts<'t>(files: &[FileFacts<'t>], api_prefixes: &BTreeSet<String>) -> Mo
         rebound: BTreeSet::new(),
         rebound_all: false,
         own_macros: BTreeSet::new(),
+        modules: files
+            .iter()
+            .flat_map(|file| file.syntax.modules.iter().copied())
+            .collect(),
     };
     let mut imported = BTreeSet::new();
     for file in files {
@@ -1450,19 +1454,30 @@ impl<'a, 's, 't> Resolver<'a, 's, 't> {
 
     /// Each API path (`mod_api::` left out) a path written in a file may be: through an API
     /// root or a name bound to an API path, under one of the file's API globs, or after
-    /// `crate`, `self` or `super`, through the mod's re-exports and globs.
+    /// `crate`, `self`, `super` or a module the mod declares, through the mod's re-exports and
+    /// globs.
     fn api_paths(&self, path: &[&'t str], globs: &BTreeSet<Vec<&'t str>>) -> Vec<Vec<String>> {
         let inside = path
             .iter()
-            .take_while(|segment| matches!(**segment, "crate" | "self" | "super"))
+            .take_while(|segment| {
+                matches!(**segment, "crate" | "self" | "super")
+                    || self.module.modules.contains(*segment)
+            })
             .count();
         let (rest, globs) = if inside > 0 {
             (&path[inside..], &self.mod_globs)
         } else {
             (path, globs)
         };
+        // A module of the mod's may share its name with an API root's module: both are read.
         let mut out: Vec<Vec<String>> = api_paths_of(rest, self.module)
             .into_iter()
+            .chain(
+                (inside > 0)
+                    .then(|| api_paths_of(path, self.module))
+                    .into_iter()
+                    .flatten(),
+            )
             .map(|p| p.iter().map(|s| (*s).to_owned()).collect())
             .collect();
         // `crate::Biome` through the mod's own `pub use mod_api::prelude::*`.
@@ -1556,16 +1571,19 @@ impl<'s, 't> Walk<'_, '_, 's, 't> {
             let open = at + 1;
             let opens = punct(tokens, open, b'{') || punct(tokens, open, b'(');
             let (name, unqualified) = match *written_name {
+                // A `Self` in a macro body may belong to an impl the macro writes, which the
+                // parser does not read: `Self { … }` there builds a struct the scan cannot place.
+                "Self" if file.in_macro[at] => {
+                    if opens {
+                        found.mark_unsure(place);
+                    }
+                    continue;
+                }
                 "Self" => match resolver.impl_at(index, file.starts[at]) {
                     Some(Some(target)) => (*target.last().unwrap_or(&"Self"), target.len() == 1),
-                    // In a macro body the parser does not read, or in an impl of a type it
-                    // cannot read, `Self { … }` builds a struct the scan cannot place.
-                    _ => {
-                        if file.in_macro[at] && opens {
-                            found.mark_unsure(place);
-                        }
-                        continue;
-                    }
+                    // Outside any impl the parser placed, or in one of a type it cannot read,
+                    // the parser reads any build.
+                    _ => continue,
                 },
                 name => (
                     name,
@@ -1690,10 +1708,15 @@ impl<'s, 't> Walk<'_, '_, 's, 't> {
         let resolver = &*self.resolver;
         let file = &resolver.files[self.index];
         let tokens = &file.tokens;
-        // A file with a glob of the mod's own (`use super::*;`) sees the mod's API globs.
+        // A file with a glob of the mod's own (`use super::*;`, `use api::*;`) sees the mod's
+        // API globs.
         let mut globs = api_globs(file, resolver.module);
         if file.imports.iter().any(|(segments, local)| {
-            *local == "*" && matches!(segments.first(), Some(&("crate" | "self" | "super")))
+            *local == "*"
+                && segments.first().is_some_and(|first| {
+                    matches!(*first, "crate" | "self" | "super")
+                        || resolver.module.modules.contains(first)
+                })
         }) {
             globs.extend(resolver.mod_globs.iter().cloned());
         }

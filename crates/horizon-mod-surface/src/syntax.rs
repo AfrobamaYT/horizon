@@ -61,6 +61,8 @@ pub(crate) struct Syntax<'t> {
     pub type_aliases: Vec<(&'t str, &'t str, bool)>,
     /// The file holds an inline `mod name { … }`, so it is more than one scope.
     pub inline_modules: bool,
+    /// Every module the file declares, inline or not (`mod api;`).
+    pub modules: BTreeSet<&'t str>,
     /// The bytes inside each macro call's delimiters, and each `macro_rules!` body.
     pub macro_bodies: Vec<Range<usize>>,
 }
@@ -195,6 +197,8 @@ impl<'a, 't> Visit<'a> for Reader<'t> {
 
     fn visit_item_mod(&mut self, m: &'a syn::ItemMod) {
         self.out.inline_modules |= m.content.is_some();
+        let name = self.name(&m.ident);
+        self.out.modules.insert(name);
         visit::visit_item_mod(self, m);
     }
 

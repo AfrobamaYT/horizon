@@ -2843,7 +2843,7 @@ fn round_six_inputs_are_not_fits() {
         assert_eq!(marker_built(source), Some(Built::None), "{source}");
     }
     // A `Self` the parser cannot place: an impl of a parenthesised type, or one inside the
-    // mod's own `macro_rules!` with a `where` clause.
+    // mod's own `macro_rules!` with a `where` clause, inside another impl's method or not.
     let dims = format!("{{ {DIMS_LITERAL} }}").replace("DimensionSettings {", "Self {");
     for source in [
         format!(
@@ -2851,6 +2851,9 @@ fn round_six_inputs_are_not_fits() {
         ),
         format!(
             "trait Make {{ fn make() -> Self; }}\nmacro_rules! make {{ () => {{ impl Make for mod_api::world::DimensionSettings where u8: Copy {{ fn make() -> Self {dims} }} }}; }}\nmake!();"
+        ),
+        format!(
+            "trait Make {{ fn make() -> Self; }}\nstruct Wrap;\nimpl Wrap {{ fn setup() {{ macro_rules! make {{ () => {{ impl Make for mod_api::world::DimensionSettings where u8: Copy {{ fn make() -> Self {dims} }} }}; }} make!(); }} }}"
         ),
         // An alias of a type the scan cannot read.
         format!(
@@ -2898,8 +2901,8 @@ fn round_six_inputs_are_not_fits() {
         ),
         Some(Built::None)
     );
-    // In a macro body, `..` before an expression is a range, and before `)` a rest (tokens
-    // cannot tell a pattern from a literal there, so it counts as a base).
+    // In a macro body's parentheses, `..` may be a range (`Pos(0, ..)` is a `RangeFull`
+    // value), so a pattern's rest there counts as a full build too.
     let in_macro = |body: &str| format!("macro_rules! m {{ () => {{ {body} }}; }}");
     assert_eq!(
         pos(&[("src/lib.rs", &in_macro("vec![mod_api::Pos(0, ..10)]"))]),
@@ -2907,7 +2910,7 @@ fn round_six_inputs_are_not_fits() {
     );
     assert_eq!(
         pos(&[("src/lib.rs", &in_macro("let mod_api::Pos(x, ..) = p;"))]),
-        Some(Built::Base)
+        Some(Built::Full)
     );
 }
 
@@ -2915,23 +2918,33 @@ fn round_six_inputs_are_not_fits() {
 fn a_path_through_the_mods_own_glob_records_the_api_path() {
     let mut biome = api_type("type:world::Biome", "", false, vec![]);
     biome.paths = vec!["world::Biome".into(), "prelude::Biome".into()];
-    for world in [
-        "pub fn f(_: crate::Biome) {}",
-        "use super::*;\npub fn f(_: Biome) {}",
+    let reexport = "pub use mod_api::prelude::*;\nmod world;";
+    // Through `crate::`, `super::*`, or a module the mod declares, by a glob or a path.
+    for files in [
+        [
+            ("src/lib.rs", reexport),
+            ("src/world.rs", "pub fn f(_: crate::Biome) {}"),
+        ],
+        [
+            ("src/lib.rs", reexport),
+            ("src/world.rs", "use super::*;\npub fn f(_: Biome) {}"),
+        ],
+        [
+            ("src/lib.rs", "mod api;\nuse api::*;\npub fn f(_: Biome) {}"),
+            ("src/api.rs", "pub use mod_api::prelude::*;"),
+        ],
+        [
+            ("src/lib.rs", "mod api;\npub fn f(_: api::Biome) {}"),
+            ("src/api.rs", "pub use mod_api::prelude::*;"),
+        ],
     ] {
         let mut made_for = wider();
         made_for.types.push(biome.clone());
-        let uses = scan_files(
-            made_for,
-            &[
-                ("src/lib.rs", "pub use mod_api::prelude::*;\nmod world;"),
-                ("src/world.rs", world),
-            ],
-        );
+        let uses = scan_files(made_for, &files);
         assert_eq!(
             entry(&uses, "type:world::Biome").paths,
             ["prelude::Biome"],
-            "{world}"
+            "{files:?}"
         );
         let mut dropped = wider();
         let mut moved = biome.clone();
