@@ -90,7 +90,8 @@ jobs:
         run: python tools/prebuilt_game.py smoke prebuilt
       # Runs what smoke built, installed as the launcher installs it, with no game data: it loads the game's
       # libraries and sets up the mods' runtime, and must stop cleanly at the missing prepared files. A crash
-      # there (two allocators, #3877) fails this OS's leg, so its archive never publishes.
+      # there (two allocators, #3877) fails this OS's leg, so its archive never publishes. On Windows MinGW is
+      # taken off PATH first, so a DLL missing beside the executable (exit 0xC0000135, #3521) fails it too.
       - name: The game executable starts and loads the game's libraries
         timeout-minutes: 10
         run: python tools/prebuilt_game.py start prebuilt
