@@ -3397,6 +3397,8 @@ mod tests {
         };
         let lan = crate::lan::Lan::start_with(Arc::new(SyncData::empty()), config).unwrap();
         let mut c = PlayConn {
+            payload_sender: PlayerSender::disabled(),
+            payload_transport: Transport::empty(),
             conn: 1,
             shared: lan.shared.clone(),
             uuid: 2,
@@ -3444,7 +3446,8 @@ mod tests {
         let forwarded = |lan: &crate::lan::Lan| {
             let events = lan.poll();
             events
-                .iter()
+                .into_iter()
+                .map(|receipt| receipt.into_parts().0)
                 .filter(|e| matches!(e, crate::lan::NetEvent::Packet(..)))
                 .count()
         };
@@ -3585,6 +3588,8 @@ mod tests {
         };
         let lan = crate::lan::Lan::start_with(Arc::new(SyncData::empty()), config).unwrap();
         let conn = |uuid: u128| PlayConn {
+            payload_sender: PlayerSender::disabled(),
+            payload_transport: Transport::empty(),
             conn: 1,
             shared: lan.shared.clone(),
             uuid,

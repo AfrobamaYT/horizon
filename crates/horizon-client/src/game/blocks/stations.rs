@@ -2478,7 +2478,9 @@ impl Game<'_> {
             let shown_modifiers = display.shows("minecraft:attribute_modifiers");
             // The item's own modifiers, then its enchantments' for each slot
             // group (`ItemStack.forEachModifier`).
-            let mut modifiers = self.items().attribute_modifiers(stack);
+            let mut modifiers =
+                horizon_client::item_attributes::attribute_modifiers(stack, self.items())
+                    .into_owned();
             modifiers.extend(e.modifier_rows(stack));
             let base = |name: &str, default| {
                 self.player
@@ -3798,4 +3800,5 @@ mod cycling_tests {
 mod brewing_changed_tests;
 
 #[cfg(test)]
+#[path = "stations/stonecutter_scroll_tests.rs"]
 mod stonecutter_scroll_tests;

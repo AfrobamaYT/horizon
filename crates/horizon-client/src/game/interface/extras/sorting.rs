@@ -2,8 +2,9 @@
 //! menu's storage slots and one by the inventory's (an optional key sorts the part under the
 //! cursor). The clicks come from `inv_sort::plan` and go through the Mouse Tweaks' ordinary slot
 //! clicks (`mouse_tweaks.rs`), so they work wherever vanilla's do.
-use crate::game::Game;
+use crate::game::{Game, Screen};
 use horizon_client::{
+    containers::BlockEntity,
     hud::{HudBatch, rgba},
     inv_sort,
     items::ItemStack,
@@ -18,48 +19,41 @@ const SORT_BUTTON: f32 = 9.0;
 
 impl Game<'_> {
     /// The sort buttons of the open screen, with the extra on: their
-    /// corner (from the screen's) and the slots each sorts. Any menu screen
-    /// gets them, by its slots' roles (`native_slot_roles`): one by the top
-    /// right of its storage slots (a chest's title line) when it has some,
-    /// one by the main inventory's (the "Inventory" label's line).
+    /// corner (from the screen's) and the slots each sorts. The container's
+    /// (chest-like ones only) sits by its title, the main inventory's by
+    /// the "Inventory" label's line.
     fn sort_buttons(&self) -> Vec<((f32, f32), Vec<usize>)> {
-        use crate::game::NativeSlotRole as Role;
-        if !self.settings.extras.sort {
+        if !self.settings.extras.sort
+            || self.screen != Screen::Inventory
+            || self.station.is_some()
+            || self.mount_active()
+        {
             return Vec::new();
         }
-        let roles = self.native_slot_roles();
-        let of = |role| -> Vec<usize> {
-            roles
-                .iter()
-                .filter(|(_, r)| *r == role)
-                .map(|(s, _)| *s)
-                .collect()
-        };
-        // Over the section's last column: (160, 5) over a chest's slots.
-        let right = |slots: &[usize]| {
-            slots
-                .iter()
-                .map(|&s| self.slot_position(s).0 + 8.0)
-                .fold(f32::MIN, f32::max)
+        let chest_like = if self.remote.is_some() {
+            if !self.remote_storage_open() {
+                return Vec::new();
+            }
+            true
+        } else {
+            match self.container_kind() {
+                None => false,
+                Some(BlockEntity::Chest(_)) => {
+                    self.chest_rows().is_some() || self.container_block_is_shulker()
+                }
+                Some(_) => return Vec::new(),
+            }
         };
         let mut buttons = Vec::new();
-        let storage = of(Role::Storage);
-        if !storage.is_empty() {
-            let top = storage
-                .iter()
-                .map(|&s| self.slot_position(s).1 - 13.0)
-                .fold(f32::MAX, f32::min);
-            buttons.push(((right(&storage), top), storage));
+        let container: Vec<usize> = self
+            .slots()
+            .into_iter()
+            .filter(|s| (300..500).contains(s))
+            .collect();
+        if chest_like && !container.is_empty() {
+            buttons.push(((160.0, 5.0), container));
         }
-        // On the "Inventory" label's line (`inventoryLabelY`, height - 94, 12
-        // above the first row): a mod's screen places its inventory itself.
-        let main = of(Role::Inventory);
-        if !main.is_empty() {
-            let y = self
-                .native_screen_inventory_y()
-                .map_or(self.screen_height() - 95.0, |y| y - 13.0);
-            buttons.push(((right(&main), y), main));
-        }
+        buttons.push(((160.0, self.screen_height() - 95.0), (9..36).collect()));
         buttons
     }
     /// The sort buttons: a bordered square with three bars, lighter under
@@ -95,7 +89,10 @@ impl Game<'_> {
         let Some(r) = self.renderer.as_ref() else {
             return false;
         };
-        let batch = HudBatch::new([r.config.width, r.config.height]);
+        let batch = HudBatch::new(
+            [r.config.width, r.config.height],
+            self.settings.gui_scale_inputs(),
+        );
         let (ox, oy) = self.inventory_origin(&batch);
         let (cx, cy) = self.cursor;
         let hit = self.sort_buttons().into_iter().find(|((x, y), _)| {

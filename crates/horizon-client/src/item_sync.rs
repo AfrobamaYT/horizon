@@ -2363,17 +2363,17 @@ mod tests {
         // must already be `minecraft:attack_damage` there (`Identifier.CODEC`
         // reads a bare name as `minecraft:`'s), as it is on the wire.
         let items = horizon_items::items::Items::for_tests(Default::default());
-        let host = items.attribute_modifiers(&pickaxe);
+        let host = pickaxe.default_attribute_modifiers(&items);
         assert_eq!(
             host.iter()
-                .map(|m| (m.0.as_str(), m.1.as_str()))
+                .map(|m| (m.attribute.as_str(), m.id.as_str()))
                 .collect::<Vec<_>>(),
             [
                 ("minecraft:attack_damage", "minecraft:base_attack_damage"),
                 ("minecraft:armor", "minecraft:x"),
             ]
         );
-        assert_eq!(host, items.attribute_modifiers(&back));
+        assert_eq!(host, back.default_attribute_modifiers(&items));
         assert_eq!(
             other("minecraft:tool"),
             Some(Tag::compound([

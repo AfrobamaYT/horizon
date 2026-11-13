@@ -794,29 +794,6 @@ impl Game<'_> {
                 }
                 set_key(&mut tag, "UUID", Tag::IntArray(uuid.to_vec()));
             }
-            Target::Other(id) => {
-                let uuid = self.uuid_for(id);
-                let marker = self
-                    .others
-                    .iter_mut()
-                    .find(|o| {
-                        o.id == id
-                            && (matches!(o.kind.as_str(), "minecraft:marker" | "marker")
-                                || crate::game::interactions::is_interaction(&o.kind))
-                    })
-                    .ok_or_else(stale)?;
-                let position = entity_nbt::position(&tag).ok_or_else(stale)?;
-                let [yaw, pitch] = entity_nbt::rotation(&tag);
-                marker.position = position;
-                marker.yaw = yaw;
-                marker.pitch = pitch;
-                // Interaction.readAdditionalSaveData on the same entity.
-                if crate::game::interactions::is_interaction(&marker.kind) {
-                    marker.interaction =
-                        Some(crate::game::interactions::InteractionState::from_tag(&tag));
-                }
-                set_key(&mut tag, "UUID", Tag::IntArray(uuid.to_vec()));
-            }
             Target::Projectile(id) => {
                 let uuid = self.uuid_for(id);
                 let index = self

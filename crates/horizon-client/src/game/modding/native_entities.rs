@@ -738,6 +738,7 @@ mod tests {
                 );
 
                 game.crystals.push(super::super::dragon::Crystal {
+                    fall: Default::default(),
                     attachment_lifetime: Default::default(),
                     join: Default::default(),
                     id: base + 4,
@@ -805,6 +806,7 @@ mod tests {
                 );
                 drop(seen);
                 game.tnts.push(super::super::tnt::PrimedTnt {
+                    used_portal: false,
                     attachment_lifetime: Default::default(),
                     rotation: [0.0, 0.0],
                     join: Default::default(),

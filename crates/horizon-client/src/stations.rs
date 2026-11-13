@@ -1932,7 +1932,12 @@ mod tests {
             r#"{"values":["minecraft:stick"]}"#,
         )
         .unwrap();
-        let items = Items::catalog(&root, &PackOverlay::NONE).unwrap();
+        let items = Items::catalog(
+            &root,
+            &PackOverlay::NONE,
+            &horizon_world::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let e = sample();
         let stick = |components: &str| {
             let snbt = format!(r#"{{id:"minecraft:stick",count:1,components:{components}}}"#);

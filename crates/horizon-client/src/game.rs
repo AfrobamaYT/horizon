@@ -3674,7 +3674,7 @@ impl Game<'_> {
             stacks.retain(|s| s.enchantment_level("minecraft:vanishing_curse") == 0);
             self.apply_equipment();
         }
-        let stacks = stacks.into_iter().map(|stack| (stack, at)).collect();
+        let stacks = stacks.into_iter().map(|stack| (stack, at, 0)).collect();
         self.drop_death_items(dying, stacks, 40, |game| {
             let r = &mut game.world.random;
             let strength = f64::from(r.next_float()) * 0.5;
@@ -3746,7 +3746,8 @@ impl Game<'_> {
         random: Option<spill::ItemRandom>,
         age: i32,
     ) -> [f64; 3] {
-        let random = random.unwrap_or_else(|| spill::prepare_item_random(velocity));
+        let mut random = random.unwrap_or_else(|| spill::prepare_item_random(velocity));
+        random.state.age = age;
         let item = stack.item.clone();
         let count = stack.count as i32;
         self.next_entity += 1;

@@ -876,7 +876,7 @@ mod jukebox_component_tests {
 }
 
 #[cfg(test)]
-#[path = "jukebox_tests.rs"]
+#[path = "jukebox/tests.rs"]
 mod jukebox_tests;
 
 #[cfg(test)]

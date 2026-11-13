@@ -920,7 +920,9 @@ mod cloud_heal_tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
-        let Ok(biomes) = crate::biome::Biomes::load(&root) else {
+        let Ok(biomes) = crate::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root),
+        ) else {
             return;
         };
         let plains = biomes.id("minecraft:plains");

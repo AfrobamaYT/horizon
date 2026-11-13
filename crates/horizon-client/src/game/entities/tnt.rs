@@ -1551,11 +1551,12 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn portal_transfer_tnt_state_follows_memory_but_not_saved_nbt() {
         use super::super::commands::Target;
-        let mut game = server_game().expect("set HORIZON_TEST_RESOURCES");
+        let mut resources = None;
+        let mut game = server_game(&mut resources).expect("set HORIZON_TEST_RESOURCES");
         game.add_primed_tnt(BlockPos::new(8, 64, 8), 0.0, 80, None, None);
         assert!(!game.tnts[0].used_portal);
         let id = game.tnts[0].id;
-        game.teleport_to_in_level(Target::Tnt(id), [8.5, 64.0, 8.5], None, false);
+        game.teleport_to_in_level(Target::Tnt(id), [8.5, 64.0, 8.5], None, [false; 3], false);
         assert!(game.tnts[0].used_portal);
         let saved = game.tnt_nbt(0);
         game.tnts.clear();
@@ -1578,8 +1579,9 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn portal_transfer_ordinary_nbt_cannot_supply_runtime_immunity() {
-        use horizon_world::nbt::Tag;
-        let mut game = server_game().expect("set HORIZON_TEST_RESOURCES");
+        use horizon_core::nbt::Tag;
+        let mut resources = None;
+        let mut game = server_game(&mut resources).expect("set HORIZON_TEST_RESOURCES");
         for marker in [0, 1] {
             game.add_primed_tnt(BlockPos::new(8, 64, 8), 0.0, 80, None, None);
             let mut saved = game.tnt_nbt(0);
@@ -2072,13 +2074,14 @@ mod tests {
     /// it while it flies.
     #[test]
     fn h13201_a_dispensed_potion_is_a_level_entity() {
-        let Some(mut game) = server_game() else {
+        let mut resources = None;
+        let Some(mut game) = server_game(&mut resources) else {
             return;
         };
         // An operator's commands.
         game.ui.registries.permission = 4;
         use crate::game::commands::Target;
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         for kind in ["splash_potion", "lingering_potion", "experience_bottle"] {
             let stack = ItemStack::new(&format!("minecraft:{kind}"), 1);
             // The dispenser at (8, 100, 8) facing south.
@@ -2096,7 +2099,7 @@ mod tests {
                 let found = game.run_command(&format!("execute if entity {selector}"));
                 assert!(found, "{kind}");
                 assert_eq!(game.level_entity(id as i32), Some(Target::Projectile(id)));
-                let saved = game.entity_nbt(Target::Projectile(id)).unwrap();
+                let saved = game.command_target_nbt(Target::Projectile(id)).unwrap();
                 let id_tag = Tag::String(format!("minecraft:{kind}").as_str().into());
                 assert_eq!(saved.get("id"), Some(&id_tag));
                 assert!(saved.get("Item").is_some() && saved.get("Motion").is_some());

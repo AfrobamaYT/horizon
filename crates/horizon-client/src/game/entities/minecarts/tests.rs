@@ -617,22 +617,3 @@ fn a_mounted_shulker_does_not_push_a_cart() {
     assert!(!takes_push_from_cart(Species::Shulker));
     assert!(takes_push_from_cart(Species::Cow));
 }
-
-/// `WitherBoss.canRide` returns false, so a moving cart cannot scoop the boss up.
-
-#[test]
-fn a_cart_picks_up_a_shulker_but_not_a_dead_one() {
-    assert!(offered_pickup(false, Species::Shulker, true));
-    assert!(!offered_pickup(false, Species::Shulker, false));
-    assert!(!offered_pickup(false, Species::Bat, true));
-    assert!(offered_pickup(true, Species::Cow, true));
-    assert!(pickup_instead_of_push(Species::Shulker, false, false));
-    assert!(can_ride_cart(Species::Shulker, 0));
-}
-
-#[test]
-fn a_mounted_shulker_does_not_push_a_cart() {
-    assert!(!pickup_instead_of_push(Species::Shulker, true, false));
-    assert!(!takes_push_from_cart(Species::Shulker));
-    assert!(takes_push_from_cart(Species::Cow));
-}

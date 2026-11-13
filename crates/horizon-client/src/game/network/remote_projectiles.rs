@@ -326,14 +326,7 @@ impl Game<'_> {
     ) -> bool {
         let id = packet.id;
         self.remove_remote_projectile(id as u32);
-        self.spawn_remote_projectile_inner(
-            id,
-            kind,
-            packet.position,
-            rotation,
-            packet.velocity,
-            packet.data,
-        )
+        self.spawn_remote_projectile_inner(kind, packet, rotation)
     }
 
     /// Whether the client tracks `id` already: asked by `AddEntity` before it tracks the new one.
@@ -358,9 +351,7 @@ impl Game<'_> {
         } else {
             self.crystals.retain(|c| c.id != p.id as u32);
             self.remove_remote_small_projectiles(p.id as u32);
-            self.spawn_remote_projectile_inner(
-                p.id, kind, p.position, rotation, p.velocity, p.data,
-            );
+            self.spawn_remote_projectile_inner(kind, p, rotation);
         }
     }
 
@@ -368,14 +359,14 @@ impl Game<'_> {
     /// `AddEntity` of an id the client does not track yet, which no list holds.
     pub(super) fn spawn_remote_projectile_inner(
         &mut self,
-        id: i32,
         kind: &str,
-        position: [f64; 3],
+        packet: &horizon_protocol::packets::play::AddEntity,
         rotation: (f32, f32),
-        velocity: [f64; 3],
-        data: i32,
     ) -> bool {
-        let id = id as u32;
+        let id = packet.id as u32;
+        let position = packet.position;
+        let velocity = packet.velocity;
+        let data = packet.data;
         let at = Vec3::new(position[0], position[1], position[2]);
         let velocity = Vec3::new(velocity[0], velocity[1], velocity[2]);
         let (yaw, pitch) = rotation;

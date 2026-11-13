@@ -4406,7 +4406,7 @@ mod tests {
     /// writes the `fall_distance` it loaded, and 0 for fangs a spell made.
     #[test]
     fn evoker_fangs_keep_their_loaded_fall_distance() {
-        let raw = horizon_world::nbt::parse_snbt(
+        let raw = horizon_core::nbt::parse_snbt(
             "{id:\"minecraft:evoker_fangs\",Pos:[1d,200d,1d],fall_distance:5.0d,Warmup:100}",
         )
         .unwrap()

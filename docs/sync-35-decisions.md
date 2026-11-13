@@ -57,6 +57,10 @@ Keep fork typed ownership, attachment and join lifetimes, generated module disco
 - `horizon-threads/stack_dump.rs`: one Release readiness store inside the busy frame, Acquire readiness wait using `yield_now`. Production capture is unchanged.
 - The independently merged sampler span-count fix remains unchanged.
 
+## Maintainer-ratified query limit
+
+Carry upstream's `MAX_CHALLENGES = 65_536` pending query-handshake address limit, including its existing-address renewal and pruning behavior. Vanilla does not impose this cap; retaining this upstream defensive limit is an explicit maintainer ruling for the sync.
+
 ## Deliberate mod-contract differences
 
 Upstream's `explosion_entities` hook is not imported: the fork's canonical `explosion_detonate` covers that moment; entity filtering there is a follow-up (maintainer ruling). No sibling event, alias, adapter, fragment, call site or test is introduced. Unrelated explosion fixes remain. Extending canonical detonation with affected-entity read/removal requires a clean-room ordering/contract specification first.

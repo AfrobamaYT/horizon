@@ -68,7 +68,7 @@ fn place_jukebox(game: &mut Game<'_>, record: bool) -> BlockStateId {
 /// (0, 64, 0): `RecordItem` and, with a `clock`, `ticks_since_song_started`.
 fn load_saved(game: &mut Game<'_>, clock: Option<i64>) {
     let clock = clock.map_or(String::new(), |n| format!("ticks_since_song_started:{n}L,"));
-    let (tag, _) = horizon_world::nbt::parse_snbt(&format!(
+    let (tag, _) = horizon_core::nbt::parse_snbt(&format!(
         "{{id:\"minecraft:jukebox\",x:0,y:64,z:0,\
          RecordItem:{{id:\"minecraft:music_disc_11\",count:1,}},{clock}}}"
     ))
@@ -240,7 +240,7 @@ fn a_saved_song_comes_back_without_its_sound() {
 fn only_a_saved_clock_brings_a_song_back() {
     let load = |clock: Option<i64>| {
         let clock = clock.map_or(String::new(), |n| format!("ticks_since_song_started:{n}L,"));
-        let (tag, _) = horizon_world::nbt::parse_snbt(&format!(
+        let (tag, _) = horizon_core::nbt::parse_snbt(&format!(
             "{{id:\"minecraft:jukebox\",x:0,y:64,z:0,\
              RecordItem:{{id:\"minecraft:music_disc_11\",count:1,}},{clock}}}"
         ))

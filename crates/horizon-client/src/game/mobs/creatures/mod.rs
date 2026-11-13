@@ -1893,17 +1893,14 @@ impl Game<'_> {
             for (stack, position, age) in stacks {
                 let random = super::spill::prepare_item_random(None);
                 let motion = velocity(self).unwrap_or(random.velocity);
-                let before = self.dropped.len();
                 self.add_item_entity_prepared(
                     stack,
                     position,
                     Some(motion),
                     pickup_delay,
                     Some(random),
+                    age,
                 );
-                if let Some(drop) = self.dropped.get_mut(before) {
-                    drop.age = age;
-                }
             }
             return;
         };
