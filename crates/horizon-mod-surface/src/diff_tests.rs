@@ -972,8 +972,9 @@ fn a_method_moved_to_a_supertrait_still_holding_is_not_a_break() {
         line.what,
         ["moved to the supertrait `Host`: a call through `ServerHost` still compiles"]
     );
-    // Without the bound, the calls through `ServerHost` break.
+    // Without the bound, the calls through `ServerHost` break, whatever other traits require.
     let cut = traits(vec![
+        called("ClientHost", &["Host"], &[]),
         called("Host", &[], &["spawn"]),
         called("ServerHost", &[], &[]),
     ]);
