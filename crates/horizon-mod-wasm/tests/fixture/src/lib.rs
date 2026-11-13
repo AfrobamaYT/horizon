@@ -16,6 +16,7 @@ pub mod projectile_owner;
 pub mod replace;
 pub mod runtime_environment;
 pub mod selector_command;
+pub mod tick_reply;
 pub mod turn;
 pub use matrix::{mirrors, sum_return};
 pub mod shutdown;
@@ -199,6 +200,7 @@ impl Hooks for Mod {
         game_payload::register(registrar);
         interaction::register(registrar);
         cauldron::register(registrar);
+        tick_reply::register(registrar);
         registrar
             .declare_datapack_registry(
                 "spell",

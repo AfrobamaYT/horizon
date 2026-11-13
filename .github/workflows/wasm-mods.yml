@@ -150,6 +150,7 @@ jobs:
             game::native_hooks::math::tests::compiled_wasm_math_profile_import_matches_actual_game_host \
             game::payload_transport::wasm_tests::compiled_guest_runs_in_actual_game_roots \
             game::payload_transport::wasm_config_tests::compiled_guest_runs_on_configuration_connection_thread \
+            game::block_entity_tick_reply_tests::native_and_compiled_wasm_tick_reply_matrix \
             game::remote::interaction_event_tests::interaction_event_wasm_tests::wasm_interaction_shared_matrix; do
             run_exact 1 -p horizon-client --lib -- --ignored --exact "$test"
           done
