@@ -46,6 +46,7 @@ pub mod chat_filter;
 mod item_particles;
 mod move_collision;
 mod moves;
+pub mod passage_cross;
 mod raw_inbox;
 mod spawn_info;
 use advancements::AdvancementOwners;
@@ -265,8 +266,7 @@ pub struct TickGrants {
     pub grants: Vec<super::advancements::CriterionGrant>,
 }
 
-/// What one player started and stopped tracking, in order, for the game to
-/// tell the mods.
+/// What one player started and stopped tracking, in order, for the game to tell the mods.
 pub struct TrackingBatch {
     pub player: u128,
     pub name: String,
@@ -341,8 +341,7 @@ pub struct Hub {
     pub attachment_snapshots: Vec<AttachmentSnapshot>,
     /// Whether native mods can produce synced attachments.
     pub sync_attachments: bool,
-    /// Criteria `CriteriaTriggers.TICK` granted to players, for the game to
-    /// tell the mods.
+    /// Criteria `CriteriaTriggers.TICK` granted to players, for the game to tell the mods.
     pub native_advancement_grants: Vec<TickGrants>,
     pub native_reload_pending: bool,
     /// Whether any native mod is loaded: `Input` and `Sneak` events only exist for them, so
@@ -391,8 +390,7 @@ pub struct Hub {
     pub debug_world: bool,
     /// Who rides what, set by the game before each tick.
     pub riding: super::entity::Riding,
-    /// The scoreboard's teams, set by the game each tick, for players'
-    /// display names.
+    /// The scoreboard's teams, set by the game each tick, for players' display names.
     pub teams: Vec<crate::scoreboard::Team>,
     /// Names a server mod shows for players in chat and the Tab list
     /// (`native_set_nickname`), by UUID. Their real name stays everywhere
@@ -467,8 +465,7 @@ fn string(s: &str) -> Tag {
     Tag::String(JavaString::from(s))
 }
 
-/// A player's display name was formatted. Replace `displayname` to change it.
-/// Both sides.
+/// A player's display name was formatted. Replace `displayname` to change it. Both sides.
 #[inline(never)]
 pub fn native_player_name_format(context: &LoopContext, username: &Text, displayname: &mut Text) {
     crate::native_client_hooks::player_name_format(context, username, displayname);
@@ -1029,8 +1026,7 @@ impl Hub {
     pub fn here(&self, g: &Guest) -> bool {
         g.placed_in(&self.config.dimension)
     }
-    /// How many passes the level in place's entity tracking has run (None
-    /// before its first).
+    /// How many passes the level in place's entity tracking has run (None before its first).
     pub fn tracking_ticks(&self) -> Option<u32> {
         self.entities
             .get(&self.config.dimension)
@@ -1054,8 +1050,7 @@ impl Hub {
             .filter(move |g| self.watches(g) && loads(g))
             .map(Guest::chunk)
     }
-    /// `PlayerList.broadcastAll(packet, dimension)`: the players in the
-    /// level in place.
+    /// `PlayerList.broadcastAll(packet, dimension)`: the players in the level in place.
     pub fn broadcast_level(&self, packet: &C) {
         let mut body = None;
         for g in self.guests.simulation_iter().filter(|g| self.watches(g)) {
@@ -1101,8 +1096,7 @@ impl Hub {
             g.sender.send(body.clone());
         }
     }
-    /// `ServerPlayer.sendSystemMessage` to the guest with `uuid`, in any
-    /// dimension.
+    /// `ServerPlayer.sendSystemMessage` to the guest with `uuid`, in any dimension.
     pub fn system_message_to_player(&self, uuid: u128, content: Tag) {
         let body = C::SystemChat(play::SystemChat {
             content,
@@ -1120,8 +1114,7 @@ impl Hub {
             overlay: true,
         }));
     }
-    /// A chat message from the host (a disguised chat: the host has no
-    /// connection to sign with).
+    /// A chat message from the host (a disguised chat: the host has no connection to sign with).
     pub fn chat(&self, sender: &str, text: &str) {
         self.broadcast(&C::DisguisedChat(play::DisguisedChat {
             message: literal(text),
@@ -1203,15 +1196,15 @@ impl Hub {
             },
         }));
     }
-    /// Disconnect a guest with a reason (ServerGamePacketListenerImpl.disconnect).
+    /// Disconnect a guest with a reason (ServerGamePacketListenerImpl.disconnect), once
+    /// ([`Guest::begin_disconnect`]): a guest already on the way out keeps its first reason.
     pub fn kick(&mut self, conn: u32, reason: Tag) {
-        // The log's "lost connection" line gives the reason, as vanilla's.
         let text = self.english(&reason);
-        if let Some((player, name)) = self.update_guest(conn, |g| {
-            g.left_reason = text.clone();
-            g.sender.disconnect(reason);
-            (g.uuid, g.name.clone())
-        }) {
+        let started = self.update_guest(conn, |g| {
+            g.begin_disconnect(text.clone(), reason)
+                .then(|| (g.uuid, g.name.clone()))
+        });
+        if let Some((player, name)) = started.flatten() {
             self.pending_kicks.push(HostEvent::Kicked {
                 conn,
                 player,
@@ -1415,8 +1408,7 @@ impl Hub {
             show_hat: Some(guest.is_none_or(|g| g.info.model_customisation & 0x40 != 0)),
         }
     }
-    /// ServerPlayer.getTabListDisplayName: the nickname, if any, as mods
-    /// format it.
+    /// ServerPlayer.getTabListDisplayName: the nickname, if any, as mods format it.
     fn tab_list_name(&self, uuid: u128, name: &str) -> Option<Tag> {
         let mut display_name = self.nicknames.get(&uuid).map(crate::text::Text::literal);
         native_player_tab_list_name_format(&self.loop_context, uuid, name, &mut display_name);
@@ -2146,9 +2138,11 @@ impl Hub {
             use play::relative::{DELTA_X, DELTA_Y, DELTA_Z};
             g.awaiting_keeps_motion = relatives & (DELTA_X | DELTA_Y | DELTA_Z) != 0;
             let turn = relatives & (play::relative::Y_ROT | play::relative::X_ROT) != 0;
+            // A relative axis (X, Y, Z: bits 0 to 2) goes as no change (`follow_passage`).
+            let at = std::array::from_fn(|k| [g.position[k], 0.0][(relatives >> k & 1) as usize]);
             g.send(&C::PlayerPosition(play::PlayerPosition {
                 teleport: id,
-                position: g.position,
+                position: at,
                 delta: [0.0; 3],
                 yaw: if turn { 0.0 } else { g.yaw },
                 pitch: if turn { 0.0 } else { g.pitch },
@@ -4178,6 +4172,11 @@ impl Hub {
                 }
                 S::MovePlayerStatus(p) => {
                     self.move_player(i, None, None, p.flags, ctx, events);
+                }
+                S::CustomPayload(p)
+                    if p.channel == horizon_protocol::passage_sync::CROSS_CHANNEL =>
+                {
+                    *held = self.passage_leg(i, p, ctx, events);
                 }
                 // handleAcceptPlayerLoad: markClientLoaded.
                 S::PlayerLoaded(_) => {
