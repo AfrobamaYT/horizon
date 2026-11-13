@@ -56,7 +56,8 @@ def payload(kind, state, title, url, body):
     text = summary(body)
     if text:
         embed["description"] = cut(text, DESCRIPTION_LIMIT)
-    return {"embeds": [embed], "allowed_mentions": {"parse": []}}
+    # 4096 is SUPPRESS_NOTIFICATIONS: a merge post never pushes or plays a sound, whatever a member's settings.
+    return {"embeds": [embed], "allowed_mentions": {"parse": []}, "flags": 4096}
 
 
 def main():
