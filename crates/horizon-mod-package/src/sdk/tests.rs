@@ -858,12 +858,23 @@ mod unpack {
             variants.push(bytes);
         }
         let folder = tempfile::tempdir().unwrap();
-        for (n, bytes) in variants.into_iter().enumerate() {
-            let into = folder.path().join(n.to_string());
-            std::fs::create_dir(&into).unwrap();
-            // Ok when the flip landed where nothing checks it; otherwise a refusal.
-            let _ = extract(ENGINE, std::io::Cursor::new(bytes), &into, 1 << 20);
-        }
+        // Split over the machine's threads: the unit tier keeps each test under 2 s.
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let chunk = variants.len().div_ceil(threads);
+        let parts: Vec<Vec<Vec<u8>>> = variants.chunks(chunk).map(<[_]>::to_vec).collect();
+        std::thread::scope(|scope| {
+            for (part, variants) in parts.into_iter().enumerate() {
+                let folder = folder.path();
+                scope.spawn(move || {
+                    for (n, bytes) in variants.into_iter().enumerate() {
+                        let into = folder.join(format!("{part}-{n}"));
+                        std::fs::create_dir(&into).unwrap();
+                        // Ok when the flip landed where nothing checks it; otherwise a refusal.
+                        let _ = extract(ENGINE, std::io::Cursor::new(bytes), &into, 1 << 20);
+                    }
+                });
+            }
+        });
     }
 
     #[test]
