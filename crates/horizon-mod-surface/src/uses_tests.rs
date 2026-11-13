@@ -937,7 +937,14 @@ fn bad_tables_are_refused_by_kind() {
 
 #[test]
 fn check_says_how_each_struct_is_built() {
-    let note = |source: &str, id: &str| entry(&scan_on(wider(), source), id).building_note();
+    let note = |source: &str, id: &str| {
+        scan_on(wider(), source)
+            .items
+            .into_iter()
+            .find(|u| u.entry.id == id)
+            .unwrap()
+            .note
+    };
     assert_eq!(
         note(
             "let s = Settings { height: 1, ..Default::default() };",
@@ -954,7 +961,21 @@ fn check_says_how_each_struct_is_built() {
             "`Settings`: built field by field (src/lib.rs:2). A new field in a later game build will break this line; end the literal with `..Default::default()` to stay compatible."
         )
     );
-    // No `Default` impl: no advice.
+    // A struct with no `Default` impl: no advice.
+    assert_eq!(
+        note("let s = ItemStack { count: 1 };", "type:ItemStack").as_deref(),
+        Some(
+            "`ItemStack`: built field by field (src/lib.rs:1). A new field in a later game build will break this line."
+        )
+    );
+    // A pattern takes `..`, not a base: no advice.
+    assert_eq!(
+        note("let Settings { height } = s;", "type:Settings").as_deref(),
+        Some(
+            "`Settings`: built field by field (src/lib.rs:1). A new field in a later game build will break this line."
+        )
+    );
+    // A tuple struct cannot take a base either.
     assert_eq!(
         note("let p = Pos(1, 2);", "type:Pos").as_deref(),
         Some(
@@ -962,4 +983,246 @@ fn check_says_how_each_struct_is_built() {
         )
     );
     assert_eq!(note("fn f(s: Settings) {}", "type:Settings"), None);
+}
+
+/// The base surface with `Host` made of a sub-host trait, `PlayersHost`, as the API's hosts are.
+fn hosts(players: Vec<Method>, more: &[&str]) -> Pieces {
+    let mut pieces = base();
+    let mut bounds = vec!["trait:PlayersHost"];
+    bounds.extend(more);
+    pieces.traits[0] = api_trait("trait:Host", Role::Call, &bounds, vec![]);
+    pieces
+        .traits
+        .push(api_trait("trait:PlayersHost", Role::Call, &[], players));
+    for name in more {
+        pieces.traits.push(api_trait(name, Role::Call, &[], vec![]));
+    }
+    pieces
+}
+
+fn player_method(returns: &str) -> Method {
+    method(
+        "method:PlayersHost::player",
+        &format!("fn player(&self, _: u128) -> {returns}"),
+        &["trait:PlayersHost", "type:PlayerRef"],
+    )
+}
+
+#[test]
+fn a_sub_host_method_called_on_the_host_is_used_and_judged() {
+    let source = "fn f(host: &mut dyn ServerHost, id: u128) { host.player(id); }";
+    let made_for = hosts(vec![player_method("Option<PlayerRef>")], &[]);
+    let uses = scan_on(made_for, source);
+    assert!(ids(&uses).contains(&"method:PlayersHost::player"));
+    assert!(ids(&uses).contains(&"trait:PlayersHost"));
+    let removed = hosts(vec![], &[]);
+    assert_eq!(
+        words(fits(uses.entries(), &removed.build())),
+        ["the method `PlayersHost::player` (removed)"]
+    );
+    let retyped = hosts(vec![player_method("PlayerRef")], &[]);
+    assert_eq!(
+        words(fits(uses.entries(), &retyped.build())),
+        ["the method `PlayersHost::player` (changed)"]
+    );
+    // A new sub-host trait refuses nobody.
+    let wider = hosts(
+        vec![player_method("Option<PlayerRef>")],
+        &["trait:FluidsHost"],
+    );
+    assert_eq!(fits(uses.entries(), &wider.build()), Fit::Fits);
+    // The sub-host traits the mod never reaches a method of stay out of its list.
+    let with_fluids = scan_on(
+        hosts(
+            vec![player_method("Option<PlayerRef>")],
+            &["trait:FluidsHost"],
+        ),
+        source,
+    );
+    assert!(!ids(&with_fluids).contains(&"trait:FluidsHost"));
+}
+
+#[test]
+fn a_tuple_field_read_by_position_is_used_and_judged() {
+    let uses = scan_on(wider(), "fn f(p: Pos) -> bool { p.0 > 70_000 }");
+    assert!(ids(&uses).contains(&"type:Pos.0"));
+    let mut target = wider();
+    target.replace_type(api_tuple("type:Pos", &["i64", "i32"]));
+    assert_eq!(
+        words(fits(uses.entries(), &target.build())),
+        ["the field `Pos.0` (changed)"]
+    );
+}
+
+#[test]
+fn full_builds_by_another_name_are_full() {
+    let built = |source: &str, id: &str| entry(&scan_on(wider(), source), id).built;
+    let full = Some(Built::Full);
+    // `Self` inside an impl for the API struct.
+    assert_eq!(
+        built(
+            "trait Make { fn make() -> Self; }\nimpl Make for mod_api::Settings { fn make() -> Self { Self { height: 1 } } }",
+            "type:Settings"
+        ),
+        full
+    );
+    // An alias and a renamed import.
+    assert_eq!(
+        built(
+            "type S2 = Settings;\nfn f() { let s = S2 { height: 1 }; }",
+            "type:Settings"
+        ),
+        full
+    );
+    assert_eq!(
+        built(
+            "use mod_api::{Settings as S};\nfn f() { let s = S { height: 1 }; }",
+            "type:Settings"
+        ),
+        full
+    );
+    // A turbofish.
+    assert_eq!(
+        built("let s = Settings::<u8> { height: 1 };", "type:Settings"),
+        full
+    );
+    // A macro's `$t { … }` and a literal of a name the scan cannot place.
+    assert_eq!(
+        built(
+            "macro_rules! make { ($t:ty) => { $t { height: 1 } } }\nfn f(s: Settings) {}",
+            "type:Settings"
+        ),
+        full
+    );
+    assert_eq!(
+        built(
+            "fn f(s: Settings) { let w = Wrapper { a: 1 }; }",
+            "type:Settings"
+        ),
+        full
+    );
+    // The mod's own struct is placed.
+    assert_eq!(
+        built(
+            "struct Wrapper { a: u8 }\nfn f(s: Settings) { let w = Wrapper { a: 1 }; }",
+            "type:Settings"
+        ),
+        Some(Built::None)
+    );
+    // The mod's own struct of an API struct's name is the mod's.
+    assert_eq!(
+        built(
+            "struct Settings { mine: u8 }\nimpl Settings { fn new() -> Self { Self { mine: 1 } } }",
+            "type:Settings"
+        ),
+        Some(Built::None)
+    );
+    assert_eq!(
+        built(
+            "struct Settings { mine: u8 }\nfn f() { let s = mod_api::Settings { height: 1 }; }",
+            "type:Settings"
+        ),
+        full
+    );
+    // A tuple struct's constructor passed as a function.
+    assert_eq!(built("let ps = xs.map(Pos);", "type:Pos"), full);
+    assert_eq!(built("let ps = xs.map_or(none, Pos);", "type:Pos"), full);
+    // In a tuple type or a parameter list it is a type.
+    assert_eq!(
+        built("let v: Vec<(Pos, i32)> = vec![];", "type:Pos"),
+        Some(Built::None)
+    );
+    assert_eq!(
+        built("fn f(a: u8, p: Pos) {}", "type:Pos"),
+        Some(Built::None)
+    );
+    assert_eq!(
+        built("use mod_api::{Pos, Settings};", "type:Pos"),
+        Some(Built::None)
+    );
+}
+
+#[test]
+fn a_union_literal_is_not_a_full_build() {
+    let mut pieces = wider();
+    let mut union = api_type(
+        "type:Bits",
+        "",
+        true,
+        vec![field("type:Bits.word", "u32", &["type:Bits"])],
+    );
+    union = Type::new(
+        union.id.clone(),
+        "",
+        None,
+        TypeContract {
+            kind: TypeKind::Union,
+            ..union.contract.clone()
+        },
+        union.fields.clone(),
+        vec![],
+    );
+    pieces.types.push(union);
+    let uses = scan_on(pieces, "let b = Bits { word: 1 };");
+    assert_eq!(entry(&uses, "type:Bits").built, Some(Built::Base));
+}
+
+#[test]
+fn a_struct_the_mod_builds_that_can_no_longer_be_built_is_named() {
+    let unbuildable = || {
+        let mut target = wider();
+        let mut record = settings(&[("height", "i32")], &["Clone", "Default"]);
+        record = Type::new(
+            record.id.clone(),
+            "",
+            None,
+            TypeContract {
+                constructible: false,
+                ..record.contract.clone()
+            },
+            record.fields.clone(),
+            vec![],
+        );
+        record.impls = vec!["Clone".into(), "Default".into()];
+        target.replace_type(record);
+        target.build()
+    };
+    let builds = scan_on(
+        wider(),
+        "\nlet s = Settings { height: 1, ..Default::default() };",
+    );
+    assert_eq!(
+        words(fits(builds.entries(), &unbuildable())),
+        ["the type `Settings` can no longer be built with a literal, and `src/lib.rs:2` builds it"]
+    );
+    let reads = scan_on(wider(), "fn f(s: &Settings) -> i32 { s.height }");
+    assert_eq!(fits(reads.entries(), &unbuildable()), Fit::Fits);
+}
+
+#[test]
+fn a_path_the_mod_writes_must_still_be_exported() {
+    let biome = |paths: &[&str]| {
+        let mut record = api_type("type:world::Biome", "", false, vec![]);
+        record.paths = paths.iter().map(|p| p.to_string()).collect();
+        record
+    };
+    let mut made_for = wider();
+    made_for.types.push(biome(&["Biome", "world::Biome"]));
+    let uses = scan_on(made_for, "use mod_api::Biome;\nfn f(b: Biome) {}");
+    assert_eq!(entry(&uses, "type:world::Biome").paths, ["Biome"]);
+    let mut kept = wider();
+    kept.types
+        .push(biome(&["Biome", "world::Biome", "prelude::Biome"]));
+    assert_eq!(fits(uses.entries(), &kept.build()), Fit::Fits);
+    let mut dropped = wider();
+    dropped.types.push(biome(&["world::Biome"]));
+    assert_eq!(
+        words(fits(uses.entries(), &dropped.build())),
+        ["`mod_api::Biome` is no longer exported under that path"]
+    );
+    // The id's own path is never listed.
+    let mut own = wider();
+    own.types.push(biome(&["Biome", "world::Biome"]));
+    let direct = scan_on(own, "fn f(b: mod_api::world::Biome) {}");
+    assert!(entry(&direct, "type:world::Biome").paths.is_empty());
 }

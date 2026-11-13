@@ -115,7 +115,7 @@ fn uses_command(args: &[PathBuf]) {
     }
     let counts: Vec<String> = kinds.iter().map(|(k, n)| format!("{k}={n}")).collect();
     println!("uses {} items: {}", uses.items.len(), counts.join(" "));
-    for note in uses.entries().filter_map(|entry| entry.building_note()) {
+    for note in uses.items.iter().filter_map(|used| used.note.as_deref()) {
         println!("{note}");
     }
     if let Some(out) = json {
@@ -129,7 +129,15 @@ fn fits_command(args: &[PathBuf]) -> ! {
     let [table, target] = args else {
         fail("usage: horizon-stage fits USES_JSON TARGET_SURFACE")
     };
-    let bytes = std::fs::read(table).unwrap_or_else(|e| fail(format!("{}: {e}", table.display())));
+    // Read at most one byte past the cap, so the reader refuses an oversized table by its size.
+    let mut bytes = Vec::new();
+    std::fs::File::open(table)
+        .and_then(|file| {
+            use std::io::Read;
+            file.take(mod_surface::uses::MAX_USES_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)
+        })
+        .unwrap_or_else(|e| fail(format!("{}: {e}", table.display())));
     let table =
         UsesTable::read(&bytes).unwrap_or_else(|e| fail(format!("{}: {e}", table.display())));
     match fits(&table.entries, &read_surface(target)) {

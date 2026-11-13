@@ -1,4 +1,4 @@
-use crate::scan::identifiers;
+use crate::scan::{Token, identifiers};
 
 fn names(text: &str) -> Vec<&str> {
     identifiers(text).map(|(name, _)| name).collect()
@@ -58,8 +58,8 @@ fn lifetimes_and_labels_are_not_names_and_do_not_open_a_literal() {
 #[test]
 fn raw_identifiers_count_by_their_name_and_numbers_do_not() {
     assert_eq!(
-        names("r#type 1u32 0x_ffu8 1e10 t.0 r#match"),
-        ["type", "t", "match"]
+        names("r#type 1u32 0x_ffu8 1e10 2.5f32 0..3 r#match"),
+        ["type", "match"]
     );
 }
 
@@ -91,7 +91,7 @@ fn unterminated_input_ends_the_scan_without_a_panic() {
 
 #[test]
 fn tokens_keep_punctuation_literals_and_lifetimes_in_order() {
-    use crate::scan::{Token, tokens};
+    use crate::scan::tokens;
     let found: Vec<Token<'_>> = tokens("S { a: 'x', ..f::<'b>(\"s\", 1) } // c")
         .map(|(token, _)| token)
         .collect();
@@ -102,7 +102,7 @@ fn tokens_keep_punctuation_literals_and_lifetimes_in_order() {
             Token::Punct(b'{'),
             Token::Ident("a"),
             Token::Punct(b':'),
-            Token::Literal,
+            Token::Literal("'x'"),
             Token::Punct(b','),
             Token::Punct(b'.'),
             Token::Punct(b'.'),
@@ -113,11 +113,21 @@ fn tokens_keep_punctuation_literals_and_lifetimes_in_order() {
             Token::Lifetime,
             Token::Punct(b'>'),
             Token::Punct(b'('),
-            Token::Literal,
+            Token::Literal("\"s\""),
             Token::Punct(b','),
-            Token::Literal,
+            Token::Literal("1"),
             Token::Punct(b')'),
             Token::Punct(b'}'),
         ]
     );
+}
+
+#[test]
+fn a_tuple_fields_position_after_a_single_dot_is_a_name() {
+    assert_eq!(names("id.0 > 7"), ["id", "0"]);
+    assert_eq!(names("pair.0.1"), ["pair", "0", "1"]);
+    // A float, a range and a method on a number are not.
+    assert_eq!(names("let x = 1.5 + 0..2;"), ["let", "x"]);
+    let found: Vec<(Token<'_>, usize)> = crate::scan::tokens("1.25").collect();
+    assert_eq!(found, [(Token::Literal("1.25"), 1)]);
 }

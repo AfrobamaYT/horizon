@@ -142,7 +142,7 @@ pub struct Required {
 
 /// A trait's own contract. Its methods are records of their own; only the required methods of
 /// a trait mods implement are part of it, because a new one breaks every implementation. Its
-/// `bounds` and `refs` are hashed only when mods implement it ([`crate::Trait::new`]).
+/// `bounds` and `refs` are hashed unless mods only call it ([`crate::Trait::new`]).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraitContract {
     pub role: Role,
@@ -152,7 +152,7 @@ pub struct TraitContract {
     /// Supertraits, normalised.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bounds: Vec<String>,
-    /// With role `implement`: the members with no default, in declaration order.
+    /// Unless mods only call it: the members with no default, in declaration order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required: Vec<Required>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

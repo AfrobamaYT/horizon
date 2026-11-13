@@ -501,6 +501,16 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
             &["trait:Hooks"],
         ),
         (
+            "a required method added to a trait the boundary lists do not name (role none)",
+            &[(
+                LIB,
+                "pub trait BlockPart {}",
+                "pub trait BlockPart {\n    fn tick(&self);\n}",
+            )],
+            HOOKS,
+            &["trait:BlockPart"],
+        ),
+        (
             "a handle method's return type",
             &[(
                 "crates/horizon-mod-vocab/src/entity.rs",
@@ -900,4 +910,31 @@ fn how_a_type_crosses_changes_its_shape_and_not_its_hash() {
     assert_eq!(via.hash, before.hash);
     assert!(before.shape.is_some() && via.shape.is_some());
     assert_ne!(via.shape, before.shape);
+}
+
+#[test]
+fn a_hidden_public_field_is_part_of_the_field_set() {
+    let point = |edits: &[(&str, &str, &str)]| {
+        export_fixture(edits, HOOKS)
+            .surface
+            .types
+            .iter()
+            .find(|t| t.id == "type:Point")
+            .cloned()
+            .unwrap()
+    };
+    let before = point(&[]);
+    let hidden = point(&[(
+        LIB,
+        "    pub y: i32,\n",
+        "    pub y: i32,\n    #[doc(hidden)]\n    pub z: i32,\n",
+    )]);
+    assert_eq!(hidden.fields.len(), before.fields.len());
+    assert_eq!(hidden.hash, before.hash);
+    assert_ne!(hidden.fields_hash, before.fields_hash);
+    // A private field changes neither, and makes the struct unbuildable.
+    let private = point(&[(LIB, "    pub y: i32,\n", "    pub y: i32,\n    z: i32,\n")]);
+    assert_eq!(private.hash, before.hash);
+    assert_eq!(private.fields_hash, before.fields_hash);
+    assert!(before.contract.constructible && !private.contract.constructible);
 }

@@ -5,23 +5,28 @@
 //! counts when its name occurs as an identifier in the source or the manifest names it, with two
 //! narrowings:
 //! - a member (a trait method, an inherent item, an associated item, a field, a variant, a hook's
-//!   argument) counts only when its owner trait, type or hook is in the closure of what counts:
-//!   named in the source, or reached from a hook, method or function the mod uses;
-//! - a name written after `X::`, where `X` is something with a member of that name, is that
-//!   member only (`TextHover::Item` is the variant, not a type `Item`).
+//!   argument) counts only when its owner trait, type or hook is reached from what counts,
+//!   through the supertraits of called traits too ([`Surface::reach`]): a sub-host trait's method
+//!   called on `&mut dyn ServerHost` counts once `ServerHost` does;
+//! - a name written after `X::`, where `X` owns a member of that name, is that member only
+//!   (`TextHover::Item` is the variant, not a type `Item`).
 //!
 //! For each struct the source names it also records how the mod builds it: [`Built::Full`] when a
-//! literal or pattern `Name { … }` (or `Name(…)` for a tuple struct) lists its fields with no `..`,
-//! [`Built::Base`] when every one ends in `..`, [`Built::None`] otherwise. A full literal breaks
-//! when the struct gains a field; the others do not. When the scan cannot tell (an unclosed
-//! literal), it says full: a refusal is safe, a wrong "fits" is not.
+//! literal or pattern lists its fields with no `..` (`Name { … }`, `Name::<T> { … }`, `Self { … }`
+//! in an impl for it, a local alias or renamed import of it, `Name(…)` or a tuple struct's
+//! constructor passed as a function), [`Built::Base`] when every one ends in `..` (and for a
+//! union, whose literal names one field), [`Built::None`] otherwise. A file with a struct literal
+//! of a name the scan cannot place (a macro's `$t { … }`) builds every API struct it names in
+//! full: when unsure, the scan says full, because a refusal is safe and a wrong "fits" is not.
+//! It records the public paths the mod writes each item by, too.
 //!
 //! [`fits`] compares such a list with a target build's surface. The mod fits when every entry
-//! exists there with an equal hash, every type keeps the trait impls it had, every struct built
-//! with a full literal keeps its field set, and every hook whose version the manifest names keeps
-//! that version. The per-member hashes make this exact about additions: a new `Host` method, a new
-//! hook, a new hook argument, a new field on a struct the mod does not build in full, or a new
-//! trait impl changes nothing for the mod.
+//! exists there with an equal hash and under every path the mod writes, every type keeps the
+//! trait impls it had, every struct the mod builds can still be built and keeps its field set
+//! when built in full, and every hook whose version the manifest names keeps that version. The
+//! per-member hashes make this exact about additions: a new `Host` method or sub-host trait, a
+//! new hook, a new hook argument, a new field on a struct the mod does not build in full, or a
+//! new trait impl changes nothing for the mod.
 //!
 //! Whether a mod is exact by nature (a `[native.*]` table, internals) is the caller's to decide
 //! from its manifest before asking: this crate does not read manifests.
@@ -82,33 +87,20 @@ pub struct Entry {
     /// With [`Built::Full`]: the struct's `fields_hash` at the made-for build.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fields_hash: Option<String>,
+    /// With [`Built::Full`]: its public fields' names at the made-for build, to name what the
+    /// target gained.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<String>,
     /// With [`Built::Full`] or [`Built::Base`]: `file:line` of the first such literal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub built_at: Option<String>,
+    /// The public paths the mod writes it by, other than its id's: the target must still
+    /// export it under each.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
     /// For a hook whose version the manifest names: that version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<u64>,
-}
-
-impl Entry {
-    /// What `check --uses` tells an author about how the mod builds this struct, when it builds
-    /// it with a literal.
-    pub fn building_note(&self) -> Option<String> {
-        let name = self.id.strip_prefix("type:")?;
-        let at = self.built_at.as_deref()?;
-        match self.built? {
-            Built::None => None,
-            Built::Base => Some(format!(
-                "`{name}`: built with `..` ({at}), so a new field in a later game build will not break this mod."
-            )),
-            Built::Full if self.impls.iter().any(|i| i == "Default") => Some(format!(
-                "`{name}`: built field by field ({at}). A new field in a later game build will break this line; end the literal with `..Default::default()` to stay compatible."
-            )),
-            Built::Full => Some(format!(
-                "`{name}`: built field by field ({at}). A new field in a later game build will break this line."
-            )),
-        }
-    }
 }
 
 /// An entry and why it is there.
@@ -116,6 +108,9 @@ impl Entry {
 pub struct Used {
     pub entry: Entry,
     pub origin: Origin,
+    /// What `check --uses` tells the author about how the mod builds this struct, when it
+    /// builds it with a literal or pattern.
+    pub note: Option<String>,
 }
 
 /// What a mod uses of one surface, sorted by id.
@@ -164,21 +159,48 @@ fn owner(id: &str, ids: &BTreeMap<&str, &str>) -> Option<String> {
 /// A place in the mod's source.
 type Place = (String, usize);
 
-/// What one source file says about a struct-like type.
+/// What the sources say about how a struct is built.
 #[derive(Default)]
 struct Building {
     full: Option<Place>,
     base: Option<Place>,
+    /// Some full build is a brace expression (`S { a: 1 }`), not a pattern or a call.
+    brace_literal: bool,
+}
+
+impl Building {
+    fn record(&mut self, place: Place, full: bool, brace_literal: bool) {
+        let slot = if full { &mut self.full } else { &mut self.base };
+        if slot.as_ref().is_none_or(|old| place < *old) {
+            *slot = Some(place);
+        }
+        self.brace_literal |= full && brace_literal;
+    }
+}
+
+type Tokens<'t> = [(Token<'t>, usize)];
+
+fn punct(tokens: &Tokens<'_>, at: usize, byte: u8) -> bool {
+    tokens
+        .get(at)
+        .is_some_and(|(t, _)| *t == Token::Punct(byte))
+}
+
+fn ident<'t>(tokens: &Tokens<'t>, at: usize) -> Option<&'t str> {
+    match tokens.get(at) {
+        Some((Token::Ident(name), _)) => Some(name),
+        _ => None,
+    }
 }
 
 /// The index of the token that closes the bracket opened at `open`, if it closes.
-fn closing(tokens: &[(Token<'_>, usize)], open: usize) -> Option<usize> {
+fn closing(tokens: &Tokens<'_>, open: usize) -> Option<usize> {
     let mut depth = 0usize;
     for (index, (token, _)) in tokens.iter().enumerate().skip(open) {
         match token {
             Token::Punct(b'(' | b'[' | b'{') => depth += 1,
             Token::Punct(b')' | b']' | b'}') => {
-                depth -= 1;
+                depth = depth.saturating_sub(1);
                 if depth == 0 {
                     return Some(index);
                 }
@@ -189,14 +211,31 @@ fn closing(tokens: &[(Token<'_>, usize)], open: usize) -> Option<usize> {
     None
 }
 
-/// Whether the literal or pattern whose bracket opens at `open` ends its field list with `..`
-/// (a base expression or a rest pattern). Unclosed: no, so the caller says full.
-fn has_rest(tokens: &[(Token<'_>, usize)], open: usize) -> bool {
-    let Some(close) = closing(tokens, open) else {
-        return false;
-    };
+/// The index after the `<…>` that opens at `open`, angle brackets counted; `None` if it does not
+/// close before a `;`, `{` or the end.
+fn after_angles(tokens: &Tokens<'_>, open: usize) -> Option<usize> {
     let mut depth = 0usize;
-    let mut previous = Token::Punct(b'{');
+    for (index, (token, _)) in tokens.iter().enumerate().skip(open) {
+        match token {
+            Token::Punct(b'<') => depth += 1,
+            Token::Punct(b'>') if index > 0 && !punct(tokens, index - 1, b'-') => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(index + 1);
+                }
+            }
+            Token::Punct(b';' | b'{') => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Whether the literal or pattern whose bracket opens at `open` and closes at `close` ends its
+/// field list with `..` (a base expression or a rest pattern).
+fn has_rest(tokens: &Tokens<'_>, open: usize, close: usize) -> bool {
+    let mut depth = 0usize;
+    let mut previous = tokens[open].0;
     for index in open + 1..close {
         let token = tokens[index].0;
         match token {
@@ -204,9 +243,8 @@ fn has_rest(tokens: &[(Token<'_>, usize)], open: usize) -> bool {
             Token::Punct(b')' | b']' | b'}') => depth = depth.saturating_sub(1),
             Token::Punct(b'.')
                 if depth == 0
-                    && tokens[index + 1].0 == Token::Punct(b'.')
-                    && matches!(previous, Token::Punct(b'{' | b'(' | b','))
-                    && index > open =>
+                    && punct(tokens, index + 1, b'.')
+                    && matches!(previous, Token::Punct(b'{' | b'(' | b',')) =>
             {
                 return true;
             }
@@ -219,23 +257,287 @@ fn has_rest(tokens: &[(Token<'_>, usize)], open: usize) -> bool {
     false
 }
 
+/// Whether the brace at `open` holds what a struct literal or pattern holds: nothing, `..`, or a
+/// field name followed by `:`, `,` or `}`.
+fn looks_like_fields(tokens: &Tokens<'_>, open: usize) -> bool {
+    match tokens.get(open + 1).map(|(t, _)| *t) {
+        Some(Token::Punct(b'}')) => true,
+        Some(Token::Punct(b'.')) => punct(tokens, open + 2, b'.'),
+        Some(Token::Ident(_)) => {
+            punct(tokens, open + 2, b',')
+                || punct(tokens, open + 2, b'}')
+                || (punct(tokens, open + 2, b':') && !punct(tokens, open + 3, b':'))
+        }
+        _ => false,
+    }
+}
+
 /// Whether the name at `at` stands where a type does, not a value: after `->`, `impl`, `for`,
-/// `dyn` or a definition keyword, path segments before it skipped.
-fn in_type_position(tokens: &[(Token<'_>, usize)], mut at: usize) -> bool {
+/// `dyn`, `<`, a definition keyword or a keyword whose block follows it, path segments before it
+/// skipped.
+fn in_type_position(tokens: &Tokens<'_>, mut at: usize) -> bool {
     while at >= 3
-        && tokens[at - 1].0 == Token::Punct(b':')
-        && tokens[at - 2].0 == Token::Punct(b':')
-        && matches!(tokens[at - 3].0, Token::Ident(_))
+        && punct(tokens, at - 1, b':')
+        && punct(tokens, at - 2, b':')
+        && ident(tokens, at - 3).is_some()
     {
         at -= 3;
     }
     match at.checked_sub(1).map(|i| tokens[i].0) {
         Some(Token::Ident(
-            "impl" | "for" | "dyn" | "struct" | "enum" | "union" | "trait" | "type",
+            "impl" | "for" | "dyn" | "struct" | "enum" | "union" | "trait" | "type" | "as" | "mod"
+            | "fn" | "where" | "if" | "match" | "while" | "in",
         )) => true,
-        Some(Token::Punct(b'>')) => at >= 2 && tokens[at - 2].0 == Token::Punct(b'-'),
+        Some(Token::Punct(b'>')) => at >= 2 && punct(tokens, at - 2, b'-'),
+        Some(Token::Punct(b'<')) => true,
         _ => false,
     }
+}
+
+/// Whether the token at `at` is an argument of a call (`f(…, X)`, `m!(X)`), not an element of a
+/// tuple type or pattern: the bracket around it is a `(` that follows a name or a `!`.
+fn in_call(tokens: &Tokens<'_>, at: usize) -> bool {
+    let mut depth = 0usize;
+    for index in (0..at).rev() {
+        match tokens[index].0 {
+            Token::Punct(b')' | b']' | b'}') => depth += 1,
+            Token::Punct(b'[' | b'{') if depth == 0 => return false,
+            Token::Punct(b'(' | b'[' | b'{') if depth > 0 => depth -= 1,
+            Token::Punct(b'(') => {
+                let definition = index >= 2 && ident(tokens, index - 2) == Some("fn");
+                return index >= 1
+                    && !definition
+                    && match tokens[index - 1].0 {
+                        Token::Punct(b'!') => true,
+                        Token::Ident(name) => {
+                            !matches!(name, "fn" | "if" | "while" | "match" | "in" | "return")
+                        }
+                        _ => false,
+                    };
+            }
+            Token::Punct(b';') if depth == 0 => return false,
+            _ => {}
+        }
+    }
+    false
+}
+
+/// One `use` tree from `at`: each path it imports with the name it is imported as. Returns the
+/// index after the tree.
+fn use_tree<'t>(
+    tokens: &Tokens<'t>,
+    mut at: usize,
+    end: usize,
+    prefix: &mut Vec<&'t str>,
+    out: &mut Vec<(Vec<&'t str>, &'t str)>,
+) -> usize {
+    let depth = prefix.len();
+    while at < end {
+        match tokens[at].0 {
+            Token::Ident(name) if name != "as" => {
+                prefix.push(name);
+                at += 1;
+                if punct(tokens, at, b':') && punct(tokens, at + 1, b':') {
+                    at += 2;
+                    continue;
+                }
+                let mut alias = name;
+                if ident(tokens, at) == Some("as") {
+                    if let Some(local) = ident(tokens, at + 1) {
+                        alias = local;
+                    }
+                    at += 2;
+                }
+                out.push((prefix.clone(), alias));
+                break;
+            }
+            Token::Punct(b'{') => {
+                at += 1;
+                while at < end && !punct(tokens, at, b'}') {
+                    at = use_tree(tokens, at, end, prefix, out);
+                    if punct(tokens, at, b',') {
+                        at += 1;
+                    }
+                }
+                at += 1;
+                break;
+            }
+            _ => {
+                at += 1;
+                break;
+            }
+        }
+    }
+    prefix.truncate(depth);
+    at
+}
+
+/// What one source file names and builds.
+struct FileFacts<'t> {
+    tokens: Vec<(Token<'t>, usize)>,
+    /// Tokens inside a `use` statement.
+    in_use: Vec<bool>,
+    /// `mod_api` paths the file writes (without `mod_api`), with the name each is known by.
+    written: Vec<(Vec<&'t str>, &'t str)>,
+    /// Local names for API names: `use … as X`, `type X = …`.
+    aliases: BTreeMap<&'t str, &'t str>,
+    /// Each `impl` body's token range and the type it is for.
+    impls: Vec<(usize, usize, &'t str)>,
+}
+
+fn file_facts(text: &str) -> FileFacts<'_> {
+    let tokens: Vec<(Token<'_>, usize)> = scan::tokens(text).collect();
+    let mut in_use = vec![false; tokens.len()];
+    let mut written = Vec::new();
+    let mut imported = Vec::new();
+    let mut aliases = BTreeMap::new();
+    let mut impls = Vec::new();
+    let mut at = 0;
+    while at < tokens.len() {
+        match tokens[at].0 {
+            Token::Ident("use") => {
+                let end = (at..tokens.len())
+                    .find(|i| punct(&tokens, *i, b';'))
+                    .unwrap_or(tokens.len());
+                in_use[at..end].iter_mut().for_each(|t| *t = true);
+                let mut start = at + 1;
+                while start < end {
+                    if punct(&tokens, start, b':') {
+                        start += 2;
+                    }
+                    start = use_tree(&tokens, start, end, &mut Vec::new(), &mut imported);
+                }
+            }
+            Token::Ident("type") => {
+                // `type X = path::Y<…>;`: X names Y.
+                if let (Some(alias), Some(end)) = (
+                    ident(&tokens, at + 1),
+                    (at..tokens.len()).find(|i| punct(&tokens, *i, b';')),
+                ) && let Some(eq) = (at..end).find(|i| punct(&tokens, *i, b'='))
+                {
+                    let target = (eq + 1..end)
+                        .take_while(|i| !punct(&tokens, *i, b'<'))
+                        .filter_map(|i| ident(&tokens, i))
+                        .last();
+                    if let Some(target) = target {
+                        aliases.insert(alias, target);
+                    }
+                }
+            }
+            // An `impl` item, not `-> impl Trait` or `x: impl Trait`.
+            Token::Ident("impl")
+                if at == 0
+                    || matches!(
+                        tokens[at - 1].0,
+                        Token::Punct(b'}' | b';' | b'{' | b']') | Token::Ident("unsafe")
+                    ) =>
+            {
+                // The type is the last name at angle depth 0 before the body or `where`.
+                let mut i = at + 1;
+                let mut target = None;
+                while i < tokens.len() {
+                    match tokens[i].0 {
+                        Token::Punct(b'<') => match after_angles(&tokens, i) {
+                            Some(next) => {
+                                i = next;
+                                continue;
+                            }
+                            None => break,
+                        },
+                        Token::Punct(b'{') | Token::Ident("where") => break,
+                        Token::Punct(b';') => {
+                            target = None;
+                            break;
+                        }
+                        Token::Ident(name) if name != "for" && name != "dyn" => target = Some(name),
+                        _ => {}
+                    }
+                    i += 1;
+                }
+                let open = (i..tokens.len()).find(|j| punct(&tokens, *j, b'{'));
+                if let (Some(target), Some(open)) = (target, open)
+                    && let Some(close) = closing(&tokens, open)
+                {
+                    impls.push((open, close, target));
+                }
+            }
+            Token::Ident("mod_api") if !in_use[at] => {
+                // A path written out: `mod_api::a::B`.
+                let mut path = Vec::new();
+                let mut i = at + 1;
+                while punct(&tokens, i, b':') && punct(&tokens, i + 1, b':') {
+                    let Some(name) = ident(&tokens, i + 2) else {
+                        break;
+                    };
+                    path.push(name);
+                    i += 3;
+                }
+                if let Some(last) = path.last().copied() {
+                    written.push((path, last));
+                }
+            }
+            _ => {}
+        }
+        at += 1;
+    }
+    for (path, name) in imported {
+        if path.first() == Some(&"mod_api") && path.len() > 1 {
+            let last = path[path.len() - 1];
+            if name != last {
+                aliases.insert(name, last);
+            }
+            written.push((path[1..].to_vec(), last));
+        }
+    }
+    FileFacts {
+        tokens,
+        in_use,
+        written,
+        aliases,
+        impls,
+    }
+}
+
+/// The types, enum variants and traits the mod's own sources define.
+fn defined<'t>(files: &[FileFacts<'t>]) -> BTreeSet<&'t str> {
+    let mut out = BTreeSet::new();
+    for file in files {
+        let tokens = &file.tokens;
+        for at in 0..tokens.len() {
+            let Some(keyword) = ident(tokens, at) else {
+                continue;
+            };
+            if !matches!(keyword, "struct" | "enum" | "union" | "type" | "trait") {
+                continue;
+            }
+            let Some(name) = ident(tokens, at + 1) else {
+                continue;
+            };
+            out.insert(name);
+            if keyword != "enum" {
+                continue;
+            }
+            let Some(open) = (at..tokens.len()).find(|i| punct(tokens, *i, b'{')) else {
+                continue;
+            };
+            let close = closing(tokens, open).unwrap_or(tokens.len());
+            let mut depth = 0usize;
+            for i in open + 1..close {
+                match tokens[i].0 {
+                    Token::Punct(b'(' | b'[' | b'{') => depth += 1,
+                    Token::Punct(b')' | b']' | b'}') => depth = depth.saturating_sub(1),
+                    Token::Ident(variant)
+                        if depth == 0
+                            && matches!(tokens[i - 1].0, Token::Punct(b'{' | b',' | b']')) =>
+                    {
+                        out.insert(variant);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    out
 }
 
 /// The records `sources` (each a path and its Rust text) and `manifest` bring in, with
@@ -247,36 +549,90 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
 ) -> Uses {
     let hashes: BTreeMap<&str, &str> = surface.entries().collect();
     let types: BTreeMap<&str, &Type> = surface.types.iter().map(|t| (t.id.as_str(), t)).collect();
+    let mut public_paths: BTreeMap<&str, &[String]> = BTreeMap::new();
+    for t in &surface.traits {
+        public_paths.insert(&t.id, &t.paths);
+    }
+    for t in &surface.types {
+        public_paths.insert(&t.id, &t.paths);
+    }
+    for f in &surface.functions {
+        public_paths.insert(&f.id, &f.paths);
+    }
+    for m in &surface.macros {
+        public_paths.insert(&m.id, &m.paths);
+    }
     let mut by_name: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for (name, id) in surface.identifiers() {
         by_name.entry(name).or_default().push(id);
     }
-    // The leaves of the owners of each member name: `Item` → {`TextHover`}.
     let owners: BTreeMap<&str, String> = hashes
         .keys()
         .filter_map(|id| owner(id, &hashes).map(|owner| (*id, owner)))
         .collect();
+    let kind = |id: &str| types.get(id).map(|t| t.contract.kind);
     let struct_like = |id: &str| {
-        types.get(id).is_some_and(|t| {
-            matches!(
-                t.contract.kind,
-                TypeKind::Struct | TypeKind::TupleStruct | TypeKind::Union
-            )
-        })
+        matches!(
+            kind(id),
+            Some(TypeKind::Struct | TypeKind::TupleStruct | TypeKind::Union)
+        )
     };
 
-    // The records named directly, each with the first place that names it, and how each named
-    // struct is built.
+    let sources: Vec<(String, String)> = sources
+        .into_iter()
+        .map(|(p, t)| (p.as_ref().to_owned(), t.as_ref().to_owned()))
+        .collect();
+    let files: Vec<FileFacts<'_>> = sources.iter().map(|(_, text)| file_facts(text)).collect();
+    let own_names = defined(&files);
+
+    // The records named directly, each with the first place that names it; how each named
+    // struct is built; the public paths the mod writes each by.
     let mut direct: BTreeMap<&str, Origin> = BTreeMap::new();
     let mut building: BTreeMap<&str, Building> = BTreeMap::new();
-    for (path, text) in sources {
-        let path = path.as_ref();
-        let tokens: Vec<(Token<'_>, usize)> = scan::tokens(text.as_ref()).collect();
+    let mut written: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
+    for ((path, _), file) in sources.iter().zip(&files) {
+        let tokens = &file.tokens;
+        let mut named_structs: BTreeSet<&str> = BTreeSet::new();
+        let mut unsure: Option<usize> = None;
         for (at, (token, line)) in tokens.iter().enumerate() {
-            let Token::Ident(name) = token else {
-                continue;
+            let place = || (path.clone(), *line);
+            // The API names this token stands for, and whether it is a local name for one.
+            let (name, local) = match token {
+                Token::Ident("Self") => match file
+                    .impls
+                    .iter()
+                    .filter(|(open, close, _)| *open < at && at < *close)
+                    .min_by_key(|(open, close, _)| close - open)
+                {
+                    Some((_, _, target)) => (*file.aliases.get(target).unwrap_or(target), true),
+                    None => continue,
+                },
+                Token::Ident(name) => match file.aliases.get(name) {
+                    Some(target) if !by_name.contains_key(name) => (*target, true),
+                    _ => (*name, false),
+                },
+                _ => continue,
             };
             let Some(ids) = by_name.get(name) else {
+                // A literal of a name the scan cannot place may be an API struct by another
+                // name (a macro's `$t { … }`, a re-export of the mod's own).
+                let Token::Ident(written_name) = token else {
+                    continue;
+                };
+                let unknown = written_name.starts_with(|c: char| c.is_ascii_uppercase())
+                    && written_name.chars().any(|c| c.is_ascii_lowercase())
+                    && !own_names.contains(written_name)
+                    && *written_name != "Self";
+                let macro_name = at >= 1 && punct(tokens, at - 1, b'$');
+                if (unknown || macro_name)
+                    && !file.in_use[at]
+                    && !(at >= 2 && punct(tokens, at - 1, b':') && punct(tokens, at - 2, b':'))
+                    && !in_type_position(tokens, at)
+                    && punct(tokens, at + 1, b'{')
+                    && looks_like_fields(tokens, at + 1)
+                {
+                    unsure.get_or_insert(*line);
+                }
                 continue;
             };
             let qualifier = match at.checked_sub(3).map(|i| &tokens[i..at]) {
@@ -290,6 +646,7 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                 _ => None,
             };
             let members: Vec<&str> = qualifier
+                .filter(|_| !local)
                 .map(|q| {
                     ids.iter()
                         .copied()
@@ -303,7 +660,7 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                 members
             };
             let here = Origin::Source {
-                file: path.to_owned(),
+                file: path.clone(),
                 line: *line,
             };
             for id in &named {
@@ -314,22 +671,81 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                 if !struct_like(id) {
                     continue;
                 }
-                let tuple = types[id].contract.kind == TypeKind::TupleStruct;
-                let opens = tokens.get(at + 1).is_some_and(|(next, _)| {
-                    *next == Token::Punct(if tuple { b'(' } else { b'{' })
-                });
-                if !opens || in_type_position(&tokens, at) {
+                // The mod's own type of the same name shadows the API's unless this file
+                // imports or writes out the API's.
+                let shadowed = own_names.contains(name)
+                    && !file.written.iter().any(|(_, known)| *known == name);
+                if shadowed {
                     continue;
                 }
-                let place = (path.to_owned(), *line);
-                let entry = building.entry(id).or_default();
-                let slot = if has_rest(&tokens, at + 1) {
-                    &mut entry.base
-                } else {
-                    &mut entry.full
-                };
-                if slot.as_ref().is_none_or(|old| place < *old) {
-                    *slot = Some(place);
+                named_structs.insert(id);
+                if file.in_use[at] || in_type_position(tokens, at) {
+                    continue;
+                }
+                let tuple = kind(id) == Some(TypeKind::TupleStruct);
+                let union = kind(id) == Some(TypeKind::Union);
+                // A turbofish: `Name::<T> { … }`.
+                let mut next = at + 1;
+                if punct(tokens, next, b':')
+                    && punct(tokens, next + 1, b':')
+                    && punct(tokens, next + 2, b'<')
+                {
+                    match after_angles(tokens, next + 2) {
+                        Some(after) => next = after,
+                        None => {
+                            building.entry(id).or_default().record(place(), true, false);
+                            continue;
+                        }
+                    }
+                }
+                let open = if tuple { b'(' } else { b'{' };
+                if punct(tokens, next, open) {
+                    let Some(close) = closing(tokens, next) else {
+                        // Unclosed: unsure, so full.
+                        building.entry(id).or_default().record(place(), true, false);
+                        continue;
+                    };
+                    let full = !union && !has_rest(tokens, next, close);
+                    // A pattern is followed by `=`, `=>`, `:` or `|`; an expression is not.
+                    let pattern = matches!(
+                        tokens.get(close + 1).map(|(t, _)| *t),
+                        Some(Token::Punct(b'=' | b':' | b'|'))
+                    ) && !punct(tokens, close + 2, b'=');
+                    building
+                        .entry(id)
+                        .or_default()
+                        .record(place(), full, !tuple && !pattern);
+                } else if tuple
+                    && at >= 1
+                    && (punct(tokens, at - 1, b'=') || in_call(tokens, at))
+                    && matches!(
+                        tokens.get(next).map(|(t, _)| *t),
+                        Some(Token::Punct(b')' | b',' | b';'))
+                    )
+                {
+                    // A tuple struct's constructor passed as a function: `.map(Name)`.
+                    building.entry(id).or_default().record(place(), true, false);
+                }
+            }
+        }
+        if let Some(line) = unsure {
+            for id in named_structs {
+                building
+                    .entry(id)
+                    .or_default()
+                    .record((path.clone(), line), true, false);
+            }
+        }
+        for (segments, name) in &file.written {
+            let path = segments.join("::");
+            for id in by_name.get(name).into_iter().flatten() {
+                let id_path = id.split_once(':').map_or("", |(_, rest)| rest);
+                if path != id_path
+                    && public_paths
+                        .get(id)
+                        .is_some_and(|paths| paths.contains(&path))
+                {
+                    written.entry(id).or_default().insert(path.clone());
                 }
             }
         }
@@ -342,14 +758,15 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
         }
     }
 
-    // A member counts once its owner is in the closure of what counts.
+    // A member counts once its owner is reached from what counts, through the supertraits of
+    // called traits too (a sub-host trait's method called on `&mut dyn ServerHost`).
     let mut counted: BTreeSet<&str> = direct
         .keys()
         .filter(|id| !owners.contains_key(*id))
         .copied()
         .collect();
     loop {
-        let reached = surface.closure(counted.iter().copied());
+        let reached = surface.reach(counted.iter().copied());
         let more: Vec<&str> = direct
             .keys()
             .filter(|id| {
@@ -363,8 +780,9 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
         counted.extend(more);
     }
 
-    // The closure, each reached record naming the counted record it was first reached from.
-    let refs = surface.refs();
+    // The list: what counts and what its signatures reference, each reached record naming the
+    // counted record it was first reached from. A called trait's supertraits are not in it.
+    let refs = surface.refs(false);
     let mut origins: BTreeMap<&str, Origin> =
         counted.iter().map(|id| (*id, direct[id].clone())).collect();
     for start in &counted {
@@ -378,22 +796,40 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
             }
         }
     }
-    let place = |(file, line): &Place| format!("{file}:{line}");
+    let at = |(file, line): &Place| format!("{file}:{line}");
     let hook_versions = &manifest.hook_versions;
     Uses {
         items: origins
             .into_iter()
             .map(|(id, origin)| {
                 let record = types.get(id);
-                let built = struct_like(id).then(|| match building.get(id) {
+                let how = building.get(id);
+                let built = struct_like(id).then_some(match how {
                     Some(Building { full: Some(_), .. }) => Built::Full,
                     Some(Building { base: Some(_), .. }) => Built::Base,
                     _ => Built::None,
                 });
-                let built_at = building
-                    .get(id)
+                let built_at = how
                     .and_then(|b| b.full.as_ref().or(b.base.as_ref()))
-                    .map(place);
+                    .map(at);
+                let name = id.strip_prefix("type:").unwrap_or(id);
+                let note = match (built, &built_at) {
+                    (Some(Built::Base), Some(place)) => Some(format!(
+                        "`{name}`: built with `..` ({place}), so a new field in a later game build will not break this mod."
+                    )),
+                    (Some(Built::Full), Some(place))
+                        if how.is_some_and(|b| b.brace_literal)
+                            && record.is_some_and(|t| t.impls.iter().any(|i| i == "Default")) =>
+                    {
+                        Some(format!(
+                            "`{name}`: built field by field ({place}). A new field in a later game build will break this line; end the literal with `..Default::default()` to stay compatible."
+                        ))
+                    }
+                    (Some(Built::Full), Some(place)) => Some(format!(
+                        "`{name}`: built field by field ({place}). A new field in a later game build will break this line."
+                    )),
+                    _ => None,
+                };
                 Used {
                     entry: Entry {
                         id: id.to_owned(),
@@ -402,13 +838,24 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                         fields_hash: (built == Some(Built::Full))
                             .then(|| record.and_then(|t| t.fields_hash.clone()))
                             .flatten(),
+                        fields: match (built, record) {
+                            (Some(Built::Full), Some(t)) => {
+                                t.fields.iter().map(|f| leaf(&f.id).to_owned()).collect()
+                            }
+                            _ => Vec::new(),
+                        },
                         built,
                         built_at,
+                        paths: written
+                            .get(id)
+                            .map(|paths| paths.iter().cloned().collect())
+                            .unwrap_or_default(),
                         version: id
                             .strip_prefix("hook:")
                             .and_then(|name| hook_versions.get(name).copied()),
                     },
                     origin,
+                    note,
                 }
             })
             .collect(),
@@ -430,6 +877,11 @@ pub enum Change {
     Fields { gained: Vec<String>, at: String },
     /// The manifest names version `named` of the hook; the target's is `now`.
     Version { named: u64, now: u64 },
+    /// The mod builds the struct with a literal or pattern at `at`, and the target's can no
+    /// longer be (a private field, `#[non_exhaustive]`).
+    NotBuildable { at: String },
+    /// The target no longer exports it under this path (`mod_api::` left out).
+    Path(String),
 }
 
 /// A used item that is not the same in the target build.
@@ -470,6 +922,13 @@ impl std::fmt::Display for Misfit {
                     f,
                     "{item} is now version {now}; this mod names version {named}"
                 )
+            }
+            Change::NotBuildable { at } => write!(
+                f,
+                "{item} can no longer be built with a literal, and `{at}` builds it"
+            ),
+            Change::Path(path) => {
+                write!(f, "`mod_api::{path}` is no longer exported under that path")
             }
         }
     }
@@ -513,8 +972,9 @@ pub enum Fit {
     DoesNotFit(Vec<Misfit>),
 }
 
-/// Whether every entry exists in `target` with an equal hash, every type keeps its impls, every
-/// struct built in full keeps its field set and every named hook version is unchanged.
+/// Whether every entry exists in `target` with an equal hash and under every path the mod writes,
+/// every type keeps its impls, every struct the mod builds can still be built (and keeps its
+/// field set when built in full), and every named hook version is unchanged.
 pub fn fits<'a>(entries: impl IntoIterator<Item = &'a Entry>, target: &Surface) -> Fit {
     let hashes: BTreeMap<&str, &str> = target.entries().collect();
     let types: BTreeMap<&str, &Type> = target.types.iter().map(|t| (t.id.as_str(), t)).collect();
@@ -523,8 +983,20 @@ pub fn fits<'a>(entries: impl IntoIterator<Item = &'a Entry>, target: &Surface) 
         .iter()
         .map(|h| (h.id.as_str(), h.contract.version))
         .collect();
+    let mut public_paths: BTreeMap<&str, &[String]> = BTreeMap::new();
+    for t in &target.traits {
+        public_paths.insert(&t.id, &t.paths);
+    }
+    for t in &target.types {
+        public_paths.insert(&t.id, &t.paths);
+    }
+    for f in &target.functions {
+        public_paths.insert(&f.id, &f.paths);
+    }
+    for m in &target.macros {
+        public_paths.insert(&m.id, &m.paths);
+    }
     let entries: Vec<&Entry> = entries.into_iter().collect();
-    let listed: BTreeSet<&str> = entries.iter().map(|e| e.id.as_str()).collect();
     let mut misfits = Vec::new();
     for entry in &entries {
         let id = entry.id.as_str();
@@ -541,18 +1013,33 @@ pub fn fits<'a>(entries: impl IntoIterator<Item = &'a Entry>, target: &Surface) 
         if *hash != entry.hash {
             misfit(Change::Changed);
         }
+        for path in &entry.paths {
+            if !public_paths
+                .get(id)
+                .is_some_and(|paths| paths.contains(path))
+            {
+                misfit(Change::Path(path.clone()));
+            }
+        }
         if let Some(record) = types.get(id) {
             for name in &entry.impls {
                 if !record.impls.contains(name) {
                     misfit(Change::LostImpl(name.clone()));
                 }
             }
+            if matches!(entry.built, Some(Built::Full | Built::Base))
+                && !record.contract.constructible
+            {
+                misfit(Change::NotBuildable {
+                    at: entry.built_at.clone().unwrap_or_default(),
+                });
+            }
             if entry.built == Some(Built::Full) && entry.fields_hash != record.fields_hash {
                 let gained = record
                     .fields
                     .iter()
-                    .filter(|f| !listed.contains(f.id.as_str()))
                     .map(|f| leaf(&f.id).to_owned())
+                    .filter(|name| !entry.fields.contains(name))
                     .collect();
                 misfit(Change::Fields {
                     gained,

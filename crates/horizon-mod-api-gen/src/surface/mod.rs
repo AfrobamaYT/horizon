@@ -555,6 +555,7 @@ struct Pending {
     doc: String,
     paths: Vec<String>,
     impls: Vec<String>,
+    fields_hash: Option<String>,
     contract: TypeContract,
     fields: Vec<Field>,
     variants: Vec<Variant>,
@@ -801,6 +802,7 @@ pub(crate) fn build(
         );
         built.paths = record.paths;
         built.impls = record.impls;
+        built.fields_hash = record.fields_hash;
         types.push(built);
     }
 
@@ -881,7 +883,7 @@ fn trait_record(
                 syn::TraitItem::Const(c) => c.ident.to_string(),
                 _ => unreachable!("associated items only"),
             };
-            if is_required && role == Role::Implement {
+            if is_required && role != Role::Call {
                 required.push(Required {
                     name: name.clone(),
                     signature: signature.clone(),
@@ -912,7 +914,7 @@ fn trait_record(
             None => None,
         };
         let is_required = method.default.is_none();
-        if is_required && role == Role::Implement {
+        if is_required && role != Role::Call {
             required.push(Required {
                 name: method_name.clone(),
                 signature: signature.clone(),
@@ -975,6 +977,8 @@ fn type_record(
     let (generics, mut contract_refs) = writer.generics(module, item_generics);
     let params = param_names(item_generics);
     let owner = id.clone();
+    // Every public field a literal must name, `#[doc(hidden)]` ones included.
+    let mut literal_fields: Vec<(String, String)> = Vec::new();
     let mut field_records = |writer: &mut Writer<'_, '_>, list: &syn::Fields| -> bool {
         let mut all_public = true;
         for (position, field) in list.iter().enumerate() {
@@ -987,6 +991,7 @@ fn type_record(
                 all_public = false;
                 continue;
             }
+            literal_fields.push((name.clone(), ty.clone()));
             if hidden(&field.attrs) {
                 continue;
             }
@@ -1103,6 +1108,17 @@ fn type_record(
         doc: doc(&attrs),
         paths: Vec::new(),
         impls: impls.into_iter().collect(),
+        fields_hash: matches!(
+            kind,
+            TypeKind::Struct | TypeKind::TupleStruct | TypeKind::UnitStruct | TypeKind::Union
+        )
+        .then(|| {
+            mod_surface::fields_hash_of(
+                literal_fields
+                    .iter()
+                    .map(|(name, ty)| (name.as_str(), ty.as_str())),
+            )
+        }),
         contract: TypeContract {
             kind,
             generics,
