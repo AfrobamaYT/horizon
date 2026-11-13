@@ -241,3 +241,121 @@ fn recipe_book_and_placement_use_component_ingredient_item_lists() {
         ["minecraft:diamond_sword"]
     );
 }
+
+#[test]
+fn enchantment_glint_override_decodes_boolean_literals_and_borrowed_numeric_values() {
+    const COMPONENT: &str = "minecraft:enchantment_glint_override";
+    let mut items = Items::empty();
+    items.component_defaults = std::sync::Arc::new(std::collections::HashMap::from([(
+        "minecraft:apple".into(),
+        std::collections::BTreeMap::from([(COMPONENT.into(), Tag::Short(256))]),
+    )]));
+    let enabled = parse(
+        r#"{"type":"neoforge:components","items":"minecraft:apple","components":{"minecraft:enchantment_glint_override":true}}"#,
+        &items,
+    );
+    let disabled = parse(
+        r#"{"type":"neoforge:components","items":"minecraft:apple","components":{"minecraft:enchantment_glint_override":false}}"#,
+        &items,
+    );
+    for (ingredient, expected) in [(&enabled, Tag::Byte(1)), (&disabled, Tag::Byte(0))] {
+        assert_eq!(
+            ingredient.shown.as_ref().unwrap()[0]
+                .data()
+                .unwrap()
+                .other(COMPONENT),
+            Some(&expected),
+        );
+    }
+    let load = load();
+    let context = load.loop_context(LoopSide::Server, []);
+    let mut candidate = ItemStack::new("minecraft:apple", 1);
+    assert!(
+        enabled.test_in(&context, &candidate),
+        "inherited numeric default"
+    );
+    assert!(!disabled.test_in(&context, &candidate));
+
+    // NbtOps.getBooleanValue uses Number.doubleValue, not Tag.asBoolean's byteValue.
+    for (value, expected) in [
+        (Tag::Byte(-1), true),
+        (Tag::Short(256), true),
+        (Tag::Int(256), true),
+        (Tag::Long(4_294_967_296), true),
+        (Tag::Float(0.5_f32.to_bits()), true),
+        (Tag::Double(0.5_f64.to_bits()), true),
+        (Tag::Float(f32::NAN.to_bits()), true),
+        (Tag::Double(f64::NAN.to_bits()), true),
+        (Tag::Double(f64::INFINITY.to_bits()), true),
+        (Tag::Double(f64::from_bits(1).to_bits()), true),
+        (Tag::Byte(0), false),
+        (Tag::Short(0), false),
+        (Tag::Int(0), false),
+        (Tag::Long(0), false),
+        (Tag::Float((-0.0_f32).to_bits()), false),
+        (Tag::Double((-0.0_f64).to_bits()), false),
+    ] {
+        assert_eq!(
+            horizon_command::item::decoded_component_value(
+                COMPONENT,
+                &value,
+                &items.component_registry,
+            )
+            .unwrap(),
+            Tag::Byte(i8::from(expected)),
+        );
+        candidate
+            .data_mut()
+            .set_loot_component(COMPONENT, &Some(value));
+        assert_eq!(enabled.test_in(&context, &candidate), expected);
+        assert_eq!(disabled.test_in(&context, &candidate), !expected);
+    }
+    let numeric = parse(
+        r#"{"type":"neoforge:components","items":"minecraft:apple","components":{"minecraft:enchantment_glint_override":0.5}}"#,
+        &items,
+    );
+    candidate
+        .data_mut()
+        .set_loot_component(COMPONENT, &Some(Tag::Int(256)));
+    assert!(numeric.test_in(&context, &candidate));
+    let (_, allocations) = horizon_threads::allocation_probe::measure(|| {
+        for _ in 0..100 {
+            assert!(enabled.test_in(&context, std::hint::black_box(&candidate)));
+        }
+    });
+    assert_eq!(allocations.calls, 0, "{allocations:?}");
+    assert_eq!(allocations.bytes, 0);
+    candidate.data_mut().set_loot_component(COMPONENT, &None);
+    assert!(
+        enabled.test_in(&context, &candidate),
+        "default is inherited again"
+    );
+    candidate.data_mut().set_loot_component(
+        "!minecraft:enchantment_glint_override",
+        &Some(Tag::Compound(Default::default())),
+    );
+    assert!(
+        !enabled.test_in(&context, &candidate),
+        "removed, not inherited"
+    );
+    assert!(
+        !disabled.test_in(&context, &candidate),
+        "absent is not false"
+    );
+
+    let invalid: Value = serde_json::from_str(
+        r#"{"type":"neoforge:components","items":"minecraft:apple","components":{"minecraft:enchantment_glint_override":"true"}}"#,
+    )
+    .unwrap();
+    assert!(Ingredient::parse(&invalid, &items).is_none());
+    let rule = IngredientRule::Components {
+        patch: crate::json_nbt::json_to_compound(invalid["components"].as_object().unwrap())
+            .unwrap(),
+        removed: Vec::new(),
+        strict: false,
+    };
+    assert_eq!(
+        components::validate(&rule, &items).unwrap_err(),
+        "component minecraft:enchantment_glint_override: Not a number",
+    );
+}

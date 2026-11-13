@@ -30,6 +30,7 @@ pub const DECODED_COMPONENTS: &[&str] = &[
     "minecraft:rarity",
     "minecraft:enchantments",
     "minecraft:stored_enchantments",
+    "minecraft:enchantment_glint_override",
     "minecraft:custom_name",
     "minecraft:item_name",
     "minecraft:block_entity_data",
@@ -58,6 +59,9 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
         | "minecraft:max_stack_size" => {
             Tag::Int(int_of(value).expect("validated numeric component") as i32)
         }
+        "minecraft:enchantment_glint_override" => Tag::Byte(i8::from(
+            horizon_items::item_data::component_bool(value).expect("validated boolean component"),
+        )),
         "minecraft:enchantments" | "minecraft:stored_enchantments" => {
             let Tag::Compound(entries) = value else {
                 unreachable!("validated enchantment map")
@@ -116,6 +120,10 @@ pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), Strin
             _ => Err("Not a string".into()),
         },
         "minecraft:enchantments" | "minecraft:stored_enchantments" => enchantment_map(t, reg),
+        // DataComponents.ENCHANTMENT_GLINT_OVERRIDE: Codec.BOOL through NbtOps.
+        "minecraft:enchantment_glint_override" => horizon_items::item_data::component_bool(t)
+            .map(|_| ())
+            .ok_or_else(|| "Not a number".into()),
         "minecraft:custom_name" | "minecraft:item_name" => super::component::decode(t),
         // TypedEntityData.codec: the type is the compound's id.
         "minecraft:block_entity_data" => match t {
