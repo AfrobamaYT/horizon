@@ -72,8 +72,12 @@ member, it records every host trait in the mod's list that leads to the member's
 It exits 2 when an input cannot be read or judged.
 
 The check is a scan of the mod's source, not a compiler. A name it cannot resolve with certainty counts as used
-and as built field by field. When the scan cannot be sure, for example because a macro it cannot expand may bring
-names into scope, it refuses instead of guessing. The real compile on the player's machine is always the final
+and as built field by field. A struct literal written with a path
+(`world::DimensionSettings { … }`) counts for the API's struct of that name; an unqualified one
+counts as the mod's own only in the file that defines it, when nothing in that file (a `use`, a
+glob, an inline module, a macro or attribute that is not standard or the API's) could change
+what the name means. When the scan cannot be sure, for example because a macro it cannot expand
+may bring names into scope, it refuses instead of guessing. The real compile on the player's machine is always the final
 check. Some sources cannot be judged at
 all: a `use` statement nested deeper than 64 groups, a symbolic link, or a `#[path]` or `include!` that leaves
 the mod's folder or is computed. A mod with a `[native.*]` table or internals is made for exactly one build, and

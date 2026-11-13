@@ -1484,7 +1484,6 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                 } else if next == at + 1
                     && matches!(kind(id), Some(TypeKind::TupleStruct | TypeKind::UnitStruct))
                     && !(punct(tokens, next, b':') && punct(tokens, next + 1, b':'))
-                    && !punct(tokens, next, b'<')
                     && !punct(tokens, next, b'!')
                 {
                     // A tuple struct's constructor or a unit struct used as a value.

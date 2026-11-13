@@ -2092,7 +2092,7 @@ fn an_unqualified_name_is_the_mods_own_only_in_a_file_nothing_can_change() {
     // standard macro, `Self { … }` in its impl.
     assert_eq!(
         own(
-            "#[derive(Default, Clone)]\n#[mod_api::horizon_mod]\nimpl Settings { fn new() -> Self { Self { mine: format!(\"x\").len() as u8 } } }\n#[cfg_attr(test, derive(Debug))]\nstruct T;"
+            "#[derive(Default, Clone)]\n#[mod_api::horizon_mod]\nimpl Settings { fn new() -> Self { Self { mine: format!(\"x\").len() as u8 } } }\n#[cfg_attr(test, derive(Debug))]\n#[cfg_attr(feature = \"x\", derive(Debug))]\nstruct T;"
         ),
         Some(Built::None)
     );
@@ -2116,6 +2116,7 @@ fn an_unqualified_name_is_the_mods_own_only_in_a_file_nothing_can_change() {
         "fn h() { #[bring::world] fn g() {} }",
         "macro_rules! m { ($n:ident) => { $n!() }; }",
         "#![bring::inner]",
+        "#[mod_api::not_an_api_macro]\nstruct S;",
     ] {
         assert_eq!(own(text), Some(Built::Full), "{text}");
     }
@@ -2157,6 +2158,15 @@ fn a_struct_name_in_a_value_position_is_a_build() {
     assert_eq!(pos("fn f(p: Pos) { if Pos(1, 2) == p {} }"), full);
     assert_eq!(pos("fn f() { match Pos(1, 2) { _ => {} } }"), full);
     assert_eq!(pos("fn ctor() -> fn(i32, i32) -> Pos { Pos }"), full);
+    // A named struct followed by `(` counts too.
+    assert_eq!(
+        entry(
+            &scan_on(wider(), "fn f() { let s = Settings(1); }"),
+            "type:Settings"
+        )
+        .built,
+        full
+    );
     // Type-only places are not.
     for source in [
         "fn f(p: Pos) {}",
@@ -2235,6 +2245,23 @@ fn aliases_resolve_to_every_api_item_they_may_name() {
         )]),
         full
     );
+    // A name some file aliases to an API struct is that struct in every file, even where a file
+    // defines its own of that name.
+    assert_eq!(
+        settings(&[
+            ("src/a.rs", "type S = mod_api::Settings;"),
+            ("src/b.rs", "struct S { a: u8 }\nfn f() -> S { S { a: 1 } }"),
+        ]),
+        full
+    );
+    // An alias of the mod's own struct is placed, so no literal of it is unsure.
+    assert_eq!(
+        settings(&[(
+            "src/a.rs",
+            "struct Mine { a: u8 }\ntype Wrap = Mine;\nfn f(s: Settings) { let w = Wrap { a: 1 }; }"
+        )]),
+        Some(Built::None)
+    );
     // Aliases are followed transitively.
     assert_eq!(
         settings(&[(
@@ -2274,4 +2301,20 @@ fn a_path_through_an_imported_api_module_records_the_public_path() {
             ["`mod_api::prelude::Biome` is no longer exported under that path"]
         );
     }
+    // A binding through another binding: `w` is `world`, so `p` is `world::prelude`.
+    let mut made_for = wider();
+    made_for
+        .types
+        .push(biome(&["world::prelude::Biome", "world::Biome"]));
+    let uses = scan_files(
+        made_for,
+        &[(
+            "src/lib.rs",
+            "use mod_api::world as w;\nuse w::prelude as p;\nfn f(_: p::Biome) {}",
+        )],
+    );
+    assert_eq!(
+        entry(&uses, "type:world::Biome").paths,
+        ["world::prelude::Biome"]
+    );
 }
