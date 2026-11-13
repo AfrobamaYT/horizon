@@ -4948,8 +4948,8 @@ impl Game<'_> {
     /// An ingredient as a recipe's JSON names it: an item, a `#tag`, or a list
     /// of them, a bare id as `minecraft:` (as vanilla reads it); `test` says
     /// whether a stack fits. Items the game doesn't know are left out; None
-    /// when nothing is left (an unknown or empty tag, for one) and outside a
-    /// world.
+    /// for missing tags, invalid inputs or when no named item is known, and
+    /// outside a world. Existing-empty tags retain an empty ingredient.
     pub(in crate::game) fn recipe_ingredient(
         &self,
         json: &str,
@@ -4982,7 +4982,7 @@ impl Game<'_> {
             .into_iter()
             .filter(|item| items.get(item).is_some())
             .collect();
-        Ok((!known.is_empty()).then(|| Ingredient::of(known)))
+        Ok((ingredient.items.is_empty() || !known.is_empty()).then(|| Ingredient::of(known)))
     }
     /// A stack as a recipe's `result` names it: `id` (a bare one as
     /// `minecraft:`), `count` (1 by default, up to 99) and `components`. None

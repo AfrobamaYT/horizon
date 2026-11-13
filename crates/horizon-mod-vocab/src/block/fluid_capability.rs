@@ -155,7 +155,12 @@ impl FluidIngredient {
             keys.borrow_mut().insert(canonical.clone(), key);
             Some(canonical)
         });
-        let source = source.ok_or_else(|| {
+        fn nonempty_tree(source: &WalkedIngredient) -> bool {
+            !source.order.is_empty() && source.children.as_ref().is_none_or(|(_, children)| {
+                children.iter().all(nonempty_tree)
+            })
+        }
+        let source = source.filter(nonempty_tree).ok_or_else(|| {
             unknown.into_inner().map_or(
                 FluidIngredientError::Invalid,
                 FluidIngredientError::UnknownFluid,

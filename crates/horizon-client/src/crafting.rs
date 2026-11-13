@@ -1344,7 +1344,7 @@ pub use horizon_items::recipe_sources::qualified;
 
 /// The keys of a minecraft-typed recipe that hold an ingredient: one entry
 /// or a list, what `Recipes`, the station tables and the network copy read.
-const INGREDIENT_KEYS: [&str; 23] = [
+pub(crate) const INGREDIENT_KEYS: [&str; 23] = [
     "ingredient",
     "ingredients",
     "base",
@@ -1371,7 +1371,7 @@ const INGREDIENT_KEYS: [&str; 23] = [
 ];
 /// The keys whose values are a map of ingredients: a shaped recipe's symbols,
 /// a firework star's shapes.
-const INGREDIENT_MAPS: [&str; 2] = ["key", "shapes"];
+pub(crate) const INGREDIENT_MAPS: [&str; 2] = ["key", "shapes"];
 
 /// One recipe file after its load's ingredient pass.
 pub struct ResolvedRecipe {
@@ -2126,7 +2126,7 @@ impl Recipes {
     /// `input` (`RecipePropertySet.test`): a recipe of that type names it, or
     /// a mod added it to the kind's input set.
     pub fn cooking_accepts(&self, context: &LoopContext, kind: &str, input: &ItemStack) -> bool {
-        self.cook(context, kind, input).is_some()
+        self.cook_placeable(context, kind, input).is_some()
             || crate::lan::recipes::PROPERTY_SETS
                 .iter()
                 .any(|(set, recipe_type, _)| {
