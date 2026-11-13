@@ -808,6 +808,9 @@ fn saved_carts_keep_a_loot_table_only_when_they_hold_a_container() {
                 Some("minecraft:chests/simple_dungeon"),
             ),
             ("minecraft:hopper_minecart", "", Some("minecraft:")),
+            // readChestVehicleSaveData: a table that is not an identifier reads as none, so
+            // neither it nor the seed is saved.
+            ("minecraft:chest_minecart", "Bad Name!", None),
         ];
         for (i, (kind, table, kept)) in cases.into_iter().enumerate() {
             let source =
