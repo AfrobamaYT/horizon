@@ -315,7 +315,7 @@ jobs:
       # Only byte-identical Git objects regain their cached mtimes; changed inputs stay new.
       - name: Restore unchanged source timestamps
         if: needs.changes.outputs.rust_required != 'false'
-        run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes.json | tee -a "$GITHUB_STEP_SUMMARY"
+        run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes-v2.json | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Check formatting
         if: needs.changes.outputs.rust_required != 'false'
         id: formatting
@@ -472,7 +472,7 @@ jobs:
       # only byte-identical Git objects regain their previous source timestamps.
       - name: Restore unchanged source timestamps
         if: needs.changes.outputs.rust_required != 'false'
-        run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes.json | tee -a "$GITHUB_STEP_SUMMARY"
+        run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes-v2.json | tee -a "$GITHUB_STEP_SUMMARY"
       # horizon-client rustc processes take several GB each; $JOBS (chosen above) fits them in the runner's
       # memory. Formatting and lint run in parallel (the lint job), so this job only tests.
       # Libraries, binaries and integration tests, then doc tests: not the ~275 examples, which the lint job already
@@ -740,7 +740,7 @@ jobs:
       # build of another tree without it left artifacts that a later job judged fresh (stale generated
       # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
       - name: Restore unchanged source timestamps
-        run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes.json"
+        run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
       # Missing data must fail on both main pushes and nightly dispatches.
       - name: Prepare checkout-keyed vanilla data
         id: data
@@ -869,7 +869,7 @@ jobs:
       # build of another tree without it left artifacts that a later job judged fresh (stale generated
       # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
       - name: Restore unchanged source timestamps
-        run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes.json"
+        run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
       - name: Check the launcher's formatting, lint and tests
         if: needs.changes.outputs.launcher_required != 'false'
         working-directory: launcher
@@ -936,7 +936,7 @@ jobs:
       # build of another tree without it left artifacts that a later job judged fresh (stale generated
       # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
       - name: Restore unchanged source timestamps
-        run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes.json"
+        run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
       - name: Check prepared output digest
         run: |
           # Never reuse a completed preparation for this diagnostic, including a retry.
@@ -986,7 +986,7 @@ jobs:
       # build of another tree without it left artifacts that a later job judged fresh (stale generated
       # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
       - name: Restore unchanged source timestamps
-        run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes.json"
+        run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
       - name: Set up disk-backed parity scratch and prepared vanilla data
         run: |
           rm -rf "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp"
