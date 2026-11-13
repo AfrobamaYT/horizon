@@ -5,5 +5,6 @@ mod __private {
             ItemFished, LifecycleContext, LootDrops, PlayerAbilities, PlayerExperience, PlayerFood,
             PortalShape, ScreenView, ServerPlayer, SoundPlay, ToolUse,
         };
+        pub use crate::built::LivingRenderState;
     }
 }
