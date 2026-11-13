@@ -14,8 +14,19 @@ pub trait EntitiesHost {
     fn entity(&self, id: u32) -> Option<EntityRef>;
     /// Side: both.
     /// The level `dimension` (`minecraft:the_nether`) as a handle: on a client,
-    /// the level it shows, whatever the server calls it. None with no world
-    /// open, or for a dimension the server hasn't loaded. API 373.
+    /// the level it shows, whatever the server calls it, and each level the
+    /// server opened for viewing (`horizon:levels`) while that view is open. A
+    /// viewed level's handle answers its block reads from its own world:
+    /// `block_state`, `block`, `block_property`, `clip`, `collision_boxes`,
+    /// `has_collisions`, and the fluid reads built on `block_state`
+    /// (`fluid_shape`, `fluid_height`, `fluid_height_for_camera`,
+    /// `fluid_can_be_replaced_with`). Its other reads, its entity reads and
+    /// every write refuse it. It answers None while the server has the level
+    /// closed; a close and a later open within the same client level make the
+    /// old handle read again. A login, a reconfiguration or a respawn into
+    /// another level replaces the client level: the old handle stays stale and
+    /// the mod asks `host.level` again. None with no world open, or for a
+    /// dimension the server hasn't loaded. API 373.
     #[access(WorldOnly)]
     fn level(&self, dimension: &str) -> Option<LevelRef>;
 }

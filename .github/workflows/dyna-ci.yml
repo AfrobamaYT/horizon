@@ -789,7 +789,7 @@ jobs:
         run: python3 tools/hotspots/check_stand_ins.py
       # Independent of the Rust job. Only after earlier static setup/checks succeeded:
       # compiler fixtures after failed setup would add a second, misleading failure.
-      - name: Test offline research tooling
+      - name: Python tests of the repository's tools
         if: ${{ success() && needs.changes.result == 'success' && needs.changes.outputs.tooling_required != 'false' }}
         run: |
           python3 -m unittest discover -s tests -v --durations=25

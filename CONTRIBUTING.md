@@ -122,13 +122,14 @@ It exits non-zero when something fails.
 ### CI tiers
 
 CI is split by how long a test takes and what it needs. Main and rollups run only quick checks and unit tests;
-every test that boots the game runs once a day.
+every test that boots the game runs once a day. Existing in-game tests still in `verify` are being moved by the next
+change of #4022.
 
 | Tier | Runs on | What |
 | --- | --- | --- |
 | Push | every pull request push | `format`, `verify-static` |
 | Gate | rollup and sync pull requests, pushes to main | `lint`, `verify` (unit tests only), `verify-static`, `launcher` |
-| Daily | once a day on main's head | every test that boots the game or needs prepared resources, the wasm fixture, `fn-replace-check`, the SDK linkage probe |
+| Daily | once a day on main's head | every test that boots the game or needs prepared resources, the wasm fixture, `fn-replace-check`, the SDK build and its linkage probe |
 
 **A unit test** uses no prepared resources, boots no game, starts no child process, uses no network and no compiled
 wasm fixture, and finishes in under 2 seconds. Any other test is a daily test: it carries `#[ignore]` and a row in
@@ -143,8 +144,8 @@ already daily tests, and the existing ones that need resources, a child process 
 - If a daily run fails on a test your pull request added or touched, an issue is filed that names the test, where it
   panicked and the pull requests merged since the last green daily run. The fix is an ordinary pull request.
 
-Three kinds of build: a **snapshot**, compiled from main's head on request, has passed the gate tier and no in-game
-tests; the **nightly** is published by the daily run when every part of it is green; a **release** is cut from a
+Three kinds of build: a **snapshot**, from main's head on request, needs only the gate tier and no in-game tests
+(today it is checked and stops; publishing it follows); the **nightly** is published by the daily run when every part of it is green; a **release** is cut from a
 nightly.
 
 Reviews on this fork read the diff, the design and CI; they do not run your change. So for anything a player or a
