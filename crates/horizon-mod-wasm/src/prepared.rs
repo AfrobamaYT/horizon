@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 pub(crate) const PREPARE: u32 = 0xffff_ff10;
 // Input: slot, generation; empty reply.
 pub(crate) const RELEASE: u32 = 0xffff_ff11;
+// Matches the guest's PreparedSlots bound in horizon-mod-api/src/wire/prepared.rs.
+const MAX_PREPARED_SLOTS: usize = 4096;
 static NEXT_GENERATION: AtomicU32 = AtomicU32::new(1);
 
 #[derive(Default)]
@@ -20,21 +22,23 @@ enum Slot {
 
 impl Slots {
     pub(crate) fn prepare(&mut self) -> Option<(u32, u32)> {
-        let generation = NEXT_GENERATION
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
-            .ok()?;
         let index = self
             .0
             .iter()
             .position(Option::is_none)
             .unwrap_or(self.0.len());
-        let slot = u32::try_from(index).ok()?;
+        if index >= MAX_PREPARED_SLOTS {
+            return None;
+        }
+        let generation = NEXT_GENERATION
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+            .ok()?;
         if index == self.0.len() {
             self.0.push(Some(Slot::Active(generation)));
         } else {
             self.0[index] = Some(Slot::Active(generation));
         }
-        Some((slot, generation))
+        Some((index as u32, generation))
     }
     pub(crate) fn check(&self, slot: u32, generation: u32) -> bool {
         self.0

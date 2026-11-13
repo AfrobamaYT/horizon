@@ -2215,14 +2215,15 @@ fn refused_prepared_release_stops_group_before_another_stack_can_be_prepared() {
 }
 
 #[test]
-fn contended_prepared_release_cleans_up_before_reusing_the_slot() {
+fn contended_prepared_release_at_capacity_cleans_up_before_slot_reuse() {
     crate::test_stack::on_guest_stack(|| {
         let bytes = guest_with_exports(
             *mod_api::wire::LAYOUT,
             "i64.const 2199023255556",
             r#"
             (func (export "prepare_can_equip") (result i64)
-                (i32.store (i32.const 4000) (i32.load (i32.const 512)))
+                (if (i32.ge_u (i32.load (i32.const 512)) (i32.const 4096))
+                    (then unreachable))
                 i64.const 2199023255560)
             (func (export "ask_can_equip") (result i64) i64.const 0)
             (func (export "release_can_equip") (result i64)
@@ -2243,6 +2244,9 @@ fn contended_prepared_release_cleans_up_before_reusing_the_slot() {
         .remove(0);
         let owner = module.downgrade();
         let token = owner.prepare(&[]).unwrap();
+        for index in 1..4096 {
+            assert_eq!(owner.prepare(&[]).unwrap().0, index);
+        }
 
         let guard = module.running.group.lock().unwrap();
         owner.release(token.0, token.1);
@@ -2250,11 +2254,12 @@ fn contended_prepared_release_cleans_up_before_reusing_the_slot() {
         assert!(!module.is_stopped());
         drop(guard);
 
-        let second = owner.prepare(&[]).unwrap();
-        assert_ne!(second.0, token.0);
-        let third = owner.prepare(&[]).unwrap();
-        assert_eq!(third.0, token.0);
+        assert_eq!(owner.prepare(&[]), None);
+        assert!(!module.is_stopped());
         assert_eq!(call(&module), Some(42));
+        let reused = owner.prepare(&[]).unwrap();
+        assert_eq!(reused.0, token.0);
+        assert_ne!(reused.1, token.1);
         let group = module.running.group.lock().unwrap();
         let memory = group.memory.data(&group.store);
         assert_eq!(
