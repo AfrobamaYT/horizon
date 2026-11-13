@@ -50,5 +50,6 @@
 - [Hook notes]()
 <!-- The counterparts preprocessor renders the current declarations at the published URL. -->
 - [NeoForge counterparts]()
+- [The process, versions and game tests](reference/process-environment.md)
 - [Maths and network NBT](reference/maths-and-network-nbt.md)
 - [Saved-world mod mismatches](reference/saved-world-mod-mismatch.md)

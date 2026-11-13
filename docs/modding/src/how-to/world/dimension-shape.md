@@ -102,8 +102,10 @@ generator is code, and `register_chunk_generator` is native only.
 
 There is no portal to a registered level. A mod sends an entity there with
 `entity.teleport_to_level(host, dimension, pos, rotation)` from a server hook, the call vanilla has
-as `Entity.teleportTo(ServerLevel, ..)`. It works for a player, a mob, a boat and a minecart (a
-vehicle takes its passengers along).
+as `Entity.teleport` with a portal's transition. It works for a player, a mob, a boat, a minecart
+(a vehicle takes its passengers along), an item, a primed TNT, an experience orb, an arrow, a
+trident, a firework and the thrown items and fireballs a chunk saves. The entity keeps its motion;
+set it first with `entity.set_velocity` to stop or turn it.
 
 ```rust,ignore
 fn run_mod_command(&self, host: &mut dyn ServerHost, event: &mut RunModCommandEvent<'_>) -> Flow {

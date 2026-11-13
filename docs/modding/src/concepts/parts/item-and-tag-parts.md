@@ -78,7 +78,9 @@ can run the block's empty-hand behaviour on the main hand.
 
 `ItemPart::damage_item` is `IItemExtension.damageItem`: the wear a stack of the part's item is about to take
 (`ItemStack.hurtAndBreak`), after Unbreaking, as NeoForge passes it. The part reads `event.amount`, the points
-about to be lost, and changes it (0 or less leaves the item whole) or returns `Flow::Cancel` for no wear at all. It
+about to be lost, and changes it (0 or less leaves the item whole) or returns `Flow::Cancel` for no wear at all.
+`event.entity` is who wears or uses the item (`None` for a dispenser's tool), and setting `event.break_now` breaks
+the item through the vanilla break whatever durability it has left, as NeoForge's `onBroken` does. It
 runs on every wear path: a player's tools, armour, shield and mace, a tool a dispenser uses, and a mob's armour. It is
 not asked when Unbreaking already saved the item or for a creative player's tools, and an item with no part costs
 one table lookup. With no part, the vanilla amount applies.

@@ -12,6 +12,31 @@ including `round` and `round_f32`. These are the paths used for vanilla `Math`
 call sites; rounding can differ by machine, and universal HotSpot bit equality
 is not promised. Calling them on wasm fails to compile and points to `strict_math`.
 
+## The math profile
+
+`host.math_profile()` is a `Host` read, the same on native and wasm and constant for the
+process lifetime. Its non-exhaustive `MathProfile` describes the
+engine's selection for `sin`, `cos`, `tan`, `exp`, `log`, `log10` and `pow`, without
+returning machine/vendor/OS identification:
+
+- `LibmRounding`: platform libm for all seven.
+- `CorrectlyRounded`: only `sin`, `cos` and `log` use the correctly rounded path;
+  `tan`, `exp`, `log10` and `pow` still use platform libm. This is the
+  selection on Windows other than AArch64.
+- `Aarch64Fma`: fdlibm with fused multiply-adds for `sin` and `cos`, fdlibm for
+  `log` and `log10`, and the Rust `libm` crate for `tan`, `exp` and `pow`.
+  Those last three are not advertised as StrictMath. This branch wins on all
+  AArch64 targets, including Windows.
+- `StrictMath`: fdlibm throughout. No target selects it: every other target uses
+  `LibmRounding`.
+
+Every profile retains the engine's Java `pow` special cases. This is information,
+not guest math: `java_math` stays native-only. A guest must ship whatever libm,
+correctly rounded or FMA operations it needs, or explicitly report that it cannot
+reproduce the profile. The read does not extend `strict_math`'s supported operations
+or promise universal HotSpot equality. Native reads allocate nothing; wasm uses the
+ordinary generated four-byte enum response and import machinery.
+
 ## Network NBT
 
 `Tag::to_network_bytes()` writes the engine's nameless network root, preserving
