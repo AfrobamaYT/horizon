@@ -3178,7 +3178,7 @@ pub(in crate::game) mod damage;
 #[path = "api_values/item_properties.rs"]
 mod item_properties;
 #[path = "api_values/loot_values.rs"]
-mod loot_values;
+pub(crate) mod loot_values;
 #[path = "api_values/particle_values.rs"]
 mod particle_values;
 pub(crate) use loot_values::{dispatch_loot_condition, dispatch_loot_function};

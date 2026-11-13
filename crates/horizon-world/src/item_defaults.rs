@@ -335,6 +335,8 @@ mod tests {
     #[test]
     fn mod_sizes_are_sanitised() {
         let _ = crate::native_load_hooks::install(crate::native_load_hooks::NativeLoadHooks {
+            item_ability_default: |_, _, _| false,
+            loot_ability: |_, _, _| {},
             loot_table_load: |_, _, _| {},
             modify_default_components: |_, item, components| match item {
                 "a:raised" => {
