@@ -140,7 +140,7 @@ fn restock_at_job_site(m: &mut Mob, w: &MobWorld) {
     };
     let own_job_site = |p: [i32; 3]| {
         matches!(villager_brain::poi_at(w, p[0], p[1], p[2]),
-            Some(villager_brain::Poi::Job(j)) if j == m.extra.variant2)
+            Some(horizon_world::poi::PoiIdentity::Job(j)) if j == m.extra.variant2)
             && villager_brain::closer_to_center(p, m.position, 1.73)
     };
     if site.is_some_and(own_job_site) {

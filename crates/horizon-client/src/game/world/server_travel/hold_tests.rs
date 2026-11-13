@@ -22,8 +22,10 @@ fn light(game: &mut Game<'_>, around: i32) {
 }
 
 /// A server with one guest standing on lit land at the origin.
-fn server() -> (Game<'static>, mpsc::Receiver<Out>) {
-    let mut game = crate::game::native_machines::tests::server_game();
+fn server<'a>(
+    resources: &'a mut Option<Arc<crate::game::Resources>>,
+) -> (Game<'a>, mpsc::Receiver<Out>) {
+    let mut game = crate::game::game_tests::tests::server_game(resources);
     light(&mut game, 0);
     game.lan_host(
         LanSettings {
@@ -86,7 +88,8 @@ fn landing(host: &LanHost) -> bool {
 #[test]
 #[ignore = "prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_hold_ignores_the_clients_moves_until_a_tp_to_lit_land_replaces_it() {
-    let (mut game, _rx) = server();
+    let mut resources = None;
+    let (mut game, _rx) = server(&mut resources);
     game.lan
         .as_mut()
         .unwrap()
@@ -118,7 +121,8 @@ fn a_hold_ignores_the_clients_moves_until_a_tp_to_lit_land_replaces_it() {
 #[test]
 #[ignore = "prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_hold_ended_by_a_trip_elsewhere_hears_the_client_again() {
-    let (mut game, _rx) = server();
+    let mut resources = None;
+    let (mut game, _rx) = server(&mut resources);
     game.lan
         .as_mut()
         .unwrap()
@@ -137,7 +141,8 @@ fn a_hold_ended_by_a_trip_elsewhere_hears_the_client_again() {
 #[test]
 #[ignore = "prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_hold_places_the_player_once_the_chunks_are_lit() {
-    let (mut game, _rx) = server();
+    let mut resources = None;
+    let (mut game, _rx) = server(&mut resources);
     game.lan
         .as_mut()
         .unwrap()
@@ -170,7 +175,8 @@ fn a_hold_places_the_player_once_the_chunks_are_lit() {
 #[test]
 #[ignore = "prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_hold_follows_the_destination_a_mod_chose() {
-    let (mut game, _rx) = server();
+    let mut resources = None;
+    let (mut game, _rx) = server(&mut resources);
     game.lan
         .as_mut()
         .unwrap()

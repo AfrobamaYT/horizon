@@ -4116,8 +4116,8 @@ mod tnt_cart_power_tests {
 
 #[cfg(test)]
 mod cart_cost_bench {
-    use super::super::native_machines::tests::server_game;
     use super::{CartKind, Minecart};
+    use crate::game::game_tests::tests::server_game;
     use horizon_core::geometry::Vec3;
 
     /// Times `tick_carts` with many parked carts and some moving ones:
@@ -4133,7 +4133,8 @@ mod cart_cost_bench {
                 .unwrap_or(default)
         };
         let (parked, moving) = (n("CARTS_PARKED", 600), n("CARTS_MOVING", 100));
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         game.settings.simulation_distance = 6;
         game.settings.render_distance = 12;
         game.player = Some(
