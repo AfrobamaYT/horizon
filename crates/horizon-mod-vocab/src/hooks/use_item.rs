@@ -50,6 +50,7 @@ pub trait Hooks {
     /// which only answers while the host has set the acting player.
     #[hook(
         side = "both",
+        version = 2,
         contract = "replace",
         out = "result",
         scope = "item",
