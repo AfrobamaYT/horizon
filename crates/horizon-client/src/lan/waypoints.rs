@@ -1018,6 +1018,7 @@ mod tests {
     /// in its order: crowds walking, crossing chunks and going far, with joins, leaves,
     /// respawns, hiding, team changes, spectators and the rule switched (which take the loop).
     #[test]
+    #[ignore = "daily"]
     fn moves_by_receiver_match_the_loop() {
         let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
         let mut next = move |n: u64| {

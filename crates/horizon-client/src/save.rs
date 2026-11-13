@@ -2969,14 +2969,13 @@ impl SaveDir {
             Folder::Poi => &self.poi_regions,
         };
         read_region_record(&self.root, cache, folder, x, z)
-            .map(|record| {
+            .inspect(|record| {
                 if self.trusted_fluid_load
                     && folder == "region"
-                    && let Some(root) = &record
+                    && let Some(root) = record
                 {
                     intern_saved_fluids(root);
                 }
-                record
             })
             .map_err(|e| {
                 crate::chunk_io::report_load_failure(&self.root, x, z, &e);
