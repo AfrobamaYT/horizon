@@ -36,6 +36,7 @@
     "horizon-prepare": "engine",
     "horizon-protocol": "engine",
     "horizon-server-files": "engine",
+    "horizon-java-properties": "engine",
     "horizon-system": "engine",
     "horizon-threads": "engine",
     "horizon-guest-stack": "engine",
@@ -77,6 +78,7 @@
     "horizon-mod-api-macros": "engine",
     "horizon-mod-point-emit": "platform",
     "horizon-mod-point-shape": "engine",
+    "horizon-mod-surface": "engine",
     "horizon-mod-points": "platform",
     "horizon-mod-render": "platform",
     "horizon-mod-wasm": "platform",
@@ -106,6 +108,7 @@
       "horizon-world",
       "horizon-mod-package",
       "horizon-mod-point-shape",
+      "horizon-mod-surface",
       "horizon-mod-runtime",
       "horizon-mod-vocab",
       "horizon-mod-api-gen",
@@ -113,7 +116,8 @@
       "horizon-game-discovery",
       "horizon-engine-slots",
       "horizon-threads",
-      "horizon-guest-stack"
+      "horizon-guest-stack",
+      "horizon-java-properties"
     ],
     "forbidden": [
       "arboard",

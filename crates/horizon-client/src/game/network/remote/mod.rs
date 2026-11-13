@@ -217,8 +217,7 @@ fn menu_title(tag: &Tag) -> horizon_client::text::Text {
     remote_text(tag).resolve_legacy()
 }
 
-/// `ChatTrustLevel`; a modified message keeps the signed content it was
-/// changed from.
+/// `ChatTrustLevel`; a modified message keeps the signed content it was changed from.
 pub(super) enum ChatTrust {
     Secure,
     Modified(String),
@@ -261,8 +260,7 @@ pub(super) struct Tracked {
     /// this base, so the server's next delta still lands where it means.
     codec_base: [f64; 3],
     silent: bool,
-    /// `Entity.vehicle`: the entity it rides (`SetPassengers`), whatever
-    /// either one's type.
+    /// `Entity.vehicle`: the entity it rides (`SetPassengers`), whatever either one's type.
     pub(in crate::game) vehicle: Option<u32>,
 }
 
@@ -639,8 +637,7 @@ pub(super) struct Remote {
     pub(super) first_passenger: bool,
     /// The player's place in its vehicle's `getPassengers`.
     pub(super) passenger_index: usize,
-    /// Item entities waiting for their item data: where they are and their
-    /// motion.
+    /// Item entities waiting for their item data: where they are and their motion.
     pub(super) pending_items: HashMap<i32, ([f64; 3], Vec3)>,
     health: (f32, i32, f32),
     /// `LocalPlayer.flashOnSetHealth`: set by the first health the server
@@ -714,8 +711,7 @@ pub(super) struct Remote {
     /// Entities with shared flag 6 (`Entity.isCurrentlyGlowing` on a client); mobs keep
     /// theirs in `Mob::glowing`.
     pub(super) glowing: std::collections::HashSet<i32>,
-    /// The player's own shared flag 5 (`Entity.isInvisible`) as the server
-    /// last set it.
+    /// The player's own shared flag 5 (`Entity.isInvisible`) as the server last set it.
     pub(super) own_invisible: bool,
     /// The player's own shared flag 0 (`Entity.isOnFire`) as the server last
     /// set it: its fire (blaze fireballs, fire aspect, lightning) never
@@ -3415,11 +3411,11 @@ impl Game<'_> {
                 d.on_ground = on_ground;
                 return;
             }
-            if let Some(i) = self.falling.iter().position(|f| f.id == id as u32) {
+            if let Some(i) = self.falling.iter().rposition(|f| f.id == id as u32) {
                 self.falling.update(i, |f| f.position = at);
                 return;
             }
-            if let Some(t) = self.tnts.iter_mut().find(|t| t.id == id as u32) {
+            if let Some(t) = self.tnts.iter_mut().rev().find(|t| t.id == id as u32) {
                 t.position = at;
                 t.on_ground = on_ground;
                 return;
@@ -3677,6 +3673,10 @@ impl Game<'_> {
             C::CustomPayload(p) if p.channel == horizon_client::lan::recipes::CONTENT_CHANNEL => {
                 self.remote_recipe_content(&p.data);
             }
+            // The passages of the chunks the server shows the window.
+            C::CustomPayload(p) if p.channel == horizon_protocol::passage_sync::CHANNEL => {
+                self.remote_passage_sync(&p.data);
+            }
             // PingDebugMonitor.onPongReceived.
             C::PongResponse(p) => {
                 let delay = self.debug_millis() - p.time;
@@ -3849,20 +3849,7 @@ impl Game<'_> {
                 }
             }
             C::PlayerPosition(p) => self.remote_teleport(&p)?,
-            C::PlayerRotation(p) => {
-                self.yaw = if p.relative_yaw {
-                    self.yaw + p.yaw
-                } else {
-                    p.yaw
-                };
-                self.pitch = (if p.relative_pitch {
-                    self.pitch + p.pitch
-                } else {
-                    p.pitch
-                })
-                .clamp(-90.0, 90.0);
-                self.snap_player_model_pitch();
-            }
+            C::PlayerRotation(p) => self.remote_rotation(&p),
             C::PlayerLookAt(p) => self.remote_look_at(&p),
             // ClientCommonPacketListenerImpl.handlePostEffects.
             C::PostEffects(p) => self.post_effects = p.effects,
@@ -4013,6 +4000,7 @@ impl Game<'_> {
                     Holder::Entity(p.id as u32)
                 };
                 self.initialize_entity(holder, &kind);
+                let replace = self.tracks_remote_entity(p.id);
                 self.spawn_entity(p.id, &kind, p.position, rotation);
                 if let Some(r) = self.remote.as_mut() {
                     r.cart_lerps.remove(&p.id);
@@ -4025,7 +4013,7 @@ impl Game<'_> {
                     (rotation[0], rotation[1]),
                     p.data,
                 ) {
-                    self.spawn_remote_projectile(&kind, &p, (rotation[0], rotation[1]));
+                    self.spawn_added_projectile(&p, &kind, (rotation[0], rotation[1]), replace);
                 }
                 // Entity.recreateFromPacket: objects must exist before applying motion.
                 self.remote_motion(p.id, p.velocity);
@@ -6299,14 +6287,16 @@ impl Game<'_> {
     fn remote_motion(&mut self, id: i32, velocity: [f64; 3]) {
         self.remote_dragon_motion(id, velocity);
         let v = Vec3::new(velocity[0], velocity[1], velocity[2]);
+        // `falling` and `tnts` are searched from the back: AddEntity calls this right after
+        // appending the block or TNT, so a spawn doesn't walk the whole list.
         if let Some(m) = self.mob_index.get_mut(&mut self.mobs, id as u32) {
             // Squid.aiStep derives its body pitch and roll from network motion.
             m.velocity = v;
         } else if let Some(d) = self.dropped.iter_mut().find(|d| d.id == id as u32) {
             d.velocity = v;
-        } else if let Some(i) = self.falling.iter().position(|f| f.id == id as u32) {
+        } else if let Some(i) = self.falling.iter().rposition(|f| f.id == id as u32) {
             self.falling.update(i, |f| f.velocity = v);
-        } else if let Some(t) = self.tnts.iter_mut().find(|t| t.id == id as u32) {
+        } else if let Some(t) = self.tnts.iter_mut().rev().find(|t| t.id == id as u32) {
             t.velocity = v;
         } else if let Some(o) = self.orbs.iter_mut().find(|o| o.id == id as u32) {
             o.velocity = v;

@@ -7,6 +7,8 @@ use mod_api::{Hooks, LoopContext, StructurePiece};
 use std::{rc::Rc, sync::Arc};
 #[path = "wire_loopback/block_entity_on_load.rs"]
 mod block_entity_on_load;
+#[path = "wire_loopback/game_rule_reads.rs"]
+mod game_rule_reads;
 mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
@@ -16,6 +18,8 @@ mod biome_region_registration;
 mod block_entity_transform;
 #[path = "wire_loopback/crash_sections.rs"]
 mod crash_sections;
+#[path = "wire_loopback/entity_layers.rs"]
+mod entity_layers;
 #[path = "wire_loopback/entity_renderers.rs"]
 mod entity_renderers;
 #[path = "wire_loopback/item_drop_state.rs"]
@@ -28,6 +32,8 @@ mod loot_tags_wire;
 mod piglin_answers;
 #[path = "wire_loopback/piston_push_reaction.rs"]
 mod piston_push_reaction;
+#[path = "wire_loopback/prepared_equip.rs"]
+mod prepared_equip;
 #[path = "wire_loopback/use_item_hand.rs"]
 mod use_item_hand;
 /// The generated proxies' refusal reason; the loopback refuses only on its own encode errors.
@@ -100,6 +106,16 @@ impl WasmHandler {
         boundary::subscriptions_of(owner, names)
     }
 }
+thread_local! {
+    static LOOPBACK_TRANSPORT: std::cell::RefCell<Option<guest::Transport>> = const { std::cell::RefCell::new(None) };
+}
+struct TransportScope(Option<guest::Transport>);
+impl Drop for TransportScope {
+    fn drop(&mut self) {
+        guest::set_transport(self.0.clone());
+        LOOPBACK_TRANSPORT.with(|transport| *transport.borrow_mut() = self.0.take());
+    }
+}
 impl WasmMod {
     fn same_group(&self, other: &Self) -> bool {
         self.group == other.group
@@ -124,12 +140,20 @@ impl WasmMod {
         let pointer = &mut *cx as *mut boundary::Cx;
         let _resources = unsafe { boundary::resource_scope(pointer, true) };
         // The pointer remains live until this synchronous call finishes; guest callbacks never retain it.
-        guest::set_transport(Some(Rc::new(move |id, bytes| {
+        let transport: guest::Transport = Rc::new(move |id, bytes| {
+            if id == mod_api::wire::HOST_LOG {
+                eprintln!("{}", Reader::new(bytes).take::<String>().unwrap());
+                return Vec::new();
+            }
             let mut out = Writer::new();
             let _resources = unsafe { boundary::resource_scope(pointer, false) };
             unsafe { boundary::serve(id, pointer, bytes, &mut out) }.unwrap();
             out.into_bytes()
-        })));
+        });
+        let previous =
+            LOOPBACK_TRANSPORT.with(|active| active.borrow_mut().replace(transport.clone()));
+        let _transport = TransportScope(previous);
+        guest::set_transport(Some(transport));
         let mut input = Writer::new();
         if let Some(handler) = handler {
             input.put(&handler);
@@ -138,12 +162,12 @@ impl WasmMod {
         if input.error().is_some() {
             return None;
         }
+        prepared_equip::record(id, input.bytes());
         let at = guest::input(input.bytes().len());
         unsafe {
             std::ptr::copy_nonoverlapping(input.bytes().as_ptr(), at, input.bytes().len());
         }
         let (at, len) = guest::run(id);
-        guest::set_transport(None);
         if len == u32::MAX {
             return None;
         }
@@ -249,6 +273,13 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
         ) {
             entity_renderers::register(event.renderers);
         }
+        fn register_entity_layers(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterEntityLayersEvent<'_>,
+        ) {
+            entity_layers::register(event.layers);
+        }
         fn register(
             &self,
             registrar: &mut dyn mod_api::Registrar,
@@ -257,6 +288,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             arm_pose_registration::check(registrar);
             biome_region_registration::register(registrar);
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
+            prepared_equip::register(registrar);
             use_item_hand::register(registrar);
             piglin_answers::register(registrar);
             block_entity_transform::register(registrar);
@@ -355,6 +387,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
         ) {
             PICKED_UP_POST.set(Some((
                 event.player,
+                event.item.entity().id(),
                 event.original.count(),
                 event.remaining.as_ref().map(|rest| rest.count()),
             )));
@@ -373,6 +406,14 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
                 event.remaining.as_ref().map(|rest| rest.count()),
             )));
             *event.remaining = None;
+        }
+        fn item_toss(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::ItemTossEvent,
+        ) -> mod_api::Flow {
+            TOSSED.set(Some((event.player, event.item.entity().id())));
+            mod_api::Flow::Cancel
         }
         fn game_rule_changed(
             &self,
@@ -478,6 +519,13 @@ impl StructurePiece for Piece {
     fn bounding_box(&self) -> mod_api::BoundingBox {
         mod_api::BoundingBox::new([1, 2, 3], [4, 5, 6])
     }
+    fn beardifier(&self) -> Option<mod_api::PieceBeardifier> {
+        Some(mod_api::PieceBeardifier::new(
+            mod_api::BoundingBox::new([1, 2, 3], [4, 5, 6]),
+            mod_api::TerrainAdjustment::BeardThin,
+            2,
+        ))
+    }
     fn post_process(
         &self,
         _: &mut dyn mod_api::PieceContext,
@@ -509,6 +557,11 @@ impl mod_api::BlockEntityPart for MachineBlock {
         _: &mut dyn mod_api::ServerHost,
         event: &mut mod_api::BlockEntityTickEvent<'_>,
     ) {
+        if event.entity.data[0] == -1 {
+            *event.reply = mod_api::BlockEntityTickReply::Unchanged;
+            event.entity.data[0] = 999;
+            return;
+        }
         event.entity.data[0] += 3;
     }
 }
@@ -537,6 +590,7 @@ fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
         &mut guest::Guest,
         &mut mod_api::BlockEntityTickEvent {
             pos: [1, 2, 3],
+            reply: &mut mod_api::BlockEntityTickReply::Changed,
             entity: mod_api::ModBlockEntityView::new(&mut entity),
         },
     );
@@ -557,11 +611,26 @@ fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
         &mut guest::Guest,
         &mut mod_api::BlockEntityTickEvent {
             pos: [1, 2, 3],
+            reply: &mut mod_api::BlockEntityTickReply::Changed,
             entity: mod_api::ModBlockEntityView::new(&mut entity),
         },
     );
     assert_eq!(entity.data, vec![8]);
     assert_eq!(entity.revision().changes(), before);
+    entity.data[0] = -1;
+    let before = entity.revision();
+    let mut reply = mod_api::BlockEntityTickReply::Changed;
+    proxy.block_entity_tick(
+        &mut guest::Guest,
+        &mut mod_api::BlockEntityTickEvent {
+            pos: [1, 2, 3],
+            reply: &mut reply,
+            entity: mod_api::ModBlockEntityView::new(&mut entity),
+        },
+    );
+    assert_eq!(reply, mod_api::BlockEntityTickReply::Unchanged);
+    assert_eq!(entity.data, [-1]);
+    assert_eq!(entity.revision(), before);
 }
 #[test]
 fn borrowed_view_reply_is_byte_identical_to_owned_snapshot() {
@@ -1116,20 +1185,52 @@ fn wire_loopback_item_picked_up_post_carries_the_original_and_writes_back_the_re
     };
     let original = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 5).unwrap();
     let mut remaining = None;
+    let item = mod_api::ItemEntityRef::new(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), 9));
     let mut event = mod_api::ItemPickedUpPostEvent {
         player: 0x1234_5678_9abc_def0_1234_5678_9abc_def0,
+        item,
         original: &original,
         remaining: &mut remaining,
     };
     module.item_picked_up_post(&mut World, &mut event);
     assert_eq!(
         PICKED_UP_POST.get(),
-        Some((0x1234_5678_9abc_def0_1234_5678_9abc_def0, 5, None))
+        Some((0x1234_5678_9abc_def0_1234_5678_9abc_def0, 9, 5, None))
     );
     assert_eq!(
         remaining.map(|rest| rest.count()),
         Some(3),
         "the remainder a guest sets comes back"
+    );
+}
+#[test]
+fn wire_loopback_item_toss_carries_the_item_entity_and_its_cancel() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+    struct World;
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World);
+    impl mod_api::ServerHost for World {}
+    mod_api::impl_server_host_areas!(World);
+    install_counter();
+    let module = WasmMod {
+        group: 0,
+        subscribed: &[],
+        listeners: &[],
+        corrupt: false,
+    };
+    let item =
+        mod_api::ItemEntityRef::new(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), 11));
+    let mut event = mod_api::ItemTossEvent {
+        player: 0x42,
+        item,
+        cancelled: false,
+    };
+    let flow = module.item_toss(&mut World, &mut event);
+    assert_eq!(TOSSED.get(), Some((0x42, 11)));
+    assert!(
+        matches!(flow, mod_api::Flow::Cancel),
+        "the guest's cancel comes back"
     );
 }
 #[test]
@@ -1374,7 +1475,8 @@ thread_local! {
     static REGISTERED_EFFECT:std::cell::Cell<Option<mod_api::EffectKey>> = const {std::cell::Cell::new(None)};
     static APPEND_ATTACK:std::cell::Cell<u8> = const {std::cell::Cell::new(0)};
     static REGISTERED_KIND:std::cell::Cell<Option<mod_api::BlockEntityTypeKey>> = const {std::cell::Cell::new(None)};
-    static PICKED_UP_POST: std::cell::Cell<Option<(u128, u32, Option<u32>)>> = const { std::cell::Cell::new(None) };
+    static PICKED_UP_POST: std::cell::Cell<Option<(u128, u32, u32, Option<u32>)>> = const { std::cell::Cell::new(None) };
+    static TOSSED: std::cell::Cell<Option<(u128, u32)>> = const { std::cell::Cell::new(None) };
     static PICKED_UP_PARTIAL: std::cell::Cell<Option<(u128, u32, Option<u32>)>> = const { std::cell::Cell::new(None) };
 }
 fn install_counter() {
@@ -1667,8 +1769,35 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
         fn provided(&self, _: ProvidedBy, _: &str) -> bool {
             true
         }
+        fn block_capability_names(&self) -> Vec<String> {
+            Vec::new()
+        }
+        fn block_capability_proxyable(&self, _: &str) -> bool {
+            false
+        }
+        fn block_capability_proxyable_names(&self) -> Vec<String> {
+            Vec::new()
+        }
         fn mods_switched(&self) -> u64 {
             7
+        }
+    }
+    impl DefaultCapabilitiesCapabilityProviders for Table {
+        fn block_container(&self, _: &str) -> Option<ModContainer> {
+            None
+        }
+        fn block_fluids(&self, _: &str) -> Option<ModFluidTanks> {
+            None
+        }
+        fn block_energy(&self, _: &str) -> Option<ModEnergyBuffer> {
+            None
+        }
+        fn item_container_provider(
+            &self,
+            _: &str,
+            _: &mut u32,
+        ) -> Option<Arc<dyn ItemContainerProvider>> {
+            None
         }
     }
     struct World;
@@ -2032,6 +2161,15 @@ fn wire_loopback_roundtrip_and_atomic_writeback() {
         proxy.bounding_box(),
         mod_api::BoundingBox::new([1, 2, 3], [4, 5, 6])
     );
+    let terrain = proxy
+        .beardifier()
+        .expect("piece terrain crosses the worker boundary");
+    assert_eq!(
+        terrain.bounds,
+        mod_api::BoundingBox::new([1, 2, 3], [4, 5, 6])
+    );
+    assert_eq!(terrain.adjustment, mod_api::TerrainAdjustment::BeardThin);
+    assert_eq!(terrain.ground_level_delta, 2);
     let mut release = Writer::new();
     release.put(&vec![id]);
     assert_eq!(
@@ -2358,6 +2496,8 @@ fn world_phase_messages_round_trip_returns_filter_decision() {
     );
 }
 
+#[path = "wire_loopback/level_ticking.rs"]
+mod level_ticking;
 #[test]
 fn wire_loopback_block_entity_data_received_preserves_tag_and_handle() {
     thread_local! { static CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }

@@ -157,6 +157,18 @@ class ClaimTests(unittest.TestCase):
         with self.assertRaisesRegex(cc.Refused, "already hold"):
             do("/claim", Fake({5: thread(holders=("NewComer",))}))
 
+    def test_already_yours_gets_the_claimed_label_it_lacks(self):
+        api = Fake({5: thread(holders=("NewComer",))})
+        with self.assertRaisesRegex(cc.Refused, "already hold"):
+            do("/claim", api)
+        self.assertIn(("label", 5, "claimed", "help wanted"), api.calls)
+        labelled = thread(holders=("NewComer",))
+        labelled["labels"] = [{"name": "claimed"}]
+        api = Fake({5: labelled})
+        with self.assertRaisesRegex(cc.Refused, "already hold"):
+            do("/claim", api)
+        self.assertEqual(api.calls, [])
+
     def test_not_claimable(self):
         for t in (thread(pr=True), thread(state="closed"), thread(locked=True)):
             api = Fake({5: t})

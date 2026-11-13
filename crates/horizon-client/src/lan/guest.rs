@@ -16,6 +16,7 @@ use horizon_protocol::{
         configuration::{ClientInformation, CustomPayload},
         play,
     },
+    passage_sync,
 };
 use std::{
     collections::VecDeque,
@@ -333,6 +334,9 @@ pub struct Guest {
     pub max_unacknowledged: u32,
     pub chunks_per_tick: f32,
     pub batch_quota: f32,
+    /// A mod's boxes of its level in which the level's blocks don't stop it (#3717): its moves
+    /// are checked through them, and its body takes them at each turn. Not saved.
+    pub collision_exclusions: horizon_world::collision_exclusions::CollisionExclusions,
     // Entities.
     pub tracker: Tracker,
     // Player state the gameplay code reads and writes.
@@ -719,6 +723,7 @@ impl Guest {
             max_unacknowledged: 1,
             chunks_per_tick: 9.0,
             batch_quota: 0.0,
+            collision_exclusions: Default::default(),
             tracker: Tracker::default(),
             motion: None,
             loaded_body: None,
@@ -835,6 +840,21 @@ impl Guest {
                 data,
             })),
             Err(e) => log::debug!("Horizon: attachment sync not sent: {e}"),
+        }
+    }
+    /// Passages to hold or forget (#3775), if the guest is on a Horizon client, the only
+    /// one that reads them, and placed or held (a hand-over's arrival is sent its chunks,
+    /// so their passages too); a message that cannot be written is not sent.
+    pub fn send_passage_sync(&self, message: &passage_sync::Message) {
+        if !(self.placed || self.held) || self.brand != "horizon" {
+            return;
+        }
+        match passage_sync::encode(message) {
+            Ok(data) => self.send(&play::Clientbound::CustomPayload(CustomPayload {
+                channel: passage_sync::CHANNEL.into(),
+                data,
+            })),
+            Err(e) => log::debug!("Horizon: passage sync not sent: {e}"),
         }
     }
     /// [`Self::send`] of a `ChunksBiomes` whose body is `packet.encode()`, the same
@@ -1233,9 +1253,60 @@ fn builtin_component(
                 write_block_predicate(predicate, ids, &mut w)?;
             }
         }
+        "minecraft:tool" => write_tool(value, ids, &mut w)?,
         _ => return None,
     }
     Some(horizon_protocol::item::Component::Raw(w.data))
+}
+
+/// `Tool.STREAM_CODEC` from `Tool.CODEC`'s saved form: the rules (blocks, an
+/// optional speed and an optional `correct_for_drops`), then the default
+/// mining speed, the wear per block and `can_destroy_blocks_in_creative`,
+/// each at its codec default when the stack leaves it out.
+fn write_tool(
+    value: &horizon_core::nbt::Tag,
+    ids: &dyn Fn(&str, &str) -> Option<i32>,
+    w: &mut horizon_protocol::buf::Writer,
+) -> Option<()> {
+    use horizon_core::nbt::Tag;
+    use horizon_world::datafix::dynamic::{as_bool_opt, as_number};
+    let Tag::List(rules) = value.get("rules")? else {
+        return None;
+    };
+    w.varint(i32::try_from(rules.len()).ok()?);
+    for rule in rules.as_slice() {
+        write_holder_set("minecraft:block", rule.get("blocks")?, ids, w)?;
+        match rule.get("speed") {
+            Some(speed) => {
+                w.bool(true);
+                w.f32(as_number(speed)?.float_value());
+            }
+            None => w.bool(false),
+        }
+        match rule.get("correct_for_drops") {
+            Some(correct) => {
+                w.bool(true);
+                w.bool(as_bool_opt(Some(correct))?);
+            }
+            None => w.bool(false),
+        }
+    }
+    let number = |key: &str| value.get(key).map(as_number);
+    w.f32(match number("default_mining_speed") {
+        Some(speed) => speed?.float_value(),
+        None => 1.0,
+    });
+    // ExtraCodecs.NON_NEGATIVE_INT.
+    let wear = match number("damage_per_block") {
+        Some(wear) => wear?.int_value(),
+        None => 1,
+    };
+    w.varint((wear >= 0).then_some(wear)?);
+    w.bool(match value.get("can_destroy_blocks_in_creative") {
+        Some(can) => as_bool_opt(Some(can))?,
+        None => true,
+    });
+    Some(())
 }
 
 /// `ByteBufCodecs.holderSet`: tags or direct registry entries, without item-id remapping.
@@ -1574,6 +1645,9 @@ fn network_stack(
                 "minecraft:can_break",
                 horizon_protocol::item::component::CAN_BREAK,
             ),
+            // The client predicts mining with the stack's own tool and shows
+            // the stack's own attribute modifiers (#14641).
+            ("minecraft:tool", horizon_protocol::item::component::TOOL),
             (
                 "minecraft:attribute_modifiers",
                 horizon_protocol::item::component::ATTRIBUTE_MODIFIERS,
@@ -2126,6 +2200,89 @@ mod tests {
                 "{input}"
             );
         }
+    }
+
+    /// A `tool` or `attribute_modifiers` the writers cannot encode is left out
+    /// of the packet, whole, as `can_break`'s is.
+    #[test]
+    fn a_tool_or_modifier_the_writers_cannot_encode_is_dropped_whole() {
+        let ids = |registry: &str, name: &str| match (registry, name) {
+            ("minecraft:block", "minecraft:stone") => Some(1),
+            ("minecraft:attribute", "minecraft:attack_damage") => Some(3),
+            _ => None,
+        };
+        let parse = |snbt: &str| horizon_core::nbt::parse_snbt(snbt).unwrap().0;
+        let entry = |extra: &str| {
+            format!(r#"[{{type:"attack_damage",id:"x",amount:2.0d,operation:"add_value"{extra}}}]"#)
+        };
+        // The forms the cases below spoil all encode.
+        for (name, snbt) in [
+            (
+                "minecraft:tool",
+                r#"{rules:[{blocks:"minecraft:stone"}]}"#.to_owned(),
+            ),
+            ("minecraft:attribute_modifiers", entry("")),
+            (
+                "minecraft:attribute_modifiers",
+                entry(r#",display:{type:"override",value:"x"}"#),
+            ),
+        ] {
+            let encoded = builtin_component(name, &parse(&snbt), &ids);
+            assert!(encoded.is_some(), "{name} {snbt}");
+        }
+        for (name, snbt) in [
+            // No rules; a rule without blocks, or with a block the registry lacks.
+            ("minecraft:tool", "{}".to_owned()),
+            ("minecraft:tool", "{rules:[{speed:2.0f}]}".to_owned()),
+            (
+                "minecraft:tool",
+                r#"{rules:[{blocks:"minecraft:missing"}]}"#.to_owned(),
+            ),
+            // A speed that is no number; a negative wear (`NON_NEGATIVE_INT`).
+            (
+                "minecraft:tool",
+                r#"{rules:[{blocks:"minecraft:stone",speed:"fast"}]}"#.to_owned(),
+            ),
+            (
+                "minecraft:tool",
+                "{rules:[],damage_per_block:-1}".to_owned(),
+            ),
+            // Not a list; an unknown attribute, operation, slot group or display type.
+            ("minecraft:attribute_modifiers", "{}".to_owned()),
+            (
+                "minecraft:attribute_modifiers",
+                entry("").replace("attack_damage", "missing"),
+            ),
+            (
+                "minecraft:attribute_modifiers",
+                entry("").replace("add_value", "multiply"),
+            ),
+            ("minecraft:attribute_modifiers", entry(r#",slot:"tail""#)),
+            (
+                "minecraft:attribute_modifiers",
+                entry(r#",display:{type:"loud"}"#),
+            ),
+            // An entry without its modifier id; an override without its text.
+            (
+                "minecraft:attribute_modifiers",
+                entry("").replace(r#"id:"x","#, ""),
+            ),
+            (
+                "minecraft:attribute_modifiers",
+                entry(r#",display:{type:"override"}"#),
+            ),
+        ] {
+            let encoded = builtin_component(name, &parse(&snbt), &ids);
+            assert!(encoded.is_none(), "{name} {snbt}");
+        }
+        // Through the stack: the bad component is neither added nor removed.
+        let mut stack = ItemStack::new("minecraft:iron_pickaxe", 1);
+        stack
+            .data_mut()
+            .set_other("minecraft:tool", Some(parse("{}")));
+        let sent = stack_to_network(|_| 1, ids, &Some(stack)).unwrap();
+        assert!(sent.component(component::TOOL).is_none());
+        assert!(sent.removed.is_empty());
     }
 
     #[test]

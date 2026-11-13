@@ -682,7 +682,7 @@ from (`results`, as a furnace's result slot):
 ```
 
 It is the menu type `<id>:<name>`, with its network id after vanilla's. A mod block's container opens it when its
-`menu` names it with as many slots ([native mods](native-mods.md), `block_entity_container`). The menu holds
+`menu` names it with as many slots ([native mods](native-mods.md), `r.block_container(&block, container)`). The menu holds
 its slots, then the player's 36. A shift-click from the inventory goes to the first slots with room, never a result
 slot, and one on the container goes to the inventory, as a chest's does. `results` fence players only: hoppers follow the
 container's faces and `inputs`, so leave result slots out of `inputs`. The data slots are the block entity's `data`

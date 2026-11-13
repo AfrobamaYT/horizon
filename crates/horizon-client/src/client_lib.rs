@@ -99,6 +99,7 @@ pub mod item_render;
 pub mod item_sync;
 pub mod item_tooltip;
 pub mod join_seq;
+pub mod move_gate;
 /// Game-owned JSON metadata conversion, shared by recipe and API adapters.
 pub use horizon_core::json_nbt;
 pub mod lan;
@@ -180,6 +181,7 @@ pub mod title;
 pub mod toasts;
 pub mod ui_theme;
 pub mod vanillagen;
+pub mod viewed_levels_net;
 pub mod voxel_occlusion;
 // Keep the old path for native callers while giving the implementation a name
 // that does not collide with the gameplay adapter in `game/interface/entity_culling/mod.rs`.

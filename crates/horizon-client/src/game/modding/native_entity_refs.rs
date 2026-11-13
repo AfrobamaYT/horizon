@@ -21,6 +21,7 @@ use super::{
     Game,
     commands::Target,
     entity::{Entity as _, entity_lists_of, for_each_entity},
+    transactions::After,
 };
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_items::items::ItemStack;
@@ -551,7 +552,7 @@ impl Game<'_> {
         if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
             return false;
         }
-        self.server_destroy_block_progress(breaker, pos, progress);
+        self.after_commit(After::BreakProgress(breaker, pos, progress));
         true
     }
     /// `Level.sendBlockUpdated`: queue the block at `pos` to be sent to the clients again.
@@ -559,9 +560,7 @@ impl Game<'_> {
         if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
             return false;
         }
-        self.after_commit(super::transactions::After::NotifyClients((
-            pos[0], pos[1], pos[2],
-        )));
+        self.after_commit(After::NotifyClients((pos[0], pos[1], pos[2])));
         true
     }
     /// `LevelRenderer.destroyBlockProgress` for this client's own view only.
@@ -1003,7 +1002,7 @@ pub(super) mod tests {
                 std::fs::create_dir(&home).unwrap();
                 command.env(key, home);
             }
-            let output = command.output().unwrap();
+            let output = output_within(&mut command, name, case);
             std::fs::remove_dir_all(scratch).unwrap();
             let stdout = String::from_utf8_lossy(&output.stdout);
             // The child's log, captured with this test's own output.
@@ -1016,6 +1015,54 @@ pub(super) mod tests {
             );
         }
         true
+    }
+
+    /// The longest a fresh child may run: a hang in its startup or shutdown fails the parent
+    /// with the child killed, instead of waiting for the whole test run's own limit.
+    const FRESH_CASE_LIMIT: std::time::Duration = std::time::Duration::from_secs(900);
+
+    /// `command`'s output, killing the child if it outlives [`FRESH_CASE_LIMIT`].
+    fn output_within(
+        command: &mut std::process::Command,
+        name: &str,
+        case: &str,
+    ) -> std::process::Output {
+        use std::io::Read;
+        use std::process::Stdio;
+        let mut child = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut stdout = child.stdout.take().unwrap();
+        let mut stderr = child.stderr.take().unwrap();
+        let out = std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = stdout.read_to_end(&mut bytes);
+            bytes
+        });
+        let err = std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = stderr.read_to_end(&mut bytes);
+            bytes
+        });
+        let deadline = std::time::Instant::now() + FRESH_CASE_LIMIT;
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("{name}: {case}: the child did not finish within {FRESH_CASE_LIMIT:?}");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        std::process::Output {
+            status,
+            stdout: out.join().unwrap(),
+            stderr: err.join().unwrap(),
+        }
     }
 
     /// Whether libtest's summary says exactly one test passed: `--exact` with a name no test

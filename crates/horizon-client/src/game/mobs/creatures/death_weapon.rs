@@ -322,8 +322,12 @@ impl Game<'_> {
         let mut rest = Vec::new();
         for d in items {
             match d {
-                drops::Drop::Item(stack) => stacks.push(to_stack(&stack)),
-                drops::Drop::Stack(stack) => stacks.push(stack),
+                drops::Drop::Item(stack) => {
+                    stacks.push(to_stack(&stack));
+                }
+                drops::Drop::Stack(stack) => {
+                    stacks.push(stack);
+                }
                 other => rest.push(other),
             }
         }
@@ -342,7 +346,14 @@ impl Game<'_> {
             used: false,
         });
         self.native_loot_drops(&context, &mut stacks);
-        stacks.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
+
+        // Stack-only modifiers may replace or reorder table results. Custom
+        // item-entity state stays on complete records outside that list.
+        let mut stacks: Vec<(ItemStack, [f64; 3], i32)> = stacks
+            .into_iter()
+            .filter(|stack| stack.count > 0 && &*stack.item != "minecraft:air")
+            .map(|stack| (stack, pos, 0))
+            .collect();
         let mut experience = None;
         for d in rest {
             match d {
@@ -358,14 +369,24 @@ impl Game<'_> {
                         Some(m.id),
                         enderman::carried_block_roll(&tool),
                     );
-                    stacks.extend(drops.into_iter().filter(enderman::carried_block_drop_kept));
+                    stacks.extend(
+                        drops
+                            .into_iter()
+                            .filter(enderman::carried_block_drop_kept)
+                            .filter(|stack| stack.count > 0 && &*stack.item != "minecraft:air")
+                            .map(|stack| (stack, pos, 0)),
+                    );
+                }
+                drops::Drop::Aged(stack, age) => {
+                    let stack = to_stack(&stack);
+                    if stack.count > 0 && &*stack.item != "minecraft:air" {
+                        stacks.push((stack, pos, age));
+                    }
                 }
                 drops::Drop::Experience(reward) if !consumed => experience = Some(reward),
                 drops::Drop::Item(_) | drops::Drop::Stack(_) | drops::Drop::Experience(_) => {}
             }
         }
-        let mut stacks: Vec<(ItemStack, [f64; 3])> =
-            stacks.into_iter().map(|stack| (stack, pos)).collect();
         if m.species() == Species::CopperGolem {
             // CopperGolem.dropEquipment: the preserved equipment is part of
             // dropAllDeathLoot, so the mods hear it with the rest. It is
@@ -374,7 +395,7 @@ impl Game<'_> {
             stacks.extend(
                 Self::golem_preserved_equipment(m)
                     .into_iter()
-                    .map(|stack| (stack, feet)),
+                    .map(|stack| (stack, feet, 0)),
             );
         }
         // Every death drop is its own ItemEntity, and the drop entity's own

@@ -1,7 +1,7 @@
 //! Native terrain adapter for the API's worker context.
 use super::native_worldgen::WorkerResources;
 use horizon_world::worldgen::mod_generators::{
-    ChunkAccess as EngineChunk, ModChunkGenerator, ModChunkGenerators,
+    ChunkAccess as EngineChunk, ModChunkGenerator, ModChunkGenerators, install_mod_chunk_generators,
 };
 use mod_api::{BlockKey, BlockMetadata, BlockState, ChunkAccess, ChunkGenerator, ChunkPos};
 use std::sync::Arc;
@@ -68,4 +68,11 @@ pub(in crate::game) fn installed_chunk_generators() -> ModChunkGenerators {
             )
         })
         .collect()
+}
+
+/// Hand the chunk generators the mods registered to the engine, before any world opens.
+pub(in crate::game) fn install() {
+    if install_mod_chunk_generators(installed_chunk_generators()).is_err() {
+        log::warn!("Mod chunk generators already installed; keeping the first table");
+    }
 }

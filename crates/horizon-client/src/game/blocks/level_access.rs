@@ -215,6 +215,9 @@ impl LevelAccess for GameLevel<'_> {
         }
         !cancel
     }
+    fn has_water_ticket(&self, pos: BlockPos) -> bool {
+        self.world.water_tickets.contains([pos.x, pos.y, pos.z])
+    }
     fn allow_moisture_change(&self, pos: BlockPos, from: i32, to: i32) -> bool {
         let mut cancel = false;
         if self.native_authoritative {
@@ -353,6 +356,16 @@ impl LevelAccess for GameLevel<'_> {
         destroy: &[BlockPos],
     ) -> bool {
         self.piston_move_allowed(piston, direction, extending, push, destroy)
+    }
+    fn on_destroyed_by_push_reaction(
+        &mut self,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Direction,
+        fluid: FluidState,
+    ) {
+        self.destroyed_by_push_reaction(ticks, pos, state, direction, fluid);
     }
     fn observe_piston_moved(
         &self,
@@ -704,7 +717,7 @@ impl LevelAccess for GameLevel<'_> {
     }
 
     fn block_entity_analog_signal(
-        &self,
+        &mut self,
         pos: BlockPos,
         state: BlockStateId,
         direction: Direction,

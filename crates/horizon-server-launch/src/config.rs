@@ -4,12 +4,12 @@
 //! start the supervisor writes them into `server.properties`, which the game reads exactly as vanilla's
 //! server does; what the game changes there itself (`/whitelist on`) is copied back afterwards.
 
+use horizon_platform::java_properties::{Properties, date_string, now_millis};
 use horizon_platform::server_files::biome_regions::BiomeRegions;
 #[cfg(test)]
 use horizon_platform::server_files::biome_regions::MissingRegions;
-use horizon_platform::server_files::{
-    java_properties::{Properties, date_string, now_millis},
-    properties::{DIFFICULTIES, GAME_MODES, ServerProperties, SystemEntropy},
+use horizon_platform::server_files::properties::{
+    DIFFICULTIES, GAME_MODES, ServerProperties, SystemEntropy,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path};
@@ -603,7 +603,7 @@ impl Config {
         Self::parse(&text).map_err(|e| format!("{}: {e}", path.display()))
     }
 
-    fn check(&self) -> Result<(), String> {
+    pub(crate) fn check(&self) -> Result<(), String> {
         let w = &self.world;
         if !GAME_MODES.contains(&w.game_mode.as_str()) {
             return Err(format!(
@@ -686,6 +686,18 @@ impl Config {
         );
         replace(&path, &text)?;
         Ok(written)
+    }
+
+    /// The level `op` gives a new operator: `op-permission-level` as the game reads it at its next start,
+    /// that is `server.properties` with this configuration's keys written over it (as
+    /// [`Config::write_properties`] does). 4, vanilla's default, when the keys cannot be read.
+    pub fn op_permission_level(&self, dir: &Path) -> i32 {
+        let mut properties = read_properties(&dir.join(PROPERTIES)).unwrap_or_default();
+        for (key, value) in self.vanilla() {
+            properties.put(&key, value);
+        }
+        ServerProperties::new(properties, &mut SystemEntropy::default())
+            .map_or(4, |p| p.op_permission_level)
     }
 
     /// A configuration from a vanilla `server.properties`: typed settings from their keys, and every other

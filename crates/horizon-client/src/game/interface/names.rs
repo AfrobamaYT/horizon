@@ -220,7 +220,7 @@ impl Game<'_> {
         camera: glam::DVec3,
         alpha: f64,
         hooks: bool,
-        frustum: Option<&horizon_client::gfx::Frustum>,
+        frustum: Option<&horizon_client::gfx::JoinedFrusta>,
     ) -> Vec<NameTag> {
         let target = self.mob_hit().map(|(i, _, _)| self.mobs[i].id);
         let viewer = self.player_team();
@@ -1227,6 +1227,7 @@ mod tests {
             jump_strength: 0.42,
             attributes: Default::default(),
             item_stack_limits: Default::default(),
+            attribute_bounds: Default::default(),
             gravity: 0.08,
             safe_fall_distance: 3.0,
             fall_damage_multiplier: 1.0,
