@@ -153,11 +153,26 @@ mod tests {
                 let prepared = game.prepare_early_game_rules(loader).unwrap();
                 game.finish_open_world(prepared).unwrap();
             });
+            crate::game::native_entity_refs::tests::with_client_game(|game| {
+                game.announce_data_bound(TagsUpdateCause::ClientPacketReceived {
+                    integrated_server: true,
+                });
+            });
         });
         let seen = seen.lock().unwrap();
         let server = TagsUpdateCause::ServerDataLoad { reload: false };
-        assert_eq!(*seen, [(server, Some(mod_api::Tag::Int(99)))]);
+        let integrated = TagsUpdateCause::ClientPacketReceived {
+            integrated_server: true,
+        };
+        assert_eq!(
+            *seen,
+            [
+                (server, Some(mod_api::Tag::Int(99))),
+                (integrated, Some(mod_api::Tag::Int(99)))
+            ]
+        );
         assert!(server.should_update_static_data());
+        assert!(!integrated.should_update_static_data());
     }
 
     /// A remote login: the applied tags announce the defaults bound once,
@@ -194,6 +209,13 @@ mod tests {
                     stack,
                     Some(mod_api::Tag::Int(99)),
                     "the defaults are published"
+                );
+                assert!(matches!(host, HostSide::Client(_)));
+                assert_eq!(
+                    event.cause,
+                    TagsUpdateCause::ClientPacketReceived {
+                        integrated_server: false
+                    }
                 );
                 assert!(event.cause.should_update_static_data());
                 self.0.lock().unwrap().push("bound");
