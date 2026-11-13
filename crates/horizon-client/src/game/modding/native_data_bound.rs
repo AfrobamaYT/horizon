@@ -68,6 +68,8 @@ mod tests {
     fn install_default_component_loads() {
         let _ = horizon_world::native_load_hooks::install(
             horizon_world::native_load_hooks::NativeLoadHooks {
+                item_ability_default: horizon_items::item_abilities::vanilla_can_perform,
+                loot_ability: |_, _, _| {},
                 loot_table_load: |_, _, _| {},
                 modify_default_components: |context, item, components| {
                     if !mod_api::__private::listened(mod_api::HookId::ModifyDefaultComponents) {
