@@ -2211,9 +2211,8 @@ mod tests {
                 .skip(2)
                 .collect()
         };
-        let (blue, _red, green, debug) = (
+        let (blue, green, debug) = (
             rgba(85, 85, 255, 255),
-            rgba(255, 85, 85, 255),
             rgba(0, 170, 0, 255),
             rgba(85, 85, 85, 255),
         );
