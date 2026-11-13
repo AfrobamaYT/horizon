@@ -14,11 +14,10 @@ impl Game<'_> {
     }
 
     /// The slot of the hand that acts: the selected one, or `OFFHAND_SLOT`.
-    /// `LivingEntity.canGlide`: some worn piece `gliding_pieces` lets glide,
-    /// or a stack in a hand that glides there (`canGlideUsing` walks every
-    /// `EquipmentSlot`).
+    /// `LivingEntity.canGlide`: some worn piece, or a stack in a hand, glides
+    /// there (`canGlideUsing` walks every `EquipmentSlot`: `gliding_slots`).
     pub(super) fn glider_worn(&self) -> bool {
-        gliding_slots(
+        super::glide_wear::gliding_slots(
             self.res.items(),
             &self.armor,
             self.inventory[self.selected].as_ref(),
@@ -35,7 +34,7 @@ impl Game<'_> {
     /// may save it). Callers skip creative.
     pub(super) fn wear_glider(&mut self, points: u32) {
         // Every 20th glide tick only, so collecting the candidates here is fine.
-        let mut pieces: Vec<usize> = gliding_slots(
+        let mut pieces: Vec<usize> = super::glide_wear::gliding_slots(
             self.res.items(),
             &self.armor,
             self.inventory[self.selected].as_ref(),
