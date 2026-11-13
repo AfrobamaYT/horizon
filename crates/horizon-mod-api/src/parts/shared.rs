@@ -72,6 +72,8 @@ pub struct PartRegistrar {
     pub(crate) chunk_generators: Vec<ChunkGeneratorInfo>,
     pub(crate) biome_sources: Vec<BiomeSourceInfo>,
     pub(crate) refused: Vec<String>,
+    /// The Part state keys this mod declared, with their Rust types.
+    pub(crate) part_states: HashMap<(&'static str, &'static str), (u64, &'static str)>,
 }
 
 impl PartRegistrar {
@@ -111,6 +113,7 @@ impl PartRegistrar {
             chunk_generators: Vec::new(),
             biome_sources: Vec::new(),
             refused: Vec::new(),
+            part_states: HashMap::new(),
         }
     }
     /// `part`, of kind `kind`, for tag `tag`; none if it is refused.

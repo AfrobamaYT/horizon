@@ -29,6 +29,44 @@ mod tests {
     }
 
     #[test]
+    fn part_state_keys_stay_in_owned_namespaces_with_one_type_each() {
+        const fn key<T>(namespace: &'static str, default: fn() -> T) -> AttachmentType<T> {
+            AttachmentType {
+                namespace,
+                name: "progress",
+                default,
+                codec: None,
+                copy_on_death: false,
+                sync: false,
+            }
+        }
+        with_porter(|| {
+            let mut r = PartRegistrar::new("porter");
+            let declare = |r: &mut PartRegistrar, declaration| {
+                r.declare_block_entity_part_state("porter::Press", declaration)
+            };
+            let progress = PartStateDeclaration::of(&key("legacy", || 0_u32));
+            assert_eq!(declare(&mut r, progress), Ok(()));
+            assert_eq!(declare(&mut r, progress), Ok(()), "one key, one type, two parts");
+            let wider = PartStateDeclaration::of(&key("legacy", || 0_i64));
+            assert_eq!(
+                declare(&mut r, wider),
+                Err(wider.refused(
+                    "porter::Press",
+                    PartStateRefusal::Incompatible { declared: "u32" }
+                ))
+            );
+            assert_eq!(
+                declare(&mut r, PartStateDeclaration::of(&key("minecraft", || 0_u32))),
+                Err(PartStateDeclaration::of(&key("minecraft", || 0_u32))
+                    .refused("porter::Press", PartStateRefusal::UnownedNamespace))
+            );
+            assert_eq!(r.refused.len(), 2, "each refusal is the mod's registration refusal");
+            assert!(r.refused[1].contains("minecraft:progress"));
+        });
+    }
+
+    #[test]
     fn manifest_owned_declarations_keep_the_persisted_namespace() {
         with_porter(|| {
             let mut r = PartRegistrar::new("porter");

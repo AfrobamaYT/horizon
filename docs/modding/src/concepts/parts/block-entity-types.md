@@ -34,6 +34,52 @@ Lookup keys may answer capabilities for vanilla and native types. `block_entity_
 native types and returns `BlockEntityPartError::VanillaType { kind }` immediately for a vanilla key. Native
 Parts are expanded after every mod has registered, so a Part can target a type declared later.
 
+## Part state
+
+A Part that keeps a value on each block entity of its type (a machine's progress, the last
+position of a moving head) declares it with `BlockEntityPartState` instead of keeping a side
+table. The game owns the values: one per block entity, in its attachment map, saved with the
+chunk through the attachment codec and kept by transactions.
+
+```rust,ignore
+static PROGRESS: AttachmentType<u32> = AttachmentType {
+    namespace: "mymod", name: "press_progress", default: || 0,
+    codec: Some(PROGRESS_CODEC), copy_on_death: false, sync: false,
+};
+impl BlockEntityPartState for Press {
+    type Data = u32;
+    const DATA: &'static AttachmentType<u32> = &PROGRESS;
+}
+r.block_entity_part_with_state(&press, Press)?;
+
+// In its tick, where the block entity is out of the world and `block_entity` finds nothing:
+let level = host.level(host.dimension()).unwrap();
+let entity = host.block_entity_identity(level, event.pos).unwrap();
+let done = Press::edit_state(host, entity, |_, progress| {
+    *progress += 1;
+    *progress >= 200
+})?;
+```
+
+- `Press::state(host, entity)` and `state_existing` read a snapshot through `&dyn Host` and never
+  insert the default. `edit_state` takes `&mut dyn ServerHost` and runs in a nested transaction
+  of its own. The closure gets a copy and the host, and no store borrow is held while it runs. The
+  result is stored when the closure returns.
+- Every call checks the handle first. A handle from another level gives `PartStateError::OtherLevel`.
+  A removed, replaced or unloaded block entity gives `Stale`. After a reload the saved value is read
+  under the new handle.
+- An edit stores nothing, and its transaction aborts, in these cases:
+  - the closure panics;
+  - the value was replaced while the closure ran (`Changed`);
+  - the value does not encode;
+  - the closure starts an edit of the same block entity and key (`Reentrant`).
+- An undecodable saved value refuses before the closure runs and keeps its bytes.
+- Registration refuses a declaration that syncs, copies on death, lies outside the mod's namespaces
+  or reuses a key with another type. It also refuses a wasm mod's declaration without a codec. The
+  refusal names the Part, the key, the type and the reason.
+- Values without a codec last for the session. Part state is server-side for now. A client reads the
+  default, because nothing is sent to it yet.
+
 ## Saved data
 
 `block_entity.replace_data(host, data)` replaces its saved payload, clearing omitted fields while retaining

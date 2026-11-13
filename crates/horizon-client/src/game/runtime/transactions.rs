@@ -112,6 +112,10 @@ pub(super) struct Level {
     /// Each entity's, player's, chunk's and the level's attachment map before this transaction
     /// first reached it (a block entity's is kept with it).
     attachments: HashMap<Holder, KeptAttachments>,
+    /// Held once this transaction reaches an attachment map, until it closes: the save
+    /// admission gate (`passes_settled`) refuses a save while a map may hold tentative
+    /// values, which only the root commit makes saveable.
+    save_gate: Option<horizon_client::join_seq::visibility::PassLease>,
     /// What the root commit does, in order.
     after: Vec<After>,
     /// Internal decide/fire/apply state. No menu route uses this yet.
@@ -439,6 +443,7 @@ impl Game<'_> {
                 for (holder, kept) in level.attachments {
                     outer.attachments.entry(holder).or_insert(kept);
                 }
+                outer.save_gate = outer.save_gate.take().or(level.save_gate);
                 outer.after.extend(level.after);
             }
             (true, None) => self.root_commit(level),
@@ -536,6 +541,11 @@ impl Game<'_> {
     /// Keeps `holder`'s attachment map as it is, if a transaction is open and hasn't yet: a
     /// block entity's with the rest of it, any other's alone.
     pub(super) fn journal_attachments(&mut self, holder: Holder) {
+        if let Some(level) = self.transactions.last_mut() {
+            level
+                .save_gate
+                .get_or_insert_with(horizon_client::join_seq::visibility::PassLease::enter);
+        }
         if let Holder::BlockEntity([x, y, z]) = holder {
             return self.journal_block_entity((x, y, z));
         }

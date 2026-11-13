@@ -411,6 +411,39 @@ impl BlockEntitiesRegistrar for PartRegistrar {
         }
     }
 
+    fn declare_block_entity_part_state(
+        &mut self,
+        part: &'static str,
+        declaration: crate::PartStateDeclaration,
+    ) -> Result<(), crate::BlockEntityStateError> {
+        let key = (declaration.namespace, declaration.name);
+        let checked = declaration
+            .check()
+            .and_then(|()| {
+                self.owned_declaration_id(&format!("{}:{}", key.0, key.1))
+                    .map(drop)
+                    .map_err(|_| crate::PartStateRefusal::UnownedNamespace)
+            })
+            .and_then(|()| match self.part_states.get(&key) {
+                Some(&(data, declared)) if data != declaration.data => {
+                    Err(crate::PartStateRefusal::Incompatible { declared })
+                }
+                _ => Ok(()),
+            });
+        match checked {
+            Ok(()) => {
+                self.part_states
+                    .insert(key, (declaration.data, declaration.data_name));
+                Ok(())
+            }
+            Err(reason) => {
+                let error = declaration.refused(part, reason);
+                self.refused.push(format!("{}: {error}", self.mod_id));
+                Err(error)
+            }
+        }
+    }
+
     fn provide_block_entity_capability(
         &mut self,
         name: &'static str,
