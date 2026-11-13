@@ -5,7 +5,7 @@
 //! source and a parse of every crate below it), so a mixin build reads only the files of the
 //! modules its targets are in. Before a function is copied, its text is checked against the
 //! index's hash: a source that is not the build's is refused by name, never walked.
-use crate::patch::{Found, Source, plain, replaceable};
+use crate::patch::{Found, Source, TargetPath, plain, replaceable, target_path};
 use quote::ToTokens;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -28,18 +28,32 @@ pub struct FunctionIndex {
     pub refused: BTreeMap<String, Refused>,
 }
 
-/// One crate's modules, as a copy's mirror reads them.
+/// One crate's modules, as a copy's mirror reads them. Every crate of the source is listed, so a
+/// target naming none of them is told so; only the game crate and the crates with
+/// `#[replaceable]` functions list their modules.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CrateModules {
     /// Its library's name (`[lib] name`), which the patch crate names it by.
     pub library: String,
-    /// Each module's files, relative to the source root, `/`-separated.
-    pub modules: BTreeMap<String, Vec<String>>,
+    /// Each module's files.
+    pub modules: BTreeMap<String, Vec<ModuleFile>>,
+}
+
+/// A file a copy may read: the patch step checks it is the build's before reading it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModuleFile {
+    /// Relative to the source root, `/`-separated.
+    pub path: String,
+    /// The SHA-256 of the file's bytes, hex.
+    pub sha256: String,
 }
 
 /// A function that can take a replacement.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Function {
+    /// The module its file is, as [`CrateModules::modules`] keys it (an inline module's function is
+    /// in a module below it).
+    pub module: String,
     /// Its file, relative to the source root, `/`-separated.
     pub file: String,
     /// Its bytes in the file, `[start, end)`: attributes, signature and body.
@@ -78,19 +92,14 @@ impl Code {
 /// A target as the index keys it: no generic arguments or spaces, and a trait method's trait by
 /// its last segment (`m::<GameLevel as LevelAccess>::block_state`), as the copy finds it.
 pub fn key(target: &str) -> String {
-    let Some((front, name)) = target.rsplit_once("::") else {
-        return plain(target);
-    };
-    let qualified = front
-        .split_once("::<")
-        .and_then(|(module, rest)| Some((module, rest.strip_suffix('>')?.split_once(" as ")?)));
-    match qualified {
-        Some((module, (ty, tr))) => {
-            let tr = plain(tr);
-            let last = tr.rsplit("::").next().unwrap_or_default();
-            format!("{}::<{} as {last}>::{name}", plain(module), plain(ty))
-        }
-        None => format!("{}::{name}", plain(front)),
+    match target_path(target) {
+        None => plain(target),
+        Some(TargetPath {
+            qualified: Some((module, ty, tr)),
+            name,
+            ..
+        }) => format!("{}::<{ty} as {tr}>::{name}", plain(module)),
+        Some(TargetPath { front, name, .. }) => format!("{}::{name}", plain(front)),
     }
 }
 
@@ -105,7 +114,7 @@ pub(crate) fn source_path(root: &Path, relative: &str) -> Result<PathBuf, String
     Ok(root.join(path))
 }
 
-fn sha256(bytes: &[u8]) -> String {
+pub(crate) fn sha256(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -115,13 +124,23 @@ fn sha256(bytes: &[u8]) -> String {
 impl FunctionIndex {
     /// Whether `target` can be copied out of the source at `root`: listed as replaceable, and its
     /// span there is the indexed text. Otherwise its refusal, `(code, why)`.
+    ///
+    /// Only the span is checked here; every other file the copy reads is checked against its
+    /// [`ModuleFile::sha256`] as it is read.
     pub fn check(&self, root: &Path, target: &str) -> Result<(), (&'static str, String)> {
         let key = key(target);
+        let krate = key.split("::").next().unwrap_or_default();
+        if !self.crates.contains_key(krate) {
+            return Err((
+                "E_MIXIN_TARGET_MISSING",
+                format!("no crate `{krate}` in the game's source"),
+            ));
+        }
         if let Some(refused) = self.refused.get(&key) {
             return Err((refused.code.name(), refused.why.clone()));
         }
         let Some(function) = self.functions.get(&key) else {
-            return Err(if key.split("::").next() == Some("horizon_client") {
+            return Err(if krate == "horizon_client" {
                 (
                     "E_MIXIN_TARGET_MISSING",
                     format!("no function `{key}` in this game build's function index ({FILE})"),
@@ -150,6 +169,48 @@ impl FunctionIndex {
             )));
         }
         Ok(())
+    }
+
+    /// The function `target` names, read at its indexed span: the very item the index's verdict
+    /// is about, never one looked up again by name. Call it once [`FunctionIndex::check`] passed.
+    pub(crate) fn found(
+        &self,
+        source: &mut Source,
+        target: &str,
+    ) -> Result<Found, (&'static str, String)> {
+        let key = key(target);
+        let stale = |why: String| ("E_MIXIN_SOURCE", why);
+        let function = self
+            .functions
+            .get(&key)
+            .ok_or_else(|| stale(format!("no function `{key}` in {FILE}")))?;
+        let path = source_path(source.root(), &function.file).map_err(stale)?;
+        let text = source.read(&path).map_err(stale)?;
+        let items = syn::parse_file(&text)
+            .map_err(|e| stale(format!("{}: {e}", path.display())))?
+            .items;
+        let lines = line_starts(&text);
+        let file = File {
+            relative: &function.file,
+            module: &function.module,
+            text: &text,
+            lines: &lines,
+        };
+        let mut candidates = BTreeMap::new();
+        collect(&function.module, &items, &file, &mut candidates);
+        let [start, end] = function.span;
+        candidates
+            .remove(&key)
+            .into_iter()
+            .flatten()
+            .find(|candidate| candidate.function.span == function.span)
+            .map(|candidate| candidate.found)
+            .ok_or_else(|| {
+                stale(format!(
+                    "{} has no function `{key}` at bytes {start}..{end}, where this game build's {FILE} has it",
+                    function.file
+                ))
+            })
     }
 
     /// Refuses each listed function, except a published loop's generic one (`generic`, keys),
@@ -220,7 +281,7 @@ pub(crate) fn index_of(
                     .unwrap_or_else(|| krate.to_owned()),
                 modules: BTreeMap::new(),
             });
-        let mut relative = Vec::new();
+        let mut listed = Vec::new();
         for path in paths {
             // A `#[path]` leads through `..`: the index names the file as the archive holds it.
             let inside = path.strip_prefix(root).ok().and_then(|inside| {
@@ -234,15 +295,45 @@ pub(crate) fn index_of(
                 }
                 Some(parts.join("/"))
             });
-            relative.push(inside.ok_or_else(|| {
+            let relative = inside.ok_or_else(|| {
                 format!(
                     "{}: outside the source at {}",
                     path.display(),
                     root.display()
                 )
-            })?);
+            })?;
+            let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            listed.push(ModuleFile {
+                path: relative,
+                sha256: sha256(&bytes),
+            });
         }
-        facts.modules.insert(module.clone(), relative);
+        facts.modules.insert(module.clone(), listed);
+    }
+    // The other crates, by name only: a target in one is told it is not marked, not that the
+    // crate does not exist.
+    let crates = root.join("crates");
+    for entry in std::fs::read_dir(&crates).map_err(|e| format!("{}: {e}", crates.display()))? {
+        let package = entry
+            .map_err(|e| format!("{}: {e}", crates.display()))?
+            .path();
+        let Some(folder) = package.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !package.join("Cargo.toml").is_file() {
+            continue;
+        }
+        let krate = folder.replace('-', "_");
+        if !index.crates.contains_key(&krate) {
+            let library = crate::replace::library_name(&package)?;
+            index.crates.insert(
+                krate,
+                CrateModules {
+                    library,
+                    modules: BTreeMap::new(),
+                },
+            );
+        }
     }
     // Every function a target can name, by key, with its file and span.
     let mut candidates: BTreeMap<String, Vec<Candidate>> = BTreeMap::new();
@@ -250,10 +341,10 @@ pub(crate) fn index_of(
         .crates
         .values()
         .flat_map(|facts| {
-            facts.modules.iter().flat_map(|(module, paths)| {
-                paths
+            facts.modules.iter().flat_map(|(module, files)| {
+                files
                     .iter()
-                    .map(|path| (module.clone(), path.clone(), root.join(path)))
+                    .map(|file| (module.clone(), file.path.clone(), root.join(&file.path)))
             })
         })
         .collect();
@@ -267,11 +358,10 @@ pub(crate) fn index_of(
         let items = syn::parse_file(&text)
             .map_err(|e| format!("{}: {e}", path.display()))?
             .items;
-        let lines: Vec<usize> = std::iter::once(0)
-            .chain(text.match_indices('\n').map(|(i, _)| i + 1))
-            .collect();
+        let lines = line_starts(&text);
         let file = File {
             relative: &relative,
+            module: &module,
             text: &text,
             lines: &lines,
         };
@@ -319,9 +409,18 @@ struct Candidate {
     function: Function,
 }
 
+/// Where each line of `text` starts.
+fn line_starts(text: &str) -> Vec<usize> {
+    std::iter::once(0)
+        .chain(text.match_indices('\n').map(|(i, _)| i + 1))
+        .collect()
+}
+
 /// A file being indexed.
 struct File<'a> {
     relative: &'a str,
+    /// The module the file is.
+    module: &'a str,
     text: &'a str,
     lines: &'a [usize],
 }
@@ -331,6 +430,7 @@ impl File<'_> {
         let start = crate::source::offset(self.text, self.lines, span.start());
         let end = crate::source::offset(self.text, self.lines, span.end());
         Function {
+            module: self.module.to_owned(),
             file: self.relative.to_owned(),
             span: [start, end],
             signature_hash: crate::internals::signature_hash(&sig.to_token_stream().to_string()),
@@ -368,8 +468,9 @@ fn collect(
                     });
             }
             Item::Impl(block) => {
-                // The header alone: the verdict reads the `impl`'s attributes, generics, trait
-                // and type, never its other methods.
+                // The header and its associated types and constants: the verdict reads the
+                // `impl`'s attributes, generics, trait and type, and a trait method's copy names
+                // the associated items through the type; never the other methods.
                 let header = syn::ItemImpl {
                     attrs: block.attrs.clone(),
                     defaultness: block.defaultness,
@@ -379,7 +480,12 @@ fn collect(
                     trait_: block.trait_.clone(),
                     self_ty: block.self_ty.clone(),
                     brace_token: block.brace_token,
-                    items: Vec::new(),
+                    items: block
+                        .items
+                        .iter()
+                        .filter(|item| !matches!(item, ImplItem::Fn(_)))
+                        .cloned()
+                        .collect(),
                 };
                 let owner = plain(&block.self_ty.to_token_stream().to_string());
                 let scope = match &block.trait_ {

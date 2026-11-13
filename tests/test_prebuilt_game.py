@@ -18,10 +18,22 @@ COMMIT = "c" * 40
 
 
 def write_build_data(root: Path, identity: dict | None = None, commit: str = COMMIT) -> None:
-    """The build-data files with their header for `commit`, and an identity naming it."""
+    """The build-data files with their header for `commit`, and an identity naming it, with the smallest
+    slices `check` accepts (each required member, as an empty file) unless `identity` gives its own."""
     for name in prebuilt_game.BUILD_DATA:
         (root / name).write_text(json.dumps({"schema": 1, "build": {"commit": commit}}))
-    (root / prebuilt_game.IDENTITY).write_text(json.dumps({**(identity or {}), "commit": commit}))
+    so, exe = prebuilt_game.dylib_suffix(), ".exe" if sys.platform == "win32" else ""
+    lib = prebuilt_game.dylib_prefix()
+    members = {"runtime": [f"bin/horizon-client{exe}", f"bin/{lib}horizon_native_mods{so}",
+                           f"deps/{lib}horizon_mod_host{so}", f"deps/{lib}horizon_mod_wasm{so}"],
+               "api": [prebuilt_game.NATIVE_MODS_TEMPLATE, "deps/libmod_api-1.rmeta", "deps/libmod_points-1.rmeta"]}
+    for name in members["runtime"] + members["api"]:
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes(b"")
+    (root / prebuilt_game.RUNTIME / prebuilt_game.EXECUTABLE).write_bytes(b"\0" + prebuilt_game.HOLDER_MARK + b"\0")
+    slices = {"runtime": [prebuilt_game.IDENTITY, *members["runtime"]],
+              "api": [*prebuilt_game.API_BUILD_DATA, *members["api"]]}
+    (root / prebuilt_game.IDENTITY).write_text(json.dumps({"slices": slices, **(identity or {}), "commit": commit}))
 
 
 class StageToolTests(unittest.TestCase):
@@ -30,27 +42,35 @@ class StageToolTests(unittest.TestCase):
             root = Path(temporary)
             source = root / "source"
             source.mkdir()
-            (source / "tracked.rs").write_text("original")
-            (source / "untracked.rs").write_text("not copied")
+            committed = b"fn first() {}\nfn second() {}\n"
+            (source / "tracked.rs").write_bytes(committed)
             manifest = source / "crates/horizon-mod-wasm/Cargo.toml"
             manifest.parent.mkdir(parents=True)
             manifest.write_text("[package]\nname = 'fixture'\n")
+            git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.autocrlf=false"]
+            subprocess.run([*git, "init", "-q"], cwd=source, check=True)
+            subprocess.run([*git, "add", "tracked.rs", "crates"], cwd=source, check=True)
+            subprocess.run([*git, "commit", "-qm", "fixture"], cwd=source, check=True)
+            commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=source, check=True, text=True,
+                                    stdout=subprocess.PIPE).stdout.strip()
+            # A Windows checkout's line endings, and edits never committed: neither reaches the stage.
+            (source / "tracked.rs").write_bytes(committed.replace(b"\n", b"\r\n") + b"fn edited() {}\r\n")
+            (source / "untracked.rs").write_text("not copied")
             target = root / "output"
             tool = root / "unused" / ".." / "horizon-stage"
             calls = []
+            real_run = prebuilt_game.run
 
             def capture(command, **kwargs):
-                calls.append(command)
-                if command[:2] == ["git", "rev-parse"]:
-                    return COMMIT + "\n"
                 if command[0] == "git":
-                    return "tracked.rs\0crates/horizon-mod-wasm/Cargo.toml\0"
+                    return real_run(command, **kwargs)
+                calls.append(command)
                 self.assertEqual(command, [str(tool.resolve()), str(target / "stage"),
                                           str(target / "stage/points.json"),
-                                          str(target / "stage/internals.json"), COMMIT])
+                                          str(target / "stage/internals.json"), commit])
                 self.assertEqual(kwargs["cwd"], target / "stage")
                 self.assertIsNone(kwargs["env"])
-                self.assertEqual((target / "stage/tracked.rs").read_text(), "original")
+                self.assertEqual((target / "stage/tracked.rs").read_bytes(), committed)
                 self.assertFalse((target / "stage/untracked.rs").exists())
                 (target / "stage/tracked.rs").write_text("staged")
                 return "staged fixture\n"
@@ -60,9 +80,8 @@ class StageToolTests(unittest.TestCase):
                 prebuilt_game.stage(target, stage_tool=tool)
                 # A second call must replace the mutated stage with fresh tracked source.
                 prebuilt_game.stage(target, stage_tool=tool)
-            self.assertEqual([call[0] for call in calls if call[:2] != ["git", "rev-parse"]],
-                             ["git", str(tool.resolve()), "git", str(tool.resolve())])
-            self.assertEqual((source / "tracked.rs").read_text(), "original")
+            self.assertEqual(len(calls), 2)
+            self.assertTrue((source / "tracked.rs").read_bytes().endswith(b"fn edited() {}\r\n"))
 
 
 class RegistryPatchTests(unittest.TestCase):
@@ -157,12 +176,21 @@ class DeterministicArchiveTests(unittest.TestCase):
 
 
 class SdkAssetTests(unittest.TestCase):
+    RUNTIME = ["deps/libhorizon_mod_host.so", "deps/libhorizon_mod_wasm.so", "bin/horizon-client",
+               "bin/libhorizon_native_mods.so"]
+    API = ["deps/libmod_api-1.rmeta", "deps/libmod_points-1.rmeta", "host/libserde_derive.so"]
+    ENGINE = ["deps/libhorizon_client-1.rmeta", "native/libwindows.a"]
+
     def out(self, root: Path, mtime: int) -> Path:
         out = root / "prebuilt"
-        for name in ("deps/libhorizon_mod_host.so", "deps/libhorizon_mod_wasm.so", "host/libserde_derive.so"):
+        for name in self.RUNTIME + self.API + self.ENGINE + [prebuilt_game.NATIVE_MODS_TEMPLATE]:
             (out / name).parent.mkdir(parents=True, exist_ok=True)
             (out / name).write_bytes(name.encode())
-        write_build_data(out, {"package_format": 6, "side": "server", "target": "x86_64-unknown-linux-gnu"})
+        slices = {"runtime": [prebuilt_game.IDENTITY, *self.RUNTIME],
+                  "api": [*self.API, *prebuilt_game.API_BUILD_DATA, prebuilt_game.NATIVE_MODS_TEMPLATE]}
+        with patch.object(sys, "platform", "linux"):
+            write_build_data(out, {"package_format": 6, "side": "server", "target": "x86_64-unknown-linux-gnu",
+                                   "slices": slices})
         for path in out.rglob("*"):
             os.utime(path, (mtime, mtime))
         return out
@@ -174,7 +202,7 @@ class SdkAssetTests(unittest.TestCase):
         with patch.object(prebuilt_game, "head", return_value=COMMIT), patch.object(prebuilt_game, "run", side_effect=run):
             prebuilt_game.pack(out, dist, stage_tool=Path("horizon-stage"))
 
-    def test_pack_writes_the_engine_build_data_and_surface_the_same_every_run(self):
+    def test_pack_writes_three_archives_that_split_the_package_and_the_same_every_run(self):
         import lzma
         import tarfile
         archives = []
@@ -182,16 +210,93 @@ class SdkAssetTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 dist = root / "dist"
-                self.pack(self.out(root, mtime), dist)
+                out = self.out(root, mtime)
+                with patch.object(sys, "platform", "linux"):
+                    self.pack(out, dist)
                 names = sorted(path.name for path in dist.iterdir())
-                self.assertEqual(names, ["build-data.tar.xz", "engine-x86_64-unknown-linux-gnu-server.tar.xz", "surface.json"])
+                self.assertEqual(names, ["api-x86_64-unknown-linux-gnu-server.tar.xz", "build-data.tar.xz",
+                                         "engine-x86_64-unknown-linux-gnu-server.tar.xz",
+                                         "runtime-x86_64-unknown-linux-gnu-server.tar.xz", "surface.json"])
                 with tarfile.open(dist / "build-data.tar.xz") as tar:
-                    self.assertEqual(tar.getnames(), [".", "./functions.json", "./internals.json", "./loops.json", "./points.json"])
-                with lzma.open(dist / "engine-x86_64-unknown-linux-gnu-server.tar.xz") as xz, tarfile.open(fileobj=xz) as tar:
-                    self.assertIn("./deps/libhorizon_mod_host.so", tar.getnames())
-                    self.assertEqual({member.mtime for member in tar.getmembers()}, {0})
+                    self.assertEqual(tar.getnames(), [".", "./functions.json", "./internals.json", "./loops.json",
+                                                      "./points.json"])
+                files = {}
+                for kind in ("runtime", "api", "engine"):
+                    with lzma.open(dist / f"{kind}-x86_64-unknown-linux-gnu-server.tar.xz") as xz, \
+                            tarfile.open(fileobj=xz) as tar:
+                        self.assertEqual({member.mtime for member in tar.getmembers()}, {0})
+                        files[kind] = sorted(m.name[2:] for m in tar.getmembers() if m.isfile())
+                self.assertEqual(files["runtime"], sorted([prebuilt_game.IDENTITY, *self.RUNTIME]))
+                self.assertEqual(files["api"], sorted([*self.API, *prebuilt_game.API_BUILD_DATA,
+                                                      prebuilt_game.NATIVE_MODS_TEMPLATE]))
+                # Everything not listed is the engine's, so the three together are the whole package, once each. The
+                # function index is the engine route's alone.
+                self.assertEqual(files["engine"], sorted([*self.ENGINE, prebuilt_game.FUNCTIONS]))
+                every = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
+                self.assertEqual(sorted(files["runtime"] + files["api"] + files["engine"]), every)
                 archives.append([(dist / name).read_bytes() for name in names])
         self.assertEqual(archives[0], archives[1])
+
+    def test_check_refuses_slices_naming_absent_or_shared_files(self):
+        api = [*self.API, *prebuilt_game.API_BUILD_DATA, prebuilt_game.NATIVE_MODS_TEMPLATE]
+        for change, why in (({"api": [*api, "deps/libgone-1.rmeta"]}, "absent files"),
+                            ({"api": [*api, "deps/libhorizon_mod_host.so"]}, "overlap"),
+                            # Each slice holds the members the required inputs name (so neither is empty).
+                            ({"api": []}, "lack required members"),
+                            ({"runtime": [prebuilt_game.IDENTITY, *self.RUNTIME[:3]]}, "lack required members"),
+                            ({"api": api[1:]}, "lack required members"),
+                            ({"api": api[:-1]}, "lack required members")):
+            with tempfile.TemporaryDirectory() as directory, self.subTest(change), \
+                    patch.object(sys, "platform", "linux"):
+                out = self.out(Path(directory), 1000)
+                identity = json.loads((out / prebuilt_game.IDENTITY).read_text())
+                identity["slices"].update(change)
+                (out / prebuilt_game.IDENTITY).write_text(json.dumps(identity))
+                with self.assertRaisesRegex(SystemExit, why):
+                    prebuilt_game.check(out)
+        # The API executable carries the holder marker in its own bytes, or the launcher plays it the wrong way.
+        with tempfile.TemporaryDirectory() as directory, patch.object(sys, "platform", "linux"):
+            out = self.out(Path(directory), 1000)
+            prebuilt_game.check(out)
+            (out / prebuilt_game.RUNTIME / prebuilt_game.EXECUTABLE).write_bytes(b"an executable")
+            with self.assertRaisesRegex(SystemExit, "holder marker"):
+                prebuilt_game.check(out)
+
+    def test_slices_come_from_the_build_records_with_proc_macros_as_leaves(self):
+        def package(name, kind="lib", deps=()):
+            return ({"id": name, "name": name, "targets": [{"kind": [kind]}]},
+                    {"id": name, "deps": [{"pkg": dep, "dep_kinds": [{"kind": dep_kind}]} for dep, dep_kind in deps]})
+        packages, nodes = zip(
+            package("horizon-mod-api", deps=[("vocab", None), ("macros", None), ("tool", "build")]),
+            package("horizon-mod-points", deps=[("vocab", None)]),
+            package("vocab", deps=[("serde", None)]),
+            package("serde"),
+            package("macros", "proc-macro", deps=[("syn", None)]),
+            package("syn"),
+            package("tool"),
+            package("horizon-mod-host", "dylib", deps=[("horizon-mod-api", None), ("engine", None)]),
+            package("horizon-mod-wasm", "dylib"),
+            package("engine"),
+        )
+        metadata = {"packages": list(packages), "resolve": {"nodes": list(nodes)}}
+        self.assertEqual(prebuilt_game.api_closure(metadata),
+                         {"horizon-mod-api", "horizon-mod-points", "vocab", "serde", "macros"})
+        copied = {name: [f"deps/lib{name}-1.rmeta"] for name in ("horizon-mod-api", "horizon-mod-points", "vocab",
+                                                                  "serde", "syn", "tool", "engine")}
+        copied["macros"] = ["host/libmacros-1.so"]
+        copied["horizon-mod-host"] = ["deps/libhorizon_mod_host.so"]
+        copied["horizon-mod-wasm"] = ["deps/libhorizon_mod_wasm.so"]
+        sliced = prebuilt_game.slices(metadata, copied, ["bin/horizon-client"])
+        self.assertEqual(sliced["runtime"], sorted([prebuilt_game.IDENTITY, "bin/horizon-client",
+                                                    "deps/libhorizon_mod_host.so", "deps/libhorizon_mod_wasm.so"]))
+        self.assertEqual(sliced["api"], sorted([
+            "deps/libhorizon-mod-api-1.rmeta", "deps/libhorizon-mod-points-1.rmeta", "deps/libvocab-1.rmeta",
+            "deps/libserde-1.rmeta", "host/libmacros-1.so", *prebuilt_game.API_BUILD_DATA,
+            prebuilt_game.NATIVE_MODS_TEMPLATE]))
+        # Each slice unpacks to its own folder, so a game library inside the API closure is refused.
+        nodes[1]["deps"].append({"pkg": "horizon-mod-wasm", "dep_kinds": [{"kind": None}]})
+        with self.assertRaisesRegex(SystemExit, "horizon-mod-wasm"):
+            prebuilt_game.slices(metadata, copied, ["bin/horizon-client"])
 
     def test_pack_refuses_another_commits_package(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -343,9 +448,9 @@ class PrebuiltContentsTests(unittest.TestCase):
         output.mkdir(parents=True)
         macros.mkdir()
         def artifact(path, kind):
-            return {"reason": "compiler-artifact", "target": {"kind": [kind]},
+            return {"reason": "compiler-artifact", "target": {"kind": [kind]}, "package_id": Path(path).name,
                     "filenames": [str(root / path)]}
-        prebuilt_game.copy_artifacts([
+        copied = prebuilt_game.copy_artifacts([
             artifact("cache/release/deps/libshared-host.rmeta", "lib"),
             artifact("cache/release/deps/libderive.so", "proc-macro"),
             artifact("cache/host/release/deps/libshared-target.rmeta", "lib"),
@@ -358,6 +463,11 @@ class PrebuiltContentsTests(unittest.TestCase):
             "libshared-target.rmeta", "libshared-second-version.rmeta", "libhorizon_client.so",
         })
         self.assertEqual({path.name for path in macros.iterdir()}, {"libderive.so"})
+        # Each copied file is recorded under its package, as the slices read them.
+        self.assertEqual(copied, {"libderive.so": ["host/libderive.so"],
+                                  "libshared-target.rmeta": ["deps/libshared-target.rmeta"],
+                                  "libshared-second-version.rmeta": ["deps/libshared-second-version.rmeta"],
+                                  "libhorizon_client.so": ["deps/libhorizon_client.so"]})
         # Multiple legitimate target versions remain available to rustc's transitive lookup.
         # Only explicit extern/facade lookup must reject ambiguous names.
         with self.assertRaises(ValueError):

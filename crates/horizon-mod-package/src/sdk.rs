@@ -123,11 +123,14 @@ pub enum Kind {
     BuildData,
     /// The API crates with their generated code written out.
     ApiSource,
-    /// Game libraries, the prebuilt executable's inputs, the stub mods library.
+    /// The game's libraries, the API route's prebuilt executable and its stub mods library, and
+    /// the package identity.
     Runtime,
-    /// Metadata of the API closure and its proc macros.
+    /// Metadata of the API closure and its proc macros, the point data and the mods library's
+    /// template: what an API-only mod builds against.
     Api,
-    /// Every other compiled file. Until the package is sliced, the whole prebuilt game.
+    /// Every other file of the prebuilt game: what the engine route (a `[native]` table,
+    /// internals or a registry dependency) builds against, with the other two.
     Engine,
 }
 
@@ -221,6 +224,12 @@ pub struct Inputs {
     pub routes: BTreeMap<String, Route>,
     /// How to make each listed file, by its name.
     pub how: BTreeMap<String, String>,
+    /// The files each compiled slice must hold, by its kind's name, as paths in the slice:
+    /// `<folder>/@program:<name>` is that program (`.exe` on Windows), `<folder>/@dylib:<crate>`
+    /// that crate's dynamic library and `<folder>/@rmeta:<crate>` its metadata, built for the
+    /// slice's target. The packager refuses a package whose slices miss one.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub members: BTreeMap<String, Vec<String>>,
 }
 
 /// What one route needs.

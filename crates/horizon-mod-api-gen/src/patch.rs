@@ -142,6 +142,11 @@ pub(crate) struct Source {
     owners: BTreeMap<String, crate::replace::OwnerTypes>,
     /// What [`replaceable`] reads once for every function it is asked about.
     cache: Cache,
+    /// Each file's SHA-256 in the function index: a file that differs is refused as it is read.
+    hashes: BTreeMap<PathBuf, String>,
+    /// Why a file read did not match the index, when one did not: the build is refused, even where
+    /// the read's failure was taken as "no such module".
+    stale: Option<String>,
 }
 
 /// The walks [`replaceable`] would otherwise repeat per function: the index asks it about every
@@ -160,11 +165,14 @@ impl Source {
     fn indexed(root: &Path, index: &crate::functions::FunctionIndex) -> Result<Self, String> {
         let mut files = BTreeMap::new();
         let mut libraries = BTreeMap::new();
+        let mut hashes = BTreeMap::new();
         for (krate, facts) in &index.crates {
-            for (module, paths) in &facts.modules {
+            for (module, listed) in &facts.modules {
                 let mut joined = Vec::new();
-                for path in paths {
-                    joined.push(crate::functions::source_path(root, path)?);
+                for file in listed {
+                    let path = crate::functions::source_path(root, &file.path)?;
+                    hashes.insert(path.clone(), file.sha256.clone());
+                    joined.push(path);
                 }
                 files.insert(module.clone(), joined);
             }
@@ -179,7 +187,31 @@ impl Source {
             libraries,
             owners: BTreeMap::new(),
             cache: Cache::default(),
+            hashes,
+            stale: None,
         })
+    }
+
+    /// The source root.
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// The text of `path`, refused when the function index has another hash for it.
+    pub(crate) fn read(&mut self, path: &Path) -> Result<String, String> {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        if let Some(expected) = self.hashes.get(path)
+            && crate::functions::sha256(text.as_bytes()) != *expected
+        {
+            let why = format!(
+                "{} differs from this game build's {}: the source is not the build's",
+                path.display(),
+                crate::functions::FILE
+            );
+            self.stale.get_or_insert_with(|| why.clone());
+            return Err(why);
+        }
+        Ok(text)
     }
 
     pub(crate) fn new(root: &Path) -> Result<Self, String> {
@@ -209,6 +241,8 @@ impl Source {
             libraries: BTreeMap::new(),
             owners: BTreeMap::new(),
             cache: Cache::default(),
+            hashes: BTreeMap::new(),
+            stale: None,
         })
     }
 
@@ -267,11 +301,10 @@ impl Source {
     /// Module `path`'s items: its file's, or an inline module's inside its parent's.
     pub(crate) fn module(&mut self, path: &str) -> Result<&Module, String> {
         if !self.parsed.contains_key(path) {
-            let items = if let Some(files) = self.files.get(path) {
+            let items = if let Some(files) = self.files.get(path).cloned() {
                 let mut items = Vec::new();
-                for file in files {
-                    let text = std::fs::read_to_string(file)
-                        .map_err(|e| format!("{}: {e}", file.display()))?;
+                for file in &files {
+                    let text = self.read(file)?;
                     items.extend(
                         syn::parse_file(&text)
                             .map_err(|e| format!("{}: {e}", file.display()))?
@@ -443,10 +476,39 @@ pub(crate) struct Found {
     pub(crate) function: syn::ImplItemFn,
 }
 
+/// A target's path as `[[native.mixin]]` rows and bridges write it: what comes before its last
+/// segment, its name, and for a trait method (`module::<Type as Trait>::name`) the module, the
+/// type without generic arguments or spaces, and the trait's last segment. The one parse of a
+/// target: [`find`] and the function index's keys both read it.
+pub(crate) struct TargetPath<'a> {
+    pub(crate) front: &'a str,
+    pub(crate) name: &'a str,
+    pub(crate) qualified: Option<(&'a str, String, String)>,
+}
+
+pub(crate) fn target_path(target: &str) -> Option<TargetPath<'_>> {
+    let (front, name) = target.rsplit_once("::")?;
+    let qualified = front.split_once("::<").and_then(|(module, rest)| {
+        let (ty, tr) = rest.strip_suffix('>')?.split_once(" as ")?;
+        let tr = plain(tr);
+        let last = tr.rsplit("::").next().unwrap_or_default().to_owned();
+        Some((module, plain(ty), last))
+    });
+    Some(TargetPath {
+        front,
+        name,
+        qualified,
+    })
+}
+
+/// The function a bridge's target names, looked up by name in its module. A mixin's target is
+/// read at its indexed span instead ([`crate::functions::FunctionIndex::found`]).
 pub(crate) fn find(source: &mut Source, target: &str) -> Result<Found, (&'static str, String)> {
-    let (front, name) = target
-        .rsplit_once("::")
-        .ok_or(("E_MIXIN_TARGET_MISSING", "not a function path".to_owned()))?;
+    let TargetPath {
+        front,
+        name,
+        qualified,
+    } = target_path(target).ok_or(("E_MIXIN_TARGET_MISSING", "not a function path".to_owned()))?;
     let krate = front.split("::").next().unwrap_or_default();
     if !source.load(krate) {
         return Err((
@@ -455,15 +517,8 @@ pub(crate) fn find(source: &mut Source, target: &str) -> Result<Found, (&'static
         ));
     }
     // A trait method is written `module::<Type as Trait>::name`.
-    let qualified = front
-        .split_once("::<")
-        .and_then(|(module, rest)| Some((module, rest.strip_suffix('>')?.split_once(" as ")?)));
     let (module, owner, trait_name) = match qualified {
-        Some((module, (ty, tr))) => {
-            let tr = plain(tr);
-            let last = tr.rsplit("::").next().unwrap_or_default().to_owned();
-            (module.to_owned(), plain(ty), Some(last))
-        }
+        Some((module, ty, last)) => (module.to_owned(), ty, Some(last)),
         None => {
             // The longest prefix that is a module; what follows it is the `impl`'s type.
             let segments: Vec<&str> = front.split("::").collect();
@@ -796,7 +851,7 @@ pub fn generate(
             refusals.push(refuse(target, code, why));
             continue;
         }
-        let found = match find(&mut source, target) {
+        let found = match index.found(&mut source, target) {
             Ok(found) => found,
             Err((code, why)) => {
                 refusals.push(refuse(target, code, why));
@@ -1007,6 +1062,12 @@ pub fn generate(
             Err((code, why)) => refusals.push(refuse(&bridge.id, code, why)),
         }
     }
+    if let Some(why) = source.stale.take() {
+        return Err(targets
+            .iter()
+            .map(|t| refuse(t, "E_MIXIN_SOURCE", why.clone()))
+            .collect());
+    }
     if !refusals.is_empty() {
         return Err(refusals);
     }
@@ -1048,6 +1109,13 @@ pub fn generate(
             patch_crate(krate, source_crate),
             prettyplease_or_tokens(lib),
         ));
+    }
+    // A mirror's module read from a file that is not the build's.
+    if let Some(why) = source.stale.take() {
+        return Err(targets
+            .iter()
+            .map(|t| refuse(t, "E_MIXIN_SOURCE", why.clone()))
+            .collect());
     }
     Ok(PatchCrate { libs, patched })
 }
@@ -1663,6 +1731,8 @@ mod tests {
             libraries: BTreeMap::new(),
             owners: BTreeMap::new(),
             cache: Cache::default(),
+            hashes: BTreeMap::new(),
+            stale: None,
         };
         assert!(source.load("horizon_mod_render"));
         assert_eq!(
@@ -1746,7 +1816,7 @@ mod tests {
         )
         .unwrap_err();
         let codes: Vec<_> = error.iter().map(|r| r.code).collect();
-        assert_eq!(codes, ["E_MIXIN_TARGET_MISSING", "E_MIXIN_NOT_REPLACEABLE"]);
+        assert_eq!(codes, ["E_MIXIN_TARGET_MISSING", "E_MIXIN_TARGET_MISSING"]);
     }
 
     #[test]
@@ -1791,6 +1861,8 @@ mod tests {
             libraries: BTreeMap::new(),
             owners: BTreeMap::new(),
             cache: Cache::default(),
+            hashes: BTreeMap::new(),
+            stale: None,
         };
         let ancestor = mirror(
             &mut source,
@@ -1850,6 +1922,8 @@ mod tests {
             libraries: BTreeMap::new(),
             owners: BTreeMap::new(),
             cache: Cache::default(),
+            hashes: BTreeMap::new(),
+            stale: None,
         };
         let used = BTreeSet::from(["Arc".to_owned()]);
         let out = mirror(&mut source, "fixture", &Tree::default(), false, Some(&used)).unwrap();
@@ -1879,6 +1953,8 @@ mod tests {
             libraries: BTreeMap::new(),
             owners: BTreeMap::new(),
             cache: Cache::default(),
+            hashes: BTreeMap::new(),
+            stale: None,
         };
         let out = mirror(&mut source, "fixture", &Tree::default(), false, None).unwrap();
         let parsed: syn::File = syn::parse2(out).unwrap();

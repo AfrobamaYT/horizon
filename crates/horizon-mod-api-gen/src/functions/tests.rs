@@ -117,9 +117,18 @@ fn the_index_lists_each_function_with_its_text_or_its_refusal() {
     );
     assert!(!index.functions.contains_key("horizon_low::unmarked"));
     assert_eq!(index.crates["horizon_low"].library, "low");
+    let game = &index.crates["horizon_client"].modules["horizon_client::game"];
     assert_eq!(
-        index.crates["horizon_client"].modules["horizon_client::game"],
-        ["crates/horizon-client/src/game.rs"]
+        game,
+        &[ModuleFile {
+            path: "crates/horizon-client/src/game.rs".into(),
+            sha256: sha256(GAME.as_bytes()),
+        }]
+    );
+    assert_eq!(ticks.module, "horizon_client::game");
+    assert_eq!(
+        index.functions["horizon_client::game::inner::nested"].module,
+        "horizon_client::game"
     );
 }
 
@@ -136,6 +145,14 @@ fn a_target_is_checked_by_its_key_and_its_text() {
         (
             "E_MIXIN_TARGET_MISSING",
             "no function `horizon_client::game::Game::no_such` in this game build's function index (functions.json)".to_owned()
+        )
+    );
+    // A crate the source does not have is not a crate to mark.
+    assert_eq!(
+        check("horizon_nowhere::f").unwrap_err(),
+        (
+            "E_MIXIN_TARGET_MISSING",
+            "no crate `horizon_nowhere` in the game's source".to_owned()
         )
     );
     assert_eq!(
@@ -208,6 +225,32 @@ fn the_copy_reads_the_index_and_refuses_a_stale_source() {
     )
     .unwrap_err();
     assert_eq!(refused[0].code, "E_MIXIN_SOURCE");
+}
+
+#[test]
+fn every_file_the_copy_reads_is_checked_not_only_the_span() {
+    let root = fixture();
+    let index = index(root.path(), &BTreeSet::new()).unwrap();
+    let targets = ["horizon_client::game::Game::ticks".to_owned()];
+    // The target's span is unchanged; the crate root the mirror reads is not the build's.
+    let lib = root.path().join("crates/horizon-client/src/lib.rs");
+    fs::write(&lib, "pub mod game;\npub fn added() {}\n").unwrap();
+    let refused = crate::patch::generate(
+        root.path(),
+        "horizon_patch",
+        &targets,
+        &Default::default(),
+        &index,
+    )
+    .unwrap_err();
+    assert_eq!(refused[0].code, "E_MIXIN_SOURCE");
+    assert!(
+        refused[0]
+            .why
+            .contains("lib.rs differs from this game build's functions.json"),
+        "{}",
+        refused[0].why
+    );
 }
 
 #[test]
