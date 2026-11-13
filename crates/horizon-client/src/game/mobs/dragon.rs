@@ -4062,7 +4062,7 @@ impl Game<'_> {
         let crystals: Vec<Vec3> = self
             .crystals
             .iter()
-            .filter(|c| in_reach(c.position) && !self.combat.spares(c.id))
+            .filter(|c| in_reach(c.position) && self.combat.visits(c.id))
             .map(|c| c.position)
             .collect();
         // The blast's source carries the player who set it off, if any.
@@ -4092,7 +4092,7 @@ impl Game<'_> {
                 self.destroy_crystal(i, by, CrystalDamage::Explosion);
             }
         }
-        let Some(d) = self.dragon.as_ref().filter(|d| !self.combat.spares(d.id)) else {
+        let Some(d) = self.dragon.as_ref().filter(|d| self.combat.visits(d.id)) else {
             return;
         };
         let hits = d.explosion_hits(center, radius, |b| {

@@ -18,7 +18,7 @@ use horizon_core::{
 use mod_api::ExplosionStart;
 #[cfg(test)]
 use mod_api::ItemDrop;
-use std::{cmp::Ordering, io};
+use std::{cmp::Ordering, collections::HashSet, io};
 use {
     horizon_core::java_hash_map::{JavaHashMap, JavaKey},
     horizon_world::{
@@ -877,21 +877,30 @@ impl Game<'_> {
                     }
                 }),
         };
-        let own = self.explosion_hurt_player(
-            &context,
-            radius,
-            damage_type,
-            exploding,
-            attacker.as_ref(),
-            blast_source.as_ref(),
-        );
+        let own = if self
+            .lan_acting_entity
+            .is_some_and(|id| !self.combat.visits(id))
+        {
+            None
+        } else {
+            self.explosion_hurt_player(
+                &context,
+                radius,
+                damage_type,
+                exploding,
+                attacker.as_ref(),
+                blast_source.as_ref(),
+            )
+        };
         let mut pushed: Vec<_> = self.lan_acting.zip(own).into_iter().collect();
         if let Some(host) = self.lan.as_ref() {
+            let combat = &self.combat;
             let guests: Vec<u32> = host
                 .hub
                 .guests
                 .iter()
                 .filter(|g| host.hub.here(g))
+                .filter(|g| u32::try_from(g.entity_id).map_or(true, |id| combat.visits(id)))
                 .map(|g| g.conn)
                 .collect();
             for conn in guests {
@@ -942,10 +951,11 @@ impl Game<'_> {
             items_ignore: items_ignore_explosion(self.blast_griefs(), interaction),
             spared: exploding.filter(|_| self.combat.explosion_source_named),
         };
-        let (items_len, orbs_len) = (self.dropped.len(), self.orbs.len());
-        let (mut items_kept, mut orbs_kept) = (0, 0);
-        let (mut boats_gone, mut carts_gone) = (0, 0);
         let mut destroyed_contents = Vec::new();
+        // Items and orbs the blast destroys, taken out after the walk: a
+        // removal mid-walk would shift the indices the visits carry.
+        let mut dropped_destroyed: HashSet<u32> = HashSet::new();
+        let mut orbs_destroyed: HashSet<u32> = HashSet::new();
         macro_rules! blocked_damage {
             ($id:expr, $kind:expr) => {{
                 let source = horizon_client::health::HurtSource {
@@ -962,13 +972,27 @@ impl Game<'_> {
                 )
             }};
         }
-        for handle in self.entity_handles() {
-            let handle = match handle {
-                EntityHandle::Boat(i) => EntityHandle::Boat(i - boats_gone),
-                EntityHandle::Cart(i) => EntityHandle::Cart(i - carts_gone),
-                other => other,
+        // The walk visits the storages in storage order, unless a listening
+        // `explosion_detonate` left the list, and then it visits exactly what
+        // the list names, in its order (`explosion_detonate.rs`). The kinds
+        // outside the storages (players, frames, paintings, cushions,
+        // crystals, the dragon, hooks) answer no handle here: the player walk
+        // and their own passes read the list for them.
+        let visits: Vec<EntityHandle> = match self.combat.blast_hit_list.as_ref() {
+            None => self.entity_handles().collect(),
+            Some(list) => list
+                .iter()
+                .filter_map(|&id| self.blast_handle(id))
+                .collect(),
+        };
+        for handle in visits {
+            // An entity the blast's list does not name is neither hurt nor
+            // pushed; without a listener the storages are the walk.
+            let hit = if with_entity!(self, handle, e => self.combat.visits(e.id())) {
+                with_entity!(self, handle, e => self.blast_hit(e, center, diameter, &blast))
+            } else {
+                None
             };
-            let hit = with_entity!(self, handle, e => self.blast_hit(e, center, diameter, &blast));
             let mut destroyed = false;
             if let Some(Hit {
                 dist,
@@ -1072,6 +1096,7 @@ impl Game<'_> {
                             item.health = (item.health as f32 - amount) as i32;
                             destroyed = item.health <= 0;
                             if destroyed {
+                                dropped_destroyed.insert(item.id);
                                 let at = item.position;
                                 // Health was already reduced above. Run the shared
                                 // onDestroyed path without applying damage twice.
@@ -1089,25 +1114,32 @@ impl Game<'_> {
                         let id = self.orbs[i].id as i32;
                         if !blocked_damage!(id, "minecraft:experience_orb") {
                             destroyed = self.orbs[i].hurt(amount);
+                            if destroyed {
+                                orbs_destroyed.insert(self.orbs[i].id);
+                            }
                         }
                     }
                     // `VehicleEntity.hurtServer` (explosions ignite TNT carts);
                     // a destroyed one is gone before the push.
-                    EntityHandle::Cart(i) => {
-                        let (id, kind) = (self.carts[i].id as i32, self.carts[i].kind.id());
-                        if !blocked_damage!(id, kind) {
-                            let len = self.carts.len();
+                    EntityHandle::Cart(_) => {
+                        // Fresh index: a destroyed cart shifted its list.
+                        let Some(i) = self.carts.iter().position(|c| c.id == entity) else {
+                            continue;
+                        };
+                        let kind = self.carts[i].kind.id();
+                        if !blocked_damage!(entity as i32, kind) {
                             self.hurt_cart(i, amount, false, true);
-                            carts_gone += len - self.carts.len();
                         }
                     }
                     // `VehicleEntity.hurtServer`: damage * 10, broken past 40.
-                    EntityHandle::Boat(i) => {
-                        let (id, kind) = (self.boats[i].id as i32, self.boats[i].entity_type());
-                        if !blocked_damage!(id, &kind) {
-                            let len = self.boats.len();
+                    EntityHandle::Boat(_) => {
+                        // Fresh index: a destroyed boat shifted its list.
+                        let Some(i) = self.boats.iter().position(|b| b.id == entity) else {
+                            continue;
+                        };
+                        let kind = self.boats[i].entity_type();
+                        if !blocked_damage!(entity as i32, &kind) {
                             self.hurt_boat(i, amount, false);
-                            boats_gone += len - self.boats.len();
                         }
                     }
                     // `hurtServer` does nothing to the rest.
@@ -1139,20 +1171,20 @@ impl Game<'_> {
                     other => with_entity_mut!(self, other, e => e.push_from_explosion(push)),
                 }
             }
-            match handle {
-                EntityHandle::Item(i) if !destroyed => {
-                    self.dropped.swap(items_kept, i);
-                    items_kept += 1;
-                }
-                EntityHandle::Orb(i) if !destroyed => {
-                    self.orbs.swap(orbs_kept, i);
-                    orbs_kept += 1;
-                }
-                _ => {}
+        }
+        // The destroyed items and orbs leave their lists, last first, so the
+        // indices under each removal stay valid. The survivors keep their
+        // storage order, as vanilla's entity list does.
+        for i in (0..self.dropped.len()).rev() {
+            if dropped_destroyed.contains(&self.dropped[i].id) {
+                self.dropped.remove(i);
             }
         }
-        self.dropped.drain(items_kept..items_len);
-        self.orbs.drain(orbs_kept..orbs_len);
+        for i in (0..self.orbs.len()).rev() {
+            if orbs_destroyed.contains(&self.orbs[i].id) {
+                self.orbs.remove(i);
+            }
+        }
         // The original target walk is finished: released contents cannot be
         // hurt or pushed by the explosion that destroyed their container.
         self.spawn_destroyed_contents(destroyed_contents);
@@ -1265,6 +1297,7 @@ impl Game<'_> {
             let a = &self.armor_stands[i];
             let p = a.position;
             if !super::armor_stands::spared_by_blast(a)
+                && self.combat.visits(a.id)
                 && blast_reaches(center, diameter, [p.x, p.y, p.z])
             {
                 let id = a.id;
@@ -1311,7 +1344,8 @@ impl Game<'_> {
             let (lo, hi) = self.paintings[i].bounds();
             let at = [0, 1, 2].map(|k| (lo[k] + hi[k]) / 2.0);
             // A painting a mod keeps stays at `i`.
-            if !(blast_reaches(center, diameter, at)
+            if !(self.combat.visits(self.paintings[i].id)
+                && blast_reaches(center, diameter, at)
                 && self.break_painting_by(i, false, self.explosion_kill_credit()))
             {
                 i += 1;
@@ -1320,7 +1354,9 @@ impl Game<'_> {
         let mut i = 0;
         while i < self.cushions.len() {
             let p = self.cushions[i].position;
-            if blast_reaches(center, diameter, [p.x, p.y, p.z]) {
+            if self.combat.visits(self.cushions[i].id)
+                && blast_reaches(center, diameter, [p.x, p.y, p.z])
+            {
                 self.break_cushion_by(i, false, self.explosion_kill_credit());
             } else {
                 i += 1;
@@ -1479,10 +1515,16 @@ impl Game<'_> {
         self.post_game_event("minecraft:explode", center, ctx);
         let mut targets =
             self.exploded_positions(center, radius, resists, source.portal_proof, &start);
-        let dimension = self.dim.id();
-        self.native_explosion_detonate(dimension, center, &mut targets);
+        // The walks that hurt entities follow the list a listening
+        // `explosion_detonate` leaves: a blast set off inside one of them
+        // (its own detonate, a nested `level_explode`) keeps its own list.
+        let outer = std::mem::take(&mut self.combat.blast_hit_list);
+        let outer_ids = std::mem::take(&mut self.combat.blast_hit_ids);
+        self.explosion_detonate(center, radius, &mut targets);
         let pushed =
             self.explosion_hurt_entities(center, radius, damage_type, interaction, &targets);
+        self.combat.blast_hit_list = outer;
+        self.combat.blast_hit_ids = outer_ids;
         if interaction != BlockInteraction::Keep {
             // Util.shuffle(list, level.random)
             for i in (2..=targets.len()).rev() {
