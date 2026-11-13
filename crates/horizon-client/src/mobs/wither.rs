@@ -459,7 +459,11 @@ pub fn custom_server_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEven
                             .block_tags
                             .get("minecraft:wither_immune")
                             .is_some_and(|t| t.contains(name));
-                        if name != "minecraft:air" && !name.ends_with("_air") && !immune {
+                        // WitherBoss.canDestroy, or what the block's parts answer.
+                        if name != "minecraft:air"
+                            && !name.ends_with("_air")
+                            && w.can_entity_destroy(m.id, [x, y, z], !immune)
+                        {
                             events.push(MobEvent::BreakBlock {
                                 pos: [x, y, z],
                                 drop: true,
@@ -610,6 +614,83 @@ mod tests {
                     ));
                     assert_eq!((plain, deferred), (!asks, asks), "asks: {asks}");
                 }
+            }
+        ));
+    }
+    /// `canEntityDestroy` in the wither's block break: a part's no keeps stone,
+    /// its yes breaks bedrock (`#wither_immune`), an unanswered block keeps
+    /// vanilla's rule, and with griefing off nothing breaks whatever it says.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn the_wither_breaks_what_block_parts_allow() {
+        use std::sync::Arc;
+        struct Parts;
+        impl crate::mobs::MobHooks for Parts {
+            fn enderman_anger_suppressed(&self, _: u32, _: &crate::mobs::PlayerView) -> bool {
+                false
+            }
+            fn can_grief(&self, _: u32, rule: bool) -> bool {
+                rule
+            }
+            fn grief_hooked(&self) -> bool {
+                false
+            }
+            fn living_visibility(
+                &self,
+                _: &crate::mobs::PlayerView,
+                _: u32,
+                visibility: f64,
+            ) -> f64 {
+                visibility
+            }
+            fn can_entity_destroy(&self, _: u32, pos: [i32; 3], vanilla: bool) -> bool {
+                match pos {
+                    [0, 64, 0] => false,
+                    [1, 64, 0] => true,
+                    _ => vanilla,
+                }
+            }
+        }
+        let build = |world: &mut crate::world::World,
+                     registry: &horizon_world::registry::BlockRegistry| {
+            world
+                .chunks
+                .insert((0, 0), Arc::new(crate::chunk::Chunk::empty(0, 0)));
+            for (pos, name) in [
+                ([0, 64, 0], "minecraft:stone"),
+                ([1, 64, 0], "minecraft:bedrock"),
+                ([0, 65, 0], "minecraft:dirt"),
+            ] {
+                let state = registry.default_state(name).unwrap();
+                world.set(pos[0], pos[1], pos[2], state).unwrap();
+            }
+        };
+        assert!(super::super::world::with_built_test_world(
+            &[],
+            build,
+            |world, types| {
+                let kind = Arc::new(types.types.get("minecraft:wither").unwrap().clone());
+                let broken = |world: &MobWorld| {
+                    let mut m = Mob::new(1, kind.clone(), Vec3::new(0.5, 64.0, 0.5), 0.0);
+                    m.extra.counter = 0;
+                    m.extra.counter2 = 1;
+                    let mut events = Vec::new();
+                    custom_server_ai_step(&mut m, world, &mut events);
+                    let mut at: Vec<[i32; 3]> = events
+                        .iter()
+                        .filter_map(|e| match e {
+                            MobEvent::BreakBlock { pos, .. } => Some(*pos),
+                            _ => None,
+                        })
+                        .collect();
+                    at.sort();
+                    at
+                };
+                let mut world = world.clone();
+                world.mob_hooks = Some(&Parts);
+                assert_eq!(broken(&world), [[0, 65, 0], [1, 64, 0]]);
+                world.mob_griefing = false;
+                assert!(broken(&world).is_empty());
             }
         ));
     }

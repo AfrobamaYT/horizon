@@ -9,6 +9,7 @@ mod mob_metadata;
 mod mob_states;
 mod raw_inbox;
 mod residency;
+mod viewed_areas;
 
 use super::{
     Game,
@@ -3318,13 +3319,8 @@ impl Game<'_> {
         {
             self.run_native_menu_events();
         }
-        if self
-            .lan
-            .as_ref()
-            .is_some_and(|host| !host.hub.chunk_watches.is_empty())
-        {
-            self.run_chunk_watches();
-        }
+        self.run_chunk_watches();
+        self.flush_passages();
         if let Some(host) = self.lan.as_mut() {
             host.hub.collect_tracking();
         }
@@ -3862,13 +3858,12 @@ impl Game<'_> {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
-        // DistanceManager.PlayerTicketTracker: every chunk within the server's
-        // view distance (Chebyshev) of a player holds a PLAYER_LOADING ticket
-        // at the entity-ticking level (31), whatever the player asked for;
-        // levels rise by one a chunk, so FULL (33) reaches two chunks past
-        // it. An extra area finishes its chunks out to its radius + 1. That
-        // covers what the player tracks (`ChunkTrackingView`, within its view
-        // distance + 1) and those chunks' lit neighbours.
+        // DistanceManager.PlayerTicketTracker: every chunk within the server's view distance
+        // (Chebyshev) of a player holds a PLAYER_LOADING ticket at the entity-ticking level (31),
+        // whatever the player asked for; levels rise by one a chunk, so FULL (33) reaches two
+        // chunks past it. An extra area finishes its chunks out to its radius + 1. That covers what
+        // the player tracks (`ChunkTrackingView`, within its view distance + 1) and those chunks'
+        // lit neighbours. The viewed areas (#3716) are squares of their own.
         let radius = host.hub.config.view_distance + 1;
         let rule = self
             .ui
@@ -3882,12 +3877,12 @@ impl Game<'_> {
             .chain(
                 self.arrival_chunks(self.dim)
                     .into_iter()
-                    // An arrival keeps only its landing spot lit enough to
-                    // resolve (the 3x3 `resolve_arrivals` checks), where it
-                    // then ticks without a player.
+                    // An arrival keeps only its landing spot lit enough to resolve (the 3x3
+                    // `resolve_arrivals` checks), where it then ticks without a player.
                     .map(|chunk| (chunk, 1)),
             )
             .chain(self.portal_ticket_areas())
+            .chain(self.viewed_extra())
             .collect();
     }
 

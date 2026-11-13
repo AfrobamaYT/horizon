@@ -12,6 +12,7 @@ mod death_tail;
 mod hoglin_target;
 #[cfg(test)]
 mod mob_dispatch_panic_tests;
+mod player_loot_entity;
 mod projectile_targets;
 mod projectile_world;
 mod pufferfish_player;
@@ -97,6 +98,7 @@ pub(super) enum Finalized {
 
 mod death_source;
 mod death_weapon;
+mod destroy_rules;
 pub(in crate::game) use death_source::death_hurt_source;
 pub(in crate::game) use death_weapon::AcceptedWeapon;
 
@@ -1800,35 +1802,6 @@ impl Game<'_> {
     /// `dropAllDeathLoot` through `mobs::drops`: the entity loot table from the
     /// world's random sequence, equipment by drop chance, species extras and
     /// the experience orbs, spawned in order.
-    /// The killing player as a loot entity: their worn and held items, read
-    /// from the guest who struck the last blow when a server's player did
-    /// (on the server thread that is every player, the window's too), so
-    /// Looting on their weapon counts.
-    fn killer_loot_entity(&mut self, guest: Option<u32>) -> horizon_world::loot::LootEntity {
-        let own = |g: &Self| {
-            let mut e = horizon_world::loot::LootEntity::new("minecraft:player");
-            let slots = [
-                ("mainhand", g.stack_in(g.selected)),
-                ("offhand", g.stack_in(super::shield::OFFHAND_SLOT)),
-                ("head", g.armor[0].as_ref()),
-                ("chest", g.armor[1].as_ref()),
-                ("legs", g.armor[2].as_ref()),
-                ("feet", g.armor[3].as_ref()),
-            ];
-            for (slot, stack) in slots {
-                if let Some(stack) = stack {
-                    e.equipment.push((slot.into(), to_loot(stack)));
-                }
-            }
-            e
-        };
-        if let Some(conn) = guest.filter(|_| self.lan_acting.is_none())
-            && let Some(entity) = self.as_guest(conn, |g| own(g))
-        {
-            return entity;
-        }
-        own(self)
-    }
     /// The UUID of the player `last_hurt_by_player` keeps: the guest on
     /// connection `conn` (None once they left), else the player in place
     /// (None on a server, which has none of its own).
@@ -1885,13 +1858,14 @@ impl Game<'_> {
     pub(super) fn drop_death_items(
         &mut self,
         dying: &DyingDrops<'_>,
-        stacks: Vec<(ItemStack, [f64; 3])>,
+        stacks: Vec<(ItemStack, [f64; 3], i32)>,
         pickup_delay: u32,
         mut velocity: impl FnMut(&mut Self) -> Option<[f64; 3]>,
     ) {
         let Some(source) = &dying.source else {
-            for (stack, position) in stacks {
-                let random = super::spill::prepare_item_random(None);
+            for (stack, position, age) in stacks {
+                let mut random = super::spill::prepare_item_random(None);
+                random.state.age = age;
                 let motion = velocity(self).unwrap_or(random.velocity);
                 self.add_item_entity_prepared(
                     stack,
@@ -1907,7 +1881,7 @@ impl Game<'_> {
         // collects the drop, before the event sees the list.
         let mut drops: Vec<super::spill::BlockItemDrop> = stacks
             .into_iter()
-            .map(|(stack, position)| {
+            .map(|(stack, position, age)| {
                 let random = super::spill::prepare_item_random(None);
                 super::spill::BlockItemDrop {
                     random: Some(random),
@@ -1915,7 +1889,10 @@ impl Game<'_> {
                     position,
                     velocity: velocity(self).unwrap_or(random.velocity),
                     pickup_delay,
-                    state: Default::default(),
+                    state: super::spill::DropState {
+                        age,
+                        ..Default::default()
+                    },
                 }
             })
             .filter(|drop| drop.stack.count > 0 && &*drop.stack.item != "minecraft:air")
@@ -2219,29 +2196,6 @@ impl Game<'_> {
             self.particles.llama_spit_burst(at, [v.x, v.y, v.z]);
         }
         self.spawn_mob_projectile(p);
-    }
-    /// `LivingDestroyBlockEvent` for the mob `id` about to destroy the block at
-    /// `pos`: false when a mod canceled. Nothing is built when no mod is loaded.
-    fn mob_may_destroy(&mut self, id: u32, pos: [i32; 3]) -> bool {
-        if !mod_api::__private::listened(mod_api::HookId::LivingDestroyBlock) {
-            return true;
-        }
-        let Some(kind) = self
-            .mobs
-            .iter()
-            .find(|m| m.id == id)
-            .map(super::native_hooks::mob_kind)
-        else {
-            return true;
-        };
-        self.may_destroy(id, &kind, pos)
-    }
-    /// Asks the mods whether the entity `id` of type `kind` may destroy the block at `pos`.
-    pub(super) fn may_destroy(&mut self, id: u32, kind: &str, pos: [i32; 3]) -> bool {
-        let state = self.world.block(pos[0], pos[1], pos[2]);
-        let mut cancel = false;
-        self.native_living_destroy_block(id, kind, pos, state, &mut cancel);
-        !cancel
     }
     /// `Entity.igniteForSeconds`: `seconds * 20` ticks of fire, scaled by the
     /// target's burning-time attribute.
@@ -3422,11 +3376,7 @@ impl Game<'_> {
                 MobEvent::DolphinTreasure { mob } => {
                     // ServerLevel.findNearestMapStructure(#dolphin_located, 50).
                     let Some(at) = self.mobs.iter().find(|m| m.id == mob).map(|m| {
-                        [
-                            m.position.x.floor() as i32,
-                            m.position.y.floor() as i32,
-                            m.position.z.floor() as i32,
-                        ]
+                        [m.position.x, m.position.y, m.position.z].map(|v| v.floor() as i32)
                     }) else {
                         continue;
                     };
@@ -3437,7 +3387,11 @@ impl Game<'_> {
                         .filter(|_| !names.is_empty())
                         .and_then(|t| t.locate(&names, at, 50));
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
-                        m.extra.home = found.map(|(_, p)| p);
+                        m.extra.home = found.as_ref().map(|(_, p)| *p);
+                    }
+                    // DolphinSwimToTreasureGoal.start: entity event 38 once it has a treasure.
+                    if found.is_some() {
+                        self.mob_event_particles(mob, 38);
                     }
                 }
                 MobEvent::EffectPlayer {
@@ -7996,34 +7950,20 @@ impl Game<'_> {
                 let block = horizon_client::mobs::aquatic::glow_squid_block_light(mob, lit);
                 packed = (packed & 0xFF) | ((block * 16) << 8);
             }
-            // A native mod's own model in place of the vanilla one
-            // (`native_mob_submit`), before any of the vanilla model's parts
-            // (a sulfur cube's swallowed block) are drawn.
-            // A player's own hook (`native_player_submit`) is asked for the
-            // other players in view.
+            // The mods' pre hooks (a player's `render_player_pre`, then `render_living_pre`),
+            // before any of the vanilla model's parts (a sulfur cube's swallowed block) are
+            // drawn. A cancel skips the rest of the entity's drawing and its post hooks; the
+            // frame's later passes (flames, name tag, shadow, leash) leave it out too.
             let who = is_player
                 .then(|| self.remote_player_name(mob.id))
                 .flatten()
                 .map(|name| PlayerRender { name, local: false });
-            let (modded, hidden) = match who {
-                _ if layers_only => (false, mod_api::HiddenParts::default()),
-                Some(who) => self.mod_player_geometry(mob, who, alpha as f32, camera, packed, out),
-                None if is_player => (false, mod_api::HiddenParts::default()),
-                None => self.mod_mob_geometry(mob, alpha as f32, camera, packed, out),
-            };
-            if modded {
-                if let Some(rgb) = outline {
-                    self.mark_outline(&out[entity_start..], rgb);
-                    if mob.invisible {
-                        out.truncate(entity_start);
-                        continue;
-                    }
-                }
-                if outline.is_none() {
-                    self.cull_entity_vertices(out, entity_start);
-                }
+            let pre = self.mod_render_pre(mob, who, listened, alpha as f32, camera, packed, out);
+            let Some(hidden) = pre else {
+                // What the mods drew in its place is culled as the entity's own would be.
+                self.cull_entity_vertices(out, entity_start);
                 continue;
-            }
+            };
             if mob.species() == Species::SulfurCube && !mob.is_invisible() {
                 self.sulfur_cube_body_geometry(
                     mob,
@@ -8054,7 +7994,7 @@ impl Game<'_> {
                     mob.species(),
                     Species::Blaze | Species::MagmaCube | Species::GlowSquid | Species::SulfurCube
                 );
-            let (mut skinned, mut parts) = (None, None);
+            let (mut skinned, mut parts, added) = (None, None, self.mod_layers(mob));
             if posable {
                 let mut models = self.skin_models.borrow_mut();
                 let mut frame = self.skin_frame.borrow_mut();
@@ -8068,7 +8008,7 @@ impl Game<'_> {
                     packed,
                     self.res.mob_data(),
                     hidden,
-                    listened.then_some(&mut parts),
+                    (listened || added.is_some()).then_some(&mut parts),
                     out,
                     &mut skin,
                 );
@@ -8083,7 +8023,7 @@ impl Game<'_> {
                         packed,
                         self.res.mob_data(),
                         &armor,
-                        listened.then_some(&mut parts),
+                        (listened || added.is_some()).then_some(&mut parts),
                         out,
                     );
                 } else {
@@ -8096,7 +8036,7 @@ impl Game<'_> {
                         self.res.mob_data(),
                         &armor,
                         hidden,
-                        listened.then_some(&mut parts),
+                        (listened || added.is_some()).then_some(&mut parts),
                         out,
                     );
                 }
@@ -8158,9 +8098,9 @@ impl Game<'_> {
                 // Held items join the GPU path's draws, their silhouette too.
                 let skin = (skinning && silhouette_on_gpu).then_some(&mut skinned);
                 self.mob_block_geometry(mob, camera, alpha, packed, skin, out);
-                // `native_mob_layer`: a native mod's layer, over the vanilla ones.
-                self.mod_mob_layer_geometry(mob, who, parts, alpha as f32, camera, packed, out);
+                self.mod_layer_geometry(mob, who, parts, added, alpha as f32, camera, packed, out);
             }
+            self.mod_render_post(mob, who, parts, alpha as f32, camera, packed, out);
             if let Some(rgb) = outline {
                 self.mark_outline(&out[entity_start..], rgb);
                 if let Some(((first, _, _), _)) = skinned {
@@ -8726,6 +8666,9 @@ impl horizon_client::mobs::MobHooks for Game<'_> {
     }
     fn grief_hooked(&self) -> bool {
         Game::grief_hooked(self)
+    }
+    fn can_entity_destroy(&self, mob: u32, pos: [i32; 3], vanilla: bool) -> bool {
+        self.entity_may_destroy(mob, pos, vanilla)
     }
     fn living_visibility(&self, player: &PlayerView, looking: u32, visibility: f64) -> f64 {
         let uuid = horizon_client::lan::playerdata::ints_uuid(player.uuid);
@@ -13387,6 +13330,7 @@ mod h169_glide_travel_tests {
                     .unwrap();
             }
         }
+        game.load_ticking_neighbourhood(0, 0);
         game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
         game.creative = true;
         assert!(game.run_command("fill 0 199 0 31 199 31 stone"));

@@ -54,6 +54,7 @@ impl PartRegistrar {
             structure_types,
             dimensions,
             chunk_generators,
+            biome_sources,
             refused
         )
     }
