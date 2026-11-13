@@ -245,7 +245,8 @@ def listed_entries():
 
 
 def known_failures():
-    """(package, test) -> its mark (None, "flaky", "harness", "gpu" or "manual"), from the policy files."""
+    """(package, test) -> its mark (None, "flaky", "harness", "gpu" or "manual"), from the policy files: the tests a
+    shard judges by their row, as a known failure (None, flaky, gpu) or by skipping them (harness, manual)."""
     return {(row.package, row.test): row.mark for row in listed_entries()
             if row.mark not in {"needs", "needs-plain", "daily"}}
 
@@ -351,8 +352,15 @@ def thread_identity(name):
     return "a thread (name withheld)"
 
 
+# The longest test identity shown: above every test path in the tree (the longest are near 160 characters), so a
+# real name is never cut, while a line that only looks like one cannot carry an unbounded payload.
+IDENTITY_CHARS = 300
+
+
 def safe_identity(name):
-    # Rust path segments only, not arbitrary libtest payloads or GitHub tokens.
+    # Rust path segments only, not arbitrary libtest payloads or GitHub tokens, and bounded in length.
+    if len(name) > IDENTITY_CHARS:
+        return f"identity withheld (longer than {IDENTITY_CHARS} characters)"
     if re.fullmatch(r"(?:r#)?[^\W\d]\w*(?:::(?:r#)?[^\W\d]\w*)*", name) and not re.search(
             r"(?:gh[pousr]_|github_pat_|token|secret)", name, re.IGNORECASE):
         return name

@@ -107,6 +107,21 @@ class IgnoredTests(unittest.TestCase):
             "memory_peak_bytes": gib, "memory_max_bytes": gib, "oom_kills": 1,
             "still_running": [stuck], "still_running_more": 0, "never_reported": None})
 
+    def test_an_identity_is_bounded_in_length(self):
+        self.assertEqual(ignored_tests.safe_identity("a::" + "b" * 297), "a::" + "b" * 297)
+        self.assertEqual(ignored_tests.safe_identity("a" * 100_000),
+                         f"identity withheld (longer than {ignored_tests.IDENTITY_CHARS} characters)")
+        # A long-running notice with a huge name never reaches the stopped run's report as it is.
+        output = (f"     Running unittests src/lib.rs (target/debug/deps/example)\nrunning 1 tests\n"
+                  f"test {'x' * 5000} has been running for over 60 seconds\n"
+                  "error: test failed, to rerun pass `--lib`\n\nCaused by:\n  process didn't exit successfully: "
+                  "`example` (signal: 9, SIGKILL: kill)\n")
+        with patch.object(ignored_tests.subprocess, "run", return_value=subprocess.CompletedProcess([], 101, output)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertIsNone(ignored_tests.run("example", []))
+        self.assertEqual(ignored_tests._stopped["still_running"],
+                         [f"identity withheld (longer than {ignored_tests.IDENTITY_CHARS} characters)"])
+
     def test_the_report_names_the_run_in_progress_before_it_ends(self):
         # A job stopped at its time limit kills this script too: what it wrote before the run is what is uploaded.
         with tempfile.TemporaryDirectory() as folder:

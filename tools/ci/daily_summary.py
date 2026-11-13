@@ -11,7 +11,8 @@ files (tools/ci/ignored_tests.py --report: test identity, kind, panic location, 
   why each run stopped as its verdict file says (signal or exit status, memory peak and limit, wall time, the tests
   still running past 60 s; stopped_text);
 - a test (or leg) green again: closes its open issue with a comment.
-A job it does not know, or an expected leg with no job, is a red leg ("did not report"), never green. Each comment
+A job it does not know, or an expected leg with no job, is a red leg ("did not report"), never green; so is a
+shard of the matrix (tools/ci/ignored_shards.py, which builds it) with no job of its name. Each comment
 names this run's URL, and none is posted twice for one run (a rerun of failed jobs, or a retry after a partial
 write, completes what is missing). `daily_summary.py --seen SHA` prints a completed real daily run of SHA, if any.
 Only a run on refs/heads/main with DRY_RUN=false writes; otherwise it prints what it would do to the job summary.
@@ -31,6 +32,9 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[2]))
+from tools.ci import ignored_shards  # noqa: E402
 
 TAG = "daily-green"
 LABEL = "bug"
@@ -87,6 +91,13 @@ def leg_jobs(jobs):
             and job["name"].split(" / ", 1)[1] not in HELPERS and job["name"] not in NOT_DAILY]
 
 
+def expected_shards():
+    """The `shards` leg's matrix jobs the daily run must have, from the matrix's own source
+    (tools/ci/ignored_shards.py --matrix --all): every package shard and every daily-rows leg."""
+    return [f"shards / ignored-tests-shards ({shard})"
+            for shard in [*ignored_shards.expand(ignored_shards.SHARDS), *ignored_shards.DAILY_ROWS_LEGS.values()]]
+
+
 def job_green(job, fresh_ok):
     return job["conclusion"] == "success" or (
         job["conclusion"] == "skipped" and job["name"].startswith("sdk / ") and fresh_ok)
@@ -126,7 +137,7 @@ def known(name):
 
 # A run's name and a test's name as ignored_tests.py writes them; anything else in a report is not shown.
 SHARD_NAME = re.compile(r"[\w#:.-]{1,200}")
-TEST_NAME = re.compile(r"(?:r#)?[^\W\d]\w*(?:::(?:r#)?[^\W\d]\w*)*")
+TEST_NAME = re.compile(r"(?=.{1,300}$)(?:r#)?[^\W\d]\w*(?:::(?:r#)?[^\W\d]\w*)*")
 STILL_RUNNING_SHOWN = 5
 
 
@@ -215,6 +226,12 @@ def verdicts(jobs, reports, results):
     for job in jobs:
         if not known(job["name"]):
             unfinished.append((job["name"], job["conclusion"], [], "did not report: a job the summary does not know"))
+    names = {job["name"] for job in jobs}
+    if "shards" not in helpers:
+        for expected in expected_shards():
+            if expected not in names:
+                unfinished.append((expected, "missing", [], "did not report: the daily matrix has this shard, but "
+                                   "no job of that name ran"))
     seen = {job["name"].split(" / ", 1)[0] for job in leg_jobs(jobs)}
     for leg in LEGS:
         result = results.get(leg, {}).get("result", "missing")

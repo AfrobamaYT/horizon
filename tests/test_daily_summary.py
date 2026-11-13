@@ -27,6 +27,8 @@ GREEN_JOBS = [job("shards / plan"), job("shards / ignored-tests-shards (horizon-
               job("windows-runtime-leases / gate"), job("windows-runtime-leases / test", "skipped"),
               job("windows-runtime-leases / runtime-leases"), job("windows-runtime-leases / launcher-processes"),
               job("sdk / fresh"), job("sdk / build linux"), job("sdk / publish", "skipped")]
+# Every other shard of the daily matrix, green (the summary expects each by name: summary.expected_shards).
+GREEN_JOBS += [job(name) for name in summary.expected_shards() if name != "shards / ignored-tests-shards (horizon-world)"]
 
 
 def shard_report(problems=(), passed=(), incomplete=()):
@@ -213,6 +215,29 @@ class DailySummaryTests(unittest.TestCase):
                                      "memory_peak_bytes": True, "oom_kills": -1})
         self.assertEqual(text, "a run did not complete; still running past 60 s: `ok::name`")
         self.assertEqual(summary.stopped_text({"shard": "x"}), "`x` did not complete")
+
+    def test_every_shard_of_the_matrix_must_report_by_name(self):
+        launcher = "shards / ignored-tests-shards (daily-rows-launcher)"
+        self.assertIn(launcher, summary.expected_shards())
+        _, out = self.run_summary(Api(GREEN_JOBS), [shard_report()])
+        self.assertIn("green=true", out)
+        # Every other job green, the launcher's shard absent: red, with one leg issue naming it.
+        api = Api([entry for entry in GREEN_JOBS if entry["name"] != launcher])
+        _, out = self.run_summary(api, [shard_report()])
+        self.assertIn("green=false", out)
+        self.assertEqual([body["title"] for _, path, body in api.writes if path == "issues"],
+                         [f"Daily: {launcher} did not complete"])
+        # A shard renamed in the workflow but not in the matrix's source: the expected name is missing.
+        renamed = [job("shards / ignored-tests-shards (daily-rows-tools)") if entry["name"] == launcher else entry
+                   for entry in GREEN_JOBS]
+        _, out = self.run_summary(Api(renamed), [shard_report()])
+        self.assertIn("green=false", out)
+
+    def test_a_stopped_runs_test_names_are_bounded_in_length(self):
+        long = "a" * 301
+        text = summary.stopped_text({"shard": "x", "still_running": [long, "ok::name"]})
+        self.assertEqual(text, "`x` did not complete; still running past 60 s: `ok::name`")
+        self.assertIn("a" * 300, summary.stopped_text({"shard": "x", "still_running": ["a" * 300]}))
 
     def test_a_skipped_leg_with_no_jobs_is_not_green(self):
         api = Api([job for job in GREEN_JOBS if not job["name"].startswith("shards")])

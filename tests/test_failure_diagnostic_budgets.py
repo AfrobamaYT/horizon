@@ -177,7 +177,7 @@ class Budgets(unittest.TestCase):
         self.assertIn('total byte budget 200', metadata)
 
     def test_multibyte_identity_and_per_test_budget(self):
-        log = self.render('test ' + '界' * 400 + ' ... FAILED\n')
+        log = self.render('test ' + '界' * 290 + ' ... FAILED\n')
         payload = log.split('failure diagnostics: ')[0]
         self.assertLessEqual(len(payload.encode()), 500)
         self.assertIn('shortened: per-test byte budget', payload)
