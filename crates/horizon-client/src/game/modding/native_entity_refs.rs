@@ -4527,7 +4527,7 @@ pub(super) mod tests {
             game.player =
                 Some(horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.spawn_entity(15, "minecraft:pig", [2.0, 0.0, 0.0], [0.0; 3]);
-            let mut add_player = |game: &mut crate::game::Game<'_>, id, uuid, x| {
+            let add_player = |game: &mut crate::game::Game<'_>, id, uuid, x| {
                 game.handle_packet(C::AddEntity(AddEntity {
                     id,
                     uuid,
