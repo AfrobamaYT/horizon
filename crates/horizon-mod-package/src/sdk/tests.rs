@@ -588,13 +588,13 @@ mod unpack {
     }
 
     #[test]
-    fn a_busy_rename_is_retried_on_windows_only() {
+    fn a_busy_rename_is_retried_a_bounded_number_of_times() {
         let denied = || std::io::Error::from(std::io::ErrorKind::PermissionDenied);
-        let sharing = || std::io::Error::from_raw_os_error(32);
         let tick = std::time::Duration::from_millis(1);
+        let held = |error: &std::io::Error| error.kind() == std::io::ErrorKind::PermissionDenied;
         let calls_until = |error: fn() -> std::io::Error, succeed_at: usize| {
             let mut calls = 0;
-            let result = rename_retrying(Path::new("a"), Path::new("b"), tick, |_, _| {
+            let result = rename_retrying(Path::new("a"), Path::new("b"), tick, held, |_, _| {
                 calls += 1;
                 if calls == succeed_at {
                     Ok(())
@@ -604,20 +604,21 @@ mod unpack {
             });
             (calls, result.is_ok())
         };
-        if cfg!(windows) {
-            assert_eq!(calls_until(denied, 3), (3, true));
-            assert_eq!(calls_until(sharing, 3), (3, true));
-            assert_eq!(calls_until(denied, 0), (6, false));
-        } else {
-            assert_eq!(calls_until(denied, 3), (1, false));
-            assert_eq!(calls_until(sharing, 3), (1, false));
-        }
+        assert_eq!(calls_until(denied, 3), (3, true));
+        assert_eq!(calls_until(denied, 0), (6, false));
         assert_eq!(
             calls_until(|| std::io::Error::from(std::io::ErrorKind::NotFound), 3),
             (1, false)
         );
+    }
+
+    #[test]
+    fn only_windows_counts_a_held_file_as_busy() {
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let sharing = std::io::Error::from_raw_os_error(32);
+        assert_eq!(busy(&denied), cfg!(windows));
+        assert_eq!(busy(&sharing), cfg!(windows));
         assert!(!busy(&std::io::Error::from(std::io::ErrorKind::NotFound)));
-        assert_eq!(busy(&sharing()), cfg!(windows));
     }
 
     #[test]

@@ -744,6 +744,7 @@ pub fn unpack(
         &partial.0,
         into,
         std::time::Duration::from_millis(100),
+        busy,
         |from, to| std::fs::rename(from, to),
     )
 }
@@ -785,6 +786,7 @@ fn rename_retrying(
     from: &Path,
     to: &Path,
     mut delay: std::time::Duration,
+    busy: impl Fn(&std::io::Error) -> bool,
     mut rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
 ) -> Result<(), Refusal> {
     let mut tries = 0;
@@ -968,7 +970,11 @@ fn entry_target(into: &Path, path: &[u8]) -> Option<PathBuf> {
         }
         target.push(part);
     }
-    target.starts_with(into).then_some(target)
+    let inside = target.strip_prefix(into).ok()?;
+    inside
+        .components()
+        .all(|part| matches!(part, std::path::Component::Normal(_)))
+        .then_some(target)
 }
 
 /// The folder an unpack writes before its rename, removed when dropped.
