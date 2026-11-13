@@ -71,15 +71,21 @@ member, it records every host trait in the mod's list that leads to the member's
 ``the type `DimensionSettings` gained the field `ultrawarm`, and `src/world.rs:12` builds it field by field``.
 It exits 2 when an input cannot be read or judged.
 
-The check is a scan of the mod's source, not a compiler. A name it cannot resolve with certainty counts as used
-and as built field by field. A struct literal written with a path
-(`world::DimensionSettings { … }`) counts for the API's struct of that name; an unqualified one
-counts as the mod's own only in the file that defines it, when nothing in that file (a `use`, a
-glob, an inline module, a macro or attribute that is not standard or the API's) could change
-what the name means. When the scan cannot be sure, for example because a macro it cannot expand
-may bring names into scope, it refuses instead of guessing. The real compile on the player's machine is always the final
-check. Some sources cannot be judged at
-all: a `use` statement nested deeper than 64 groups, a symbolic link, or a `#[path]` or `include!` that leaves
-the mod's folder or is computed. A mod with a `[native.*]` table or internals is made for exactly one build, and
-this check does not apply to it. A mod that fits is still compiled against the target build, and the binary
-built is exact to that build.
+The check reads the mod's source with a Rust parser; it is not a compiler and does not expand macros. A name
+it cannot resolve with certainty counts as used and as built field by field. A struct literal written with a
+path (`world::DimensionSettings { … }`) counts for the API's struct of that name; an unqualified one counts as
+the mod's own only in the file that defines it outside any `#[cfg]`, when nothing in that file (a `use`, a glob,
+an inline module, a macro or attribute that is not standard or the API's) could change what the name means and
+the mod has no `include!`. What the parser cannot see counts as doubt, which refuses rather than guesses:
+- inside a `macro_rules!` body, every API struct name followed by `{` or `(` is a build in full, and a literal
+  the scan cannot place there counts every API struct the mod names as built in full;
+- a file that uses a macro, derive or attribute from outside the mod and the API counts every API struct it
+  names as built in full, because the expansion may build it.
+
+So a mod that builds API structs only through a dependency's macro is refused when such a struct gains a field,
+even if the macro would cope. The real compile on the player's machine is always the final check. Some sources
+cannot be judged at all: a file that does not parse as Rust (the message gives its line), one nested deeper
+than 256 levels, a `use` statement nested deeper than 64 groups, a symbolic link, or a `#[path]` or `include!`
+that leaves the mod's folder or is computed. A mod with a `[native.*]` table or internals is made for exactly
+one build, and this check does not apply to it. A mod that fits is still compiled against the target build,
+and the binary built is exact to that build.

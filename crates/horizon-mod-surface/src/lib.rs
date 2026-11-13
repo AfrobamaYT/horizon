@@ -72,6 +72,7 @@ pub mod diff;
 pub mod records;
 pub mod scan;
 pub mod shape;
+mod syntax;
 pub mod uses;
 
 pub use diff::{Diff, Verdict, diff};

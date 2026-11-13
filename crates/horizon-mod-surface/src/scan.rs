@@ -182,15 +182,20 @@ impl<'a> Iterator for Tokens<'a> {
     type Item = (Token<'a>, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let item = self.token()?;
-        self.dots = (item.0 == Token::Punct(b'.'), self.dots.0);
-        Some(item)
+        self.spanned().map(|(token, line, _)| (token, line))
     }
 }
 
 impl<'a> Tokens<'a> {
+    /// The next token with its line and the byte it starts at.
+    pub fn spanned(&mut self) -> Option<(Token<'a>, usize, usize)> {
+        let item = self.token()?;
+        self.dots = (item.0 == Token::Punct(b'.'), self.dots.0);
+        Some(item)
+    }
+
     /// The next token, comments and whitespace skipped.
-    fn token(&mut self) -> Option<(Token<'a>, usize)> {
+    fn token(&mut self) -> Option<(Token<'a>, usize, usize)> {
         while let Some(byte) = self.peek(0) {
             let line = self.line;
             let start = self.at;
@@ -211,11 +216,11 @@ impl<'a> Tokens<'a> {
                 }
                 b'"' => {
                     self.string();
-                    return Some((literal(self), line));
+                    return Some((literal(self), line, start));
                 }
                 b'\'' => {
                     let is_literal = self.quote();
-                    return Some((quoted(self, is_literal), line));
+                    return Some((quoted(self, is_literal), line, start));
                 }
                 b'0'..=b'9' => {
                     // After a single `.` token (`pair.0`, `nested.0.1`, `pair. 0`, `pair./**/0`):
@@ -225,7 +230,7 @@ impl<'a> Tokens<'a> {
                         while self.peek(0).is_some_and(|b| b.is_ascii_digit()) {
                             self.at += 1;
                         }
-                        return Some((Token::Ident(&self.text[start..self.at]), line));
+                        return Some((Token::Ident(&self.text[start..self.at]), line, start));
                     }
                     // A number with its suffix (`1u32`, `0x_ff`), and a float's fraction.
                     self.word();
@@ -235,7 +240,7 @@ impl<'a> Tokens<'a> {
                         self.at += 1;
                         self.word();
                     }
-                    return Some((literal(self), line));
+                    return Some((literal(self), line, start));
                 }
                 _ if is_ident(byte) => {
                     let word = self.word();
@@ -245,31 +250,31 @@ impl<'a> Tokens<'a> {
                             if next == Some(b'"') || self.raw_string_ahead() =>
                         {
                             self.raw_string();
-                            return Some((literal(self), line));
+                            return Some((literal(self), line, start));
                         }
                         ("r", Some(b'#')) => {
                             // A raw identifier: `r#type` is `type`.
                             self.at += 1;
                             let name = self.word();
                             if !name.is_empty() {
-                                return Some((Token::Ident(name), line));
+                                return Some((Token::Ident(name), line, start));
                             }
                         }
                         ("b" | "c", Some(b'"')) => {
                             self.string();
-                            return Some((literal(self), line));
+                            return Some((literal(self), line, start));
                         }
                         ("b", Some(b'\'')) => {
                             let is_literal = self.quote();
-                            return Some((quoted(self, is_literal), line));
+                            return Some((quoted(self, is_literal), line, start));
                         }
-                        _ => return Some((Token::Ident(word), line)),
+                        _ => return Some((Token::Ident(word), line, start)),
                     }
                 }
                 _ if byte.is_ascii_whitespace() => self.bump(),
                 _ => {
                     self.at += 1;
-                    return Some((Token::Punct(byte), line));
+                    return Some((Token::Punct(byte), line, start));
                 }
             }
         }

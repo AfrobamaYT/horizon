@@ -478,7 +478,10 @@ fn the_list_is_what_the_source_and_manifest_name_and_what_their_signatures_reach
 
 #[test]
 fn the_first_place_is_the_first_file_then_line_whatever_the_order_given() {
-    let sources = [("src/b.rs", "\n\nInventory"), ("src/a.rs", "\nInventory")];
+    let sources = [
+        ("src/b.rs", "\n\nfn f(_: Inventory) {}"),
+        ("src/a.rs", "\nfn f(_: Inventory) {}"),
+    ];
     let uses = uses(sources, &ManifestFacts::default(), &base().build()).unwrap();
     assert_eq!(
         uses.items[0].origin,
@@ -672,17 +675,29 @@ fn how_a_struct_is_built_is_read_from_literals_and_patterns() {
     let built = |source: &str| entry(&scan_on(wider(), source), "type:Settings").built;
     // Literals and patterns with no `..` are full; a literal with a base is base; a pattern with
     // `..` is a read, not a build.
-    assert_eq!(built("let s = Settings { height: 1 };"), Some(Built::Full));
-    assert_eq!(built("let Settings { height } = s;"), Some(Built::Full));
-    assert_eq!(built("let Settings { .. } = s;"), Some(Built::None));
-    assert_eq!(built("let s = Settings { ..d };"), Some(Built::Base));
     assert_eq!(
-        built("let s = Settings { height: f(Settings { ..d }) };"),
+        built("fn t() { let s = Settings { height: 1 }; }"),
+        Some(Built::Full)
+    );
+    assert_eq!(
+        built("fn t() { let Settings { height } = s; }"),
+        Some(Built::Full)
+    );
+    assert_eq!(
+        built("fn t() { let Settings { .. } = s; }"),
+        Some(Built::None)
+    );
+    assert_eq!(
+        built("fn t() { let s = Settings { ..d }; }"),
+        Some(Built::Base)
+    );
+    assert_eq!(
+        built("fn t() { let s = Settings { height: f(Settings { ..d }) }; }"),
         Some(Built::Full)
     );
     // A range in a field value is not a base.
     assert_eq!(
-        built("let s = Settings { height: 0..5 };"),
+        built("fn t() { let s = Settings { height: 0..5 }; }"),
         Some(Built::Full)
     );
     // Where a type stands, a brace opens a body, not a literal.
@@ -691,19 +706,32 @@ fn how_a_struct_is_built_is_read_from_literals_and_patterns() {
         built("impl Mine for mod_api::Settings { fn x() {} }"),
         Some(Built::None)
     );
-    assert_eq!(built("let s: Settings = make();"), Some(Built::None));
-    // One full literal anywhere makes it full; unsure (unclosed) is full.
     assert_eq!(
-        built("let a = Settings { ..d };\nlet b = mod_api::Settings { height: 2 };"),
+        built("fn t() { let s: Settings = make(); }"),
+        Some(Built::None)
+    );
+    // One full literal anywhere makes it full; a file that does not parse cannot be judged.
+    assert_eq!(
+        built("fn t() { let a = Settings { ..d };\nlet b = mod_api::Settings { height: 2 }; }"),
         Some(Built::Full)
     );
-    assert_eq!(built("let s = Settings { height: 1"), Some(Built::Full));
+    assert_eq!(
+        uses(
+            [("src/lib.rs", "fn t() {\nlet s = Settings { height: 1")],
+            &manifest(&[]),
+            &wider().build()
+        ),
+        Err(ScanError::Parse {
+            file: "src/lib.rs".into(),
+            line: 2
+        })
+    );
     // A tuple struct's constructor is a full literal.
     let pos = |source: &str| entry(&scan_on(wider(), source), "type:Pos").built;
-    assert_eq!(pos("let p = Pos(1, 2);"), Some(Built::Full));
+    assert_eq!(pos("fn t() { let p = Pos(1, 2); }"), Some(Built::Full));
     // A `..` inside a nested bracket is no rest.
-    assert_eq!(pos("let p = Pos((..), 2);"), Some(Built::Full));
-    assert_eq!(pos("let Pos(x, ..) = p;"), Some(Built::None));
+    assert_eq!(pos("fn t() { let p = Pos((..), 2); }"), Some(Built::Full));
+    assert_eq!(pos("fn t() { let Pos(x, ..) = p; }"), Some(Built::None));
     assert_eq!(pos("fn f(p: Pos) {}"), Some(Built::None));
 }
 
@@ -729,7 +757,7 @@ fn a_type_that_gains_an_impl_fits_and_one_that_loses_one_is_named() {
 fn a_name_after_a_path_to_its_owner_is_that_member_not_a_type_of_the_same_name() {
     let uses = scan_on(
         wider(),
-        "match hover { TextHover::Item { .. } => {}, _ => {} }",
+        "fn t() { match hover { TextHover::Item { .. } => {}, _ => {} } }",
     );
     assert!(ids(&uses).contains(&"type:TextHover.Item"));
     assert!(!ids(&uses).contains(&"type:Item"));
@@ -969,7 +997,7 @@ fn check_says_how_each_struct_is_built() {
     };
     assert_eq!(
         note(
-            "let s = Settings { height: 1, ..Default::default() };",
+            "fn t() { let s = Settings { height: 1, ..Default::default() }; }",
             "type:Settings"
         )
         .as_deref(),
@@ -978,28 +1006,36 @@ fn check_says_how_each_struct_is_built() {
         )
     );
     assert_eq!(
-        note("\nlet s = Settings { height: 1 };", "type:Settings").as_deref(),
+        note(
+            "\nfn t() { let s = Settings { height: 1 }; }",
+            "type:Settings"
+        )
+        .as_deref(),
         Some(
             "`Settings`: built field by field (src/lib.rs:2). A new field in a later game build will break this line; end the literal with `..Default::default()` to stay compatible."
         )
     );
     // A struct with no `Default` impl: no advice.
     assert_eq!(
-        note("let s = ItemStack { count: 1 };", "type:ItemStack").as_deref(),
+        note(
+            "fn t() { let s = ItemStack { count: 1 }; }",
+            "type:ItemStack"
+        )
+        .as_deref(),
         Some(
             "`ItemStack`: built field by field (src/lib.rs:1). A new field in a later game build will break this line."
         )
     );
     // A pattern takes `..`, not a base: no advice.
     assert_eq!(
-        note("let Settings { height } = s;", "type:Settings").as_deref(),
+        note("fn t() { let Settings { height } = s; }", "type:Settings").as_deref(),
         Some(
             "`Settings`: built field by field (src/lib.rs:1). A new field in a later game build will break this line."
         )
     );
     // A tuple struct cannot take a base either.
     assert_eq!(
-        note("let p = Pos(1, 2);", "type:Pos").as_deref(),
+        note("fn t() { let p = Pos(1, 2); }", "type:Pos").as_deref(),
         Some(
             "`Pos`: built field by field (src/lib.rs:1). A new field in a later game build will break this line."
         )
@@ -1105,7 +1141,10 @@ fn full_builds_by_another_name_are_full() {
     );
     // A turbofish.
     assert_eq!(
-        built("let s = Settings::<u8> { height: 1 };", "type:Settings"),
+        built(
+            "fn t() { let s = Settings::<u8> { height: 1 }; }",
+            "type:Settings"
+        ),
         full
     );
     // A macro's `$t { … }` and a literal of a name the scan cannot place.
@@ -1154,11 +1193,14 @@ fn full_builds_by_another_name_are_full() {
         full
     );
     // A tuple struct's constructor passed as a function.
-    assert_eq!(built("let ps = xs.map(Pos);", "type:Pos"), full);
-    assert_eq!(built("let ps = xs.map_or(none, Pos);", "type:Pos"), full);
+    assert_eq!(built("fn t() { let ps = xs.map(Pos); }", "type:Pos"), full);
+    assert_eq!(
+        built("fn t() { let ps = xs.map_or(none, Pos); }", "type:Pos"),
+        full
+    );
     // In a tuple type or a parameter list it is a type.
     assert_eq!(
-        built("let v: Vec<(Pos, i32)> = vec![];", "type:Pos"),
+        built("fn t() { let v: Vec<(Pos, i32)> = vec![]; }", "type:Pos"),
         Some(Built::None)
     );
     assert_eq!(
@@ -1192,7 +1234,7 @@ fn a_union_literal_is_not_a_full_build() {
         vec![],
     );
     pieces.types.push(union);
-    let uses = scan_on(pieces, "let b = Bits { word: 1 };");
+    let uses = scan_on(pieces, "fn t() { let b = Bits { word: 1 }; }");
     assert_eq!(entry(&uses, "type:Bits").built, Some(Built::Base));
 }
 
@@ -1218,7 +1260,7 @@ fn a_struct_the_mod_builds_that_can_no_longer_be_built_is_named() {
     };
     let builds = scan_on(
         wider(),
-        "\nlet s = Settings { height: 1, ..Default::default() };",
+        "\nfn t() { let s = Settings { height: 1, ..Default::default() }; }",
     );
     assert_eq!(
         words(fits(builds.entries(), &unbuildable())),
@@ -1320,7 +1362,7 @@ fn a_macro_literal_in_another_file_builds_every_struct_the_mod_names() {
         full
     );
     // A metavariable where a type stands is not a literal.
-    let typed = "macro_rules! f { ($t:ty) => { impl Foo for $t { } } }";
+    let typed = "macro_rules! make { ($t:ty, $h:expr) => { impl Foo for $t { } } }";
     assert_eq!(
         built_in(
             &[("src/macros.rs", typed), ("src/world.rs", world)],
@@ -1445,8 +1487,8 @@ fn a_tuple_constructor_as_a_value_is_a_full_build() {
         pos("struct Maker { ctor: fn(i32, i32) -> Pos }\nfn f() { let m = Maker { ctor: Pos }; }"),
         full
     );
-    assert_eq!(pos("let c = match k { _ => Pos };"), full);
-    assert_eq!(pos("let cs = [Pos, Pos];"), full);
+    assert_eq!(pos("fn t() { let c = match k { _ => Pos }; }"), full);
+    assert_eq!(pos("fn t() { let cs = [Pos, Pos]; }"), full);
     assert_eq!(pos("fn c() -> fn(i32, i32) -> Pos { return Pos; }"), full);
     // Not as a field's type, an array type or an attribute.
     assert_eq!(pos("struct Maker { ctor: Pos }"), Some(Built::None));
@@ -2047,26 +2089,97 @@ fn a_use_statement_nested_too_deep_cannot_be_judged() {
     );
 }
 
+fn scan_result(source: &str) -> Result<Uses, ScanError> {
+    uses([("src/lib.rs", source)], &manifest(&[]), &wider().build())
+}
+
 #[test]
-fn deeply_nested_brackets_and_comments_scan_without_recursion() {
-    // A literal whose field value nests 100 000 brackets, a macro body as deep, and as many nested
-    // block comments: every walk over them is a loop, so each scans to its end.
-    let depth = 100_000;
-    let literal = format!(
-        "fn f() {{ let s = Settings {{ height: {}1{} }}; }}",
-        "(".repeat(depth),
-        ")".repeat(depth)
+fn source_nested_past_the_limit_cannot_be_judged_and_nothing_overflows() {
+    // Each shape the parser reads by recursion, nested `n` deep after a literal on line 1.
+    let shapes: [(&str, fn(usize) -> String); 16] = [
+        ("parens", |n| {
+            format!("let x = {}1{};", "(".repeat(n), ")".repeat(n))
+        }),
+        ("brackets", |n| {
+            format!("let x = {}1{};", "[".repeat(n), "]".repeat(n))
+        }),
+        ("blocks", |n| {
+            format!("let x = {}1{};", "{".repeat(n), "}".repeat(n))
+        }),
+        ("not", |n| format!("let x = {}y;", "!".repeat(n))),
+        ("minus", |n| format!("let x = {}1;", "- ".repeat(n))),
+        ("refs", |n| format!("let x = {}y;", "&".repeat(n))),
+        ("closures", |n| format!("let x = {}1;", "|y| ".repeat(n))),
+        ("empty closures", |n| {
+            format!("let x = {}1;", "move || ".repeat(n))
+        }),
+        ("assignments", |n| format!("{}1;", "a = ".repeat(n))),
+        ("returns", |n| format!("{}1;", "return ".repeat(n))),
+        ("else if", |n| {
+            format!("let x = {}{{ 1 }};", "if a { 1 } else ".repeat(n))
+        }),
+        ("generics", |n| {
+            format!("let x: {}u8{} = y;", "V<".repeat(n), ">".repeat(n))
+        }),
+        ("fn types", |n| {
+            format!("let x: {}u8 = y;", "fn() -> ".repeat(n))
+        }),
+        ("bindings", |n| format!("let {}_ = 1;", "a @ ".repeat(n))),
+        ("mut refs", |n| format!("let {}y = z;", "&mut ".repeat(n))),
+        ("mixed", |n| {
+            format!("let x = {}y{};", "(!-&".repeat(n), ")".repeat(n))
+        }),
+    ];
+    for (shape, nest) in shapes {
+        let source = |n: usize| {
+            format!(
+                "fn f() {{ let s = Settings {{ height: 1 }};\n{} }}",
+                nest(n)
+            )
+        };
+        let too_deep = |n: usize| match scan_result(&source(n)) {
+            Ok(uses) => {
+                assert_eq!(
+                    entry(&uses, "type:Settings").built,
+                    Some(Built::Full),
+                    "{shape}"
+                );
+                false
+            }
+            Err(ScanError::TooDeep { file, line }) => {
+                assert_eq!((file.as_str(), line), ("src/lib.rs", 2), "{shape}");
+                true
+            }
+            Err(other) => panic!("{shape}: {other}"),
+        };
+        // Real code nests well within the limit; 100 000 deep is refused, not overflowed.
+        assert!(!too_deep(16), "{shape}");
+        assert!(too_deep(100_000), "{shape}");
+        // The deepest nesting accepted parses, on the scan's own stack.
+        let mut refused = 4 * crate::syntax::MAX_NESTING;
+        assert!(too_deep(refused), "{shape}");
+        let mut judged = 16;
+        while refused - judged > 1 {
+            let middle = (judged + refused) / 2;
+            if too_deep(middle) {
+                refused = middle;
+            } else {
+                judged = middle;
+            }
+        }
+        assert!(judged <= crate::syntax::MAX_NESTING, "{shape}: {judged}");
+    }
+    // Siblings do not add up: a long list of negative numbers is judged.
+    let list = format!(
+        "fn f() {{ let s = Settings {{ height: 1 }}; let x = [{}]; }}",
+        "-1, ".repeat(10_000)
     );
     assert_eq!(
-        entry(&scan_on(wider(), &literal), "type:Settings").built,
+        entry(&scan_on(wider(), &list), "type:Settings").built,
         Some(Built::Full)
     );
-    let macro_body = format!(
-        "macro_rules! m {{ () => {{ {}Settings{} }} }}",
-        "{[".repeat(depth),
-        "]}".repeat(depth)
-    );
-    assert!(ids(&scan_on(wider(), &macro_body)).contains(&"type:Settings"));
+    // Comments nest without any limit: the tokenizer and the parser skip them in a loop.
+    let depth = 100_000;
     let comments = format!(
         "{}{}\nfn f(s: Settings) {{}}",
         "/*".repeat(depth),
@@ -2089,10 +2202,10 @@ fn an_unqualified_name_is_the_mods_own_only_in_a_file_nothing_can_change() {
         )
     };
     // The examples mod's shape: its own struct, standard derives, the API's own attribute, a
-    // standard macro, `Self { … }` in its impl.
+    // standard macro, `Self { … }` in its impl; `!` after a keyword is no macro.
     assert_eq!(
         own(
-            "#[derive(Default, Clone)]\n#[mod_api::horizon_mod]\nimpl Settings { fn new() -> Self { Self { mine: format!(\"x\").len() as u8 } } }\n#[cfg_attr(test, derive(Debug))]\n#[cfg_attr(feature = \"x\", derive(Debug))]\nstruct T;"
+            "#[derive(Default, Clone)]\n#[mod_api::horizon_mod]\nimpl Settings { fn new() -> Self { Self { mine: format!(\"x\").len() as u8 } } }\n#[cfg_attr(test, derive(Debug))]\n#[cfg_attr(feature = \"x\", derive(Debug))]\nstruct T;\nfn k(x: bool) -> bool { if !x { return !(x); } while !x {} x }"
         ),
         Some(Built::None)
     );
@@ -2115,7 +2228,7 @@ fn an_unqualified_name_is_the_mods_own_only_in_a_file_nothing_can_change() {
         "fn h() { bring::api_world!(); }",
         "fn h() { #[bring::world] fn g() {} }",
         "macro_rules! m { ($n:ident) => { $n!() }; }",
-        "#![bring::inner]",
+        "fn h() { #![bring::inner] }",
         "#[mod_api::not_an_api_macro]\nstruct S;",
     ] {
         assert_eq!(own(text), Some(Built::Full), "{text}");
@@ -2178,7 +2291,7 @@ fn a_struct_name_in_a_value_position_is_a_build() {
         "type P = Pos;",
         "impl From<Pos> for Q {}",
         "fn f() -> Box<dyn Fn(Pos) -> u8> { todo() }",
-        "let v: Vec<(Pos, i32)> = Vec::<Pos>::new();",
+        "fn t() { let v: Vec<(Pos, i32)> = Vec::<Pos>::new(); }",
     ] {
         assert_eq!(pos(source), Some(Built::None), "{source}");
     }
@@ -2327,4 +2440,296 @@ fn a_path_through_an_imported_api_module_records_the_public_path() {
         entry(&uses, "type:world::Biome").paths,
         ["world::prelude::Biome"]
     );
+}
+
+#[test]
+fn a_literal_the_parser_reads_builds_in_full_wherever_it_stands() {
+    for source in [
+        "fn f() { let d = ::mod_api::world::DimensionSettings { min_y: 0, height: 256, logical_height: 256 }; }".to_owned(),
+        format!("fn f() {{ let r#type = {DIMS_LITERAL}; }}"),
+        format!("struct S {{ r#type: mod_api::DimensionSettings }}\nimpl S {{ fn f(&mut self) {{ self.r#type = {DIMS_LITERAL}; }} }}"),
+        format!("fn f(bounds: B) {{ bounds.union({DIMS_LITERAL}); }}"),
+    ] {
+        refused_for_the_new_field(fits_a_new_dims_field(&[("src/lib.rs", &source)]));
+    }
+    let pos = |source: &str| entry(&scan_on(wider(), source), "type:Pos").built;
+    for source in [
+        "fn f(union: &mut Vec<Pos>) { union.push(Pos(1, 2)); }",
+        "fn f() -> bool { ORIGIN < Pos(1, 2) }",
+        "fn f() { g(MIN < MAX, Pos(1, 2)); }",
+    ] {
+        assert_eq!(pos(source), Some(Built::Full), "{source}");
+    }
+}
+
+#[test]
+fn a_definition_under_cfg_in_a_macro_or_in_an_included_file_is_not_the_mods_own() {
+    let literal = format!("fn f() -> DimensionSettings {{ {DIMS_LITERAL} }}");
+    // `include!` puts a file in its includer's scope, where the `use` binds the API's struct.
+    let body = format!("#[cfg(any())]\nstruct DimensionSettings {{ pub mine: u8 }}\n{literal}");
+    refused_for_the_new_field(fits_a_new_dims_field(&[
+        (
+            "src/lib.rs",
+            "use mod_api::world::DimensionSettings;\ninclude!(\"body.rs\");",
+        ),
+        ("src/body.rs", &body),
+    ]));
+    refused_for_the_new_field(fits_a_new_dims_field(&[("src/lib.rs", &body)]));
+    // What the includer does around `include!` reaches the included file: no file is judged
+    // on its own in a mod with one.
+    let plain = format!("struct DimensionSettings {{ pub mine: u8 }}\n{literal}");
+    refused_for_the_new_field(fits_a_new_dims_field(&[
+        (
+            "src/lib.rs",
+            "#[dep::wrap]\nfn g() { include!(\"body.rs\"); }",
+        ),
+        ("src/body.rs", &plain),
+    ]));
+    let in_macro = format!("macro_rules! m ( () => ( struct DimensionSettings; ) );\n{literal}");
+    refused_for_the_new_field(fits_a_new_dims_field(&[("src/lib.rs", &in_macro)]));
+    // Defined plainly, it is the mod's own, wherever it is named; so a literal the scan cannot
+    // place elsewhere does not make it built.
+    let own = "struct DimensionSettings { pub mine: u8 }\nfn f(d: DimensionSettings) -> DimensionSettings { DimensionSettings { mine: d.mine } }";
+    assert_eq!(fits_a_new_dims_field(&[("src/lib.rs", own)]), Fit::Fits);
+    let unplaced = "macro_rules! m { () => { Wrapper { a: 1 } }; }";
+    assert_eq!(
+        fits_a_new_dims_field(&[("src/lib.rs", own), ("src/m.rs", unplaced)]),
+        Fit::Fits
+    );
+}
+
+#[test]
+fn an_expansion_the_scan_cannot_follow_builds_every_api_struct_its_file_names() {
+    for source in [
+        "use mod_api::DimensionSettings;\nfn f() -> DimensionSettings { dep::make!(DimensionSettings, 0, 256) }",
+        "#[derive(dep::Make)]\nstruct Holder { d: mod_api::DimensionSettings }",
+        "#[dep::build]\nfn f() -> mod_api::DimensionSettings { todo!() }",
+    ] {
+        refused_for_the_new_field(fits_a_new_dims_field(&[("src/lib.rs", source)]));
+    }
+    // A struct no code outside the API can build is not built by an expansion either.
+    let mut sealed = wider();
+    let record = settings(&[("height", "i32")], &["Clone"]);
+    sealed.replace_type(Type::new(
+        record.id.clone(),
+        "",
+        None,
+        TypeContract {
+            constructible: false,
+            ..record.contract.clone()
+        },
+        record.fields.clone(),
+        vec![],
+    ));
+    let hidden = scan_files(
+        sealed,
+        &[
+            ("src/lib.rs", "#[dep::build]\nfn f(s: Settings) {}"),
+            ("src/m.rs", "macro_rules! m { () => { Wrapper { a: 1 } }; }"),
+        ],
+    );
+    assert_eq!(entry(&hidden, "type:Settings").built, Some(Built::None));
+    // Named with only standard macros and attributes, it is not built.
+    let plain = "#[derive(Debug)]\nstruct Holder { d: mod_api::DimensionSettings }\nfn f(d: mod_api::DimensionSettings) { println!(\"{}\", d.height); }";
+    assert_eq!(fits_a_new_dims_field(&[("src/lib.rs", plain)]), Fit::Fits);
+}
+
+#[test]
+fn a_path_under_a_glob_or_a_re_export_records_the_api_path_it_stands_for() {
+    let biome = |paths: &[&str]| {
+        let mut record = api_type("type:world::Biome", "", false, vec![]);
+        record.paths = paths.iter().map(|p| p.to_string()).collect();
+        record
+    };
+    let all = ["Biome", "world::Biome", "prelude::Biome"];
+    let written = |files: &[(&str, &str)]| {
+        let mut made_for = wider();
+        made_for.types.push(biome(&all));
+        entry(&scan_files(made_for, files), "type:world::Biome")
+            .paths
+            .clone()
+    };
+    assert_eq!(
+        written(&[("src/lib.rs", "use mod_api::*;\nfn f(_: prelude::Biome) {}")]),
+        ["prelude::Biome"]
+    );
+    assert_eq!(
+        written(&[
+            ("src/lib.rs", "pub use mod_api::prelude;\nmod world;"),
+            ("src/world.rs", "fn f(_: crate::prelude::Biome) {}"),
+        ]),
+        ["prelude::Biome"]
+    );
+    let uses = {
+        let mut made_for = wider();
+        made_for.types.push(biome(&all));
+        scan_files(
+            made_for,
+            &[("src/lib.rs", "use mod_api::*;\nfn f(_: prelude::Biome) {}")],
+        )
+    };
+    let mut dropped = wider();
+    dropped.types.push(biome(&["Biome", "world::Biome"]));
+    assert_eq!(
+        words(fits(uses.entries(), &dropped.build())),
+        ["`mod_api::prelude::Biome` is no longer exported under that path"]
+    );
+}
+
+#[test]
+fn a_macro_body_is_read_as_tokens() {
+    let in_macro = |body: &str| format!("macro_rules! m {{ () => {{ {body} }}; }}");
+    // An API struct's name followed by `{` builds it, in full unless it ends in `..`, wherever
+    // a `..` nests inside.
+    refused_for_the_new_field(fits_a_new_dims_field(&[(
+        "src/lib.rs",
+        &in_macro(&format!(
+            "fn f() -> mod_api::{DIMS_LITERAL} {{ mod_api::{DIMS_LITERAL} }}"
+        )),
+    )]));
+    refused_for_the_new_field(fits_a_new_dims_field(&[(
+        "src/lib.rs",
+        &in_macro("mod_api::DimensionSettings { min_y: f(..), height: 1, logical_height: 2 }"),
+    )]));
+    let based = in_macro("mod_api::Settings { height: 1, ..Default::default() }");
+    assert_eq!(
+        built_in(&[("src/lib.rs", &based)], "type:Settings"),
+        Some(Built::Base)
+    );
+    // Followed by `(`, a tuple struct is built.
+    let pos = in_macro("mod_api::Pos(1, 2)");
+    assert_eq!(
+        built_in(&[("src/lib.rs", &pos)], "type:Pos"),
+        Some(Built::Full)
+    );
+    // A metavariable followed by `(` may be a tuple struct's name.
+    let maker = "macro_rules! make { ($t:ident) => { $t(1, 2) }; }";
+    assert_eq!(
+        built_in(
+            &[
+                ("src/m.rs", maker),
+                ("src/lib.rs", "fn f(_: Pos) { make!(Pos); }")
+            ],
+            "type:Pos"
+        ),
+        Some(Built::Full)
+    );
+    // A `..` inside a nested bracket is a value, not a rest.
+    let nested = in_macro("mod_api::Pos((..), 2)");
+    assert_eq!(
+        built_in(&[("src/lib.rs", &nested)], "type:Pos"),
+        Some(Built::Full)
+    );
+    // A literal of a name the scan cannot place may build any API struct the mod names; a
+    // brace after an unknown name that holds no fields is no literal.
+    let unplaced = in_macro("let _ = Done { a: 1 };");
+    assert_eq!(
+        built_in(
+            &[
+                ("src/m.rs", &unplaced),
+                ("src/lib.rs", "fn f(_: Settings) {}")
+            ],
+            "type:Settings"
+        ),
+        Some(Built::Full)
+    );
+    let block = in_macro("let _ = Done { 1 };");
+    assert_eq!(
+        built_in(
+            &[("src/m.rs", &block), ("src/lib.rs", "fn f(_: Settings) {}")],
+            "type:Settings"
+        ),
+        Some(Built::None)
+    );
+    // Nor is a trait's name the mod defines.
+    let traits = format!("trait Wrapper {{}}\n{}", in_macro("Wrapper { a: 1 }"));
+    assert_eq!(
+        built_in(
+            &[
+                ("src/m.rs", &traits),
+                ("src/lib.rs", "fn f(_: Settings) {}")
+            ],
+            "type:Settings"
+        ),
+        Some(Built::None)
+    );
+    // A path written in a macro body is a path the mod writes.
+    let mut made_for = wider();
+    let mut biome = api_type("type:world::Biome", "", false, vec![]);
+    biome.paths = vec!["world::Biome".into(), "prelude::Biome".into()];
+    made_for.types.push(biome);
+    let uses = scan_files(
+        made_for,
+        &[(
+            "src/lib.rs",
+            &in_macro("fn f(_: mod_api::prelude::Biome) {}"),
+        )],
+    );
+    assert_eq!(entry(&uses, "type:world::Biome").paths, ["prelude::Biome"]);
+}
+
+#[test]
+fn a_macro_of_the_mods_name_brought_in_by_a_use_is_not_the_mods() {
+    let macros = "macro_rules! make { ($t:ident) => {}; }";
+    let world = "use dep::make;\nfn f(_: DimensionSettings) { make!(DimensionSettings); }";
+    refused_for_the_new_field(fits_a_new_dims_field(&[
+        ("src/macros.rs", macros),
+        ("src/world.rs", world),
+    ]));
+    let own = "fn f(_: DimensionSettings) { make!(DimensionSettings); }";
+    assert_eq!(
+        fits_a_new_dims_field(&[("src/macros.rs", macros), ("src/world.rs", own)]),
+        Fit::Fits
+    );
+}
+
+#[test]
+fn parser_names_are_read_as_written() {
+    // A raw identifier, after a byte-order mark.
+    let raw =
+        format!("\u{feff}fn f() -> mod_api::DimensionSettings {{ mod_api::r#{DIMS_LITERAL} }}");
+    refused_for_the_new_field(fits_a_new_dims_field(&[("src/lib.rs", &raw)]));
+    let settings = |source: &str| built_in(&[("src/lib.rs", source)], "type:Settings");
+    assert_eq!(
+        settings("\u{feff}fn f() { let s = Settings { height: 1 }; }"),
+        Some(Built::Full)
+    );
+    // A path from the root is never the mod's own, in a literal or an impl's target.
+    let own = "struct Settings { mine: u8 }\n";
+    assert_eq!(
+        settings(&format!(
+            "{own}fn f() {{ let s = ::Settings {{ height: 1 }}; }}"
+        )),
+        Some(Built::Full)
+    );
+    assert_eq!(
+        settings(&format!(
+            "{own}impl Make for ::Settings {{ fn make() -> Self {{ Self {{ height: 1 }} }} }}"
+        )),
+        Some(Built::Full)
+    );
+    // A named struct's name as a value builds nothing; a unit struct matched by name does.
+    assert_eq!(settings("fn f() { let s = Settings; }"), Some(Built::None));
+    let mut pieces = wider();
+    let mut record = api_type("type:Marker", "", true, vec![]);
+    record = Type::new(
+        record.id.clone(),
+        "",
+        None,
+        TypeContract {
+            kind: TypeKind::UnitStruct,
+            ..record.contract.clone()
+        },
+        vec![],
+        vec![],
+    );
+    pieces.types.push(record);
+    let matched = scan_files(
+        pieces,
+        &[(
+            "src/lib.rs",
+            "use mod_api::Marker;\nfn f(m: Marker) { match m { Marker => {} } }",
+        )],
+    );
+    assert_eq!(entry(&matched, "type:Marker").built, Some(Built::Full));
 }

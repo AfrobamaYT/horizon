@@ -11,23 +11,38 @@
 //! - a name written after `X::`, where `X` owns a member of that name, is that member only
 //!   (`TextHover::Item` is the variant, not a type `Item`).
 //!
-//! For each struct the source names it also records how the mod builds it: [`Built::Full`] when a
-//! literal or pattern lists its fields with no `..` (`Name { … }`, `Name::<T> { … }`, `Name(…)`,
-//! `Self { … }` in an impl for it, a local alias or renamed import of it, or a tuple or unit
-//! struct's name used as a value), [`Built::Base`] when every one ends in `..` (and for a union,
-//! whose literal names one field), [`Built::None`] otherwise. A name counts as built anywhere
-//! but where only a type can stand. Which struct a name means is decided by two rules, with no
-//! module resolution:
+//! For each struct the source names it also records how the mod builds it, read with a Rust
+//! parser ([`crate::syntax`]): [`Built::Full`] where a struct literal or call lists its fields
+//! with no `..` (`Name { … }`, `Name::<T> { … }`, `Name(…)`, `Self { … }` in an impl for it, a
+//! local alias or renamed import of it), where a pattern matches it exhaustively (`let Name { a }
+//! = …`, `Name(a, b) =>`), or where a tuple or unit struct's name stands as a value (`.map(Pos)`,
+//! `Marker`); [`Built::Base`] when every literal ends in a base (and for a union, whose literal
+//! names one field); [`Built::None`] otherwise. A pattern ending in `..` is a read. Which struct a
+//! name means is decided by two rules, with no module resolution:
 //! - a name written with a path (`a::b::Name`) is every API struct of that name;
 //! - an unqualified name (or `Self` in an impl for one) is the mod's own type only in a file
-//!   that defines it at its top level, binds it with no `use`, has no glob, no inline module, no
-//!   `use` with a metavariable, and only standard or API macros and attributes whose names
-//!   nothing in the mod rebinds. Otherwise it is every API struct of that name.
+//!   that defines it at its top level under no `#[cfg]`, binds it with no `use`, has no glob, no
+//!   inline module, no `use` with a metavariable, and only standard or API macros and attributes
+//!   whose names nothing in the mod rebinds, in a mod with no `include!`. Otherwise it is every
+//!   API struct of that name.
 //!
-//! A struct literal of a name the scan cannot place (a macro's `$t { … }`) builds every API
-//! struct the mod names in full: when unsure, the scan says full, because a refusal is safe and
-//! a wrong "fits" is not. It records the public paths the mod writes each item by, too,
-//! through renamed or imported API modules as well.
+//! The parser does not expand macros, so what it cannot see is counted as doubt, never as
+//! fitting, because a refusal is safe and a wrong "fits" is not:
+//! - a macro body's tokens are read as they stand: every API struct name in one followed by
+//!   `{` or `(` is a build, and a literal of a name the scan cannot place there (a metavariable's
+//!   `$t { … }` or `$t(…)`, a struct of an unknown name) builds every API struct the mod names in
+//!   full;
+//! - a file holding a macro or attribute that is neither standard, the API's own nor the mod's
+//!   own `macro_rules!` (a dependency's macro, an unknown derive or attribute macro), or a `use`
+//!   with a metavariable, builds in full every API struct it names, since that expansion may
+//!   build it.
+//!
+//! A file that does not parse, or nests deeper than [`syntax::MAX_NESTING`], cannot be judged
+//! ([`ScanError`]). Even a mod judged to fit is compiled on the player's machine against the
+//! target build, and that compile stays the final check. The scan also records the public paths
+//! the mod writes each item by: imported, written out, under an API glob (`prelude::Biome`
+//! after `use mod_api::*`), or through an API module the mod re-exports (`crate::prelude::Biome`
+//! after `pub use mod_api::prelude`).
 //!
 //! [`fits`] compares such a list with a target build's surface. The mod fits when every entry
 //! exists there with an equal hash and under every path the mod writes, every type keeps the
@@ -45,6 +60,7 @@
 //! entries. [`UsesTable::read`] refuses an unknown schema, malformed JSON, repeated ids and
 //! documents over [`MAX_USES_BYTES`] with a typed [`UsesError`].
 use crate::scan::{self, Token};
+use crate::syntax::{self, How, Syntax};
 use crate::{MacroKind, Role, Surface, Type, TypeKind, leaf};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -240,26 +256,6 @@ fn closing(tokens: &Tokens<'_>, open: usize) -> Option<usize> {
     None
 }
 
-/// The index after the `<…>` that opens at `open`, angle brackets counted; `None` if it does not
-/// close before a `;`, `{` or the end.
-fn after_angles(tokens: &Tokens<'_>, open: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    for (index, (token, _)) in tokens.iter().enumerate().skip(open) {
-        match token {
-            Token::Punct(b'<') => depth += 1,
-            Token::Punct(b'>') if index > 0 && !punct(tokens, index - 1, b'-') => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(index + 1);
-                }
-            }
-            Token::Punct(b';' | b'{') => return None,
-            _ => {}
-        }
-    }
-    None
-}
-
 /// Whether the literal or pattern whose bracket opens at `open` and closes at `close` ends its
 /// field list with `..` (a base expression or a rest pattern).
 fn has_rest(tokens: &Tokens<'_>, open: usize, close: usize) -> bool {
@@ -383,22 +379,22 @@ fn use_tree<'t>(
 /// What one source file holds that names resolve through.
 struct FileFacts<'t> {
     tokens: Vec<(Token<'t>, usize)>,
-    /// Tokens inside a `use` statement.
-    in_use: Vec<bool>,
-    /// Every `use` path with the name it brings in (`*` for a glob).
+    /// Each token's first byte.
+    starts: Vec<usize>,
+    /// What the parser reads of the file.
+    syntax: Syntax<'t>,
+    /// Tokens inside a macro call's delimiters or a `macro_rules!` body, which the parser does
+    /// not see into.
+    in_macro: Vec<bool>,
+    /// Every `use` path with the name it brings in (`*` for a glob), macro bodies included.
     imports: Vec<(Vec<&'t str>, &'t str)>,
-    /// Every path written out in code, `a::b::C`, by the index of its last name.
+    /// Every path written out in macro bodies, `a::b::C`.
     chains: Vec<Vec<&'t str>>,
-    /// `type X = …Y<…>;` items: (X, Y), and whether it is an item of its own (not an associated
-    /// type of an impl or trait).
+    /// `type X = …Y<…>;`: (X, Y), and whether it is an item of its own (not an associated type
+    /// of an impl), from the parser and from macro bodies.
     type_aliases: Vec<(&'t str, &'t str, bool)>,
-    /// Each `impl` or `trait` body's token range, the type or trait it is for, and the path it
-    /// is written by (`impl Make for mod_api::Settings` gives `mod_api`, `Settings`).
-    bodies: Vec<Body<'t>>,
-    /// The structs, enums, unions and type aliases the file defines at its top level.
-    defines: BTreeSet<&'t str>,
-    /// The file holds an inline `mod name { … }`, so it is more than one scope.
-    inline_modules: bool,
+    /// Structs, enums, unions and variants written in macro bodies.
+    macro_types: BTreeSet<&'t str>,
     /// Some `use` holds a macro metavariable (`use mod_api::$m;`): what it binds is unknown.
     use_metavariable: bool,
     /// Every macro call anywhere in the file, function bodies and macro bodies included: the
@@ -411,9 +407,6 @@ struct FileFacts<'t> {
     macro_rules: Vec<&'t str>,
 }
 
-/// An `impl` or `trait` body: its token range, its target's last name and the whole path.
-type Body<'t> = (usize, usize, &'t str, Vec<&'t str>);
-
 /// The deepest nesting of `use` groups the scan reads: `use a::{b::{c}}` nests 2.
 pub const MAX_USE_NESTING: usize = 64;
 
@@ -423,6 +416,11 @@ pub enum ScanError {
     /// A `use` statement nests its groups deeper than [`MAX_USE_NESTING`], at this line of
     /// this file.
     UseTooDeep { file: String, line: usize },
+    /// The file does not parse as Rust, at this line.
+    Parse { file: String, line: usize },
+    /// The file nests brackets, generics or expressions deeper than the scan parses
+    /// ([`syntax::MAX_NESTING`]), at this line.
+    TooDeep { file: String, line: usize },
 }
 
 impl std::fmt::Display for ScanError {
@@ -432,137 +430,127 @@ impl std::fmt::Display for ScanError {
                 f,
                 "{file}:{line}: a `use` statement nests its groups deeper than {MAX_USE_NESTING}; the mod's source cannot be judged"
             ),
+            Self::TooDeep { file, line } => write!(
+                f,
+                "{file}:{line}: the source nests deeper than {} levels; the mod's source cannot be judged",
+                syntax::MAX_NESTING
+            ),
+            Self::Parse { file, line } => write!(
+                f,
+                "{file}:{line}: the file does not parse as Rust; the mod's source cannot be judged"
+            ),
         }
     }
 }
 
 impl std::error::Error for ScanError {}
 
-/// A file's facts, or the line of a `use` statement nested deeper than [`MAX_USE_NESTING`].
-fn file_facts(text: &str) -> Result<FileFacts<'_>, usize> {
-    let tokens: Vec<(Token<'_>, usize)> = scan::tokens(text).collect();
+/// A file's facts, or why it cannot be judged.
+fn file_facts<'t>(file: &str, text: &'t str) -> Result<FileFacts<'t>, ScanError> {
+    let mut stream = scan::tokens(text);
+    let (mut tokens, mut starts) = (Vec::new(), Vec::new());
+    while let Some((token, line, start)) = stream.spanned() {
+        tokens.push((token, line));
+        starts.push(start);
+    }
     let mut in_use = vec![false; tokens.len()];
     let mut imports = Vec::new();
-    let mut chains = Vec::new();
-    let mut type_aliases = Vec::new();
-    let mut bodies: Vec<Body<'_>> = Vec::new();
     let mut use_metavariable = false;
     let mut at = 0;
     while at < tokens.len() {
-        match tokens[at].0 {
-            Token::Ident("use") => {
-                let end = (at..tokens.len())
-                    .find(|i| punct(&tokens, *i, b';'))
-                    .unwrap_or(tokens.len());
-                in_use[at..end].iter_mut().for_each(|t| *t = true);
-                use_metavariable |= tokens[at..end]
-                    .iter()
-                    .any(|(token, _)| *token == Token::Punct(b'$'));
-                // [`use_tree`] recurses once per group: bound it before it reads one.
-                let mut nesting = 0usize;
-                for (token, _) in &tokens[at..end] {
-                    match token {
-                        Token::Punct(b'{') => nesting += 1,
-                        Token::Punct(b'}') => nesting = nesting.saturating_sub(1),
-                        _ => {}
-                    }
-                    if nesting > MAX_USE_NESTING {
-                        return Err(tokens[at].1);
-                    }
+        if tokens[at].0 == Token::Ident("use") {
+            let end = (at..tokens.len())
+                .find(|i| punct(&tokens, *i, b';'))
+                .unwrap_or(tokens.len());
+            in_use[at..end].iter_mut().for_each(|t| *t = true);
+            use_metavariable |= tokens[at..end]
+                .iter()
+                .any(|(token, _)| *token == Token::Punct(b'$'));
+            // [`use_tree`] recurses once per group: bound it before it reads one.
+            let mut nesting = 0usize;
+            for (token, _) in &tokens[at..end] {
+                match token {
+                    Token::Punct(b'{') => nesting += 1,
+                    Token::Punct(b'}') => nesting = nesting.saturating_sub(1),
+                    _ => {}
                 }
-                let mut start = at + 1;
-                while start < end {
-                    if punct(&tokens, start, b':') {
-                        start += 2;
-                    }
-                    start = use_tree(&tokens, start, end, &mut Vec::new(), &mut imports);
+                if nesting > MAX_USE_NESTING {
+                    return Err(ScanError::UseTooDeep {
+                        file: file.to_owned(),
+                        line: tokens[at].1,
+                    });
                 }
-                // `a::b::{self}` binds `b`, and `{self as x}` binds `x`, both to `a::b`.
-                for (path, local) in imports.iter_mut() {
-                    if path.len() >= 2 && path.last() == Some(&"self") {
-                        path.pop();
-                        if *local == "self" {
-                            *local = path[path.len() - 1];
-                        }
+            }
+            let mut start = at + 1;
+            while start < end {
+                if punct(&tokens, start, b':') {
+                    start += 2;
+                }
+                start = use_tree(&tokens, start, end, &mut Vec::new(), &mut imports);
+            }
+            // `a::b::{self}` binds `b`, and `{self as x}` binds `x`, both to `a::b`.
+            for (path, local) in imports.iter_mut() {
+                if path.len() >= 2 && path.last() == Some(&"self") {
+                    path.pop();
+                    if *local == "self" {
+                        *local = path[path.len() - 1];
                     }
                 }
             }
+            at = end;
+        }
+        at += 1;
+    }
+    if let Some(line) = syntax::too_deep(&tokens) {
+        return Err(ScanError::TooDeep {
+            file: file.to_owned(),
+            line,
+        });
+    }
+    let syntax = syntax::read(text).map_err(|line| ScanError::Parse {
+        file: file.to_owned(),
+        line,
+    })?;
+    let in_macro: Vec<bool> = starts
+        .iter()
+        .map(|start| {
+            syntax
+                .macro_bodies
+                .iter()
+                .any(|body| body.start < *start && *start + 1 < body.end)
+        })
+        .collect();
+    // What macro bodies write, which the parser leaves as tokens: paths, type aliases and
+    // definitions.
+    let mut chains = Vec::new();
+    let mut type_aliases = syntax.type_aliases.clone();
+    let mut macro_types = BTreeSet::new();
+    for at in (0..tokens.len()).filter(|at| in_macro[*at]) {
+        match tokens[at].0 {
             Token::Ident("type") => {
                 // `type X = path::Y<…>;`: X names Y.
                 if let (Some(alias), Some(end)) = (
                     ident(&tokens, at + 1),
                     (at..tokens.len()).find(|i| punct(&tokens, *i, b';')),
                 ) && let Some(eq) = (at..end).find(|i| punct(&tokens, *i, b'='))
-                {
-                    let target = (eq + 1..end)
+                    && let Some(target) = (eq + 1..end)
                         .take_while(|i| !punct(&tokens, *i, b'<'))
                         .filter_map(|i| ident(&tokens, i))
-                        .last();
-                    let associated = bodies
-                        .iter()
-                        .any(|(open, close, _, _)| *open < at && at < *close);
-                    if let Some(target) = target {
-                        type_aliases.push((alias, target, !associated));
-                    }
+                        .last()
+                {
+                    type_aliases.push((alias, target, true));
                 }
             }
-            // An `impl` or `trait` item, not `-> impl Trait` or `x: impl Trait`.
-            Token::Ident(keyword @ ("impl" | "trait"))
-                if at == 0
-                    || matches!(
-                        tokens[at - 1].0,
-                        Token::Punct(b'}' | b';' | b'{' | b']' | b')')
-                            | Token::Ident("unsafe" | "pub")
-                    ) =>
-            {
-                // The type is the last name at angle depth 0 before the body or `where`, with
-                // the path it ends.
-                let mut i = at + 1;
-                let mut target = None;
-                let mut path = Vec::new();
-                while i < tokens.len() {
-                    match tokens[i].0 {
-                        Token::Punct(b'<') => match after_angles(&tokens, i) {
-                            Some(next) => {
-                                i = next;
-                                continue;
-                            }
-                            None => break,
-                        },
-                        Token::Punct(b'{') | Token::Ident("where") => break,
-                        Token::Punct(b';') => {
-                            target = None;
-                            break;
-                        }
-                        Token::Punct(b':') if keyword == "trait" => break,
-                        Token::Ident(name) if name != "for" && name != "dyn" => {
-                            if !(i >= 2
-                                && punct(&tokens, i - 1, b':')
-                                && punct(&tokens, i - 2, b':'))
-                            {
-                                path.clear();
-                            }
-                            path.push(name);
-                            target = Some(name);
-                        }
-                        _ => {}
-                    }
-                    i += 1;
-                }
-                let open = (i..tokens.len()).find(|j| punct(&tokens, *j, b'{'));
-                if let (Some(target), Some(open)) = (target, open)
-                    && let Some(close) = closing(&tokens, open)
-                {
-                    bodies.push((open, close, target, path));
+            Token::Ident("struct" | "enum" | "union") => {
+                if let Some(name) = ident(&tokens, at + 1) {
+                    macro_types.insert(name);
                 }
             }
             Token::Ident(first)
                 if !in_use[at]
                     && punct(&tokens, at + 1, b':')
                     && punct(&tokens, at + 2, b':')
-                    && !(at >= 2
-                        && punct(&tokens, at - 1, b':')
-                        && punct(&tokens, at - 2, b':')) =>
+                    && path_start(&tokens, at) == at =>
             {
                 // A path written out: `a::b::C`.
                 let mut path = vec![first];
@@ -578,23 +566,22 @@ fn file_facts(text: &str) -> Result<FileFacts<'_>, usize> {
             }
             _ => {}
         }
-        at += 1;
     }
-    let mut defines = BTreeSet::new();
-    let mut inline_modules = false;
-    let mut depth = 0usize;
     let mut macro_calls = Vec::new();
     let mut attributes = Vec::new();
     let mut macro_rules = Vec::new();
     for at in 0..tokens.len() {
         match tokens[at].0 {
+            // `name!(…)`, or `macro_rules! name`; not `if !x` or `return !(…)`.
             Token::Punct(b'!')
                 if at > 0
-                    && ident(&tokens, at - 1).is_some()
-                    && matches!(
-                        tokens.get(at + 1).map(|(t, _)| *t),
-                        Some(Token::Punct(b'(' | b'[' | b'{') | Token::Ident(_))
-                    ) =>
+                    && ident(&tokens, at - 1)
+                        .is_some_and(|name| !syntax::KEYWORDS.contains(&name))
+                    && match tokens.get(at + 1).map(|(t, _)| *t) {
+                        Some(Token::Punct(b'(' | b'[' | b'{')) => true,
+                        Some(Token::Ident(_)) => ident(&tokens, at - 1) == Some("macro_rules"),
+                        _ => false,
+                    } =>
             {
                 let first = path_start(&tokens, at - 1);
                 if first >= 1 && punct(&tokens, first - 1, b'$') {
@@ -622,30 +609,18 @@ fn file_facts(text: &str) -> Result<FileFacts<'_>, usize> {
                     attributes.push((open, closing(&tokens, open).unwrap_or(tokens.len())));
                 }
             }
-            Token::Punct(b'{') => depth += 1,
-            Token::Punct(b'}') => depth = depth.saturating_sub(1),
-            Token::Ident("mod")
-                if ident(&tokens, at + 1).is_some() && punct(&tokens, at + 2, b'{') =>
-            {
-                inline_modules = true;
-            }
-            Token::Ident("struct" | "enum" | "union" | "type") if depth == 0 => {
-                if let Some(name) = ident(&tokens, at + 1) {
-                    defines.insert(name);
-                }
-            }
             _ => {}
         }
     }
     Ok(FileFacts {
         tokens,
-        in_use,
+        starts,
+        syntax,
+        in_macro,
         imports,
         chains,
         type_aliases,
-        bodies,
-        defines,
-        inline_modules,
+        macro_types,
         use_metavariable,
         macro_calls,
         attributes,
@@ -677,6 +652,9 @@ struct ModFacts<'t> {
     /// Some glob outside the API and the mod (`use dep::*;`) or a `#[macro_use]` may bring in
     /// macros of any name.
     rebound_all: bool,
+    /// The mod's own `macro_rules!` names that no `use` binds to something else: the scan reads
+    /// their bodies.
+    own_macros: BTreeSet<&'t str>,
 }
 
 fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
@@ -706,7 +684,9 @@ fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
         others: BTreeSet::new(),
         rebound: BTreeSet::new(),
         rebound_all: false,
+        own_macros: BTreeSet::new(),
     };
+    let mut imported = BTreeSet::new();
     for file in files {
         facts.rebound.extend(file.macro_rules.iter().copied());
         facts.rebound_all |= file
@@ -722,6 +702,7 @@ fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
             }
             if !api {
                 facts.rebound.insert(name);
+                imported.insert(*name);
             }
             let last = path[path.len() - 1];
             if name != &last {
@@ -743,44 +724,9 @@ fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
                 facts.others.insert(alias);
             }
         }
-        let tokens = &file.tokens;
-        for at in 0..tokens.len() {
-            let Some(keyword) = ident(tokens, at) else {
-                continue;
-            };
-            if !matches!(keyword, "struct" | "enum" | "union" | "trait") {
-                continue;
-            }
-            let Some(name) = ident(tokens, at + 1) else {
-                continue;
-            };
-            if keyword == "trait" {
-                facts.others.insert(name);
-                continue;
-            }
-            facts.types.insert(name);
-            if keyword != "enum" {
-                continue;
-            }
-            let Some(open) = (at..tokens.len()).find(|i| punct(tokens, *i, b'{')) else {
-                continue;
-            };
-            let close = closing(tokens, open).unwrap_or(tokens.len());
-            let mut depth = 0usize;
-            for i in open + 1..close {
-                match tokens[i].0 {
-                    Token::Punct(b'(' | b'[' | b'{') => depth += 1,
-                    Token::Punct(b')' | b']' | b'}') => depth = depth.saturating_sub(1),
-                    Token::Ident(variant)
-                        if depth == 0
-                            && matches!(tokens[i - 1].0, Token::Punct(b'{' | b',' | b']')) =>
-                    {
-                        facts.types.insert(variant);
-                    }
-                    _ => {}
-                }
-            }
-        }
+        facts.types.extend(file.syntax.types.iter().copied());
+        facts.types.extend(file.macro_types.iter().copied());
+        facts.others.extend(file.syntax.traits.iter().copied());
     }
     // `use` paths that start at a name bound to an API path: `use p::Biome;` after
     // `use mod_api::prelude as p;`. Followed a bounded number of times.
@@ -811,6 +757,11 @@ fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
             facts.bound.entry(name).or_default().insert(path);
         }
     }
+    facts.own_macros = files
+        .iter()
+        .flat_map(|file| file.macro_rules.iter().copied())
+        .filter(|name| !imported.contains(name))
+        .collect();
     facts
 }
 
@@ -833,6 +784,15 @@ fn api_paths_of<'t>(path: &[&'t str], module: &ModFacts<'t>) -> Vec<Vec<&'t str>
             full.extend(rest);
             full
         })
+        .collect()
+}
+
+/// The API modules `file` imports with a glob, `mod_api::` left out.
+fn api_globs<'t>(file: &FileFacts<'t>, module: &ModFacts<'t>) -> BTreeSet<Vec<&'t str>> {
+    file.imports
+        .iter()
+        .filter(|(_, local)| *local == "*")
+        .flat_map(|(segments, _)| api_paths_of(&segments[..segments.len() - 1], module))
         .collect()
 }
 
@@ -956,6 +916,7 @@ struct Trusted<'s> {
     api_derives: BTreeSet<&'s str>,
     rebound: &'s BTreeSet<&'s str>,
     rebound_all: bool,
+    own_macros: &'s BTreeSet<&'s str>,
 }
 
 /// What a macro, attribute or derive path is.
@@ -1027,10 +988,27 @@ impl Trusted<'_> {
         file.macro_calls
             .iter()
             .all(|path| self.path(path, Named::Macro))
-            && file
-                .attributes
-                .iter()
-                .all(|(open, close)| self.attribute(&file.tokens, open + 1, *close, 16))
+            && self.attributes(file)
+    }
+
+    fn attributes(&self, file: &FileFacts<'_>) -> bool {
+        file.attributes
+            .iter()
+            .all(|(open, close)| self.attribute(&file.tokens, open + 1, *close, 16))
+    }
+
+    /// Whether the scan reads every expansion in `file`: each macro is a standard or API one
+    /// or the mod's own `macro_rules!` (whose body the scan reads as tokens), and each attribute
+    /// a standard or API one.
+    fn followed(&self, file: &FileFacts<'_>) -> bool {
+        let own = |path: &[&str]| match path {
+            [name] | ["crate", name] => !self.rebound_all && self.own_macros.contains(name),
+            _ => false,
+        };
+        file.macro_calls
+            .iter()
+            .all(|path| self.path(path, Named::Macro) || own(path))
+            && self.attributes(file)
     }
 }
 
@@ -1077,172 +1055,6 @@ fn arguments(tokens: &Tokens<'_>, open: usize, close: usize) -> Vec<(usize, usiz
     list
 }
 
-/// The bracket that encloses the token at `at`, as its index, if any.
-fn enclosing(tokens: &Tokens<'_>, at: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    for index in (0..at).rev() {
-        match tokens[index].0 {
-            Token::Punct(b')' | b']' | b'}') => depth += 1,
-            Token::Punct(b'(' | b'[' | b'{') if depth > 0 => depth -= 1,
-            Token::Punct(b'(' | b'[' | b'{') => return Some(index),
-            _ => {}
-        }
-    }
-    None
-}
-
-/// How far back the position checks below look, in tokens: past it they answer "a value",
-/// which counts a build, the safe side.
-const LOOK_BACK: usize = 4096;
-
-/// The bracket that encloses the token at `at`, angle brackets of generics counted (a `<`
-/// after `->` or `=>` is no bracket); `None` past a `;` or [`LOOK_BACK`].
-fn opener(tokens: &Tokens<'_>, at: usize) -> Option<usize> {
-    let (mut depth, mut angles) = (0usize, 0usize);
-    for index in (at.saturating_sub(LOOK_BACK)..at).rev() {
-        match tokens[index].0 {
-            Token::Punct(b')' | b']' | b'}') => depth += 1,
-            Token::Punct(b'(' | b'[' | b'{') if depth > 0 => depth -= 1,
-            Token::Punct(b'(' | b'[' | b'{') => return Some(index),
-            Token::Punct(b'>')
-                if depth == 0
-                    && !(index > 0
-                        && (punct(tokens, index - 1, b'-') || punct(tokens, index - 1, b'='))) =>
-            {
-                angles += 1;
-            }
-            Token::Punct(b'<') if depth == 0 => match angles.checked_sub(1) {
-                Some(left) => angles = left,
-                None => return Some(index),
-            },
-            Token::Punct(b';') if depth == 0 => return None,
-            _ => {}
-        }
-    }
-    None
-}
-
-/// The keyword of the item whose name and generics come before `open` (`struct`, `union` or
-/// `enum`), if one does before a `;`, `{`, `}`, `=` or `,`; with the token it stopped at.
-fn item_keyword<'t>(tokens: &Tokens<'t>, open: usize) -> (Option<&'t str>, Option<usize>) {
-    for index in (open.saturating_sub(256)..open).rev() {
-        match tokens[index].0 {
-            Token::Ident(keyword @ ("struct" | "union" | "enum")) => return (Some(keyword), None),
-            Token::Punct(b';' | b'{' | b'}' | b'=' | b',') => return (None, Some(index)),
-            _ => {}
-        }
-    }
-    (None, None)
-}
-
-/// Whether the bracket at `open` holds a definition's fields: a struct's or union's body or
-/// tuple, or an enum variant's.
-fn definition_body(tokens: &Tokens<'_>, open: usize) -> bool {
-    match item_keyword(tokens, open) {
-        (Some(_), _) => true,
-        (None, Some(stop)) if matches!(tokens[stop].0, Token::Punct(b'{' | b',')) => {
-            enclosing(tokens, open).is_some_and(|outer| {
-                punct(tokens, outer, b'{') && item_keyword(tokens, outer).0 == Some("enum")
-            })
-        }
-        _ => false,
-    }
-}
-
-/// Whether the `<` at `open` opens generics: after a capitalised name, a `::` (turbofish) or a
-/// definition's name.
-fn generic(tokens: &Tokens<'_>, open: usize) -> bool {
-    match open.checked_sub(1).map(|i| tokens[i].0) {
-        Some(Token::Ident(name)) => {
-            name.starts_with(|c: char| c.is_ascii_uppercase())
-                || matches!(name, "impl" | "fn")
-                || (open >= 2
-                    && matches!(
-                        ident(tokens, open - 2),
-                        Some("fn" | "struct" | "enum" | "union" | "trait" | "type" | "impl")
-                    ))
-        }
-        Some(Token::Punct(b':')) => open >= 2 && punct(tokens, open - 2, b':'),
-        _ => false,
-    }
-}
-
-/// Whether the statement holding the `=` at `eq` is a `type` alias, whose right side is a type.
-fn type_alias_eq(tokens: &Tokens<'_>, eq: usize) -> bool {
-    for index in (eq.saturating_sub(256)..eq).rev() {
-        match tokens[index].0 {
-            Token::Ident("type") => return true,
-            Token::Punct(b';' | b'{' | b'}') | Token::Ident("let") => return false,
-            _ => {}
-        }
-    }
-    false
-}
-
-/// Whether the path that starts at `start` stands only where a type does, never a value: after
-/// `->`, a definition keyword, `impl`, `dyn`, `as` or `for`, a `:` that is not a struct
-/// literal's field, the `=` of a `type` alias, inside generics, a function type's arguments, a
-/// definition's fields, or a tuple, array or reference type in such a place. Anything else is a
-/// value, which counts a build.
-fn type_only(tokens: &Tokens<'_>, start: usize) -> bool {
-    let mut at = start;
-    for _ in 0..LOOK_BACK {
-        let Some(previous) = at.checked_sub(1) else {
-            return false;
-        };
-        match tokens[previous].0 {
-            Token::Ident(
-                "impl" | "dyn" | "struct" | "enum" | "union" | "trait" | "type" | "as" | "for"
-                | "where" | "mod" | "fn" | "use",
-            ) => return true,
-            Token::Punct(b'>') => return previous >= 1 && punct(tokens, previous - 1, b'-'),
-            Token::Punct(b'=') => return type_alias_eq(tokens, previous),
-            Token::Punct(b':') => {
-                // A struct literal's field: `{ name: N` or `, name: N` in a brace that holds no
-                // definition's fields.
-                let field = previous >= 2
-                    && ident(tokens, previous - 1).is_some()
-                    && matches!(tokens[previous - 2].0, Token::Punct(b'{' | b','))
-                    && enclosing(tokens, previous).is_some_and(|open| {
-                        punct(tokens, open, b'{') && !definition_body(tokens, open)
-                    });
-                return !field;
-            }
-            Token::Punct(b'<') => return generic(tokens, previous),
-            Token::Punct(b'&' | b'*') | Token::Ident("mut" | "const") | Token::Lifetime => {
-                at = previous;
-            }
-            Token::Punct(b',' | b'(' | b'[' | b'{') => {
-                let open = if punct(tokens, previous, b',') {
-                    match opener(tokens, previous) {
-                        Some(open) => open,
-                        None => return false,
-                    }
-                } else {
-                    previous
-                };
-                match tokens[open].0 {
-                    Token::Punct(b'<') => return generic(tokens, open),
-                    Token::Punct(b'(')
-                        if open >= 1
-                            && matches!(
-                                ident(tokens, open - 1),
-                                Some("Fn" | "FnMut" | "FnOnce" | "fn")
-                            ) =>
-                    {
-                        return true;
-                    }
-                    Token::Punct(b'(' | b'{') if definition_body(tokens, open) => return true,
-                    Token::Punct(b'(' | b'[') => at = open,
-                    _ => return false,
-                }
-            }
-            _ => return false,
-        }
-    }
-    false
-}
-
 /// The records `sources` (each a path and its Rust text) and `manifest` bring in, with
 /// everything their signatures reference; [`ScanError`] when the source cannot be judged.
 pub fn uses<P: AsRef<str>, T: AsRef<str>>(
@@ -1285,6 +1097,9 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
             Some(TypeKind::Struct | TypeKind::TupleStruct | TypeKind::UnitStruct | TypeKind::Union)
         )
     };
+    // Whether code outside the API may build a struct at all: what the scan cannot see can
+    // only build those.
+    let buildable = |id: &str| types.get(id).is_some_and(|t| t.contract.constructible);
 
     let sources: Vec<(String, String)> = sources
         .into_iter()
@@ -1292,12 +1107,7 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
         .collect();
     let files: Vec<FileFacts<'_>> = sources
         .iter()
-        .map(|(file, text)| {
-            file_facts(text).map_err(|line| ScanError::UseTooDeep {
-                file: file.clone(),
-                line,
-            })
-        })
+        .map(|(file, text)| file_facts(file, text))
         .collect::<Result<_, _>>()?;
     let module = mod_facts(&files);
     let trusted = Trusted {
@@ -1331,29 +1141,70 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
             .collect(),
         rebound: &module.rebound,
         rebound_all: module.rebound_all,
+        own_macros: &module.own_macros,
     };
-    // Whether nothing the scan cannot follow may change what names mean in each file: no glob,
-    // no inline module, no `use` with a metavariable, and only standard or API macros and
-    // attributes.
+    // A file brought in by `include!` is part of its includer's scope: with one anywhere, no
+    // file is judged on its own.
+    let included = files.iter().any(|file| {
+        file.macro_calls
+            .iter()
+            .any(|path| path.last() == Some(&"include"))
+    });
+    // Whether a file holds an expansion the scan cannot follow: a `use` with a metavariable,
+    // or a macro or attribute that is neither a standard or API one nor the mod's own
+    // `macro_rules!`.
+    let opaque: Vec<bool> = files
+        .iter()
+        .map(|file| file.use_metavariable || !trusted.followed(file))
+        .collect();
+    // Whether nothing the scan cannot follow may change what names mean in each file.
     let certain: Vec<bool> = files
         .iter()
-        .map(|file| {
-            !file.inline_modules
-                && !file.use_metavariable
-                && !file.imports.iter().any(|(_, local)| *local == "*")
+        .zip(&opaque)
+        .map(|(file, opaque)| {
+            !included
+                && !opaque
                 && trusted.file(file)
+                && !file.syntax.inline_modules
+                && !file.imports.iter().any(|(_, local)| *local == "*")
         })
         .collect();
     // Whether an unqualified `name` in a file certainly means the mod's own type: the file
-    // defines it at its top level (a `type` alias of an API item is no definition), no `use` in
-    // it binds the name, and the file is certain. Anything else leaves the API's.
+    // defines it at its top level under no `#[cfg]` (a `type` alias of an API item is no
+    // definition), no `use` in it binds the name, and the file is certain. Anything else leaves
+    // the API's.
     let own_in = |file: &FileFacts<'_>, certain: bool, name: &str| {
         certain
-            && file.defines.contains(name)
+            && file.syntax.defines.contains(name)
             && !file.type_aliases.iter().any(|(alias, target, item)| {
                 *item && *alias == name && !api_names_of(target, &module, &by_name).is_empty()
             })
             && !file.imports.iter().any(|(_, local)| *local == name)
+    };
+    let mod_globs: BTreeSet<Vec<&str>> = files.iter().flat_map(|f| api_globs(f, &module)).collect();
+    // Each API path (`mod_api::` left out) a path written in a file may be: through an API
+    // root or a name bound to an API path, under one of the file's API globs, or after
+    // `crate`, `self` or `super`, through the mod's re-exports and globs.
+    let api_paths = |path: &[&'_ str], globs: &BTreeSet<Vec<&str>>| -> Vec<Vec<String>> {
+        let inside = path
+            .iter()
+            .take_while(|segment| matches!(**segment, "crate" | "self" | "super"))
+            .count();
+        let (rest, globs) = if inside > 0 {
+            (&path[inside..], &mod_globs)
+        } else {
+            (path, globs)
+        };
+        let mut out: Vec<Vec<String>> = api_paths_of(rest, &module)
+            .into_iter()
+            .map(|p| p.iter().map(|s| (*s).to_owned()).collect())
+            .collect();
+        if rest.len() >= 2 {
+            for glob in globs {
+                out.push(glob.iter().chain(rest).map(|s| (*s).to_owned()).collect());
+            }
+        }
+        out
     };
 
     // The records named directly, each with the first place that names it; how each named
@@ -1363,57 +1214,79 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
     let mut written: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
     let mut named_structs: BTreeSet<&str> = BTreeSet::new();
     let mut unsure: Option<Place> = None;
-    for (((path, _), file), certain) in sources.iter().zip(&files).zip(certain) {
+    let mut mark_unsure = |here: Place| {
+        if unsure.as_ref().is_none_or(|old| here < *old) {
+            unsure = Some(here);
+        }
+    };
+    // The API structs a name in a file may be, as ids, and whether it is the mod's own there.
+    let resolve = |file: &FileFacts<'_>, certain: bool, name: &str, unqualified: bool| {
+        let api_names = api_names_of(name, &module, &by_name);
+        let aliased = api_names.iter().any(|api| *api != name);
+        let own = unqualified && !aliased && own_in(file, certain, name);
+        let ids: Vec<&str> = api_names
+            .iter()
+            .flat_map(|api| by_name[api].iter().copied())
+            .collect();
+        (ids, aliased, own)
+    };
+    // A name the scan cannot place that a literal builds: it may be an API struct by another
+    // name.
+    let unknown = |name: &str| {
+        name.starts_with(|c: char| c.is_ascii_uppercase())
+            && name.chars().any(|c| c.is_ascii_lowercase())
+            && name != "Self"
+            && !module.types.contains(name)
+            && !module.item_aliases.contains(name)
+            && !module.others.contains(name)
+    };
+    for (((path, _), file), (certain, opaque)) in sources
+        .iter()
+        .zip(&files)
+        .zip(certain.iter().copied().zip(opaque.iter().copied()))
+    {
         let tokens = &file.tokens;
+        let impl_at = |byte: usize| {
+            file.syntax
+                .impls
+                .iter()
+                .filter(|i| i.body.start < byte && byte < i.body.end)
+                .min_by_key(|i| i.body.len())
+        };
+        // Every name: the records it names.
         for (at, (token, line)) in tokens.iter().enumerate() {
             let place = || (path.clone(), *line);
             let Token::Ident(written_name) = token else {
                 continue;
             };
             let start = path_start(tokens, at);
-            // The name this token stands for (an impl's target for `Self`), whether it is the
-            // mod's own type there, and every API name it may be. A name written with a path
-            // is never the mod's own.
-            let (name, own_here) = match *written_name {
-                "Self" => match file
-                    .bodies
-                    .iter()
-                    .filter(|(open, close, _, _)| *open < at && at < *close)
-                    .min_by_key(|(open, close, _, _)| close - open)
-                {
-                    Some((_, _, target, path)) => (*target, path.len() == 1),
+            let (name, unqualified) = match *written_name {
+                "Self" => match impl_at(file.starts[at]) {
+                    Some(i) => (*i.target.last().unwrap_or(&"Self"), i.target.len() == 1),
                     None => continue,
                 },
-                name => (name, start == at),
+                name => (
+                    name,
+                    start == at
+                        && !(at >= 2 && punct(tokens, at - 1, b':') && punct(tokens, at - 2, b':')),
+                ),
             };
-            let api_names = api_names_of(name, &module, &by_name);
-            let aliased = api_names.iter().any(|api| *api != name);
-            let own_here = own_here && !aliased && own_in(file, certain, name);
-            let ids: Vec<&str> = api_names
-                .iter()
-                .flat_map(|api| by_name[api].iter().copied())
-                .collect();
+            let (ids, aliased, own) = resolve(file, certain, name, unqualified);
             if ids.is_empty() {
-                // A literal of a name the scan cannot place may be an API struct by another
-                // name; so may a macro body's `$name { … }`.
-                let unknown = name.starts_with(|c: char| c.is_ascii_uppercase())
-                    && name.chars().any(|c| c.is_ascii_lowercase())
-                    && !module.types.contains(name)
-                    && !module.item_aliases.contains(name)
-                    && !module.others.contains(name)
-                    && *written_name != "Self";
+                // In a macro body, which the parser does not read: a literal of a name the
+                // scan cannot place, or a metavariable's `$name { … }`.
                 let metavariable = at >= 1 && punct(tokens, at - 1, b'$');
-                let literal = punct(tokens, at + 1, b'{')
-                    && !file.in_use[at]
-                    && !in_type_position(tokens, at);
-                if literal
-                    && ((unknown && looks_like_fields(tokens, at + 1))
-                        || (metavariable && !(at >= 2 && in_type_position(tokens, at - 1))))
+                // A metavariable followed by `(` may be a tuple struct's name.
+                if file.in_macro[at]
+                    && ((punct(tokens, at + 1, b'{')
+                        && !in_type_position(tokens, at)
+                        && unknown(name)
+                        && looks_like_fields(tokens, at + 1))
+                        || (metavariable
+                            && (punct(tokens, at + 1, b'{') || punct(tokens, at + 1, b'('))
+                            && !in_type_position(tokens, at - 1)))
                 {
-                    let here = place();
-                    if unsure.as_ref().is_none_or(|old| here < *old) {
-                        unsure = Some(here);
-                    }
+                    mark_unsure(place());
                 }
                 continue;
             }
@@ -1437,105 +1310,102 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                     .entry(id)
                     .and_modify(|origin| *origin = here.clone().min(origin.clone()))
                     .or_insert_with(|| here.clone());
-                if !struct_like(id) || own_here {
+                if !struct_like(id) || own {
                     continue;
                 }
                 named_structs.insert(id);
-                if file.in_use[at] || type_only(tokens, start) {
-                    continue;
-                }
-                let union = kind(id) == Some(TypeKind::Union);
-                // A turbofish: `Name::<T> { … }`.
-                let mut next = at + 1;
-                if punct(tokens, next, b':')
-                    && punct(tokens, next + 1, b':')
-                    && punct(tokens, next + 2, b'<')
-                {
-                    match after_angles(tokens, next + 2) {
-                        Some(after) => next = after,
-                        None => {
-                            building.entry(id).or_default().record(place(), true, false);
-                            continue;
-                        }
-                    }
-                }
-                if punct(tokens, next, b'{') || punct(tokens, next, b'(') {
-                    let brace = punct(tokens, next, b'{');
-                    let Some(close) = closing(tokens, next) else {
-                        // Unclosed: unsure, so full.
-                        building.entry(id).or_default().record(place(), true, false);
-                        continue;
-                    };
-                    let rest = has_rest(tokens, next, close);
-                    // A pattern is followed by `=`, `=>`, `:` or `|`; an expression is not.
-                    let pattern = matches!(
-                        tokens.get(close + 1).map(|(t, _)| *t),
-                        Some(Token::Punct(b'=' | b':' | b'|'))
-                    ) && !punct(tokens, close + 2, b'=');
-                    if pattern && rest {
-                        // `let S { a, .. } = s`: a read of the named fields, not a build.
-                        continue;
-                    }
-                    let full = !union && !rest;
-                    building
-                        .entry(id)
-                        .or_default()
-                        .record(place(), full, brace && !pattern);
-                } else if next == at + 1
-                    && matches!(kind(id), Some(TypeKind::TupleStruct | TypeKind::UnitStruct))
-                    && !(punct(tokens, next, b':') && punct(tokens, next + 1, b':'))
-                    && !punct(tokens, next, b'!')
-                {
-                    // A tuple struct's constructor or a unit struct used as a value.
+                if opaque && buildable(id) {
+                    // An expansion the scan cannot follow may build any API struct the file
+                    // names.
                     building.entry(id).or_default().record(place(), true, false);
+                }
+                // In a macro body: a name followed by `{` or `(` is a build, in full unless it
+                // ends in `..`.
+                let open = at + 1;
+                if file.in_macro[at] && (punct(tokens, open, b'{') || punct(tokens, open, b'(')) {
+                    let rest =
+                        closing(tokens, open).is_some_and(|close| has_rest(tokens, open, close));
+                    let full = !rest && kind(id) != Some(TypeKind::Union);
+                    building.entry(id).or_default().record(
+                        place(),
+                        full,
+                        punct(tokens, open, b'{'),
+                    );
                 }
             }
         }
-        // The API paths this file writes: imported, written out, or under an imported glob,
-        // each through an API root or a name bound to an API path.
-        let mut paths: Vec<(String, &str)> = Vec::new();
-        let mut globs: BTreeSet<String> = BTreeSet::new();
-        for (segments, local) in &file.imports {
-            if *local == "*" {
-                for api in api_paths_of(&segments[..segments.len() - 1], &module) {
-                    globs.insert(api.join("::"));
+        // Every place the parser reads a struct built or matched.
+        for build in &file.syntax.builds {
+            let place = || (path.clone(), build.line);
+            let (name, unqualified) = match &build.path[..] {
+                ["Self"] => match impl_at(build.byte) {
+                    Some(i) => (*i.target.last().unwrap_or(&"Self"), i.target.len() == 1),
+                    None => continue,
+                },
+                [.., last] => (*last, build.path.len() == 1 && !build.rooted),
+                [] => continue,
+            };
+            let (ids, _, own) = resolve(file, certain, name, unqualified);
+            if ids.is_empty() {
+                if build.brace && unknown(name) {
+                    mark_unsure(place());
                 }
                 continue;
             }
-            for api in api_paths_of(segments, &module) {
-                if let Some(last) = api.last() {
-                    paths.push((api.join("::"), last));
+            for id in ids {
+                if !struct_like(id) || own {
+                    continue;
                 }
+                let full = match build.how {
+                    How::Full => kind(id) != Some(TypeKind::Union),
+                    How::Base => false,
+                    How::Value => {
+                        if !matches!(kind(id), Some(TypeKind::TupleStruct | TypeKind::UnitStruct)) {
+                            continue;
+                        }
+                        true
+                    }
+                };
+                building
+                    .entry(id)
+                    .or_default()
+                    .record(place(), full, build.brace);
             }
         }
-        for chain in &file.chains {
-            for api in api_paths_of(chain, &module) {
-                if let Some(last) = api.last() {
-                    paths.push((api.join("::"), last));
-                }
+        // The API paths this file writes: imported, written out in code or in macro bodies,
+        // or under an imported glob.
+        let globs = api_globs(file, &module);
+        let mut paths: Vec<Vec<String>> = Vec::new();
+        for (segments, local) in &file.imports {
+            if *local != "*" {
+                paths.extend(api_paths(segments, &globs));
             }
         }
-        if !globs.is_empty() {
-            let names: BTreeSet<&str> = tokens
-                .iter()
-                .filter_map(|(t, _)| match t {
-                    Token::Ident(name) => Some(*name),
-                    _ => None,
-                })
-                .collect();
-            for glob in &globs {
-                for name in &names {
-                    let path = if glob.is_empty() {
-                        (*name).to_owned()
-                    } else {
-                        format!("{glob}::{name}")
-                    };
-                    paths.push((path, name));
-                }
+        for chain in file.syntax.paths.iter().chain(&file.chains) {
+            paths.extend(api_paths(chain, &globs));
+        }
+        // Under a glob, a name written alone is the glob's; one written after a path is
+        // that path's, read above.
+        let names: BTreeSet<&str> = (0..tokens.len())
+            .filter(|at| !(*at >= 2 && punct(tokens, at - 1, b':') && punct(tokens, at - 2, b':')))
+            .filter_map(|at| ident(tokens, at))
+            .collect();
+        for glob in &globs {
+            for name in &names {
+                paths.push(
+                    glob.iter()
+                        .map(|s| (*s).to_owned())
+                        .chain([(*name).to_owned()])
+                        .collect(),
+                );
             }
         }
-        for (path, name) in paths {
-            for id in by_name.get(name).into_iter().flatten() {
+        for api in paths {
+            let Some(name) = api.last() else {
+                continue;
+            };
+            let path = api.join("::");
+            for id in by_name.get(name.as_str()).into_iter().flatten() {
                 let id_path = id.split_once(':').map_or("", |(_, rest)| rest);
                 if path != id_path
                     && public_paths
@@ -1550,7 +1420,7 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
     // A literal the scan cannot place, anywhere in the mod, may build any API struct the mod
     // names, anywhere: each counts as built field by field.
     if let Some(place) = unsure {
-        for id in named_structs {
+        for id in named_structs.into_iter().filter(|id| buildable(id)) {
             building
                 .entry(id)
                 .or_default()
