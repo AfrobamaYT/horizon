@@ -77,6 +77,23 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
             };
             value(a) == value(b)
         }
+        "minecraft:potion_duration_scale" => {
+            // `Float.equals` uses floatToIntBits: signed zeros differ, all NaNs agree.
+            let bits = |stack: &ItemStack| {
+                stack
+                    .data()
+                    .and_then(|data| data.other(id))
+                    .and_then(crate::properties::component_float)
+                    .map(|value| {
+                        if value.is_nan() {
+                            0x7fc0_0000
+                        } else {
+                            value.to_bits()
+                        }
+                    })
+            };
+            bits(a) == bits(b)
+        }
         "minecraft:block_entity_data" => block_entity_equal(
             a.data().and_then(|d| d.other(id)),
             b.data().and_then(|d| d.other(id)),
