@@ -1,6 +1,6 @@
 use super::*;
 
-fn load_kind(data: &Path, kind: &str, out: &mut HashMap<String, Value>) -> io::Result<()> {
+pub(super) fn load_kind(data: &Path, kind: &str, out: &mut HashMap<String, Value>) -> io::Result<()> {
     let Ok(entries) = fs::read_dir(data) else {
         return Ok(());
     };
@@ -17,7 +17,7 @@ fn load_kind(data: &Path, kind: &str, out: &mut HashMap<String, Value>) -> io::R
 }
 
 /// Every file's path, size and modification time under `dir`, in name order.
-fn hash_files(dir: &Path, hasher: &mut impl std::hash::Hasher) {
+pub(super) fn hash_files(dir: &Path, hasher: &mut impl std::hash::Hasher) {
     use std::hash::Hash;
     let Ok(entries) = fs::read_dir(dir) else {
         return;
@@ -39,7 +39,7 @@ fn hash_files(dir: &Path, hasher: &mut impl std::hash::Hasher) {
     }
 }
 
-fn load_dir(
+pub(super) fn load_dir(
     dir: &Path,
     namespace: &str,
     prefix: &str,
