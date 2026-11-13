@@ -94,11 +94,6 @@ fn uses_command(args: &[PathBuf]) {
     }
     let surface = read_surface(surface);
     let input = mod_uses::read(dir).unwrap_or_else(|e| fail(e));
-    if let Some(why) = &input.exact {
-        eprintln!(
-            "note: this mod is made for exactly one build ({why}); the fit test does not apply"
-        );
-    }
     // No manifest form names a hook version today (the schema refuses `hook_version`).
     let manifest = ManifestFacts {
         names: input.manifest_names,

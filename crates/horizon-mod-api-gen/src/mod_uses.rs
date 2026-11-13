@@ -1,6 +1,6 @@
 //! A mod folder as `horizon-stage uses` scans it: its Rust sources and what its manifest names.
 use mod_surface::scan::{Token, tokens};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 /// The largest Rust source file read, in bytes; a larger one is refused, never truncated.
 pub const MAX_SOURCE_BYTES: u64 = 8 << 20;
@@ -8,6 +8,8 @@ pub const MAX_SOURCE_BYTES: u64 = 8 << 20;
 pub const MAX_TOTAL_BYTES: u64 = 64 << 20;
 /// The most Rust source files read from one mod.
 pub const MAX_FILES: usize = 4096;
+/// The largest `horizon-mod.toml` read, in bytes.
+pub const MAX_MANIFEST_BYTES: u64 = 64 << 10;
 
 /// What [`read`] found in a mod folder.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -16,8 +18,6 @@ pub struct ModInput {
     pub sources: Vec<(String, String)>,
     /// The capability keys `horizon-mod.toml` lists.
     pub manifest_names: Vec<String>,
-    /// Why the mod is made for exactly one build, when it is: a `[native.*]` table or internals.
-    pub exact: Option<String>,
 }
 
 /// Why a mod folder cannot be judged.
@@ -30,6 +30,11 @@ pub enum ReadError {
     /// A `#[path]` or `include!` in `file` brings in source from outside the folder, or from a
     /// place the scan cannot know.
     Escapes { file: String, target: String },
+    /// A `#[path]` or `include!` in `file` brings in a file of the folder the scan does not read:
+    /// not a `.rs` file, under the root `target/` or a hidden folder, or missing.
+    NotScanned { file: String, target: String },
+    /// The mod is made for exactly one build (a `[native.*]` table or internals): why.
+    Exact(String),
     /// More source than is read: a file, or the whole mod.
     TooLarge { what: String, size: u64, most: u64 },
     /// `horizon-mod.toml` is not valid TOML.
@@ -49,6 +54,14 @@ impl std::fmt::Display for ReadError {
                 f,
                 "{file} brings in `{target}`, outside the mod's folder; the mod's source cannot be judged"
             ),
+            Self::NotScanned { file, target } => write!(
+                f,
+                "{file} brings in `{target}`, which the scan does not read; the mod's source cannot be judged"
+            ),
+            Self::Exact(why) => write!(
+                f,
+                "this mod is tied to one build ({why}); fit checks do not apply"
+            ),
             Self::TooLarge { what, size, most } => {
                 write!(f, "{what} is {size} bytes; the most read is {most}")
             }
@@ -66,28 +79,73 @@ fn io(path: &Path) -> impl FnOnce(std::io::Error) -> ReadError + '_ {
     }
 }
 
-/// `target` joined to `base` (both relative to the mod's folder), if it stays inside it.
-fn inside(base: &[String], target: &str) -> bool {
+/// `target` joined to `base` (both relative to the mod's folder), `/`-separated, if it stays
+/// inside the folder.
+fn inside(base: &[String], target: &str) -> Option<String> {
     if target.starts_with('/') || target.starts_with('\\') || target.contains(':') {
-        return false;
+        return None;
     }
     let mut parts: Vec<&str> = base.iter().map(String::as_str).collect();
-    for component in Path::new(target).components() {
+    for component in target.split(['/', '\\']) {
         match component {
-            Component::Normal(name) => match name.to_str() {
-                Some(name) => parts.push(name),
-                None => return false,
-            },
-            Component::CurDir => {}
-            Component::ParentDir => {
-                if parts.pop().is_none() {
-                    return false;
-                }
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
             }
-            Component::RootDir | Component::Prefix(_) => return false,
+            name => parts.push(name),
         }
     }
-    true
+    Some(parts.join("/"))
+}
+
+/// The text of a string literal token as Rust reads it: `"…"` with its escapes, or a raw string
+/// `r"…"` / `r#"…"#`. `None` for any other literal or an escape this does not know.
+fn decode(literal: &str) -> Option<String> {
+    if let Some(raw) = literal.strip_prefix('r') {
+        let hashes = raw.len() - raw.trim_start_matches('#').len();
+        let body = raw.get(hashes..raw.len().checked_sub(hashes)?)?;
+        return body.strip_prefix('"')?.strip_suffix('"').map(str::to_owned);
+    }
+    let body = literal.strip_prefix('"')?.strip_suffix('"')?;
+    let mut out = String::new();
+    let mut chars = body.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next()? {
+            'n' => out.push('\n'),
+            'r' => out.push('\r'),
+            't' => out.push('\t'),
+            '0' => out.push('\0'),
+            '\\' => out.push('\\'),
+            '\'' => out.push('\''),
+            '"' => out.push('"'),
+            'x' => {
+                let code =
+                    u8::from_str_radix(&chars.by_ref().take(2).collect::<String>(), 16).ok()?;
+                out.push(char::from(code).is_ascii().then_some(char::from(code))?);
+            }
+            'u' => {
+                if chars.next()? != '{' {
+                    return None;
+                }
+                let digits: String = chars.by_ref().take_while(|c| *c != '}').collect();
+                out.push(char::from_u32(
+                    u32::from_str_radix(&digits.replace('_', ""), 16).ok()?,
+                )?);
+            }
+            '\n' => {
+                // A line continuation: the newline and the whitespace after it are skipped.
+                let rest: String = chars.collect();
+                out.push_str(&decode(&format!("\"{}\"", rest.trim_start()))?);
+                return Some(out);
+            }
+            _ => return None,
+        }
+    }
+    Some(out)
 }
 
 /// Whether the token at `at` sits inside an attribute's brackets, `#[…]` or `#![…]`.
@@ -110,53 +168,87 @@ fn in_attribute(list: &[Token<'_>], at: usize) -> bool {
     false
 }
 
-/// The first `#[path = "…"]` or `include!(…)` in `text` that leaves the folder, given the file's
-/// folder relative to the mod's.
-fn escape(text: &str, folder: &[String]) -> Option<String> {
+/// Every file `text` brings in with `#[path = "…"]` or `include!(…)` (any delimiter), each as a
+/// path relative to the mod's folder, given the file's folder. `Err` names the first one that
+/// leaves the folder or that the scan cannot read: a computed or undecodable path, or a
+/// `#[path]` inside braces (an inline module, whose files nest by its name).
+fn references(text: &str, folder: &[String]) -> Result<Vec<String>, String> {
     let list: Vec<Token<'_>> = tokens(text).map(|(t, _)| t).collect();
-    let literal = |at: usize| match list.get(at) {
-        Some(Token::Literal(text))
-            if text.starts_with('"') && text.ends_with('"') && text.len() >= 2 =>
-        {
-            Some(&text[1..text.len() - 1])
-        }
-        _ => None,
+    let mut found = Vec::new();
+    let mut depth = 0usize;
+    let resolve = |at: usize, found: &mut Vec<String>| match list.get(at) {
+        Some(Token::Literal(literal)) => match decode(literal) {
+            Some(target) => match inside(folder, &target) {
+                Some(path) => {
+                    found.push(path);
+                    Ok(())
+                }
+                None => Err(target),
+            },
+            None => Err(format!("{literal}, a path the scan cannot read")),
+        },
+        _ => Err("a path the scan cannot read".to_owned()),
     };
     for at in 0..list.len() {
         match list[at] {
+            Token::Punct(b'{') => depth += 1,
+            Token::Punct(b'}') => depth = depth.saturating_sub(1),
             // `path = "…"` anywhere inside an attribute, `cfg_attr(…, path = …)` included.
             Token::Ident("path")
                 if list.get(at + 1) == Some(&Token::Punct(b'='))
                     && list.get(at + 2) != Some(&Token::Punct(b'='))
                     && in_attribute(&list, at) =>
             {
-                match literal(at + 2) {
-                    Some(target) if inside(folder, target) => {}
-                    Some(target) => return Some(target.to_owned()),
-                    None => return Some("a path the scan cannot read".to_owned()),
+                if depth > 0 {
+                    return Err("a #[path] inside braces".to_owned());
                 }
+                resolve(at + 2, &mut found)?;
             }
-            Token::Ident("include")
-                if list.get(at + 1) == Some(&Token::Punct(b'!'))
-                    && list.get(at + 2) == Some(&Token::Punct(b'(')) =>
-            {
-                match (literal(at + 3), list.get(at + 4)) {
-                    (Some(target), Some(Token::Punct(b')'))) if inside(folder, target) => {}
-                    (Some(target), Some(Token::Punct(b')'))) => return Some(target.to_owned()),
-                    _ => return Some("a computed path".to_owned()),
+            Token::Ident("include") if list.get(at + 1) == Some(&Token::Punct(b'!')) => {
+                let close = match list.get(at + 2) {
+                    Some(Token::Punct(b'(')) => b')',
+                    Some(Token::Punct(b'[')) => b']',
+                    Some(Token::Punct(b'{')) => b'}',
+                    _ => continue,
+                };
+                if list.get(at + 4) != Some(&Token::Punct(close)) {
+                    return Err("a computed path".to_owned());
                 }
+                resolve(at + 3, &mut found)?;
             }
             _ => {}
         }
     }
-    None
+    Ok(found)
+}
+
+/// Reads at most `most` bytes of `path`, refusing a larger file by its size.
+fn read_bounded(path: &Path, shown: &str, most: u64) -> Result<String, ReadError> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .and_then(|file| file.take(most + 1).read_to_end(&mut bytes))
+        .map_err(io(path))?;
+    if bytes.len() as u64 > most {
+        return Err(ReadError::TooLarge {
+            what: shown.to_owned(),
+            size: bytes.len() as u64,
+            most,
+        });
+    }
+    String::from_utf8(bytes).map_err(|e| ReadError::Io {
+        path: path.to_path_buf(),
+        error: e.to_string(),
+    })
 }
 
 /// Reads `dir`: every `.rs` file outside the mod's `target/` and hidden folders, and
-/// `horizon-mod.toml` when there is one.
+/// `horizon-mod.toml` when there is one. A mod made for exactly one build is refused
+/// ([`ReadError::Exact`]), and so is a `#[path]` or `include!` of a file the scan does not read.
 pub fn read(dir: &Path) -> Result<ModInput, ReadError> {
     let mut input = ModInput::default();
     let mut total = 0u64;
+    let mut brought: Vec<(String, String)> = Vec::new();
     let mut pending = vec![dir.to_path_buf()];
     while let Some(folder) = pending.pop() {
         for entry in std::fs::read_dir(&folder).map_err(io(&folder))? {
@@ -174,7 +266,6 @@ pub fn read(dir: &Path) -> Result<ModInput, ReadError> {
                     pending.push(path);
                 }
             } else if kind.is_file() && name.ends_with(".rs") {
-                let size = entry.metadata().map_err(io(&path))?.len();
                 let relative: Vec<String> = path
                     .strip_prefix(dir)
                     .unwrap_or(&path)
@@ -182,14 +273,8 @@ pub fn read(dir: &Path) -> Result<ModInput, ReadError> {
                     .map(|c| c.as_os_str().to_string_lossy().into_owned())
                     .collect();
                 let shown = relative.join("/");
-                if size > MAX_SOURCE_BYTES {
-                    return Err(ReadError::TooLarge {
-                        what: shown,
-                        size,
-                        most: MAX_SOURCE_BYTES,
-                    });
-                }
-                total += size;
+                let text = read_bounded(&path, &shown, MAX_SOURCE_BYTES)?;
+                total += text.len() as u64;
                 if total > MAX_TOTAL_BYTES || input.sources.len() >= MAX_FILES {
                     return Err(ReadError::TooLarge {
                         what: format!("the mod's source ({} files)", input.sources.len() + 1),
@@ -197,21 +282,32 @@ pub fn read(dir: &Path) -> Result<ModInput, ReadError> {
                         most: MAX_TOTAL_BYTES,
                     });
                 }
-                let text = std::fs::read_to_string(&path).map_err(io(&path))?;
-                if let Some(target) = escape(&text, &relative[..relative.len() - 1]) {
-                    return Err(ReadError::Escapes {
-                        file: shown,
-                        target,
-                    });
+                match references(&text, &relative[..relative.len() - 1]) {
+                    Ok(paths) => brought.extend(paths.into_iter().map(|p| (shown.clone(), p))),
+                    Err(target) => {
+                        return Err(ReadError::Escapes {
+                            file: shown,
+                            target,
+                        });
+                    }
                 }
                 input.sources.push((shown, text));
             }
         }
     }
     input.sources.sort();
+    for (file, target) in brought {
+        if input
+            .sources
+            .binary_search_by(|(path, _)| path.as_str().cmp(&target))
+            .is_err()
+        {
+            return Err(ReadError::NotScanned { file, target });
+        }
+    }
     let manifest = dir.join("horizon-mod.toml");
     if manifest.is_file() {
-        let text = std::fs::read_to_string(&manifest).map_err(io(&manifest))?;
+        let text = read_bounded(&manifest, "horizon-mod.toml", MAX_MANIFEST_BYTES)?;
         let value: toml::Table =
             toml::from_str(&text).map_err(|e| ReadError::Manifest(e.to_string()))?;
         if let Some(capabilities) = value.get("capabilities").and_then(toml::Value::as_array) {
@@ -237,9 +333,9 @@ pub fn read(dir: &Path) -> Result<ModInput, ReadError> {
             .and_then(toml::Value::as_array)
             .is_some_and(|rows| !rows.is_empty());
         if let Some(table) = native_tables.first() {
-            input.exact = Some(format!("it has a [native.{table}] table"));
+            return Err(ReadError::Exact(format!("it has a [native.{table}] table")));
         } else if internals {
-            input.exact = Some("it names game internals".to_owned());
+            return Err(ReadError::Exact("it names game internals".to_owned()));
         }
     }
     Ok(input)
@@ -287,11 +383,10 @@ mod tests {
             ]
         );
         assert_eq!(input.manifest_names, ["registries"]);
-        assert_eq!(input.exact, None);
     }
 
     #[test]
-    fn a_native_table_or_internals_make_the_mod_exact() {
+    fn a_mod_tied_to_one_build_gets_no_table() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
@@ -299,8 +394,8 @@ mod tests {
             "capabilities = []\n[native]\ngame = \"26.3\"\n[[native.mixin]]\nid = \"x\"\n",
         );
         assert_eq!(
-            read(dir.path()).unwrap().exact.as_deref(),
-            Some("it has a [native.mixin] table")
+            read(dir.path()).unwrap_err().to_string(),
+            "this mod is tied to one build (it has a [native.mixin] table); fit checks do not apply"
         );
         write(
             dir.path(),
@@ -308,9 +403,34 @@ mod tests {
             "capabilities = []\n[[internals]]\npath = \"x\"\n",
         );
         assert_eq!(
-            read(dir.path()).unwrap().exact.as_deref(),
-            Some("it names game internals")
+            read(dir.path()).unwrap_err(),
+            ReadError::Exact("it names game internals".into())
         );
+    }
+
+    #[test]
+    fn the_manifest_and_each_source_are_read_with_a_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let big = format!(
+            "capabilities = []\n# {}\n",
+            "x".repeat(MAX_MANIFEST_BYTES as usize)
+        );
+        write(root, "horizon-mod.toml", &big);
+        assert!(matches!(
+            read(root).unwrap_err(),
+            ReadError::TooLarge { what, most: MAX_MANIFEST_BYTES, .. } if what == "horizon-mod.toml"
+        ));
+        write(root, "horizon-mod.toml", "capabilities = []\n");
+        write(
+            root,
+            "src/lib.rs",
+            &"/".repeat(MAX_SOURCE_BYTES as usize + 1),
+        );
+        assert!(matches!(
+            read(root).unwrap_err(),
+            ReadError::TooLarge { what, most: MAX_SOURCE_BYTES, .. } if what == "src/lib.rs"
+        ));
     }
 
     #[test]
@@ -327,17 +447,57 @@ mod tests {
     fn source_from_outside_the_folder_cannot_be_judged() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        // Inside the folder: fine.
+        // Inside the folder and scanned: fine, with any delimiter and a decoded or raw literal.
+        write(root, "src/gen/x.rs", "");
+        write(root, "src/y.rs", "");
         write(
             root,
             "src/lib.rs",
-            "#[path = \"gen/x.rs\"] mod x;\ninclude!(\"../src/y.rs\");\n// #[path = \"/etc\"]",
+            "#[path = \"gen/x.rs\"] mod x;\ninclude!(\"../src/y.rs\");\ninclude! { r#\"y.rs\"# }\ninclude![\"\\x79.rs\"];\n// #[path = \"/etc\"]",
         );
         assert!(read(root).is_ok());
         let escapes = |text: &str| {
             write(root, "src/lib.rs", text);
             read(root).unwrap_err()
         };
+        // Escapes decoded before the check, with every delimiter.
+        for text in [
+            "include!(\"./\\x2e\\x2e/\\x2e\\x2e/shared.rs\");",
+            "include!(\"\\u{2e}\\u{2e}/../shared.rs\");",
+            "include! { \"../../shared.rs\" }",
+            "include![\"../../shared.rs\"];",
+            "#[path = r\"../../shared.rs\"] mod x;",
+        ] {
+            assert!(matches!(escapes(text), ReadError::Escapes { .. }), "{text}");
+        }
+        // An escape the scan cannot decode cannot be judged.
+        assert!(matches!(
+            escapes("include!(\"\\q.rs\");"),
+            ReadError::Escapes { .. }
+        ));
+        // A file of the folder the scan does not read cannot be judged.
+        write(root, "src/part.inc", "");
+        write(root, "target/gen.rs", "");
+        write(root, ".hidden/gen.rs", "");
+        for (text, target) in [
+            ("include!(\"part.inc\");", "src/part.inc"),
+            ("include!(\"../target/gen.rs\");", "target/gen.rs"),
+            ("#[path = \"../.hidden/gen.rs\"] mod gen;", ".hidden/gen.rs"),
+            ("include!(\"missing.rs\");", "src/missing.rs"),
+        ] {
+            assert_eq!(
+                escapes(text),
+                ReadError::NotScanned {
+                    file: "src/lib.rs".into(),
+                    target: target.into()
+                }
+            );
+        }
+        // A `#[path]` inside an inline module nests by its name: not judged.
+        assert!(matches!(
+            escapes("mod outer { #[path = \"y.rs\"] mod inner; }"),
+            ReadError::Escapes { .. }
+        ));
         assert_eq!(
             escapes("#[path = \"../../other/x.rs\"] mod x;"),
             ReadError::Escapes {
