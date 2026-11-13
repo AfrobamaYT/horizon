@@ -468,7 +468,7 @@ mod swap_hands_tests {
                         }
                         _ => None,
                     })
-                    .last()
+                    .next_back()
                     .expect("the client was sent its inventory")
             };
             let hub = &mut game.lan.as_mut().unwrap().hub;
