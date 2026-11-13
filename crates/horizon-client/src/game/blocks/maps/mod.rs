@@ -1373,8 +1373,8 @@ impl Game<'_> {
         self.tick_mob_compasses();
     }
     /// `EntityEquipment.tick` -> `CompassItem.inventoryTick` for mobs: a
-    /// compass a mob holds in its main hand or wears loses its target when
-    /// the lodestone is gone. (A mob keeps no components for its off hand.)
+    /// compass in any of a mob's equipment slots loses its target when
+    /// the lodestone is gone.
     fn tick_mob_compasses(&mut self) {
         use horizon_items::equipment;
         const TRACKER: &str = "minecraft:lodestone_tracker";
@@ -1386,13 +1386,7 @@ impl Game<'_> {
         };
         let mut gone: Vec<(usize, usize)> = Vec::new();
         for (i, m) in self.mobs.iter().enumerate() {
-            for slot in [
-                equipment::MAINHAND,
-                equipment::HEAD,
-                equipment::CHEST,
-                equipment::LEGS,
-                equipment::FEET,
-            ] {
+            for slot in 0..equipment::SLOT_NAMES.len() {
                 if gone_in(m.extra.slot_stack(slot)) {
                     gone.push((i, slot));
                 }
