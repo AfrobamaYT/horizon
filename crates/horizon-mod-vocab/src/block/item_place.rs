@@ -252,17 +252,13 @@ impl Drop for ItemPlace {
             }
             _ => return,
         };
-        loop {
-            match &mut *current {
-                Self::Strict(inner)
-                | Self::OneByOne(inner)
-                | Self::InfiniteMaterials { inner, .. }
-                | Self::Nested { parent: inner, .. } => {
-                    let next = std::mem::replace(inner, Box::new(Self::Scratch(0)));
-                    current = next;
-                }
-                _ => break,
-            }
+        while let Self::Strict(inner)
+        | Self::OneByOne(inner)
+        | Self::InfiniteMaterials { inner, .. }
+        | Self::Nested { parent: inner, .. } = &mut *current
+        {
+            let next = std::mem::replace(inner, Box::new(Self::Scratch(0)));
+            current = next;
         }
     }
 }
