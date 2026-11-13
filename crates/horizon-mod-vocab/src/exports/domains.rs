@@ -41,11 +41,11 @@ pub use entity::types::{
     RemovalReason, ServerPlayer, TextAlignment, Transformation, UnspawnedMobRef,
 };
 pub use item::types::{
-    ArmorHurt, ArrowPickup, ClientMiningPrediction, Dispensed, EnchantmentInfo, EnchantmentKey,
-    EquipmentSlotGroup, InteractionAttempt, InteractionKey, InteractionResult,
-    ItemAttributeModifier, ItemAttributeModifiers, ItemClick, ItemCooldown, ItemDisplayContext,
-    ItemDrop, ItemEnchantments, ItemFished, ItemKey, LootDrops, MenuKey, ModelError, ModelRef,
-    ScopedActionResult, StatType, ToolAbility, ToolUse, UsePhase,
+    ArmorHurt, ArrowPickup, ClientMiningPrediction, ContainerLootFilled, Dispensed,
+    EnchantmentInfo, EnchantmentKey, EquipmentSlotGroup, InteractionAttempt, InteractionKey,
+    InteractionResult, ItemAttributeModifier, ItemAttributeModifiers, ItemClick, ItemCooldown,
+    ItemDisplayContext, ItemDrop, ItemEnchantments, ItemFished, ItemKey, LootDrops, MenuKey,
+    ModelError, ModelRef, ScopedActionResult, StatType, ToolAbility, ToolUse, UsePhase,
 };
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use runtime::TEST_MODS;
