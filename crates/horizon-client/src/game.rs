@@ -216,13 +216,6 @@ use {
     },
 };
 
-/// The time a frame spends uploading chunk meshes when the player set no
-/// Chunk Updates or Upload Budget: a burst past it waits for the next frames.
-const AUTO_UPLOAD_TIME: Duration = Duration::from_millis(2);
-/// `AUTO_UPLOAD_TIME` while the view's terrain is still arriving (a world's
-/// open, a teleport): the meshes waiting then are the view itself, not edits
-/// to it, so a frame gives them more of its time to fill the view sooner.
-const AUTO_UPLOAD_TIME_ARRIVING: Duration = Duration::from_millis(6);
 /// A frame's finished meshes up to this many upload at once, unqueued.
 const AUTO_UPLOADS_AT_ONCE: usize = 8;
 /// The most changed columns far terrain waits on behind a mod's hold (`Game::lod_held`): past
@@ -1680,13 +1673,13 @@ struct Game<'a> {
     died: horizon_client::fast_hash::FxHashSet<u32>,
     /// Client-ticked block-entity animation state (`game/blocks/block_entity_anims.rs`).
     be_anims: horizon_client::block_entity_anim::BlockEntityAnims,
-    /// Item being used (eaten): hotbar slot and ticks used, and `useItem`, the stack in use.
+    /// Item being used (eaten): hotbar slot and ticks used.
     using: Option<(usize, u32)>,
-    use_item: Option<ItemStack>,
     /// `getUseDuration` at the use's start, as a mod left it (`game/items/item_use.rs`).
     use_duration: i32,
-    /// A mod's `Start` or `Tick` set that use's ticks left (`game/items/item_use.rs`).
-    use_ticks_set: bool,
+    /// What that use began with (`useItem`) and whether a mod set its ticks left
+    /// (`game/items/item_use.rs`).
+    use_start: using_item::UseStart,
     /// The crossbow charge's start and middle loading sounds played (`game/items/crossbow.rs`):
     /// each charge plays each once, however far a mod's tick moved the charge at a time.
     crossbow_sounds: [bool; 2],
@@ -2052,6 +2045,7 @@ struct Game<'a> {
     native_mod_screen: Option<String>,
     /// Meshed sections waiting for an upload budget (Horizon settings).
     pending_uploads: Vec<((i32, i32, i32), horizon_client::mesher::SectionMesh)>,
+    upload_pace: upload_pace::UploadPace,
     /// This frame's view frustum, for culling entities and block entities.
     view_frustum: Option<horizon_client::gfx::JoinedFrusta>,
     /// Whether the renderer's section-occlusion graph is active for this view.
@@ -6056,7 +6050,7 @@ impl Game<'_> {
             self.lan_synced_since(from);
             horizon_client::spans::time("tick_lecterns", || self.tick_lecterns());
             horizon_client::spans::time("tick_maps", || self.tick_maps());
-            self.tick_lodestone_compasses();
+            self.tick_equipment_compasses();
             horizon_client::spans::time("tick_bolts", || self.tick_bolts());
             horizon_client::spans::time("tick_fishing", || self.tick_fishing());
             self.ordered_before(ordered_tick::Batch::Tridents)?;
@@ -7491,7 +7485,7 @@ impl Game<'_> {
             .as_ref()
             .map(|s| (s.selected.map_or(-1, |i| i as i32), s.stone.clone()));
         let crafter_data = match self.container_kind() {
-            Some(BlockEntity::Crafter(c)) => Some((c.disabled, c.triggered)),
+            Some(BlockEntity::Crafter(c)) => Some((c.disabled, c.is_triggered())),
             _ => None,
         };
         // The merchant's session, lent to the menu for this click.
@@ -13028,6 +13022,7 @@ impl Game<'_> {
         self.streaming
             .extra
             .extend(waiting.into_iter().map(|chunk| (chunk, 0)));
+        self.streaming.upload_backlog = self.pending_uploads.len();
         let plan = horizon_client::spans::time("streaming_plan", || {
             let mut step = self.streaming.begin_plan_update(&mut self.world);
             loop {
@@ -13063,11 +13058,13 @@ impl Game<'_> {
         {
             log::warn!("Horizon: failed to save unloaded chunks: {e}");
         }
-        self.spawn_fresh_chunks();
+        horizon_client::spans::time("spawn_fresh_chunks", || self.spawn_fresh_chunks());
         self.ask_loaded_light_emission();
         // Vanilla saves the chunk before its unload hook and drops its block entities afterwards.
-        self.native_chunks_loaded();
-        self.native_chunks_unloaded(&unloaded);
+        horizon_client::spans::time("mods_chunks_changed", || {
+            self.native_chunks_loaded();
+            self.native_chunks_unloaded(&unloaded);
+        });
         for chunk in &unloaded {
             self.world.modified.unloaded(&(chunk.x, chunk.z));
         }
@@ -13207,19 +13204,15 @@ impl Game<'_> {
                     (0, 0)
                 };
                 let (mut count, mut bytes) = (0, 0u64);
-                // Without the player's budgets, uploads stop once they took
-                // AUTO_UPLOAD_TIME of this frame (at least one goes): a burst of
-                // finished meshes spreads over frames, nearest first.
-                let auto = !budgeted;
-                let auto_time = if arriving {
-                    AUTO_UPLOAD_TIME_ARRIVING
-                } else {
-                    AUTO_UPLOAD_TIME
-                };
+                // Without the player's budgets, uploads stop once they took this
+                // frame's share (`UploadPace::budget`: a quarter of the recent frame
+                // time, more with a backlog, at most 2 ms; at least one goes): a burst
+                // of finished meshes spreads over frames, nearest first.
+                let auto = (!budgeted).then(|| self.upload_pace.budget(pending.len(), arriving));
                 let started = Instant::now();
                 let upload_span = horizon_client::spans::guard("upload_queue");
                 while let Some((_, mesh)) = pending.last() {
-                    if auto && count > 0 && started.elapsed() >= auto_time {
+                    if auto.is_some_and(|time| count > 0 && started.elapsed() >= time) {
                         break;
                     }
                     let size = ((mesh.solid.len() + mesh.translucent.len())
@@ -13618,9 +13611,8 @@ impl<'a> Game<'a> {
                 anims
             },
             using: None,
-            use_item: None,
             use_duration: 0,
-            use_ticks_set: false,
+            use_start: Default::default(),
             crossbow_sounds: [false; 2],
             view: Default::default(),
             limiter: horizon_client::window::FramerateLimiter::new(0),
@@ -13827,6 +13819,7 @@ impl<'a> Game<'a> {
             async_particle_culler: RefCell::new(Default::default()),
             pack_shadow_casters: (false, false),
             pending_uploads: Vec::new(),
+            upload_pace: Default::default(),
             frame_graph: Default::default(),
             extras: Default::default(),
             pvp: Default::default(),
@@ -14094,7 +14087,11 @@ impl GameCpuResources {
                 minecarts::CartModels::load(document)
             });
             let creative_screen = named_scope(scope, "game_cpu.creative", move || {
-                Creative::load(root).map_err(|error| error.to_string())
+                let mut creative = Creative::load(root).map_err(|error| error.to_string())?;
+                let tab_modifiers =
+                    horizon_client::polytone_creative_tabs::TabModifier::read_all(root);
+                creative.set_pack_modifiers(tab_modifiers);
+                Ok::<_, String>(creative)
             });
             (
                 painting_variants

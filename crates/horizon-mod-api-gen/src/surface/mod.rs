@@ -3,6 +3,7 @@
 //! sides and "Not on wasm" from the wire index; everything else from a walk of the public items
 //! of `horizon-mod-api` and the vocabulary it re-exports.
 mod expand;
+pub mod notes;
 mod rust;
 #[cfg(test)]
 mod tests;
@@ -555,6 +556,9 @@ struct Pending {
     doc: String,
     paths: Vec<String>,
     impls: Vec<String>,
+    /// The API items its impls' trait paths name (`From<Input>` names `Input`): found through the
+    /// type, so they get records, but outside its contract and hash.
+    impl_refs: Vec<String>,
     fields_hash: Option<String>,
     contract: TypeContract,
     fields: Vec<Field>,
@@ -658,6 +662,7 @@ pub(crate) fn build(
                 let mut record = type_record(&mut writer, id, &path, &item, impls, &forms);
                 record.paths = paths;
                 named.extend(record.contract.refs.iter().cloned());
+                named.extend(record.impl_refs.iter().cloned());
                 for field in &record.fields {
                     named.extend(field.contract.refs.iter().cloned());
                 }
@@ -1083,6 +1088,7 @@ fn type_record(
     };
     // Derived and hand-written alike, by trait; `Wire` is `wire_form`'s.
     let mut impls: BTreeSet<String> = derives.iter().filter(|d| *d != "Wire").cloned().collect();
+    let mut impl_refs = Vec::new();
     for (impl_module, impl_params, trait_path) in trait_impls {
         // How a type crosses is `wire_form`'s.
         if trait_path
@@ -1092,8 +1098,9 @@ fn type_record(
         {
             continue;
         }
-        let (written, _) = writer.path(*impl_module, impl_params, trait_path);
+        let (written, refs) = writer.path(*impl_module, impl_params, trait_path);
         impls.insert(written);
+        merge(&mut impl_refs, refs);
     }
     let form = wire_forms::form_of(item_id, &attrs, &derives, forms);
     let wire_form = form.map(|form| {
@@ -1108,6 +1115,7 @@ fn type_record(
         doc: doc(&attrs),
         paths: Vec::new(),
         impls: impls.into_iter().collect(),
+        impl_refs,
         fields_hash: matches!(
             kind,
             TypeKind::Struct | TypeKind::TupleStruct | TypeKind::UnitStruct | TypeKind::Union

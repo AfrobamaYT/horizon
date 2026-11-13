@@ -2146,8 +2146,8 @@ impl Game<'_> {
         } else {
             (left, forward)
         };
-        let r = f64::from(self.yaw * 0.017_453_292);
-        let (s, co) = (f64::from(trig::sin(r)), f64::from(trig::cos(r)));
+        let r = self.yaw.to_radians();
+        let (s, co) = (f64::from(r.sin()), f64::from(r.cos()));
         let intent = [left * co - forward * s, forward * co + left * s];
         let id = self.carts[i].id;
         let result = self.with_entity_held_out(id, |game| {

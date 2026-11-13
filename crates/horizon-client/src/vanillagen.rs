@@ -310,7 +310,8 @@ impl VanillaTerrain {
         structures: bool,
     ) -> crate::Result<Self> {
         let data: Arc<GeneratorData> = shared_resource_data(resources, overrides)?;
-        let generator = OverworldGenerator::for_mod(data, seed, stem, generator, structures)?;
+        let generator =
+            OverworldGenerator::for_mod(data, seed, dimension, stem, generator, structures)?;
         let mut terrain =
             Self::assemble(resources, generator, seed, "minecraft:normal", dimension)?;
         terrain.mod_terrain = true;

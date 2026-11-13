@@ -960,3 +960,21 @@ fn a_listed_boundary_trait_an_older_tree_lacks_is_a_note() {
         export.notes
     );
 }
+
+#[test]
+fn a_hidden_type_named_only_by_an_impl_gets_its_record() {
+    let secret = |edits: &[(&str, &str, &str)]| {
+        export_fixture(edits, HOOKS)
+            .surface
+            .types
+            .iter()
+            .find(|t| t.id.ends_with("Secret"))
+            .map(|t| t.id.clone())
+    };
+    assert_eq!(secret(&[]), None);
+    let from = "impl From<internal::Secret> for Point {\n    fn from(_: internal::Secret) -> Self {\n        Self { x: 0, y: 0 }\n    }\n}\n/// A colour.";
+    assert_eq!(
+        secret(&[(LIB, "/// A colour.", from)]).as_deref(),
+        Some("type:internal::Secret")
+    );
+}
