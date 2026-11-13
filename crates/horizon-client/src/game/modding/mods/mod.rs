@@ -1192,24 +1192,32 @@ fn register_mob_effects(mods: &[horizon_client::mod_content::ContentMod]) {
     }
 }
 
-/// the mods' thrown entity types, as their mob effects: set once, from the
+/// the mods' entity types' templates, which the tracker reads their settings
+/// from, and their thrown types, as their mob effects: set once, from the
 /// startup root. Living types are mobs, loaded with vanilla's from the
 /// content root's `entity-types.json`.
 fn register_entity_types(mods: &[horizon_client::mod_content::ContentMod]) {
-    use horizon_client::projectiles;
+    use horizon_client::{lan::tracking, projectiles};
     let mut types = horizon_client::mod_content::entity_types(mods);
+    let templates = types.iter().map(|t| (t.id.clone(), t.template.clone()));
+    let templates_set = tracking::register_templates(templates);
+    let templates_changed = !templates_set
+        && tracking::templates()
+            .iter()
+            .copied()
+            .ne(types.iter().map(|t| (t.id.as_str(), t.template.as_str())));
     types.retain(|t| t.item.is_some());
     let set = projectiles::register_thrown_types(
         types
             .iter()
             .filter_map(|t| Some((t.id.clone(), t.item.clone()?, t.damage))),
     );
-    if !set
+    let thrown_changed = !set
         && projectiles::thrown_types()
             .iter()
             .map(|t| t.id)
-            .ne(types.iter().map(|t| t.id.as_str()))
-    {
+            .ne(types.iter().map(|t| t.id.as_str()));
+    if templates_changed || thrown_changed {
         log::warn!("Horizon: the mods' entity types changed; restart the game to use them");
     }
 }
@@ -1657,9 +1665,12 @@ impl Game<'_> {
 }
 
 /// Mob types loaded from a scratch root whose `entity-types.json` has a
-/// zombie, a villager, and the rows a content root writes for a mod's types
-/// (`mod_content`): `ruby:ghoul` (a zombie with 40 health), `ruby:settler` (a
-/// villager as it is) and `ruby:bolt` (a thrown snowball, not a mob).
+/// zombie, a villager, a wandering trader, a wolf, a cat and a parrot, and the
+/// rows a content root writes for a mod's types (`mod_content`): `ruby:ghoul`
+/// (a zombie with 40 health), `ruby:settler` (a villager as it is),
+/// `ruby:merchant` (a wandering trader), the tameable `ruby:hound`,
+/// `ruby:tabby` and `ruby:macaw` (a wolf, a cat and a parrot) and `ruby:bolt`
+/// (a thrown snowball, not a mob).
 #[cfg(test)]
 pub(super) fn living_mod_types()
 -> std::collections::HashMap<String, std::sync::Arc<horizon_client::mobs::MobType>> {
@@ -1669,14 +1680,26 @@ pub(super) fn living_mod_types()
         r#""width":0.6,"height":1.95,"eye_height":1.62,"category":"misc","fire_immune":false"#;
     let trader =
         r#""width":0.6,"height":1.95,"eye_height":1.62,"category":"creature","fire_immune":false"#;
+    let wolf =
+        r#""width":0.6,"height":0.85,"eye_height":0.68,"category":"creature","fire_immune":false"#;
+    let cat =
+        r#""width":0.6,"height":0.7,"eye_height":0.35,"category":"creature","fire_immune":false"#;
+    let parrot =
+        r#""width":0.5,"height":0.9,"eye_height":0.54,"category":"creature","fire_immune":false"#;
     let table = format!(
         r#"{{"minecraft:zombie":{{{zombie},"attributes":{{"minecraft:max_health":20.0,"minecraft:movement_speed":0.23000000417232513}}}},
         "minecraft:villager":{{{villager},"attributes":{{"minecraft:max_health":20.0,"minecraft:movement_speed":0.5}}}},
         "minecraft:wandering_trader":{{{trader},"attributes":{{"minecraft:max_health":20.0,"minecraft:movement_speed":0.7}}}},
+        "minecraft:wolf":{{{wolf},"attributes":{{"minecraft:max_health":8.0,"minecraft:movement_speed":0.30000001192092896}}}},
+        "minecraft:cat":{{{cat},"attributes":{{"minecraft:max_health":10.0,"minecraft:movement_speed":0.30000001192092896}}}},
+        "minecraft:parrot":{{{parrot},"attributes":{{"minecraft:max_health":6.0,"minecraft:movement_speed":0.20000000298023224}}}},
         "minecraft:snowball":{{"width":0.25,"height":0.25,"eye_height":0.0,"category":"misc","fire_immune":false}},
         "ruby:ghoul":{{{zombie},"attributes":{{"minecraft:max_health":40.0,"minecraft:movement_speed":0.23000000417232513}},"template":"minecraft:zombie"}},
         "ruby:settler":{{{villager},"attributes":{{"minecraft:max_health":20.0,"minecraft:movement_speed":0.5}},"template":"minecraft:villager"}},
         "ruby:merchant":{{{trader},"attributes":{{"minecraft:max_health":20.0,"minecraft:movement_speed":0.7}},"template":"minecraft:wandering_trader"}},
+        "ruby:hound":{{{wolf},"attributes":{{"minecraft:max_health":8.0,"minecraft:movement_speed":0.30000001192092896}},"template":"minecraft:wolf"}},
+        "ruby:tabby":{{{cat},"attributes":{{"minecraft:max_health":10.0,"minecraft:movement_speed":0.30000001192092896}},"template":"minecraft:cat"}},
+        "ruby:macaw":{{{parrot},"attributes":{{"minecraft:max_health":6.0,"minecraft:movement_speed":0.20000000298023224}},"template":"minecraft:parrot"}},
         "ruby:bolt":{{"width":0.25,"height":0.25,"eye_height":0.0,"category":"misc","fire_immune":false,"template":"minecraft:snowball"}}}}"#
     );
     // A folder per call: tests run in parallel in one process, and each removes its own.
@@ -2013,6 +2036,74 @@ mod tests {
             death_loot_table(&zombie, true).as_deref(),
             Some("minecraft:entities/zombie")
         );
+    }
+
+    /// A content mod's tameable type (#4031) is its template's mob: a wolf, a
+    /// cat or a parrot, tamed and sitting, saves its owner, sitting and its
+    /// template's own field (a collar's colour, a parrot's variant) under its
+    /// own id and loads back as itself with all of them.
+    #[test]
+    fn a_mod_tameable_type_saves_and_loads_its_owner() {
+        use horizon_client::mobs::{Mob, Species};
+        use horizon_core::geometry::Vec3;
+        let types = living_mod_types();
+        let owner = [1, 2, 3, 4];
+        use horizon_core::nbt::Tag;
+        for (id, species, own) in [
+            ("ruby:hound", Species::Wolf, ("CollarColor", Tag::Byte(14))),
+            ("ruby:tabby", Species::Cat, ("CollarColor", Tag::Byte(3))),
+            ("ruby:macaw", Species::Parrot, ("Variant", Tag::Int(2))),
+        ] {
+            let kind = types[id].clone();
+            assert_eq!(kind.species, species, "{id}");
+            let mut pet = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+            pet.extra.tame = true;
+            pet.extra.owner = Some(owner);
+            pet.extra.sitting = true;
+            match species {
+                Species::Parrot => pet.extra.variant = 2,
+                _ => pet.extra.color = if species == Species::Wolf { 14 } else { 3 },
+            }
+            let tag =
+                horizon_client::entity_nbt::mob_to_nbt(&pet, [0, 0, 0, 1], None, None, |_| None);
+            let get = |key: &str| tag.get(key).cloned();
+            assert_eq!(
+                get("id"),
+                Some(horizon_core::nbt::Tag::String(id.into())),
+                "{id}"
+            );
+            assert_eq!(
+                get("Owner"),
+                Some(horizon_core::nbt::Tag::IntArray(owner.to_vec())),
+                "{id}"
+            );
+            assert_eq!(
+                get("Sitting"),
+                Some(horizon_core::nbt::Tag::Byte(1)),
+                "{id}"
+            );
+            assert_eq!(get(own.0), Some(own.1), "{id}");
+            let loaded = horizon_client::entity_nbt::mob_from_nbt(&tag, &types, 2, None)
+                .expect("it loads back");
+            assert_eq!(
+                (
+                    loaded.kind.id.as_str(),
+                    loaded.species(),
+                    loaded.extra.tame,
+                    loaded.extra.owner,
+                    loaded.extra.sitting,
+                    (loaded.extra.color, loaded.extra.variant)
+                ),
+                (
+                    id,
+                    species,
+                    true,
+                    Some(owner),
+                    true,
+                    (pet.extra.color, pet.extra.variant)
+                )
+            );
+        }
     }
 
     /// A mod's declared attribute set (#845, `EntityAttributeCreationEvent`)
