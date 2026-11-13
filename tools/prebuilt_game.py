@@ -242,7 +242,7 @@ def api_route(out: Path, link_args: list[str]) -> list[str]:
         for marker in ("/* MOD_ENTRIES */", "/* MOD_SLOTS */", "/* BUILT_MODS */"):
             template = template.replace(marker, "")
         # The stub takes the API from the game's library, as the launcher's library does at its C link.
-        stub.write_text(f"extern crate {GAME_LIBRARIES[0]} as _;\n{template}")
+        stub.write_text(f"{template}\nextern crate {GAME_LIBRARIES[0]} as _;\n")
         run(["rustc", *common, *install_name, "--crate-type", "dylib", "--crate-name", NATIVE_MODS,
              "-C", f"metadata={NATIVE_MODS_METADATA}", *extern_args(deps, "mod_api"),
              "--extern", f"{GAME_LIBRARIES[0]}={dylib(deps, GAME_LIBRARIES[0])}", "--out-dir", str(folder), str(stub)])
