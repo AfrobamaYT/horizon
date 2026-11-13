@@ -280,8 +280,9 @@ def failure_diagnostics(output):
         abort = next((label for pattern, label in ABORTS if pattern.match(line.strip())), None)
         if abort:
             thread = re.match(r"thread '([^']*)'", line.strip())
-            if thread:
-                abort += f" on {thread_identity(thread[1])}"
+            # The Rust runtime aborts (SIGABRT, signal 6) after each of these messages.
+            abort = f"(signal 6: {abort})" + (f" on {thread_identity(thread[1])}" if thread else
+                                              "; fatal thread unknown, see the last started tests below")
             if abort not in aborts:
                 aborts.append(abort)
         if RESULT.match(line) or SUMMARY.match(line) or TARGET.match(line):
@@ -351,15 +352,20 @@ def failure_diagnostics(output):
             context.append("  panic reason missing from captured output")
             panic_reason_pending = True
     remaining = _active_budget if _active_budget is not None else [FAILURE_TOTAL_BYTES]
+    # What killed the process comes first: a test that libtest reported FAILED ran to its end, so it is never
+    # the one that took the process down.
+    for abort in aborts:
+        print(f"FATAL: process aborted {abort}")
+    if aborts and failures:
+        print("ordinary failures (the process kept running after them):")
     shown = shortened = missing = withheld = 0
     identities_withheld = locations_withheld = payloads_withheld = reasons_shown = 0
     for name in failures:
         identity = safe_identity(name)
         details = contexts.get(name)
         if details is None:
-            # A crash ends the test without its own panic: say what the runtime aborted on, and
-            # what panicked on threads that are not tests (a server or worker thread).
-            details = [f"  process aborted: {abort}" for abort in aborts]
+            # No panic of its own: what panicked on threads that are not tests (a server or worker thread).
+            details = []
             for thread, other in contexts.items():
                 if "::" not in thread and thread not in failures:
                     details += ["  on a non-test thread:"] + other
@@ -374,13 +380,12 @@ def failure_diagnostics(output):
         emitted, cut = bounded_record(record, remaining)
         shown += emitted
         shortened += cut
-    if not failures and (aborts or contexts):
-        # The process died without libtest naming a failed test: what the runtime said, and every
-        # thread's panic, unattributed.
-        details = [f"  process aborted: {abort}" for abort in aborts]
+    if not failures and contexts:
+        # No failed test named: every thread's panic, unattributed.
+        details = []
         for thread, other in contexts.items():
             details += [f"  panic on {thread_identity(thread)}:"] + other
-        emitted, cut = bounded_record("  no failed test named; process-level:\n" + "\n".join(details) + "\n", remaining)
+        emitted, cut = bounded_record("  no failed test named; panics seen:\n" + "\n".join(details) + "\n", remaining)
         shortened += cut
     print(f"failure diagnostics: {shown} shown; {len(failures) - shown} failing tests not shown "
           f"(total byte budget {FAILURE_TOTAL_BYTES}); {shortened} records shortened "
@@ -402,13 +407,13 @@ def crash_report(package, output, expected, results):
         if (found := RUNNING_LONG.match(line.strip())) and found[1] not in results and found[1] not in long:
             long.append(found[1])
     if long:
-        print(f"{package}: still running past 60 s when it crashed: "
+        print(f"{package}: last started tests, still running past 60 s when it crashed: "
               + ", ".join(safe_identity(name) for name in long[:CRASH_NAMES]))
     unreported = sorted(set(expected) - set(results))
     if unreported:
         shown = ", ".join(safe_identity(name) for name in unreported[:CRASH_NAMES])
         more = f" (and {len(unreported) - CRASH_NAMES} more)" if len(unreported) > CRASH_NAMES else ""
-        print(f"{package}: {len(unreported)} listed tests never reported: {shown}{more}")
+        print(f"{package}: {len(unreported)} listed tests never reported (started or not yet started): {shown}{more}")
 
 
 def missing_result_framing(output, name):
