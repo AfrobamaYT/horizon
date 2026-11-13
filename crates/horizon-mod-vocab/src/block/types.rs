@@ -87,12 +87,14 @@ impl<'a> ModBlockEntityView<'a> {
     }
 
     /// Begin one tick listener's lazy payload checkpoint.
+    // hidden: the generated listener dispatch brackets each tick listener with this; mods never call it
     #[doc(hidden)]
     pub fn __begin_tick_listener(&mut self) {
         self.tick_listener = true;
     }
 
     /// Accept this listener's edits, or restore the preceding accepted payload.
+    // hidden: the generated listener dispatch brackets each tick listener with this; mods never call it
     #[doc(hidden)]
     pub fn __finish_tick_listener(&mut self, reply: BlockEntityTickReply) {
         self.tick_listener = false;

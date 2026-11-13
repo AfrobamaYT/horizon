@@ -341,6 +341,7 @@ pub struct WaterTicket {
 
 impl WaterTicket {
     /// Construct a handle at the game boundary.
+    // hidden: a game-side constructor; mods receive tickets from `add_water_ticket`
     #[doc(hidden)]
     pub fn new(level: LevelRef, id: u64) -> Self {
         Self { level, id }
@@ -350,6 +351,7 @@ impl WaterTicket {
         self.level
     }
     /// The session-only identity used by the game.
+    // hidden: a game-side helper; mods use the handle's methods
     #[doc(hidden)]
     pub fn id(self) -> u64 {
         self.id

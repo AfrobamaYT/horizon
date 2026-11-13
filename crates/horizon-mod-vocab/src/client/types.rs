@@ -636,6 +636,7 @@ pub enum SoundState {
 }
 
 /// A file-backed standalone model baked on every resource load.
+// exhaustive: mods build every form with a struct literal and the game matches them without a wildcard
 #[derive(Clone, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub enum StandaloneModelForm {
     /// Bake one dependency with the blockstate baker's negative XYZ quarter-turns.
