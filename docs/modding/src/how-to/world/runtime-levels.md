@@ -58,7 +58,7 @@ requesting mod and level id. A failed open rolls back publication and frees the 
 a failed unload leaves the level open for another unload request. Observe `is_open` after
 the queue runs rather than treating the returned result as completion.
 
-An explicitly opened runtime level fires `level_load` while parked: `event.level` names
+An explicitly opened runtime level fires `level_load` while parked: `event.dimension` names
 the opened level, whereas the Host still names the current level.
 
 ## Closing

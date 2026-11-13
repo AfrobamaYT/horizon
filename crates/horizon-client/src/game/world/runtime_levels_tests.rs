@@ -111,9 +111,9 @@ impl Hooks for Opener {
     fn level_load(&self, host: &mut dyn mod_api::ServerHost, event: &mut LevelLoadEvent<'_>) {
         self.loads.lock().unwrap().push(event.dimension.to_owned());
         self.load_contexts.lock().unwrap().push((
-            event.level.dimension_id().to_owned(),
+            event.dimension.to_owned(),
             host.dimension().to_owned(),
-            event.level.in_place(host),
+            host.level(event.dimension).unwrap().in_place(host),
         ));
     }
     fn level_unload(&self, _: &mut dyn mod_api::ServerHost, event: &mut LevelUnloadEvent<'_>) {

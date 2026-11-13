@@ -60,7 +60,7 @@ fn runtime_level_hostcalls_preserve_requests_refusals_and_generations() {
     guest::set_transport(Some(Rc::new(move |id, bytes| {
         let mut out = Writer::new();
         // SAFETY: world and its frame live throughout the synchronous transport.
-        unsafe { boundary::serve(id, &mut cx.borrow_mut(), bytes, &mut out) }.unwrap();
+        unsafe { boundary::serve(id, &mut *cx.borrow_mut(), bytes, &mut out) }.unwrap();
         out.into_bytes()
     })));
     let host = &mut guest::Guest;

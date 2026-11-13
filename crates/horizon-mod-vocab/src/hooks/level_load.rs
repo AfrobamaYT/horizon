@@ -9,7 +9,7 @@ pub trait Hooks {
     /// others open when someone first goes there (a player, a portal, an
     /// `execute in` command), with the level in place. Once for each open:
     /// `level_unload` follows. Explicitly opened runtime levels also fire this while
-    /// parked: `event.level` names the opened level, not the Host's current level.
+    /// parked: `event.dimension` names the opened level, not the Host's current level.
     /// Server-side.
     #[hook(
         side = "server",
