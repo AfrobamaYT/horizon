@@ -154,7 +154,7 @@ fn a_malformed_note_or_surface_is_refused_by_name() {
         err.contains("change note bad.toml has the unknown key `reason`"),
         "{err}"
     );
-    std::fs::write(dir.path().join("new.json"), "{\"schema\": 1, \"hooks\": [").unwrap();
+    std::fs::write(dir.path().join("new.json"), "{\"schema\": 2, \"hooks\": [").unwrap();
     let (code, _, err) = run(dir.path(), &[]);
     assert_eq!(code, 2);
     assert!(

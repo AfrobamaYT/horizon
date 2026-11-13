@@ -99,6 +99,10 @@ def report(tool: str, base: Path, head: Path, work: Path, gate_on: bool) -> tupl
     if gate_on:
         command.append("--gate")
     diff = subprocess.run(command, capture_output=True, text=True)
+    # A base surface of another schema is an unreadable base, like a tree the exporter cannot read.
+    base_schema = f"{work / 'base.json'}: surface schema "
+    if diff.returncode == 2 and base_schema in diff.stderr:
+        return 0, f"No surface report: the head's horizon-stage cannot read the base surface ({last_line(diff.stderr)}).\n"
     text = diff.stdout + diff.stderr
     return (0 if diff.returncode == 0 else 1), text
 

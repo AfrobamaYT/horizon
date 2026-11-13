@@ -952,7 +952,7 @@ fn called(name: &str, bounds: &[&str], methods: &[&str]) -> Trait {
 }
 
 #[test]
-fn a_method_moved_to_a_supertrait_still_holding_is_not_a_break() {
+fn a_method_moved_to_a_supertrait_still_holding_breaks_only_calls_by_trait_path() {
     let old = traits(vec![
         called("Host", &[], &[]),
         called("ServerHost", &["Host"], &["spawn"]),
@@ -962,7 +962,7 @@ fn a_method_moved_to_a_supertrait_still_holding_is_not_a_break() {
         called("ServerHost", &["Host"], &[]),
     ]);
     let d = diff(&old, &moved);
-    assert_eq!(d.verdict, Verdict::Additive, "{}", d.to_text());
+    assert_eq!(d.verdict, Verdict::Conditional, "{}", d.to_text());
     let line = d
         .changes
         .iter()
@@ -970,7 +970,9 @@ fn a_method_moved_to_a_supertrait_still_holding_is_not_a_break() {
         .unwrap();
     assert_eq!(
         line.what,
-        ["moved to the supertrait `Host`: a call through `ServerHost` still compiles"]
+        [
+            "moved to the supertrait `Host`: breaks only calls written by trait path (`ServerHost::spawn(host)`)"
+        ]
     );
     // Without the bound, the calls through `ServerHost` break, whatever other traits require.
     let cut = traits(vec![
@@ -1131,4 +1133,63 @@ fn reordered_variants_of_an_exhaustive_enum_break() {
     let d = diff(&old, &new);
     let (_, _, class, what, _) = only(&d);
     assert_eq!((class, what), (Class::Breaking, vec!["variants reordered"]));
+}
+
+#[test]
+fn a_called_trait_gaining_a_supertrait_that_breaks_dyn_breaks() {
+    let generic = Method::new(
+        "method:Lookup::find",
+        "",
+        MethodContract {
+            signature: "fn find<T: Wire>(&self) -> T".into(),
+            required: true,
+            wasm: true,
+            refs: vec![],
+        },
+    );
+    let mut lookup = called("Lookup", &[], &[]);
+    lookup = Trait::new(
+        "trait:Lookup",
+        "",
+        lookup.contract.clone(),
+        vec![generic],
+        vec![],
+    );
+    let with = |bound: &str| {
+        traits(vec![
+            called("Host", &[bound], &[]),
+            called("Named", &["Send"], &["name"]),
+            called("Copied", &["Clone"], &["name"]),
+            lookup.clone(),
+        ])
+    };
+    let base = traits(vec![
+        called("Host", &[], &[]),
+        called("Named", &["Send"], &["name"]),
+        called("Copied", &["Clone"], &["name"]),
+        lookup.clone(),
+    ]);
+    for (bound, class, line) in [
+        ("Named", Class::Additive, "now also requires `Named`"),
+        ("Debug", Class::Additive, "now also requires `Debug`"),
+        (
+            "Clone",
+            Class::Breaking,
+            "now also requires `Clone`: `dyn Host` stops compiling",
+        ),
+        (
+            "Copied",
+            Class::Breaking,
+            "now also requires `Copied`: `dyn Host` stops compiling",
+        ),
+        (
+            "Lookup",
+            Class::Breaking,
+            "now also requires `Lookup`: `dyn Host` stops compiling",
+        ),
+    ] {
+        let d = diff(&base, &with(bound));
+        let (id, _, c, what, _) = only(&d);
+        assert_eq!((id, c, what), ("trait:Host", class, vec![line]), "{bound}");
+    }
 }

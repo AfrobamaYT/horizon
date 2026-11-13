@@ -78,8 +78,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The schema this crate writes and reads. Adding a field does not change it; removing or
-/// redefining one does.
-pub const SCHEMA: u32 = 1;
+/// redefining one does. 2: `fields_hash` is over the sorted fields, and a hook argument's
+/// references are matched by full path.
+pub const SCHEMA: u32 = 2;
 
 /// The whole document.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,10 +121,7 @@ impl std::fmt::Display for ReadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Json(error) => write!(f, "surface.json is not a valid surface: {error}"),
-            Self::Schema(schema) => write!(
-                f,
-                "surface.json has schema {schema}; this tool reads schema {SCHEMA}"
-            ),
+            Self::Schema(schema) => write!(f, "surface schema {schema}, this tool reads {SCHEMA}"),
             Self::DuplicateId(id) => write!(f, "surface.json lists {id} twice"),
         }
     }
