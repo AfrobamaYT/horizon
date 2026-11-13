@@ -80,6 +80,9 @@ pub(super) struct Level {
     dimension: Option<super::Dim>,
     /// Each block entity as it was before this transaction first wrote it.
     block_entities: HashMap<Pos, Kept>,
+    /// The block entities this transaction removed (`journal_remove_block_entity`): an abort
+    /// puts them back as `block_entities` keeps them.
+    removed_block_entities: std::collections::HashSet<Pos>,
     /// Each item slot (block entity, slot) a slot-only write changed, as it was before this
     /// transaction first wrote it, for a block entity not kept whole in `block_entities`: a
     /// move through a container keeps the slot it touches, not the entity's whole saved data.
@@ -194,6 +197,9 @@ pub(super) enum After {
     /// A mod's validated vanilla packet, bound to its physical protocol incarnation.
     Packet(horizon_client::net::PreparedPacket),
     Cauldron(super::cauldron_interactions::Effects),
+    /// A mod's world pickup or placement of fluid, its block already set: what is left of it
+    /// (`Game::commit_fluid_write`).
+    FluidWrite(Box<super::world_fluids::WrittenFluid>),
     /// `BlockEntity.setChanged`.
     Changed(Pos),
     /// `BlockEntity.setChanged` and `Level.sendBlockUpdated` after its data was loaded.
@@ -385,6 +391,9 @@ impl Game<'_> {
                 for (pos, kept) in level.block_entities {
                     outer.block_entities.entry(pos).or_insert(kept);
                 }
+                outer
+                    .removed_block_entities
+                    .extend(level.removed_block_entities);
                 for (pos, state) in level.blocks {
                     outer.blocks.entry(pos).or_insert(state);
                 }
@@ -442,6 +451,16 @@ impl Game<'_> {
             .block_entities
             .entry(pos)
             .or_insert_with(|| Kept::capture(&self.world, &self.hoppers, pos));
+    }
+    /// Removes the block entity at `pos`, kept whole by the open transaction, which puts it back
+    /// if it aborts: a block write in the transaction that drops it, so later reads in it see
+    /// none. Outside a transaction, it just goes.
+    pub(super) fn journal_remove_block_entity(&mut self, pos: Pos) {
+        self.journal_block_entity(pos);
+        if let Some(level) = self.transactions.last_mut() {
+            level.removed_block_entities.insert(pos);
+        }
+        self.world.block_entities.remove(&pos);
     }
     /// How many block entities the open transactions keep whole, and how many single slots:
     /// what a test reads to tell a slot journal from a whole capture without timing it.
@@ -663,6 +682,7 @@ impl Game<'_> {
             After::Payload(payload) => payload.publish(),
             After::Packet(packet) => packet.publish(),
             After::Cauldron(effects) => self.commit_cauldron_effects(effects),
+            After::FluidWrite(written) => self.commit_fluid_write(*written),
             After::Changed(pos) => self.container_changed(pos),
             After::Updated(pos) => self.block_entity_updated(pos),
             After::NotifyClients(pos) => self.notify_block_clients(pos),
@@ -807,13 +827,21 @@ impl Game<'_> {
         }
 
         for (pos, kept) in level.block_entities {
-            if let (Some(entity), Some(now)) =
-                (kept.entity, self.world.block_entities.get_mut(&pos))
+            let removed = level.removed_block_entities.contains(&pos);
+            match (kept.entity, self.world.block_entities.get_mut(&pos)) {
+                (Some(entity), Some(now)) => *now = entity,
+                // One this transaction removed comes back.
+                (Some(entity), None) if removed => {
+                    self.world.block_entities.insert(pos, entity);
+                }
+                _ => {}
+            }
+            if let Some(generation) = kept.generation
+                && self.world.block_entities.get(&pos).is_some()
             {
-                *now = entity;
                 self.world
                     .block_entities
-                    .restore_generation(pos, kept.generation.unwrap());
+                    .restore_generation(pos, generation);
             }
             self.world
                 .block_entities

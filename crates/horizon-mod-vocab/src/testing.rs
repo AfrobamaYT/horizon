@@ -633,6 +633,33 @@ impl crate::prelude::FluidsEnergyBackendMut for FakeHost {
             .and_then(|standing| standing.energy.as_mut())
             .map_or(0, |energy| energy.extract(amount))
     }
+    /// The source block at `pos` ([`FakeLevel::set_block`]), a bucket of it; the fake plays no
+    /// sound or game event for it.
+    fn level_pickup_fluid(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        _: Option<PlayerRef>,
+        tx: &Transaction,
+    ) -> Option<FluidStack> {
+        if !self.journal.holds(tx) {
+            return None;
+        }
+        let fluid = self.level.take_source(level, pos)?;
+        Some(FluidStack::new(fluid, 1000))
+    }
+    /// A source of `fluid` where nothing is; the fake plays no sound or game event for it.
+    fn level_place_fluid(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        fluid: crate::FluidKey,
+        _: Option<PlayerRef>,
+        _: bool,
+        tx: &Transaction,
+    ) -> bool {
+        self.journal.holds(tx) && self.level.put_source(level, pos, fluid)
+    }
 }
 impl crate::prelude::EntitiesBackendMut for FakeHost {
     fn entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {

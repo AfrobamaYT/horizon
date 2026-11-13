@@ -154,7 +154,10 @@ mod survive_tests;
 mod tests;
 
 pub use bonemeal::{BonemealCheck, TemplateSettings};
-pub use buckets::{BucketContent, fluid_bucket, fluid_empty_sound, fluid_pickup_sound};
+pub use buckets::{
+    BucketContent, Douse, Drain, FluidChange, FluidWrite, PlacedLiquid, fluid_bucket,
+    fluid_empty_sound, fluid_pickup_sound,
+};
 pub use data::{BlockData, ItemBinding, ItemKind, Named, Props, PushReaction, StateFacts, Tags};
 pub use falling::Landing;
 pub use fluids::{
@@ -1433,6 +1436,18 @@ impl Behaviours {
     ) -> bool {
         self.sim(level, ticks)
             .destroy_block(pos, drop, flags::UPDATE_LIMIT)
+    }
+    /// `Block.dropResources(state, level, pos)`: the loot of `state` at `pos`, with what the
+    /// block entity there copies into it, as `destroy_block` drops it (nothing under
+    /// `doTileDrops` false), without touching the block.
+    pub fn drop_resources<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) {
+        self.sim(level, ticks).drop_resources(state, pos);
     }
     /// A player breaking a block (`playerWillDestroy` + `Level.destroyBlock`
     /// without drops; the caller handles the player's loot/tool). Double

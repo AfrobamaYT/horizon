@@ -1,6 +1,6 @@
 //! The level fake: blocks, block entities with the game's storages, and entities.
 use super::FAKE_EPOCH;
-use crate::{BlockEntityTypeKey, FluidStack, ItemStack, LevelRef, WorldEpoch};
+use crate::{BlockEntityTypeKey, FluidKey, FluidStack, ItemStack, LevelRef, WorldEpoch};
 use std::collections::{BTreeMap, HashMap};
 
 // no wire: in-process testing harness state, not a mod boundary payload.
@@ -40,7 +40,10 @@ impl FakeLevel {
     pub fn level(&self) -> LevelRef {
         self.level
     }
-    /// Puts block `name` (`minecraft:stone`) at `pos`.
+    /// Puts block `name` (`minecraft:stone`) at `pos`. A block named after a resolved fluid
+    /// (`minecraft:water`) is that fluid's source, which
+    /// [`LevelRef::pickup_fluid`](crate::LevelRef::pickup_fluid) takes away and
+    /// [`LevelRef::place_fluid`](crate::LevelRef::place_fluid) puts where nothing is.
     pub fn set_block(&mut self, pos: [i32; 3], name: &str) -> &mut Self {
         self.blocks.insert(pos, name.to_owned());
         self
@@ -73,6 +76,26 @@ impl FakeLevel {
             .then(|| self.blocks.get(&pos))
             .flatten()
             .map(String::as_str)
+    }
+    /// The fluid source block at `pos` taken away: its fluid.
+    pub(super) fn take_source(&mut self, level: LevelRef, pos: [i32; 3]) -> Option<FluidKey> {
+        let fluid = crate::content::registry_keys::fluid_key(self.block_at(level, pos)?)?;
+        self.blocks.remove(&pos);
+        Some(fluid)
+    }
+    /// A source of `fluid` put at `pos`, where no block or block entity is: whether it went.
+    pub(super) fn put_source(&mut self, level: LevelRef, pos: [i32; 3], fluid: FluidKey) -> bool {
+        let Some(id) = crate::content::registry_keys::fluid_id(fluid) else {
+            return false;
+        };
+        if level != self.level
+            || self.blocks.contains_key(&pos)
+            || self.block_entities.contains_key(&pos)
+        {
+            return false;
+        }
+        self.blocks.insert(pos, id.to_owned());
+        true
     }
     pub(super) fn standing(&self, level: LevelRef, pos: [i32; 3]) -> Option<&FakeBlockEntity> {
         (level == self.level)
