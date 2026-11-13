@@ -685,7 +685,11 @@ impl Game<'_> {
     pub(super) fn install_parts(&self, prepared: PreparedParts) {
         cauldron_interactions::install(prepared.cauldrons);
         if self.is_logical_server() {
-            native_worldgen_parts::publish(prepared.parts.as_ref(), &prepared.block_states);
+            native_worldgen_parts::publish(
+                prepared.parts.as_ref(),
+                &prepared.block_states,
+                self.pack.assets.registry,
+            );
         }
         api_values::install_block_states(prepared.block_states);
         native_world_read::install_block_tags(prepared.tags);

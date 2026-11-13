@@ -55,6 +55,22 @@ state whose parts are asked. The host is a read-only `LevelSide`.
 | `block_changed` | The global server hook hears a change earlier, right after the state is written, and also for replaced writes. |
 | Panics | A panicking part is contained with a warning. |
 
+## Rotation
+
+`BlockPart::rotate` answers how a structure template turns your block as it places it: world
+generation's structures, `/place template`, the structure block, jigsaw blocks and the host's
+template snapshots. `event.state` is already mirrored, `event.pos` is where it goes and
+`event.rotation` the template's turn. `event.rotated` starts at the game's own turned state; set
+it to another state of the same block, for example
+`context.state_with_property(event.state, "facing", "north")`.
+
+| Rule | Behavior |
+| --- | --- |
+| Context | A worldgen Part method: a `WorldgenHost` on the worldgen workers or the server thread, no `Host`, no writes. Keep it a pure function of the event. |
+| Refusals | A state of another block, or one the game does not have, is refused with a warning; the game's state is placed. |
+| Mirroring | Stays the game's: vanilla's table, or the template's for a mod block. |
+| Panics | A panicking part is contained with a warning, and the game's state is placed. |
+
 ## Landing writes
 
 `BlockPart::fall_on` runs at vanilla's landing moment on a read-only level random host.

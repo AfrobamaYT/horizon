@@ -538,6 +538,8 @@ mod stubs {
     pub(super) struct NeighbourUpdate;
     #[derive(Clone, Copy)]
     pub(super) struct ConnectionKind;
+    #[derive(Clone, Copy)]
+    pub(super) struct StructureRotation;
     pub(super) struct GlobalPos;
     pub(super) struct AttributeModifier;
     #[derive(Clone, Copy)]
