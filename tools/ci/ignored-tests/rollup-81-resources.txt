@@ -1,3 +1,7 @@
 # Stock attached storage integration tests use prepared game resources.
 horizon-client game::attachment_index::attached_storage_tests::attached_items_are_undone_by_an_abort_and_saved_by_their_codec HORIZON_TEST_RESOURCES needs
 horizon-client game::attachment_index::attached_storage_tests::attached_energy_refuses_past_its_capacity HORIZON_TEST_RESOURCES needs
+
+# Nested state-change ordering requires the prepared block behaviour tables.
+horizon-world level::state_change_tests::a_nested_write_is_heard_after_the_updates_it_queued HORIZON_RESOURCES needs
+horizon-world level::state_change_tests::nested_writes_are_heard_in_the_order_they_were_made HORIZON_RESOURCES needs
