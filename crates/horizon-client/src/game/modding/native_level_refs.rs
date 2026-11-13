@@ -526,10 +526,10 @@ impl Game<'_> {
         Some(forced.into_iter().map(|(x, z)| [x, z]).collect())
     }
     /// The block state ID at `pos` (`Level.getBlockState`), without formatting a string.
-    /// None for a chunk that isn't loaded or a `y` outside the world. On a client, the
-    /// state is the one the server sent for a chunk the client holds.
+    /// None for a chunk that isn't loaded or a `y` outside the world. On a client, the state
+    /// the server sent for a column the client holds, of its own level or a viewed one.
     pub(super) fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockStateId> {
-        let world = self.native_level_read_world(level)?;
+        let world = self.native_level_view_world(level)?;
         let [x, y, z] = pos;
         world.is_loaded_at(x, y, z).then(|| world.block(x, y, z))
     }

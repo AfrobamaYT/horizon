@@ -18,6 +18,8 @@ pub(in crate::game) const MAX_COLUMNS: usize = 2048;
 pub(in crate::game) struct ViewedWorld {
     /// The level's key (`minecraft:the_nether`).
     pub(in crate::game) level: String,
+    /// Its key as a mod's `LevelRef` names it.
+    key: mod_api::DimensionKey,
     /// What its chunk packets decode with.
     format: Arc<ChunkFormat>,
     /// The world clock its day time follows: its dimension type's `default_clock`.
@@ -33,6 +35,7 @@ impl ViewedWorld {
         world: World,
     ) -> Self {
         Self {
+            key: mod_api::__private::dimension_key(&level),
             level,
             format,
             default_clock,
@@ -134,6 +137,22 @@ impl ViewedWorlds {
     }
     pub(in crate::game) fn get_mut(&mut self, level: i32) -> Option<&mut ViewedWorld> {
         self.worlds.get_mut(&level)
+    }
+    /// The key of the level named `level`, while the server keeps it open: what `host.level`
+    /// hands a client mod for it.
+    pub(in crate::game) fn key_of(&self, level: &str) -> Option<mod_api::DimensionKey> {
+        self.worlds
+            .values()
+            .find(|w| w.level == level)
+            .map(|w| w.key)
+    }
+    /// The world of the level `key` names, while the server keeps it open: what a client mod's
+    /// reads through its handle read.
+    pub(in crate::game) fn world_of(&self, key: mod_api::DimensionKey) -> Option<&World> {
+        self.worlds
+            .values()
+            .find(|w| w.key == key)
+            .map(|w| &w.world)
     }
     /// The world of `level`, if the server opened it.
     #[cfg(test)]

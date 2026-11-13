@@ -184,15 +184,14 @@ impl Game<'_> {
             .collect()
     }
     /// The level `dimension` (`minecraft:the_nether`) as a handle: on a client,
-    /// the level it shows, whatever the server calls it. None with no world
-    /// open, or for a dimension the server hasn't loaded. API 373.
+    /// the level it shows, whatever the server calls it, or one the server opened
+    /// for viewing (`client_level_key`). None with no world open, or for a
+    /// dimension the server hasn't loaded. API 373.
     pub(super) fn level(&self, dimension: &str) -> Option<LevelRef> {
-        if !self.is_logical_server() {
-            let epoch = self.native_lifecycle.epoch()?;
-            let remote = self.remote.as_ref().filter(|r| r.logged_in)?;
-            return (remote.level == dimension).then(|| LevelRef::new(epoch, remote.level_key));
-        }
         let epoch = self.native_lifecycle.epoch()?;
+        if !self.is_logical_server() {
+            return Some(LevelRef::new(epoch, self.client_level_key(dimension)?));
+        }
         let dim = std::iter::once(self.dim)
             .chain(self.levels.parked_dims())
             .find(|d| d.id() == dimension)?;
@@ -723,8 +722,9 @@ impl Game<'_> {
         })
     }
 
-    /// Clip an empty-context ray against collider or outline shapes, without fluids.
-    /// None on failed reads, dynamic shapes, invalid rays or traversal limits.
+    /// Clip an empty-context ray against collider or outline shapes, without fluids, in the
+    /// world `native_level_view_world` reads. None on failed reads, dynamic shapes, invalid
+    /// rays or traversal limits.
     pub(super) fn level_clip(
         &self,
         level: LevelRef,
@@ -739,7 +739,7 @@ impl Game<'_> {
             collision_context::CollisionContext,
             world_ray::{RayBlockMode, RayFluidMode, clip_world},
         };
-        let world = self.native_level_world(level)?;
+        let world = self.native_level_view_world(level)?;
         let mut rays = super::explosion::ColliderRays {
             scene: SceneCollisions {
                 world,

@@ -33,6 +33,21 @@ vanilla camera. Requests from later render callbacks apply at the next frame's e
 Setting a type never emits `camera_type_cycle`; F5 alone cycles, and its final event choice
 wins over requests made inside the cycle callback.
 
+## Viewed levels
+
+A server can open other levels for a client to view besides the one the player is in (`horizon:levels`,
+as Immersive Portals' `ClientWorldLoader` keeps a `ClientLevel` per dimension). On a client,
+`host.level("minecraft:the_nether")` also returns a handle for each such level while the server keeps it
+open. `block_state`, `clip`, `collision_boxes` and `has_collisions` on that handle read the viewed
+level's own world, never the player's, so a mod can aim a ray or collide a box through a portal. They
+never write and never load a column: a column the client doesn't hold is `None`, for a collision box as
+soon as its walk reaches one. `clip` keeps its traversal limit and `collision_boxes` its cell cap.
+
+The handle is `None` from the server's close of the level, and from a login, respawn or
+reconfiguration, until the server opens that level again. Writes, server-only reads, the other level
+reads and the entity reads (`entities_in`) refuse a viewed level. Native and wasm mods use the same
+handle methods.
+
 ## Crosshair reads
 
 `ClientHost::crosshair_target()` returns the ordinary interaction-range target as

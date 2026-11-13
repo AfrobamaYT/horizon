@@ -2,7 +2,8 @@
 //! `horizon:levels`, as Immersive Portals' `ClientWorldLoader` keeps a `ClientLevel` per
 //! dimension. The server wraps each packet of such a level with it (`PacketRedirection`); here
 //! a `run`'s packets change that level's world and nothing of the player's own: its `World`,
-//! the level mods reach through `host.level`, its renderer and its sounds stay as they are.
+//! its renderer and its sounds stay as they are. A client mod reads a viewed level's blocks
+//! through `host.level` (gap 10, `modding/native_viewed_levels.rs`) and never writes it.
 //!
 //! The client views at most `viewed_levels_net::MAX_LEVELS` levels besides its own, the number
 //! its capability answer gives. A Login, a Respawn or a new configuration phase drops every
@@ -13,7 +14,7 @@ mod worlds;
 pub(in crate::game) use worlds::ViewedWorlds;
 
 #[cfg(test)]
-mod tests {
+pub(in crate::game) mod tests {
     use super::routing::RouteError;
     use crate::game::{Game, game_tests::tests::server_game};
     use horizon_protocol::{
@@ -27,7 +28,7 @@ mod tests {
     const STONE: BlockStateId = BlockStateId(1);
     const AIR: BlockStateId = BlockStateId(0);
 
-    fn spawn(dimension: &str) -> play::SpawnInfo {
+    pub(in crate::game) fn spawn(dimension: &str) -> play::SpawnInfo {
         play::SpawnInfo {
             dimension_type: 0,
             dimension: dimension.into(),
@@ -43,7 +44,9 @@ mod tests {
     }
 
     /// A client of a server whose Login names four levels, the player in the Overworld.
-    fn client(resources: &mut Option<std::sync::Arc<crate::game::Resources>>) -> Game<'_> {
+    pub(in crate::game) fn client(
+        resources: &mut Option<std::sync::Arc<crate::game::Resources>>,
+    ) -> Game<'_> {
         let mut game = server_game(resources);
         game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
         let (pipe, _server) = horizon_protocol::connection::Pipe::pair();
@@ -74,19 +77,28 @@ mod tests {
     }
 
     /// A column of stone at `x, z`, unlit.
-    fn column(x: i32, z: i32) -> C {
-        let section = Section {
-            non_empty: 4096,
+    pub(in crate::game) fn column(x: i32, z: i32) -> C {
+        layered(x, z, 24)
+    }
+
+    /// A column at `x, z` whose lowest `stone` of its 24 sections are stone and the rest air,
+    /// unlit.
+    pub(in crate::game) fn layered(x: i32, z: i32, stone: usize) -> C {
+        let section = |state: BlockStateId| Section {
+            non_empty: if state == AIR { 0 } else { 4096 },
             fluids: 0,
-            states: Paletted::from_values(&[STONE.0 as i32; 4096], Strategy::Blocks, 16),
+            states: Paletted::from_values(&[state.0 as i32; 4096], Strategy::Blocks, 16),
             biomes: Paletted::from_values(&[1; 64], Strategy::Biomes, 2),
         };
+        let sections: Vec<_> = (0..24)
+            .map(|i| section(if i < stone { STONE } else { AIR }))
+            .collect();
         C::LevelChunkWithLight(play::LevelChunkWithLight {
             x,
             z,
             chunk: ChunkData {
                 heightmaps: Vec::new(),
-                buffer: ChunkData::from_sections(&vec![section; 24]),
+                buffer: ChunkData::from_sections(&sections),
                 block_entities: Vec::new(),
             },
             light: LightData {
@@ -101,17 +113,17 @@ mod tests {
     }
 
     /// The custom payload the client's net thread hands the game for a whole packet body.
-    fn payload(body: &[u8]) -> C {
+    pub(in crate::game) fn payload(body: &[u8]) -> C {
         let mut r = Reader::new(body);
         let id = r.varint().unwrap();
         C::decode(id, r.rest()).unwrap()
     }
 
-    fn open(level: i32, dimension: &str) -> C {
+    pub(in crate::game) fn open(level: i32, dimension: &str) -> C {
         payload(&viewed_levels::open(level, &spawn(dimension)))
     }
 
-    fn run(level: i32, packets: &[C]) -> C {
+    pub(in crate::game) fn run(level: i32, packets: &[C]) -> C {
         let mut run = viewed_levels::Run::new(level, &packets[0].encode()).unwrap();
         for packet in &packets[1..] {
             run.push(&packet.encode()).unwrap();
