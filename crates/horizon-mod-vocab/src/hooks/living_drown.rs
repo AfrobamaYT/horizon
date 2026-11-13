@@ -8,7 +8,7 @@ pub trait Hooks {
     /// `damage_amount` or `bubble_count`, or cancel to skip drowning this tick.
     /// Eight bubbles are the vanilla entity event; another positive count is
     /// sent as that many bubble particles, and none sends nothing. Asked on
-    /// servers, for the entities `native_living_breathe` is; a water animal,
+    /// servers, for the entities `living_breathe` is; a water animal,
     /// axolotl or nautilus shows no bubbles, as in vanilla.
     /// It is given the loop `context` of the server that ticks the entity (its
     /// registries, settings and mod list), because it fires inside the tick's
