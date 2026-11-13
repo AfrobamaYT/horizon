@@ -235,7 +235,7 @@ entity coverage is data, handles and global hooks. On the server a mod can act o
 | `sinkInFluid(type)` | Missing | — | Same. |
 | `canDrownInFluidType(type)` | Partial | `living_drown` (`hooks/base.rs`), `FluidTypeProperties.can_drown` | The global drown event can cancel or change damage; fluid data decides whether it applies. |
 | `moveInFluid(type, movement, fallDistance)` | Missing | — | Movement in fluid is engine-owned; no per-entity method. |
-| `onDamageTaken(container)` | Partial | `living_damage_post` (`hooks/living_damage_post.rs`), `living_incoming_damage` (`hooks/base.rs`) | Global server hooks: the incoming container before the hit, and a post-damage notice only once health dropped, not a per-entity callback for every hurt. |
+| `onDamageTaken(container)` | Partial | `living_damage_post` (`hooks/living_damage_post.rs`), `living_incoming_damage` (`hooks/base.rs`) | Global server hooks: the incoming container before the hit, and a post-damage notice at the end of every hurt that passed the cooldown (health damage 0 when none was taken), not a per-entity callback. |
 
 ## `IBlockEntityExtension`
 

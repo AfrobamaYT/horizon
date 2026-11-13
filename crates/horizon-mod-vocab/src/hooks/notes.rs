@@ -1544,7 +1544,10 @@ mod mixin or use it replaces in its design or PR."#]
   there was to take. A step the hit skips (a source that bypasses armor, no Resistance effect) runs none. They
   last for the hit.
 
-- `living_damage_post` (NeoForge's `LivingDamageEvent.Post`) observes the hit after it takes health.
+- `living_damage_post` (NeoForge's `LivingDamageEvent.Post`) observes every hit that passed
+  `living_incoming_damage` and the cooldown, at the end of `hurtServer` (after a totem, the hurt sounds and a
+  player's `die`; a mob's `living_death` is settled by the game after its hurt returns, so it follows), including
+  a hit that took no health: its `container.health_damage()` is then 0.
   Its `container.should_cause_side_effects()` is `hurtServer`'s fresh-hit decision
   (`shouldCauseSideEffects`), recorded before damage is applied: true for a fresh hit, false for a
   stronger hit inside the invulnerability window, and true for a source that bypasses the cooldown.

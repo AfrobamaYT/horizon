@@ -3,21 +3,24 @@
 //! hits that fire them.
 use super::dragon::{Dragon, SPECIAL};
 use super::entity::damage_level_of;
-use super::native_entity_refs::tests::with_game;
+use super::native_entity_refs::tests::{bind_local_player, with_game};
+use horizon_client::command::args::GameMode;
 use horizon_client::mobs::{Damage, DamageKind, Mob};
+use horizon_client::motion::PlayerMotion;
 use horizon_core::{geometry::Vec3, random::RandomSource};
 use mod_api::{
     self, Hooks, HurtSource, LevelRandomHost, LivingDamagePostEvent, LivingDamagePreEvent,
-    LivingIncomingDamageEvent, Reduction,
+    LivingIncomingDamageEvent, LivingShieldBlockEvent, Reduction,
 };
 use std::sync::{Arc, Mutex};
 
 /// What the probe heard: Pre's entity, original damage, new damage and armor's reduction, and
-/// Post's health damage.
+/// Post's health damage, then its entity, health damage, absorption reduction and blocked damage.
 #[derive(Debug, Default, PartialEq)]
 struct Heard {
     pre: Vec<(i32, f32, f32, f32)>,
     post: Vec<(i32, f32)>,
+    post_values: Vec<(i32, f32, f32, f32)>,
     sources: Vec<HitSource>,
     side_effects: Vec<(i32, bool)>,
 }
@@ -61,6 +64,16 @@ impl Hooks for Probe {
         }
         mod_api::Flow::Continue
     }
+    fn living_shield_block(
+        &self,
+        _: &mut dyn LevelRandomHost,
+        event: &mut LivingShieldBlockEvent<'_>,
+    ) {
+        if event.entity == 227002 {
+            event.block.blocked = true;
+            event.block.blocked_damage = event.damage;
+        }
+    }
     fn living_damage_pre(
         &self,
         level: &mut dyn LevelRandomHost,
@@ -91,6 +104,12 @@ impl Hooks for Probe {
         let heard = (event.entity, event.container.health_damage());
         let mut log = self.0.lock().unwrap();
         log.post.push(heard);
+        log.post_values.push((
+            event.entity,
+            event.container.health_damage(),
+            event.container.reduction(Reduction::Absorption),
+            event.container.blocked(),
+        ));
         log.source("post", event.entity, event.source);
         log.side_effects
             .push((event.entity, event.container.should_cause_side_effects()));
@@ -214,6 +233,66 @@ fn mob_and_dragon_post_records_fresh_hit_decision() {
             (225015, false)
         ]
     );
+}
+
+fn survival_player(game: &mut super::Game<'_>, id: u32) {
+    game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+    bind_local_player(game, id, u128::from(id));
+    game.set_game_mode(GameMode::Survival);
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn post_fires_for_a_player_hit_that_absorption_took_whole() {
+    let heard = heard(|game| {
+        survival_player(game, 227001);
+        game.player.as_mut().unwrap().set_health(2.0, true).unwrap();
+        assert!(game.hurt_player_from(2.0, None, "minecraft:generic", Some(None), false));
+        let health = &game.player.as_ref().unwrap().health;
+        assert_eq!((health.health(), health.absorption()), (20.0, 0.0));
+    });
+    assert_eq!(heard.post_values, [(227001, 0.0, 2.0, 0.0)]);
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn post_fires_for_a_player_hit_a_shield_blocked_whole() {
+    let heard = heard(|game| {
+        survival_player(game, 227002);
+        game.hurt_player_from(2.0, None, "minecraft:generic", Some(None), false);
+        assert_eq!(game.player.as_ref().unwrap().health.health(), 20.0);
+    });
+    assert_eq!(heard.post_values, [(227002, 0.0, 0.0, 2.0)]);
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_hit_inside_the_cooldown_no_stronger_than_the_last_fires_no_post() {
+    let heard = heard(|game| {
+        // Pre sets 225003's damage to 2, which `lastHurt` keeps.
+        let mut pig = mob(game, 225003, "minecraft:pig");
+        let source = Damage::of(DamageKind::Generic);
+        assert!(pig.damage(damage_level_of!(game), 4.0, source));
+        // Inside the cooldown and no stronger than the last hit: refused, no Post.
+        assert!(!pig.damage(damage_level_of!(game), 2.0, source));
+    });
+    assert_eq!(heard.post, [(225003, 2.0)]);
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn post_fires_once_for_a_killing_blow_on_a_mob() {
+    let heard = heard(|game| {
+        let mut pig = mob(game, 225016, "minecraft:pig");
+        assert!(pig.damage(
+            damage_level_of!(game),
+            100.0,
+            Damage::of(DamageKind::Generic)
+        ));
+        assert_eq!(pig.health, 0.0);
+    });
+    // `living_death` is settled by the game's next tick, after the hurt and its Post.
+    assert_eq!(heard.post, [(225016, 100.0)]);
 }
 
 #[test]

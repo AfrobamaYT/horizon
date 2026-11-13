@@ -4350,10 +4350,7 @@ impl Mob {
         if !absorbed && dealt != 0.0 {
             self.record_damage(source, dealt);
         }
-        if through != 0.0 {
-            container.record_health_damage(through);
-            level.damage_post(crate::health::Hurting::Mob(self, &source), &container);
-        }
+        container.record_health_damage(through);
         // LivingEntity.hurtArmor: `Horse` is the only mob that overrides it, and
         // it hands `doHurtEquipment` the body slot alone. A wolf's armour has
         // its own rule (`Wolf.actuallyHurt`, `hurt_wolf_armor`) and a player's
@@ -4464,6 +4461,8 @@ impl Mob {
                 self.outbox.push(MobEvent::Infested { at, velocities });
             }
         }
+        // The last of `LivingEntity.hurtServer`: `LivingDamageEvent.Post`, health taken or not.
+        level.damage_post(crate::health::Hurting::Mob(self, &source), &container);
         // Shulker.hurtServer: the low-health teleport roll after `super.hurtServer`.
         if success && self.species() == Species::Shulker {
             shulker::after_hurt(self);
