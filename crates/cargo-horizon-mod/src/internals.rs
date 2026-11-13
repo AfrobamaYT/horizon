@@ -642,8 +642,10 @@ mod tests {
 
     #[test]
     fn tools_and_launcher_share_the_freshness_check() {
-        let entries: Vec<ListedInternal> =
-            horizon_mod_package::internals::parse(include_str!("../tests/fixtures/internals-new.json")).unwrap();
+        let entries: Vec<ListedInternal> = horizon_mod_package::internals::parse(include_str!(
+            "../tests/fixtures/internals-new.json"
+        ))
+        .unwrap();
         let mut declared = horizon_mod_package::manifest::Internal {
             path: "horizon_client::game::Game<'_>::reach".into(),
             kind: None,

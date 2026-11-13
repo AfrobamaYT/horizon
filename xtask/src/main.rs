@@ -333,7 +333,11 @@ fn sdk_index(dist: &Path, commit: &str, date: &str, nightly: Option<String>) -> 
     Index::read(&read, commit)
         .and_then(|read| read.verify_folder(dist))
         .map_err(|e| e.to_string())?;
-    println!("wrote {} listing {} assets", path.display(), index.assets.len());
+    println!(
+        "wrote {} listing {} assets",
+        path.display(),
+        index.assets.len()
+    );
     Ok(())
 }
 
@@ -646,7 +650,12 @@ mod tests {
         let _ = fs::remove_dir_all(&base);
         let bin = base.join("bin");
         fs::create_dir_all(&bin).unwrap();
-        for name in ["horizon-client", "horizon-ctl", "horizon-prepare", "horizon-server"] {
+        for name in [
+            "horizon-client",
+            "horizon-ctl",
+            "horizon-prepare",
+            "horizon-server",
+        ] {
             fs::write(bin.join(name), b"").unwrap();
         }
         let out = base.join("out");
@@ -655,7 +664,10 @@ mod tests {
         let error = package(&bin.join("horizon-client"), &out).unwrap_err();
         assert!(error.contains("horizon-wasm-std.wasm"), "{error}");
         assert!(!error.contains("horizon-ctl,"), "{error}");
-        assert!(out.join("kept").is_file(), "the packager ran before the check");
+        assert!(
+            out.join("kept").is_file(),
+            "the packager ran before the check"
+        );
         fs::remove_dir_all(&base).unwrap();
     }
 

@@ -209,12 +209,7 @@ mod tests {
 
     #[test]
     fn reads_only_regular_root_catalogs() {
-        let bytes = archive(
-            "./internals.json",
-            tar::EntryType::Regular,
-            JSON,
-            Some(PTS),
-        );
+        let bytes = archive("./internals.json", tar::EntryType::Regular, JSON, Some(PTS));
         let found = catalogs_from_archive(bytes.as_slice()).unwrap();
         assert_eq!(found.internals, JSON);
         assert_eq!(found.points, PTS);
@@ -285,7 +280,8 @@ mod tests {
                 .to_string()
                 .contains("checksum")
         );
-        let headless = r#"[{"path":"Example","kind":"struct","signature":"struct Example","hash":"abc"}]"#;
+        let headless =
+            r#"[{"path":"Example","kind":"struct","signature":"struct Example","hash":"abc"}]"#;
         let later = JSON.replace(r#""schema":1"#, r#""schema":2"#);
         for (text, points) in [
             ("not JSON", PTS),

@@ -126,10 +126,7 @@ fn each_bad_index_is_refused_by_name() {
     }
     for broken in [&b"not json"[..], br#"{"schema": 1}"#, b"[]"] {
         assert!(
-            matches!(
-                Index::read(broken, COMMIT),
-                Err(Refusal::Malformed(_))
-            ),
+            matches!(Index::read(broken, COMMIT), Err(Refusal::Malformed(_))),
             "{}",
             String::from_utf8_lossy(broken)
         );
@@ -199,7 +196,10 @@ fn a_release_folders_index_lists_each_asset_and_reads_back() {
         written,
         index(&[("surface.json", surface.as_bytes()), (ENGINE, b"engine")])
     );
-    assert_eq!(Index::read(written.to_json().as_bytes(), COMMIT).unwrap(), written);
+    assert_eq!(
+        Index::read(written.to_json().as_bytes(), COMMIT).unwrap(),
+        written
+    );
     write("notes.txt", b"stray");
     assert_eq!(
         Index::of_folder(folder.path(), build, "1.99.1".into()).unwrap_err(),
@@ -216,17 +216,20 @@ fn a_route_names_its_assets_for_the_target_and_every_missing_one() {
         [ENGINE]
     );
     assert_eq!(
-        listed.route_assets("engine", target, Side::Server).unwrap_err(),
-        Refusal::Missing(vec![
-            "engine-x86_64-unknown-linux-gnu-server.tar.xz".into()
-        ])
+        listed
+            .route_assets("engine", target, Side::Server)
+            .unwrap_err(),
+        Refusal::Missing(vec!["engine-x86_64-unknown-linux-gnu-server.tar.xz".into()])
     );
 }
 
 #[test]
 fn asset_names_state_kind_target_and_side() {
     for (name, parts) in [
-        ("surface.json", Some((Kind::Surface, Codec::None, None, None))),
+        (
+            "surface.json",
+            Some((Kind::Surface, Codec::None, None, None)),
+        ),
         (
             "build-data.tar.xz",
             Some((Kind::BuildData, Codec::Xz, None, None)),
@@ -277,7 +280,11 @@ fn removing_each_required_input_names_it_before_work() {
                     .map(|name| (name.clone(), checkout.join(name))),
             )
             .collect();
-        assert!(files.iter().any(|(name, _)| name == "horizon-wasm-std.wasm"));
+        assert!(
+            files
+                .iter()
+                .any(|(name, _)| name == "horizon-wasm-std.wasm")
+        );
         assert!(files.iter().any(|(name, _)| name == "horizon-server.exe"));
         for (_, path) in &files {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -291,7 +298,7 @@ fn removing_each_required_input_names_it_before_work() {
             else {
                 panic!("{route}: {name} missing was not refused");
             };
-            assert_eq!(missing, [name.clone()], "{route}");
+            assert_eq!(missing, std::slice::from_ref(name), "{route}");
             assert_eq!(how.len(), 1, "{route}: {name} has no way to make it");
             std::fs::write(path, b"").unwrap();
         }
@@ -352,7 +359,10 @@ mod unpack {
         let folder = tempfile::tempdir().unwrap();
         let into = folder.path().join("sdk");
         unpack(&listed, ENGINE, &packed[..], &into, 1 << 20).unwrap();
-        assert_eq!(std::fs::read(into.join("deps/a.rmeta")).unwrap().len(), 1 << 16);
+        assert_eq!(
+            std::fs::read(into.join("deps/a.rmeta")).unwrap().len(),
+            1 << 16
+        );
         // Only the destination is left: the scratch tar is gone.
         assert_eq!(std::fs::read_dir(folder.path()).unwrap().count(), 1);
         let small = folder.path().join("small");
@@ -383,12 +393,27 @@ mod unpack {
         let folder = tempfile::tempdir().unwrap();
         let packed = xz(&tar(&[("a", b"a")], Some("/etc/passwd")));
         let listed = index(&[(ENGINE, &packed)]);
-        let refused = unpack(&listed, ENGINE, &packed[..], &folder.path().join("l"), 1 << 20);
+        let refused = unpack(
+            &listed,
+            ENGINE,
+            &packed[..],
+            &folder.path().join("l"),
+            1 << 20,
+        );
         assert!(
             matches!(&refused, Err(Refusal::Archive { why, .. }) if why.contains("not a file or folder")),
             "{refused:?}"
         );
-        let refused = unpack(&listed, ENGINE, &b"not xz"[..], &folder.path().join("d"), 1 << 20);
-        assert!(matches!(refused, Err(Refusal::Archive { .. })), "{refused:?}");
+        let refused = unpack(
+            &listed,
+            ENGINE,
+            &b"not xz"[..],
+            &folder.path().join("d"),
+            1 << 20,
+        );
+        assert!(
+            matches!(refused, Err(Refusal::Archive { .. })),
+            "{refused:?}"
+        );
     }
 }

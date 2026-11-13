@@ -369,7 +369,10 @@ pub(super) fn identity(dir: &Path) -> Result<Identity, String> {
         serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
     let supported = horizon_mod_package::sdk::PACKAGE_FORMAT;
     let (version, supported_text) = (format.package_format.to_string(), supported.to_string());
-    let args = [("version", version.as_str()), ("format", supported_text.as_str())];
+    let args = [
+        ("version", version.as_str()),
+        ("format", supported_text.as_str()),
+    ];
     match format.package_format {
         found if found == supported => {
             serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
@@ -972,10 +975,10 @@ mod tests {
         let name = native::prebuilt_archive("x86_64-unknown-linux-gnu", true);
         assert_eq!(
             name,
-            "horizon-prebuilt-v5-x86_64-unknown-linux-gnu-server.tar.gz"
+            "horizon-prebuilt-v6-x86_64-unknown-linux-gnu-server.tar.gz"
         );
         let listing =
-            format!("AB12  horizon-prebuilt-v5-x86_64-unknown-linux-gnu.tar.gz\ncd34 *{name}\n");
+            format!("AB12  horizon-prebuilt-v6-x86_64-unknown-linux-gnu.tar.gz\ncd34 *{name}\n");
         assert_eq!(expected_sum(&listing, &name).as_deref(), Some("cd34"));
         assert_eq!(expected_sum(&listing, "horizon-prebuilt-x.tar.gz"), None);
     }

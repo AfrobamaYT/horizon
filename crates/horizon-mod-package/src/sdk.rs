@@ -237,7 +237,12 @@ impl Inputs {
                 let name = path.file_name().unwrap_or_default().to_string_lossy();
                 (name.into_owned(), path)
             })
-            .chain(route.checkout.iter().map(|name| (name.clone(), checkout.join(name))))
+            .chain(
+                route
+                    .checkout
+                    .iter()
+                    .map(|name| (name.clone(), checkout.join(name))),
+            )
             .filter(|(_, path)| !path.is_file())
             .map(|(name, _)| name)
             .collect();
@@ -310,7 +315,10 @@ pub enum Refusal {
     /// Reading or writing failed.
     Io(String),
     /// Files a route needs are not there; how to make each.
-    MissingInputs { missing: Vec<String>, how: Vec<String> },
+    MissingInputs {
+        missing: Vec<String>,
+        how: Vec<String>,
+    },
 }
 
 impl fmt::Display for Refusal {
@@ -396,7 +404,11 @@ impl Index {
         let io = |error: std::io::Error| Refusal::Io(format!("{}: {error}", folder.display()));
         let mut assets = BTreeMap::new();
         for entry in std::fs::read_dir(folder).map_err(io)? {
-            let name = entry.map_err(io)?.file_name().to_string_lossy().into_owned();
+            let name = entry
+                .map_err(io)?
+                .file_name()
+                .to_string_lossy()
+                .into_owned();
             if BESIDE_ASSETS.contains(&name.as_str()) {
                 continue;
             }

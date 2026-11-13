@@ -1,8 +1,8 @@
 //! One source staging pass for the launcher and `horizon-stage`.
 use crate::{internals, points, replace};
-use point_shape::build_data::Document;
 /// The build a staged copy is of, named in each build-data file's header.
 pub use point_shape::build_data::Build;
+use point_shape::build_data::Document;
 use std::{path::Path, time::Instant};
 
 /// Discovery instrumentation must never be used to build or publish a game.

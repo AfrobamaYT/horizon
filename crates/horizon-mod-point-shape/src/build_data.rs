@@ -73,8 +73,7 @@ pub fn read<T: DeserializeOwned>(file: &str, text: &str) -> Result<(Build, T), S
             ));
         }
     }
-    let document: WithBuild<T> =
-        serde_json::from_str(text).map_err(|e| format!("{file}: {e}"))?;
+    let document: WithBuild<T> = serde_json::from_str(text).map_err(|e| format!("{file}: {e}"))?;
     Ok((document.build, document.body))
 }
 
@@ -99,7 +98,10 @@ mod tests {
             },
         ))
         .unwrap();
-        assert!(text.starts_with(r#"{"schema":1,"build":{"commit":"#), "{text}");
+        assert!(
+            text.starts_with(r#"{"schema":1,"build":{"commit":"#),
+            "{text}"
+        );
         let (read_build, body) = read::<Loops>(LOOPS, &text).unwrap();
         assert_eq!(read_build, build);
         assert_eq!(body.loops, ["tick"]);
@@ -110,12 +112,22 @@ mod tests {
         let commit = "c".repeat(40);
         let later = format!(r#"{{"schema":2,"build":{{"commit":"{commit}"}},"loops":[]}}"#);
         let error = read::<Loops>(LOOPS, &later).unwrap_err();
-        assert!(error.contains("loops.json has build-data schema 2"), "{error}");
+        assert!(
+            error.contains("loops.json has build-data schema 2"),
+            "{error}"
+        );
         let error = read::<Loops>(LOOPS, r#"{"loops":[]}"#).unwrap_err();
-        assert!(error.contains("loops.json has no build-data schema"), "{error}");
+        assert!(
+            error.contains("loops.json has no build-data schema"),
+            "{error}"
+        );
         let error = read::<Loops>(LOOPS, "[]").unwrap_err();
         assert!(error.starts_with("loops.json: "), "{error}");
         let headless = r#"{"schema":1,"loops":[]}"#;
-        assert!(read::<Loops>(LOOPS, headless).unwrap_err().contains("build"));
+        assert!(
+            read::<Loops>(LOOPS, headless)
+                .unwrap_err()
+                .contains("build")
+        );
     }
 }
