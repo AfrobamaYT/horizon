@@ -757,11 +757,11 @@ struct GameLevel<'w> {
     /// The item frames a comparator reads through a conductor.
     item_frames: &'w [horizon_client::entities::ItemFrame],
     /// The minecarts, in `cart_boxes` order, for a detector rail's comparator.
-    carts: &'w [minecarts::Minecart],
+    carts: &'w mut horizon_client::join_seq::JoinList<minecarts::Minecart, false>,
     /// Arrow and thrown trident boxes (wooden buttons).
     arrow_boxes: Vec<([f64; 3], [f64; 3])>,
     /// Every entity on the walk; see `entity::for_each_entity`.
-    entities: entity::EntityLists<'w>,
+    other_entities: entity::EntityLists<'w>,
     /// End crystals, which aren't on the walk yet.
     crystals: &'w [dragon::Crystal],
     /// The fishing hooks here, which aren't on the walk either. None ignores
@@ -886,7 +886,7 @@ fn server_only_block_use(
 impl GameLevel<'_> {
     /// `LilyPadBlock.entityInside`: the boxes of the boats that can break a pad.
     fn boat_trigger_boxes(&self) -> impl Iterator<Item = Aabb> + '_ {
-        self.entities.boats.iter().map(boats::Boat::bounds)
+        self.entities().boats.iter().map(boats::Boat::bounds)
     }
     /// How many entities in `area` press plates and tripwires, or with
     /// `LIVING` only the living ones; a constant so a list of other kinds
@@ -894,7 +894,7 @@ impl GameLevel<'_> {
     fn count_triggers<const LIVING: bool>(&self, area: Aabb) -> usize {
         use entity::{Entity as _, for_each_entity};
         let mut count = 0;
-        for_each_entity!(self.entities, entity => {
+        for_each_entity!(self.entities(), entity => {
             if (!LIVING || entity.is_living())
                 && entity.triggers_blocks()
                 && area.intersects(entity.bounds())
@@ -903,48 +903,6 @@ impl GameLevel<'_> {
             }
         });
         count
-    }
-    /// `DetectorRailBlock.getAnalogOutputSignal`: a powered rail reads the
-    /// minecart on it, a command block cart first (its success count), else the first container cart's fullness.
-    fn detector_rail_signal(&self, pos: BlockPos, powered: bool) -> i32 {
-        if !powered {
-            return 0;
-        }
-        let (x, y, z) = (f64::from(pos.x), f64::from(pos.y), f64::from(pos.z));
-        let area = Aabb::new(
-            Vec3::new(x + 0.2, y, z + 0.2),
-            Vec3::new(x + 0.8, y + 0.8, z + 0.8),
-        );
-        let mut container = None;
-        for ((lo, hi), cart) in self.cart_boxes.iter().zip(self.carts) {
-            let bounds = Aabb::new(
-                Vec3::new(lo[0], lo[1], lo[2]),
-                Vec3::new(hi[0], hi[1], hi[2]),
-            );
-            if !area.intersects(bounds) {
-                continue;
-            }
-            match cart.kind {
-                minecarts::CartKind::CommandBlock => return cart.command.success_count,
-                minecarts::CartKind::Chest | minecarts::CartKind::Hopper => {
-                    // Counted here, for the cart a comparator reads, not for
-                    // every cart on every block tick.
-                    container = container.or_else(|| Some(self.cart_signal(cart)));
-                }
-                _ => {}
-            }
-        }
-        container.unwrap_or(0)
-    }
-    /// A container minecart's comparator signal: its open menu's slots while
-    /// someone has it open, else its own.
-    fn cart_signal(&self, cart: &minecarts::Minecart) -> i32 {
-        let key = (i32::MAX - 15, minecarts::CART_KEY_Y, cart.id as i32);
-        let slots = match self.world.block_entities.get(&key) {
-            Some(BlockEntity::Chest(open)) => open,
-            _ => &cart.items,
-        };
-        minecarts::Minecart::container_signal(slots, self.items)
     }
     /// Every entity box that blocks building: the players who aren't
     /// spectators, the minecarts and the `Blockers` (a removed mob or a marker
@@ -956,7 +914,7 @@ impl GameLevel<'_> {
                 Vec3::new(hi[0], hi[1], hi[2]),
             )
         };
-        let b = self.entities;
+        let b = self.entities();
         self.player_box
             .iter()
             .chain(
@@ -2805,7 +2763,7 @@ impl Game<'_> {
                     }
                 }
             };
-            for_each_entity!(level.entities, entity => {
+            for_each_entity!(level.entities(), entity => {
                 if entity.triggers_blocks() && entity.sweeps_blocks_inside() {
                     let at = entity.position();
                     if entity_ticking(at.x.floor() as i32, at.z.floor() as i32) {
@@ -4367,6 +4325,7 @@ impl Game<'_> {
         }
         let native_authoritative = self.native_authoritative();
         let environment = self.res.environment_of(&self.dimension_type().id);
+        let other_entities = entity::entity_lists_of!(self, without_carts);
         let mut level = GameLevel {
             cake_probe: false,
             cake_requested: std::cell::Cell::new(false),
@@ -4385,9 +4344,9 @@ impl Game<'_> {
                 .any(|feature| feature == "minecraft:redstone_experiments"),
             cart_boxes,
             item_frames: &self.item_frames,
-            carts: &self.carts,
+            carts: &mut self.carts,
             arrow_boxes,
-            entities: entity::entity_lists_of!(self),
+            other_entities,
             crystals: &self.crystals,
             trigger_hooks,
             trigger_extras,
@@ -5749,8 +5708,8 @@ impl Game<'_> {
         let broken = state;
         let facts = self.res.facts().get(state).clone();
         let held = self.held().cloned();
-        // The block entity as it was, for what the drops copy from it.
         let key = (pos[0], pos[1], pos[2]);
+        self.unpack_loot(container_loot::LootTarget::Block(key), None);
         let loot_entity = if self.creative {
             None
         } else {
@@ -7237,6 +7196,11 @@ impl Game<'_> {
             span("mods_leaves_flush", || self.native_leaves_flush());
             horizon_client::spans::time("recheck_golem_openers", || self.recheck_golem_openers());
             span("mod_viewers", || self.tick_mod_container_viewers());
+            // The mobile kinds' entities that joined before the earliest
+            // general row still to tick go first, in join order; then the
+            // general rows (#792), then the mobile kinds' remainder.
+            self.ordered_before(ordered_tick::Batch::General)?;
+            horizon_client::spans::time("tick_general", || self.tick_general())?;
             // Orbs, primed TNT and falling blocks still to tick, in join order.
             self.run_ordered_ticks(horizon_client::join_seq::JoinSeq::MAX, false)?;
             horizon_client::spans::time("tick_experience", || self.tick_experience());
@@ -10467,8 +10431,8 @@ impl Game<'_> {
             &self.health_resources.damage,
         )
         .map_err(|e| format!("world registries: {e}"))?;
-        // Warm the loot data with this world's packs before chunks decode
-        // (`save::roll_loaded_loot` reads the cached copy).
+        // Warm this world's pack-aware loot data before gameplay can unpack
+        // a container's pending table on its first inventory access.
         self.load_server_loot();
         // MinecraftServer's constructor reads CustomBossEvents before any
         // server event.
@@ -11936,95 +11900,6 @@ impl Game<'_> {
             ));
         }
         self.tracked_special_box(id as i32)
-    }
-    /// The orbs' tick, but for the movement: that is `tick_ordered_before`'s,
-    /// in join order with the other kinds.
-    fn tick_experience(&mut self) {
-        if self.xp_delay > 0 {
-            self.xp_delay -= 1;
-        }
-        let spectator = self.spectator();
-        let player = self
-            .player
-            .as_ref()
-            .filter(|p| !p.health.dead_or_dying() && !spectator);
-        // Player.aiStep: standing, the pickup area is the player's box
-        // inflated by (1, 0.5, 1); riding, the union with the vehicle's box
-        // inflated by (1, 0, 1).
-        let bounds = player.map(|p| {
-            let w = f64::from(p.dimensions.width) / 2.0;
-            let own = Aabb::new(
-                Vec3::new(p.position.x - w, p.position.y, p.position.z - w),
-                Vec3::new(
-                    p.position.x + w,
-                    p.position.y + f64::from(p.dimensions.height),
-                    p.position.z + w,
-                ),
-            );
-            let area = match self.riding_box() {
-                Some(vehicle) => own.union_bounds(vehicle).inflate(Vec3::new(1.0, 0.0, 1.0)),
-                None => own.inflate(Vec3::new(1.0, 0.5, 1.0)),
-            };
-            (
-                [
-                    area.min_position().x,
-                    area.min_position().y,
-                    area.min_position().z,
-                ],
-                [
-                    area.max_position().x,
-                    area.max_position().y,
-                    area.max_position().z,
-                ],
-            )
-        });
-        let mut orbs = self.orbs.lift();
-        #[cfg(test)]
-        entity::taken_pass_tests::after_take(self);
-        let mut gained = 0;
-        let mut taken = Vec::new();
-        if let Some((min, max)) = bounds {
-            orbs.retain_mut(|o| {
-                let touching = o.position.x + 0.25 > min[0]
-                    && o.position.x - 0.25 < max[0]
-                    && o.position.y + 0.5 > min[1]
-                    && o.position.y < max[1]
-                    && o.position.z + 0.25 > min[2]
-                    && o.position.z - 0.25 < max[2];
-                if touching && self.xp_delay == 0 {
-                    // ExperienceOrb.playerTouch: one orb every 2 ticks; a
-                    // merged orb gives its value once per count.
-                    self.xp_delay = 2;
-                    gained += o.points();
-                    taken.push(o.clone());
-                    o.count -= 1;
-                    return o.count > 0;
-                }
-                true
-            });
-        }
-        self.orbs
-            .restore(orbs, horizon_client::join_seq::RestoreOrder::SurvivorsFirst);
-        if gained > 0 {
-            gained = self.mending(gained);
-        }
-        for o in taken {
-            // ClientPacketListener.handleTakeItemEntity: every orb taken sounds
-            // at the orb, whether mending took its points or not.
-            let pitch =
-                (self.world.random.next_float() - self.world.random.next_float()) * 0.35 + 0.9;
-            let at = [o.position.x, o.position.y, o.position.z];
-            self.audio.play(
-                "minecraft:entity.experience_orb.pickup",
-                Some(at),
-                0.1,
-                pitch,
-            );
-            self.add_pickup(pickups::Taken::Orb(Box::new(o)), pickups::Collector::Player);
-        }
-        if gained > 0 {
-            self.give_experience_points(gained as i32);
-        }
     }
     /// `FurnaceResultSlot.checkTakeAchievements`: the player took from the output of the
     /// furnace at `pos`, which pops the experience of what it made at them
@@ -15706,32 +15581,28 @@ fn load_world_rest(
     };
     let load_mobs = || -> Result<_> {
         let _step = startup::step("rest.mobs");
+        let catalog = &resources.motion().attributes;
         let mut types = if draws {
             match entity_models {
                 Some(document) => MobTypes::load_with_document_and_defaults(
                     root,
                     document,
                     item_defaults.entries(),
+                    catalog,
                 )?,
-                None => MobTypes::load_with_defaults(root, item_defaults.entries())?,
+                None => MobTypes::load_with_defaults(root, item_defaults.entries(), catalog)?,
             }
         } else {
-            MobTypes::load_for_server(root)?
+            MobTypes::load_for_server(root, catalog)?
         };
         // #845: the declared sets take their types' rows — the merged rows
         // the live attribute map's catalog took in core (the template's with
         // the declared set on top) — as their attribute map and spawn
         // fields, so a mob of the type spawns with what the map answers.
         for declaration in mod_api::__private::entity_attribute_declarations() {
-            let row = resources
-                .motion()
-                .attributes
-                .entity_row(&declaration.id)
-                .map(std::sync::Arc::new);
+            let row = catalog.entity_row(&declaration.id).map(std::sync::Arc::new);
             match (types.types.get_mut(&declaration.id), row) {
-                (Some(kind), Some(row)) => {
-                    kind.take_attribute_row(row, &resources.motion().attributes)
-                }
+                (Some(kind), Some(row)) => kind.take_attribute_row(row, catalog),
                 (Some(_), None) => log::warn!(
                     "Horizon: mod entity attributes of {} never reached the catalog; ignored",
                     declaration.id
@@ -15746,7 +15617,7 @@ fn load_world_rest(
         // same way, so a new mob of the type spawns with them.
         resource_load::take_modified_attribute_rows(
             &mut types.types,
-            &resources.motion().attributes,
+            catalog,
             mod_api::__private::entity_attribute_modifications(),
         );
         let mob_types: HashMap<_, _> = types

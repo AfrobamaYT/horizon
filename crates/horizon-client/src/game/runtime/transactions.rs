@@ -86,6 +86,8 @@ pub(super) struct Level {
     slots: HashMap<(Pos, usize), KeptSlot>,
     /// Each block's state before this transaction first wrote it.
     blocks: HashMap<Pos, BlockStateId>,
+    /// Each quart cell before this transaction first wrote it.
+    biomes: HashMap<Pos, u16>,
     /// Each player's inventory before this transaction first wrote it, by UUID.
     players: HashMap<u128, KeptPlayer>,
     /// Synced player health and its unpublished update events before set_health.
@@ -201,8 +203,13 @@ pub(super) enum After {
     /// A provider's answer changed here (`level_invalidate_capabilities`): the capability
     /// generation moves on.
     Capabilities(Pos),
+
+    /// `ServerLevel.destroyBlockProgress`: breaker id, position, stage. Sent once, at the root commit.
+    BreakProgress(i32, [i32; 3], i32),
     /// The block's new state, set with its updates (`Level.setBlock`, `UPDATE_ALL`).
     Block(Pos),
+    /// Save, remesh and resend a changed biome column.
+    Biome((i32, i32)),
     /// Deferred interaction effects, replayed in the same root-commit order.
     Effect(DeferredEffect),
     /// `Block.popResource`.
@@ -380,6 +387,9 @@ impl Game<'_> {
                 }
                 for (pos, state) in level.blocks {
                     outer.blocks.entry(pos).or_insert(state);
+                }
+                for (pos, biome) in level.biomes {
+                    outer.biomes.entry(pos).or_insert(biome);
                 }
                 for (uuid, kept) in level.players {
                     outer.players.entry(uuid).or_insert(kept);
@@ -628,6 +638,15 @@ impl Game<'_> {
         level.after.push(After::Block(key));
         self.world.set_stored(pos[0], pos[1], pos[2], state)
     }
+    /// Keep the original cell without publishing the tentative write.
+    pub(in crate::game) fn journal_biome(&mut self, pos: [i32; 3], old: u16) {
+        if let Some(level) = self.transactions.last_mut() {
+            level
+                .biomes
+                .entry((pos[0] >> 2, pos[1] >> 2, pos[2] >> 2))
+                .or_insert(old);
+        }
+    }
     /// Queue a reusable interaction effect for the outermost successful commit.
     pub(super) fn defer_effect(&mut self, effect: DeferredEffect) {
         self.after_commit(After::Effect(effect));
@@ -648,6 +667,13 @@ impl Game<'_> {
             After::Updated(pos) => self.block_entity_updated(pos),
             After::NotifyClients(pos) => self.notify_block_clients(pos),
             After::Capabilities(pos) => self.world.capability_generations.invalidate(pos),
+
+            After::BreakProgress(breaker, pos, progress) => {
+                self.server_destroy_block_progress(breaker, pos, progress);
+            }
+            After::Biome(key) => {
+                self.commit_biome_columns(&std::collections::HashSet::from([key]), &[key]);
+            }
             After::Effect(effect) => match effect {
                 DeferredEffect::CustomStat {
                     player,
@@ -699,6 +725,7 @@ impl Game<'_> {
     }
     fn root_commit(&mut self, level: Level) {
         let mut told = std::collections::HashSet::new();
+        let mut biome_columns = std::collections::HashSet::new();
         for after in level.after {
             match after {
                 // Each storage tells the world once, after every write.
@@ -715,6 +742,7 @@ impl Game<'_> {
                         let _ = self.level_set([pos.0, pos.1, pos.2], now);
                     }
                 }
+                After::Biome(key) if !biome_columns.insert(key) => {}
                 after => self.run_after(after),
             }
         }
@@ -814,6 +842,17 @@ impl Game<'_> {
                 .and_then(|entity| entity.slots_mut().get_mut(slot))
             {
                 *target = kept.stack;
+            }
+        }
+        let bottom_quart = self.world.bottom_y() >> 2;
+        for ((qx, qy, qz), biome) in level.biomes {
+            if let Some(chunk) = self.world.chunks.get_mut(&(qx >> 2, qz >> 2)) {
+                std::sync::Arc::make_mut(chunk).set_biome_cell(
+                    qx & 3,
+                    qy - bottom_quart,
+                    qz & 3,
+                    biome,
+                );
             }
         }
         for (pos, state) in level.blocks {

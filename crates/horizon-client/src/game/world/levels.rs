@@ -654,7 +654,6 @@ impl Game<'_> {
                 .as_ref()
                 .unwrap_or_else(|| self.res.biomes())
                 .clone(),
-            self.server_loot.clone(),
         )?;
         save.install_profession_snapshot(self.stations().professions.clone());
         let mut world = Game::world_for_mods(self.res.facts().air, self.level.seed);
