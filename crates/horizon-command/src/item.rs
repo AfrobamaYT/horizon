@@ -27,12 +27,14 @@ pub const DECODED_COMPONENTS: &[&str] = &[
     "minecraft:repair_cost",
     "minecraft:max_damage",
     "minecraft:max_stack_size",
+    "minecraft:map_id",
     "minecraft:rarity",
     "minecraft:enchantments",
     "minecraft:stored_enchantments",
     "minecraft:custom_name",
     "minecraft:item_name",
     "minecraft:block_entity_data",
+    "minecraft:enchantable",
 ];
 
 /// Validate and decode a component into the value representation shared with stacks.
@@ -55,8 +57,16 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
         "minecraft:damage"
         | "minecraft:repair_cost"
         | "minecraft:max_damage"
-        | "minecraft:max_stack_size" => {
+        | "minecraft:max_stack_size"
+        | "minecraft:map_id" => {
             Tag::Int(int_of(value).expect("validated numeric component") as i32)
+        }
+        "minecraft:enchantable" => {
+            let value = value.get("value").expect("validated enchantable value");
+            Tag::compound([(
+                "value",
+                Tag::Int(int_of(value).expect("validated numeric enchantable value") as i32),
+            )])
         }
         "minecraft:enchantments" | "minecraft:stored_enchantments" => {
             let Tag::Compound(entries) = value else {
@@ -83,6 +93,8 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
 /// The codecs of the item components commands commonly set.
 pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), String> {
     match id {
+        // MapId.CODEC is Codec.INT, without a non-negative constraint.
+        "minecraft:map_id" => int_of(t).map(|_| ()).ok_or_else(|| "Not a number".into()),
         "minecraft:damage" | "minecraft:repair_cost" => {
             let v = int_of(t).ok_or("Not a number")?;
             if v < 0 {
@@ -101,6 +113,20 @@ pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), Strin
             let v = int_of(t).ok_or("Not a number")?;
             if !(1..=99).contains(&v) {
                 return Err(format!("Value must be within range [1;99]: {v}"));
+            }
+            Ok(())
+        }
+        // Enchantable.CODEC: a record with one required positive integer.
+        "minecraft:enchantable" => {
+            let Tag::Compound(_) = t else {
+                return Err(not_map(t));
+            };
+            let value = t
+                .get("value")
+                .ok_or_else(|| format!("No key value in {}", snbt(t)))?;
+            let v = int_of(value).ok_or("Not a number")?;
+            if v <= 0 {
+                return Err(format!("Value must be positive: {v}"));
             }
             Ok(())
         }
