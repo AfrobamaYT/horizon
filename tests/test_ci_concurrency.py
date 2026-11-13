@@ -15,7 +15,7 @@ WORKFLOWS = [ROOT / ".github/workflows/dyna-ci.yml"]
 MAIN_ONLY = [ROOT / ".github/workflows" / name for name in ("wasm-mods.yml", "fn-replace-check.yml")]
 
 
-def expression_value(expression, github, inputs=None):
+def expression_value(expression, github, inputs=None, matrix=None):
     """Evaluate this workflow's context/equality/boolean subset; reject other syntax.
 
     These contexts use nonzero PR numbers, lowercase event/ref strings and nonempty
@@ -26,7 +26,8 @@ def expression_value(expression, github, inputs=None):
         if isinstance(node, ast.Constant):
             return node.value
         if isinstance(node, ast.Name):
-            return {"github": github, "inputs": inputs or {}, "true": True, "false": False}[node.id]
+            return {"github": github, "inputs": inputs or {}, "matrix": matrix or {},
+                    "true": True, "false": False}[node.id]
         if isinstance(node, ast.Attribute):
             return evaluate(node.value).get(node.attr, "")
         if isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], (ast.Eq, ast.NotEq)):
@@ -50,21 +51,22 @@ def expression_value(expression, github, inputs=None):
     return evaluate(ast.parse(expression.replace("&&", " and ").replace("||", " or ").strip(), mode="eval").body)
 
 
-def concurrency_for(path, event, sha, number=None, ref="refs/heads/main", inputs=None):
+def concurrency_for(path, event, sha, number=None, ref="refs/heads/main", inputs=None, job=None,
+                    matrix=None, run_id="1"):
     workflow = yaml.safe_load(path.read_text())
-    policy = workflow["concurrency"]
-    github = {"event_name": event, "sha": sha, "ref": ref,
+    policy = workflow["jobs"][job]["concurrency"] if job else workflow["concurrency"]
+    github = {"event_name": event, "sha": sha, "ref": ref, "run_id": run_id,
               "event": {"pull_request": {"number": number or ""}}}
     if number is not None:
         github["ref"] = f"refs/pull/{number}/merge"
     group = re.sub(r"\$\{\{(.*?)\}\}",
-                   lambda match: str(expression_value(match.group(1), github, inputs)), policy["group"])
+                   lambda match: str(expression_value(match.group(1), github, inputs, matrix)), policy["group"])
     cancel = policy["cancel-in-progress"]
     if isinstance(cancel, str):
         match = re.fullmatch(r"\$\{\{(.*?)\}\}", cancel)
         if match is None:
             raise AssertionError("cancellation must be a boolean or an Actions expression")
-        cancel = expression_value(match.group(1), github, inputs)
+        cancel = expression_value(match.group(1), github, inputs, matrix)
     if not isinstance(cancel, bool):
         raise AssertionError("cancellation did not evaluate to a boolean")
     return group, cancel
@@ -110,20 +112,38 @@ class ConcurrencyTests(unittest.TestCase):
                 self.assertEqual(set(triggers), {"push", "workflow_dispatch"})
                 self.assertEqual(triggers["push"], {"branches": ["main"]})
 
-    def test_main_only_checks_run_main_side_by_side_and_replace_superseded_dispatches(self):
+    def test_main_only_checks_coalesce_main_pushes_and_keep_dispatches_apart(self):
         for path in MAIN_ONLY:
             with self.subTest(workflow=path.name):
-                first = concurrency_for(path, "push", "a" * 40)
-                next_push = concurrency_for(path, "push", "b" * 40)
+                first = concurrency_for(path, "push", "a" * 40, run_id="10")
+                next_push = concurrency_for(path, "push", "b" * 40, run_id="11")
+                main_dispatch = concurrency_for(path, "workflow_dispatch", "b" * 40, run_id="12")
+                main_again = concurrency_for(path, "workflow_dispatch", "b" * 40, run_id="13")
                 branch = concurrency_for(path, "workflow_dispatch", "c" * 40, ref="refs/heads/suspect")
                 branch_again = concurrency_for(path, "workflow_dispatch", "d" * 40, ref="refs/heads/suspect")
                 other_branch = concurrency_for(path, "workflow_dispatch", "c" * 40, ref="refs/heads/other")
-                self.assertNotEqual(first[0], next_push[0], "a main push must not wait behind another")
-                self.assertIs(first[1], False, "a main run always finishes")
-                self.assertIs(next_push[1], False)
+                self.assertEqual(first[0], next_push[0], "main pushes coalesce: only the newest waits")
+                for _, cancel in (first, next_push, main_dispatch, main_again):
+                    self.assertIs(cancel, False, "a main run always finishes")
+                self.assertNotIn(main_dispatch[0], (first[0], main_again[0]),
+                                 "a dispatch on main is never folded into another run")
                 self.assertEqual(branch[0], branch_again[0], "a newer dispatch on a branch replaces the older")
                 self.assertIs(branch_again[1], True)
                 self.assertNotIn(other_branch[0], (branch[0], first[0]), "other refs never displace each other")
+
+    def test_slow_shards_coalesce_per_shard_on_main_only(self):
+        path = WORKFLOWS[0]
+        shard = lambda event, run_id, name: concurrency_for(
+            path, event, "a" * 40, job="ignored-tests-shards", matrix={"shard": name}, run_id=run_id)
+        first = shard("push", "10", "horizon-world")
+        newer = shard("push", "11", "horizon-world")
+        other = shard("push", "11", "horizon-items")
+        dispatch = shard("workflow_dispatch", "12", "horizon-world")
+        self.assertEqual(first[0], newer[0], "main pushes coalesce per shard")
+        self.assertNotEqual(newer[0], other[0], "different shards never displace each other")
+        self.assertNotEqual(dispatch[0], first[0], "a dispatch's shards are never folded into main's")
+        for _, cancel in (first, newer, other, dispatch):
+            self.assertIs(cancel, False, "a running shard always finishes")
 
 if __name__ == "__main__":
     unittest.main()

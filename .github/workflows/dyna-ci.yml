@@ -710,6 +710,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.ignored_matrix) }}
+    # Main pushes: one group per shard. A running shard finishes and only the newest push's shard
+    # waits; an older waiting one is cancelled, as the release gate reads the newest main result
+    # (owner's rule, 2026-11-13). A dispatch's shards are never folded into main's.
+    concurrency:
+      group: ignored-shard-${{ github.event_name == 'push' && 'main' || github.run_id }}-${{ matrix.shard }}
+      cancel-in-progress: false
     # Owner-approved stopgap: #2944 removes this when the legs run under 15 minutes.
     runs-on: ${{ (matrix.shard == 'horizon-client#1of2' || matrix.shard == 'horizon-client#2of2') && 'dyna-xlarge' || 'dyna-large' }}
     # Temporary: #2944 brings client data legs under 15 minutes and restores the 60-minute cap.
@@ -823,6 +829,10 @@ jobs:
               echo "Missing coverage: pool routing was disabled/unavailable or the shard matrix was empty. Restore the pool lease/switch if expired; do not treat this run as tested."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$RESULT" = cancelled ] && [ "$GITHUB_EVENT_NAME" = push ]; then
+            echo "Superseded: a newer main push's shards carry this coverage." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if [ "$RESULT" != success ]; then
             echo "::error::Prepared-data coverage required; shard result: $RESULT; self-hosted: $ROUTE; $REASON"
             exit 1
