@@ -37,6 +37,7 @@ use std::{
 };
 
 mod biome_regions;
+mod missing_mods;
 pub(super) mod events;
 mod management;
 mod predicate_graph;
@@ -175,6 +176,8 @@ struct Setup {
     level_name: String,
     port: Option<u16>,
     started: Instant,
+    /// `--allowMissingMods`: open a world whose saved mods are missing (`missing_mods`).
+    allow_missing_mods: bool,
 }
 static SETUP: OnceLock<Mutex<Option<Setup>>> = OnceLock::new();
 /// usercache.json (Services.nameToIdCache): used by the server thread only.
@@ -363,6 +366,7 @@ pub(super) fn preflight(options: &mut Options) -> Result<bool> {
     let mut world = None;
     let mut port = None;
     let mut init_settings = false;
+    let mut allow_missing_mods = false;
     for argument in crate::entry::dedicated_arguments::parse(&args) {
         let (name, value) = argument?;
         match name {
@@ -376,9 +380,12 @@ pub(super) fn preflight(options: &mut Options) -> Result<bool> {
             | "jfrProfile"
             | "game-tests" => {}
             "initSettings" => init_settings = true,
+            name if name == horizon_client::save::level_mods::ALLOW_FLAG => {
+                allow_missing_mods = true
+            }
             "help" => {
                 eprintln!(
-                    "Option                Description\n------                -----------\n--help\n--game-tests          Enables test-only mod content (or HORIZON_GAME_TESTS=1/true)\n--initSettings        Initializes 'server.properties' and 'eula.txt', then quits\n--nogui\n--port <Integer>      (default: -1)\n--universe <String>   (default: .)\n--world <String>"
+                    "Option                Description\n------                -----------\n--allowMissingMods    Opens a world saved with mods that are not loaded now, removing their blocks\n--help\n--game-tests          Enables test-only mod content (or HORIZON_GAME_TESTS=1/true)\n--initSettings        Initializes 'server.properties' and 'eula.txt', then quits\n--nogui\n--port <Integer>      (default: -1)\n--universe <String>   (default: .)\n--world <String>"
                 );
                 return Ok(false);
             }
@@ -466,6 +473,7 @@ pub(super) fn preflight(options: &mut Options) -> Result<bool> {
             level_name,
             port,
             started,
+            allow_missing_mods,
         });
     Ok(true)
 }
@@ -919,6 +927,7 @@ impl Game<'_> {
             level_name,
             port,
             started,
+            allow_missing_mods,
         } = SETUP
             .get()
             .and_then(|m| m.lock().unwrap().take())
@@ -929,6 +938,9 @@ impl Game<'_> {
         let new_world = !world_dir.join("level.dat").exists();
         if new_world {
             self.write_world_gen(&world_dir, &props)?;
+        } else {
+            // Before anything writes the world: a refusal leaves it as it was saved.
+            self.check_missing_mods(&world_dir, allow_missing_mods)?;
         }
         // The console thread starts first, as in initServer.
         let (tx, console) = mpsc::channel();

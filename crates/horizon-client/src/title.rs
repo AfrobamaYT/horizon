@@ -27,6 +27,7 @@ mod edit_world;
 mod experiments;
 mod flat;
 mod missing_biome_regions;
+mod missing_mods;
 mod onboarding;
 pub mod preset_editors;
 mod splash;
@@ -303,6 +304,11 @@ pub enum Mode {
         world: WorldEntry,
         missing: Vec<(String, String)>,
     },
+    /// Saved mods not loaded now, whose blocks opening the world removes (`missing_mods`).
+    MissingMods {
+        world: WorldEntry,
+        missing: Vec<crate::save::level_mods::MissingMod>,
+    },
     Delete {
         world: WorldEntry,
     },
@@ -442,11 +448,13 @@ pub struct Title {
     ban_queue: std::collections::VecDeque<crate::ban_notice::Notice>,
     /// A ban notice's three buttons as last drawn (`ConfirmLinkScreen`'s row).
     ban_buttons: Cell<[(f32, f32); 3]>,
-    backup: Option<mpsc::Receiver<Result<u64, String>>>,
+    backup: Option<mpsc::Receiver<Result<(PathBuf, u64), String>>>,
     backup_shown: Cell<bool>,
     /// The backup a `BackupBeforeUpgrade` asked for opens its world when done; whether it
     /// was the question about customized or experimental settings, the last one asked.
     backup_then_open: Option<bool>,
+    /// The backup `MissingMods` asked for: its world opens only once the backup is made.
+    open_after_mods_backup: bool,
     /// The backup `OptimizeConfirm` asked for starts the optimization when done (with the
     /// Erase Cached Data choice).
     optimize_after_backup: Option<bool>,
@@ -754,6 +762,7 @@ impl Mode {
             Self::Optimize { .. } => "world_optimize",
             Self::LowDiskSpace { .. } => "low_disk_space",
             Self::MissingBiomeRegions { .. } => "missing_biome_regions",
+            Self::MissingMods { .. } => "missing_mods",
             Self::AdoptBiomeRegions { .. } => "adopt_biome_regions",
             Self::Delete { .. } => "world_delete",
             Self::Recover { .. } => "world_recover",
@@ -858,6 +867,7 @@ impl Title {
             backup: None,
             backup_shown: Cell::new(false),
             backup_then_open: None,
+            open_after_mods_backup: false,
             optimize_after_backup: None,
             restore_after_backup: false,
             optimize: None,
@@ -1367,6 +1377,9 @@ impl Title {
         if let Mode::Backup { world } = &self.mode {
             let world = world.clone();
             let folder = world.folder.clone();
+            if std::mem::take(&mut self.open_after_mods_backup) {
+                return self.mods_backup_done(world, result);
+            }
             if std::mem::take(&mut self.restore_after_backup) {
                 // `makeBackupAndShowToast(..).thenAcceptAsync(..)` in attemptRestore: the restore
                 // runs, backup failed or not.
@@ -1386,7 +1399,7 @@ impl Title {
                 self.open_request = Some(folder);
             }
             let toast = match result {
-                Ok(bytes) => WorldToast::Created { folder, bytes },
+                Ok((_, bytes)) => WorldToast::Created { folder, bytes },
                 Err(error) => WorldToast::Failed(error),
             };
             self.pending_toast = Some(toast);
@@ -2002,6 +2015,7 @@ Running out of disk space while in game can lead to your world being damaged.",
             Mode::MissingBiomeRegions { missing, .. } => {
                 missing_biome_regions::screen_info(missing)
             }
+            Mode::MissingMods { missing, .. } => missing_mods::screen_info(missing),
             Mode::AdoptBiomeRegions { .. } => edit_world::adopt_screen_info(),
             // AccessibilityOnboardingScreen narrates its title.
             Mode::Onboarding(_) => ScreenInfo::new(
@@ -2695,6 +2709,9 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             Mode::MissingBiomeRegions { missing, .. } => {
                 self.draw_missing_biome_regions(atlas, batch, (w, h), missing)
             }
+            Mode::MissingMods { missing, .. } => {
+                self.draw_missing_mods(atlas, batch, (w, h), missing)
+            }
             Mode::Backup { .. } => {
                 self.backup_shown.set(true);
                 crate::ui::menu_background(batch, atlas, 0.0, 0.0, w, h, false);
@@ -3348,6 +3365,10 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             (Mode::MissingBiomeRegions { world, .. }, Some(96)) => {
                 let world = world.clone();
                 self.open_with_vanilla_regions(world)
+            }
+            (Mode::MissingMods { world, .. }, Some(id @ 101..=103)) => {
+                let world = world.clone();
+                self.answer_missing_mods(world, id)
             }
             (Mode::Edit { world, name, .. }, Some(98)) => {
                 let (world, name) = (world.clone(), name.clone());
@@ -4484,6 +4505,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         match &self.mode {
             // OptimizeWorldScreen: `shouldCloseOnEsc` is false; the Backup wait takes no input.
             Mode::Backup { .. } | Mode::Optimize { .. } => {}
+            Mode::MissingMods { .. } => self.leave_closed_for_missing_mods(),
             // BackupConfirmScreen.keyPressed: Escape runs `onCancel`, the Edit World screen again.
             Mode::OptimizeConfirm { world, name, .. } | Mode::AdoptBiomeRegions { world, name } => {
                 self.edit_world(name.clone(), world.clone())
