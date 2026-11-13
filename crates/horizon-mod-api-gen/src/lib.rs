@@ -673,6 +673,7 @@ pub use wire::generate_host as generate_wire_host;
 pub mod internals;
 pub mod internals_view;
 pub mod loops;
+pub mod mod_uses;
 pub mod notes;
 pub mod patch;
 pub mod points;
