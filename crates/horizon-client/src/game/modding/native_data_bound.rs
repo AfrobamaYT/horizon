@@ -201,6 +201,7 @@ mod tests {
                 host: HostSide<'_>,
                 event: &mut DefaultComponentsBoundEvent,
             ) {
+                assert!(matches!(&host, HostSide::Client(_)));
                 let stack = match host {
                     HostSide::Server(host) => dirt_stack_size(host),
                     HostSide::Client(host) => dirt_stack_size(host),
@@ -210,7 +211,6 @@ mod tests {
                     Some(mod_api::Tag::Int(99)),
                     "the defaults are published"
                 );
-                assert!(matches!(host, HostSide::Client(_)));
                 assert_eq!(
                     event.cause,
                     TagsUpdateCause::ClientPacketReceived {
