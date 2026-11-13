@@ -44,6 +44,28 @@ pub trait PlayersClientHost {
         &mut self,
         boxes: &[[f64; 6]],
     ) -> Result<(), CollisionExclusionsError>;
+    /// Moves the window's player through `passage` (#3775), one its server told it of, as
+    /// Immersive Portals' client does: its feet, where it was a tick ago (so the frames
+    /// between two ticks do not jump), its velocity and its look come out at the far side,
+    /// turned with the passage, and the server is told the passage and where the feet were.
+    /// Nothing else of the player changes: on ground, fall distance, sprinting, what it
+    /// uses. The server checks the move to there as any move, then answers with a position
+    /// packet that changes nothing (all relative and zero), so the player keeps its velocity;
+    /// as any position packet does, it stops mining (a passage crossed while mining aborts
+    /// the dig). A refused crossing puts the player back where the server has it
+    /// ([`Self::last_passage_refusal`] says why). One crossing at a time: the next waits
+    /// for the server's answer. Refused, with nothing moved or sent, when not connected to
+    /// a server, with no player, while riding, for a passage the window does not hold, when
+    /// the feet are more than 20 blocks from the opening, and when a mod's
+    /// `client_packet_send` cancels the crossing's payload.
+    #[access(WorldOnly)]
+    fn cross_passage(&mut self, passage: PassageId) -> Result<(), PassageCrossError>;
+    /// Side: client.
+    /// The server's refusal of the window's last crossing ([`Self::cross_passage`]) and the
+    /// passage it named, until the next crossing; None when it was not refused or no answer
+    /// came yet.
+    #[access(WorldOnly)]
+    fn last_passage_refusal(&self) -> Option<(PassageId, PassageCrossRefusal)>;
 }
 /// The handles' reads of the `players` area, implemented by the game and reached through [`Backend`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait

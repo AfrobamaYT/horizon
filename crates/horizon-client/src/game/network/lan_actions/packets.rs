@@ -130,6 +130,12 @@ impl Game<'_> {
 
     /// A packet from a guest that the hub does not handle itself.
     pub(in crate::game) fn lan_guest_packet(&mut self, conn: u32, packet: S) {
+        // A crossing the hub's move check passed; a dead player's is refused, not dropped.
+        if let S::CustomPayload(p) = &packet
+            && p.channel == horizon_protocol::passage_sync::CROSS_CHANNEL
+        {
+            return self.guest_passage_cross(conn, &p.data);
+        }
         let Some(host) = self.lan.as_ref() else {
             return;
         };
