@@ -493,7 +493,8 @@ def run(package, skip, number=None, count=None):
         client_half = package == "horizon-client" and count == 2 and number in (1, 2)
         command = ["cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []), "--no-fail-fast"]
         if client_half:
-            command.append("--jobs=8")
+            # The runner's own cap (tools/ci/cargo_jobs.py --cap) when set, else the old fixed one.
+            command.append(f"--jobs={os.environ.get('CI_JOBS', '8')}")
         expected = set()
         timing = os.environ.get("HORIZON_DATA_LEG_TIMING") == "1"
         phase = f"{package}#{number}of{count}" if number is not None else package
@@ -522,7 +523,7 @@ def run(package, skip, number=None, count=None):
             # This marks the existing test command, not an instruction inside a binary.
             print(f"data-leg phase={phase} test-command-start utc={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} listed={int(number is not None)} compile_list_seconds={time.monotonic() - compile_started:.3f}", flush=True)
         execution_started = time.monotonic()
-        threads = 8 if client_half else 4
+        threads = min(8 if client_half else 4, int(os.environ.get("CI_CPUS", "8")))
         process = subprocess.run(
             [*command, "--", "--include-ignored", "--exact", f"--test-threads={threads}", *skips],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace", env=env,

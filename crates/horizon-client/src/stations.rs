@@ -1911,6 +1911,89 @@ mod tests {
         assert!(!out.has_any_enchantments());
     }
 
+    /// `ItemStack.isDamageableItem` asks for the DAMAGE component too, so a
+    /// stick patched with MAX_DAMAGE alone is no grindstone or anvil repair.
+    #[test]
+    fn grindstone_needs_the_damage_component() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-grind-damage-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("data/minecraft/tags/item/enchantable")).unwrap();
+        fs::write(
+            root.join("items.json"),
+            r#"{"minecraft:stick":{"minecraft:max_stack_size":64},
+                "minecraft:diamond_sword":{"minecraft:max_stack_size":1,"minecraft:max_damage":1561,"minecraft:damage":0}}"#,
+        )
+        .unwrap();
+        // The anvil only asks `isDamageableItem` for the combine once
+        // `canEnchant` passed, so the stick joins vanilla's sharp-weapon tag.
+        fs::write(
+            root.join("data/minecraft/tags/item/enchantable/sharp_weapon.json"),
+            r#"{"values":["minecraft:stick"]}"#,
+        )
+        .unwrap();
+        let items = Items::catalog(
+            &root,
+            &PackOverlay::NONE,
+            &horizon_world::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
+        let e = sample();
+        let stick = |components: &str| {
+            let snbt = format!(r#"{{id:"minecraft:stick",count:1,components:{components}}}"#);
+            item_data::parse_stack(&snbt).unwrap().unwrap()
+        };
+        let sharp = |mut s: ItemStack| {
+            s.enchant("minecraft:sharpness", 1);
+            s
+        };
+        // `/give @s minecraft:stick[minecraft:max_damage=10,minecraft:max_stack_size=1]`
+        let patched = stick(r#"{"minecraft:max_damage":10,"minecraft:max_stack_size":1}"#);
+        assert_eq!(patched.damage, 0);
+        assert!(!grindstone_accepts(&items, &patched));
+        // Two of them are not one "repaired" stick.
+        assert!(grindstone_result(&e, &items, Some(&patched), Some(&patched)).is_none());
+        // The anvil's combine gate refuses a non-damageable stack
+        // (`AnvilMenu.java:151`), so its enchantments do not merge either.
+        let (a, b) = (sharp(patched.clone()), sharp(patched.clone()));
+        assert!(
+            anvil_result(&e, &items, Some(&a), Some(&b), None, "", false)
+                .result
+                .is_none()
+        );
+        // The same patch with an explicit `minecraft:damage=0` has the component.
+        let explicit = stick(
+            r#"{"minecraft:max_damage":10,"minecraft:max_stack_size":1,"minecraft:damage":0}"#,
+        );
+        assert!(grindstone_accepts(&items, &explicit));
+        // So the grindstone merges two into one and the anvil combines them.
+        let merged = grindstone_result(&e, &items, Some(&explicit), Some(&explicit)).unwrap();
+        assert_eq!((merged.count, merged.damage), (1, 0));
+        let (a, b) = (sharp(explicit.clone()), sharp(explicit.clone()));
+        assert_eq!(
+            anvil_result(&e, &items, Some(&a), Some(&b), None, "", false)
+                .result
+                .map(|s| s.enchantment_level("minecraft:sharpness")),
+            Some(2)
+        );
+        // A sword's own durability supplies DAMAGE; removing it refuses it.
+        let sword = item_data::parse_stack(r#"{id:"minecraft:diamond_sword",count:1}"#)
+            .unwrap()
+            .unwrap();
+        assert!(grindstone_accepts(&items, &sword));
+        let mut removed = sword.clone();
+        removed.data_mut().set_other(
+            "!minecraft:damage",
+            Some(Tag::compound(Vec::<(&str, Tag)>::new())),
+        );
+        assert!(!grindstone_accepts(&items, &removed));
+        // An enchanted book is accepted for its enchantments, not its damage.
+        let mut book = ItemStack::new("minecraft:enchanted_book", 1);
+        book.enchant("minecraft:sharpness", 1);
+        assert!(grindstone_accepts(&items, &book));
+        let _ = fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn stonecutting_component_result_is_retained() {
         let items = Items::for_tests(Default::default());

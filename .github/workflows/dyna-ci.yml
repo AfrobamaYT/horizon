@@ -1,7 +1,7 @@
 name: dyna-checks
 run-name: ${{ github.event.pull_request.title || github.event.head_commit.message || github.workflow }}
 # A contributor's pull request (its head in a fork) gets the cheap checks (verify-static, format); the heavy ones
-# (everything that compiles) run on main's pushes, dispatches, and pull requests from this repository's own branches
+# (everything that compiles) run on main's pushes, dispatches, and same-repository rollup or sync pull requests
 # (tools/ci/pr_gate.py, docs/ci-runners.md).
 # Keep upstream's workflows byte-identical; disable checks (ci.yml) in the fork's Actions
 # settings after this workflow's verify passes on main.
@@ -92,6 +92,8 @@ jobs:
           EVENT: ${{ github.event_name }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           PR: ${{ inputs.pr }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: python3 tools/ci/pr_gate.py >> "$GITHUB_OUTPUT"
       - name: Fetch this commit's history for selection
         if: github.event_name == 'pull_request'
@@ -325,6 +327,9 @@ jobs:
           find crates/horizon-mod-api/src crates/horizon-mod-vocab/src -name '*.rs' -print0 | xargs -0 rustfmt --edition 2024 --check --config skip_children=true
           find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustfmt --edition 2024 --config skip_children=true --check
           rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs
+      # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
+      - name: Cap build parallelism to the runner
+        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       - name: Lint native targets
         if: needs.changes.outputs.rust_required != 'false'
         id: native-lint
@@ -473,6 +478,9 @@ jobs:
       - name: Restore unchanged source timestamps
         if: needs.changes.outputs.rust_required != 'false'
         run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes-v2.json | tee -a "$GITHUB_STEP_SUMMARY"
+      # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
+      - name: Cap build parallelism to the runner
+        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       # horizon-client rustc processes take several GB each; $JOBS (chosen above) fits them in the runner's
       # memory. Formatting and lint run in parallel (the lint job), so this job only tests.
       # Libraries, binaries and integration tests, then doc tests: not the ~275 examples, which the lint job already
@@ -747,6 +755,9 @@ jobs:
       # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
       - name: Restore unchanged source timestamps
         run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
+      # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
+      - name: Cap build parallelism to the runner
+        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       # Missing data must fail on both main pushes and nightly dispatches.
       - name: Prepare checkout-keyed vanilla data
         id: data
@@ -833,6 +844,14 @@ jobs:
             echo "Superseded: a newer main push's shards carry this coverage." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          # A main push that waited over an hour cannot route by its own pool snapshot (the token
+          # reads Variables only as of the run's creation), so its shards were skipped. Coverage
+          # comes from the newer pushes queued behind it; a fresh run with the pool off still fails.
+          if [ "$RESULT" = skipped ] && [ "$GITHUB_EVENT_NAME" = push ] &&
+             [[ "$REASON" == "snapshot rejected: run age outside"* ]]; then
+            echo "Not tested here: the run waited past its routing snapshot; a newer main push carries this coverage." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if [ "$RESULT" != success ]; then
             echo "::error::Prepared-data coverage required; shard result: $RESULT; self-hosted: $ROUTE; $REASON"
             exit 1
@@ -880,6 +899,9 @@ jobs:
       # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
       - name: Restore unchanged source timestamps
         run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
+      # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
+      - name: Cap build parallelism to the runner
+        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       - name: Check the launcher's formatting, lint and tests
         if: needs.changes.outputs.launcher_required != 'false'
         working-directory: launcher
@@ -947,6 +969,9 @@ jobs:
       # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
       - name: Restore unchanged source timestamps
         run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
+      # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
+      - name: Cap build parallelism to the runner
+        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       - name: Check prepared output digest
         run: |
           # Never reuse a completed preparation for this diagnostic, including a retry.
@@ -997,6 +1022,9 @@ jobs:
       # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
       - name: Restore unchanged source timestamps
         run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
+      # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
+      - name: Cap build parallelism to the runner
+        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       - name: Set up disk-backed parity scratch and prepared vanilla data
         run: |
           rm -rf "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp"
