@@ -43,7 +43,15 @@ fn client_only_attribute_does_not_shift_both_side_registry() {
             )
             .is_ok()
         );
-        assert!(alpha.attributes.is_empty());
+        assert_eq!(
+            alpha.widen_attribute_bounds("minecraft:max_health", 1.0, 1e6),
+            Err(crate::AttributeRegistrationError::WrongSide)
+        );
+        assert!(
+            zeta.widen_attribute_bounds("minecraft:max_health", 1.0, 1e6)
+                .is_ok()
+        );
+        assert!(alpha.attributes.is_empty() && alpha.attribute_widenings.is_empty());
         assert_eq!(zeta.attributes[0].id, "zeta:mana");
     });
 }

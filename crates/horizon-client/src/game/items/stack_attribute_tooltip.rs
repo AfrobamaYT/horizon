@@ -24,12 +24,8 @@ impl Game<'_> {
     ) -> (Vec<(String, u32)>, Vec<(Text, u32)>) {
         // The item's own modifiers, then its enchantments' for each slot
         // group (`ItemStack.forEachModifier`).
-        let info = self.items().get(&stack.item);
-        let mut modifiers = horizon_client::item_attributes::attribute_modifiers_or(
-            stack,
-            info.map_or(&[], |i| &i.modifiers),
-        )
-        .into_owned();
+        let mut modifiers =
+            horizon_client::item_attributes::attribute_modifiers(stack, self.items()).into_owned();
         modifiers.extend(self.active_enchantment_definitions().modifier_rows(stack));
         // `Player.getAttributeBaseValue`: the attribute's default where the player has none.
         let base = |name: &str, default| {
