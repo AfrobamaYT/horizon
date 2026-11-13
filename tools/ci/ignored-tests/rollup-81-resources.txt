@@ -1,0 +1,3 @@
+# Stock attached storage integration tests use prepared game resources.
+horizon-client game::attachment_index::attached_storage_tests::attached_items_are_undone_by_an_abort_and_saved_by_their_codec HORIZON_TEST_RESOURCES needs
+horizon-client game::attachment_index::attached_storage_tests::attached_energy_refuses_past_its_capacity HORIZON_TEST_RESOURCES needs
