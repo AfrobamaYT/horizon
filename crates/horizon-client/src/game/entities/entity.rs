@@ -1090,7 +1090,8 @@ macro_rules! define_entity_handles {
         /// Allocation-free storage-order walk with stable IDs and verified index hints.
         /// The next ID is captured before the caller can remove the current entity.
         pub(super) struct EntityIdCursor {
-            $($field: (Option<u32>, usize, usize),)*
+            before: JoinSeq,
+            $($field: (Option<(u32, JoinSeq)>, usize, usize),)*
         }
 
         /// Every list moved out of `Game`, for [`for_each_entity_mut`]: the
@@ -1158,26 +1159,31 @@ macro_rules! define_entity_handles {
 
             pub(super) fn entity_id_cursor(&self) -> EntityIdCursor {
                 EntityIdCursor {
-                    $($field: (self$(.$list)+.first().map(|e| e.id()), 0, self$(.$list)+.len()),)*
+                    before: JoinSeq::upcoming(),
+                    $($field: (self$(.$list)+.first().map(|e| (e.id(), e.join_seq())), 0, self$(.$list)+.len()),)*
                 }
             }
 
             /// Verify a stable identity before returning any index-bearing handle.
-            /// If a callback removed the next identity, skip that storage rather than
-            /// substituting whichever entity shifted into its former row.
+            /// Removed next identities resume at the next surviving original join.
+            /// The captured join ceiling excludes entities spawned by callbacks.
             pub(super) fn next_entity_id(&self, cursor: &mut EntityIdCursor) -> Option<(u32, EntityHandle)> {
                 $({
                     let (next, hint, remaining) = &mut cursor.$field;
                     if *remaining > 0 {
-                        if let Some(id) = *next {
-                            let index = if self$(.$list)+.get(*hint).is_some_and(|e| e.id() == id) {
+                        if let Some((id, join)) = *next {
+                            let index = if self$(.$list)+.get(*hint).is_some_and(|e| e.id() == id && e.join_seq() == join) {
                                 Some(*hint)
-                            } else { self$(.$list)+.iter().position(|e| e.id() == id) };
+                            } else {
+                                self$(.$list)+.iter().position(|e| e.id() == id && e.join_seq() == join).or_else(|| {
+                                    self$(.$list)+.iter().position(|e| e.join_seq() > join && e.join_seq() < cursor.before)
+                                })
+                            };
                             if let Some(i) = index {
                                 *remaining -= 1;
                                 *hint = i + 1;
-                                *next = self$(.$list)+.get(i + 1).map(|e| e.id());
-                                return Some((id, EntityHandle::$kind(i)));
+                                *next = self$(.$list)+.get(i + 1).filter(|e| e.join_seq() < cursor.before).map(|e| (e.id(), e.join_seq()));
+                                return Some((self$(.$list)+[i].id(), EntityHandle::$kind(i)));
                             }
                         }
                         *remaining = 0;
