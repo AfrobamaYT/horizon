@@ -16,6 +16,7 @@ on:
       - 'launcher/src/rust_toolchain.rs'
       - 'tools/ci/rust-version'
       - 'tools/prebuilt_game.py'
+      - 'tools/sdk_api_source.py'
       - 'tools/native_dylib_probe.py'
       - 'tools/native_dylib_probe/**'
       - 'tools/native_probe_ci.py'
@@ -31,7 +32,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: native-dylib-probe-${{ github.ref }}
+  group: native-dylib-probe-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -136,6 +137,14 @@ jobs:
       - name: Two mod libraries share the game's exact Rust state
         run: >-
           "$PROBE_PYTHON" tools/native_dylib_probe.py --sdk "$SDK_OUT" --output "$PROBE_OUT"
+      - name: The starter mod checks against the API source alone, host and wasm32
+        if: runner.os == 'Linux'
+        run: |
+          rustup target add wasm32-unknown-unknown
+          out="${LINKAGE_SCRATCH:-target}/api-source"
+          rm -rf "$out"
+          "$PROBE_PYTHON" tools/sdk_api_source.py build "$out"
+          "$PROBE_PYTHON" tools/sdk_api_source.py check "$out"
       - name: Probe command log
         if: failure()
         run: tail -n 120 "$PROBE_OUT/commands.log"

@@ -296,6 +296,16 @@
       ]
     },
     {
+      "id": "handle:Point::inner_from",
+      "hash": "*",
+      "doc": "Moves from.",
+      "signature": "fn inner_from(&self)",
+      "wasm": true,
+      "refs": [
+        "type:Point"
+      ]
+    },
+    {
       "id": "handle:Point::move_from",
       "hash": "*",
       "doc": "Moves from.",
@@ -310,6 +320,16 @@
       "hash": "*",
       "doc": "Moves to.",
       "signature": "fn move_to(&self)",
+      "wasm": true,
+      "refs": [
+        "type:Point"
+      ]
+    },
+    {
+      "id": "handle:Point::outer_to",
+      "hash": "*",
+      "doc": "Moves to.",
+      "signature": "fn outer_to(&self)",
       "wasm": true,
       "refs": [
         "type:Point"
