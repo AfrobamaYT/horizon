@@ -1827,6 +1827,31 @@ mod tests {
         }
     }
 
+    /// With the villagers on their own random (`parallel::villagers_own_random`), villagers in one
+    /// herd tick in groups beside the other herds and leave the mobs and the level random as the
+    /// serial loop does, since the serial loop draws the same way while the switch is on.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn villagers_on_their_own_random_tick_in_groups_as_serial() {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                horizon_client::parallel::OWN_RANDOM_TEST
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        let _reset = Reset;
+        horizon_client::parallel::OWN_RANDOM_TEST.store(true, std::sync::atomic::Ordering::Relaxed);
+        let mut game = separated_herds_game();
+        for k in 0..12 {
+            let x = 4.0 + f64::from(k % 6) * 2.0;
+            let z = 14.0 + f64::from(k / 6) * 2.0;
+            assert!(game.run_command(&format!("summon villager {x:.1} 66 {z:.1}")));
+        }
+        let groups = grouped_as_serial(&mut game, 30, "villagers", |_| {});
+        assert_eq!(groups, groups_for(3));
+    }
+
     /// `plan` stays serial while a mob holds, in either hand, an item whose consumable teleports
     /// its eater, whatever the species; the same mobs plan normally with a plain item.
     #[test]
