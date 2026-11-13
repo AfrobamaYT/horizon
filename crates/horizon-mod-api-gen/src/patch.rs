@@ -1695,9 +1695,7 @@ mod tests {
     #[ignore = "daily"]
     fn a_lower_free_function_installs_through_its_library_name() {
         // `horizon-mod-render`'s library is `mod_render`: the installer must call the slot there.
-        let crate_ = generate(
-            &root(),
-            "horizon_patch",
+        let crate_ = generate_here(
             &["horizon_mod_render::render::world_drawn".into()],
             &Extras::default(),
         )
