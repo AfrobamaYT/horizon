@@ -118,3 +118,86 @@ fn vanilla_biome_palettes_are_byte_identical_after_reload() {
     };
     assert_eq!(palettes(&saved), palettes(&resaved));
 }
+
+/// Every file under `root` with its bytes.
+fn disk_bytes(root: &std::path::Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    fn walk(dir: &std::path::Path, found: &mut std::collections::BTreeMap<PathBuf, Vec<u8>>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, found);
+            } else {
+                found.insert(path.clone(), std::fs::read(&path).unwrap());
+            }
+        }
+    }
+    let mut found = std::collections::BTreeMap::new();
+    walk(root, &mut found);
+    found
+}
+
+#[test]
+fn an_exhausted_biome_table_refuses_every_save_before_touching_the_world() {
+    let (registry, biomes) = super::loot_tests::fixture();
+    let registry: &'static BlockRegistry = Box::leak(Box::new(registry));
+    let biomes = Arc::new(biomes);
+    let root = std::env::temp_dir().join(format!("horizon-biome-exhausted-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("playerdata")).unwrap();
+    std::fs::write(root.join("level.dat"), b"level bytes").unwrap();
+    std::fs::write(root.join("playerdata/a.dat"), b"player bytes").unwrap();
+    let save = SaveDir::new(root.clone(), LevelShape::OVERWORLD);
+    save.save(&[Arc::new(Chunk::empty(0, 0))], registry, &biomes)
+        .unwrap();
+    let before = disk_bytes(&root);
+    assert!(
+        before
+            .keys()
+            .any(|path| path.starts_with(root.join("region"))),
+        "the world already holds a region file"
+    );
+    // A world whose saved names fill every biome id: the next one has no place.
+    let mut allocated = 0;
+    while biomes.ensure_saveable().is_ok() {
+        biomes.saved_id(&format!("gone_mod:biome_{allocated}"));
+        allocated += 1;
+        assert!(allocated < 70_000, "the biome table must run out of ids");
+    }
+    let refused = |error: Box<dyn std::error::Error>| {
+        assert!(
+            error
+                .downcast_ref::<crate::biome::BiomeIdExhausted>()
+                .is_some(),
+            "{error}"
+        );
+        assert!(error.to_string().contains("65536"), "{error}");
+    };
+    refused(
+        save.save(&[Arc::new(Chunk::empty(1, 0))], registry, &biomes)
+            .unwrap_err(),
+    );
+    refused(
+        save.save_later(&[Arc::new(Chunk::empty(1, 0))], registry, &biomes)
+            .unwrap_err(),
+    );
+    let _ = save.flush();
+    refused(save.save_protos(Vec::new(), registry, &biomes).unwrap_err());
+    // A record that reaches the writer thread is refused too, without a file.
+    let encoding = Arc::new(Encoding {
+        registry,
+        biomes: biomes.clone(),
+        tables: None,
+        shape: save.shape,
+    });
+    let record = Record::Chunk(Arc::new(Chunk::empty(1, 0)), encoding, None);
+    match &compress_records(&[((1, 0), &record)], 0)[0] {
+        Err(error) => assert!(error.to_string().contains("65536"), "{error}"),
+        Ok(_) => panic!("an exhausted table compressed a chunk"),
+    }
+    assert_eq!(
+        disk_bytes(&root),
+        before,
+        "no byte of the world changed after the refusals"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
