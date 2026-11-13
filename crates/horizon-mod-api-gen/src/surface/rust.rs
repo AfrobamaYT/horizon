@@ -71,7 +71,7 @@ pub(super) fn print(tokens: TokenStream) -> String {
                         joint = next.spacing() == Spacing::Joint;
                         i += 1;
                     }
-                    let end = matches!(trees.get(i + 1), None)
+                    let end = trees.get(i + 1).is_none()
                         || matches!(trees.get(i + 1), Some(TokenTree::Punct(p)) if p.as_char() == '>');
                     match run.as_str() {
                         "," if end => {}
@@ -174,7 +174,8 @@ impl Paths<'_, '_> {
             .last()
             .map(|s| s.arguments.clone())
             .unwrap_or(syn::PathArguments::None);
-        let mut rewritten: syn::Path = syn::parse_str(&written.join("::")).unwrap_or_else(|_| path.clone());
+        let mut rewritten: syn::Path =
+            syn::parse_str(&written.join("::")).unwrap_or_else(|_| path.clone());
         if let Some(last) = rewritten.segments.last_mut() {
             last.arguments = arguments;
         }
@@ -313,7 +314,10 @@ impl Layouts {
                     .iter()
                     .map(|f| {
                         (
-                            f.ident.as_ref().map(ToString::to_string).unwrap_or_default(),
+                            f.ident
+                                .as_ref()
+                                .map(ToString::to_string)
+                                .unwrap_or_default(),
                             self.shape(index, module, &f.ty, params, 0),
                         )
                     })
@@ -355,7 +359,9 @@ impl Layouts {
                     lit: syn::Lit::Int(n),
                     ..
                 }) => match n.base10_parse::<u64>() {
-                    Ok(n) => Shape::Array(boxed(self.shape(index, module, &a.elem, params, depth)), n),
+                    Ok(n) => {
+                        Shape::Array(boxed(self.shape(index, module, &a.elem, params, depth)), n)
+                    }
                     Err(_) => opaque(ty),
                 },
                 _ => opaque(ty),
@@ -367,7 +373,9 @@ impl Layouts {
                     .map(|e| self.shape(index, module, e, params, depth))
                     .collect(),
             ),
-            Type::Path(p) if p.qself.is_none() => self.path(index, module, ty, &p.path, params, depth),
+            Type::Path(p) if p.qself.is_none() => {
+                self.path(index, module, ty, &p.path, params, depth)
+            }
             _ => opaque(ty),
         }
     }
@@ -456,7 +464,9 @@ impl Layouts {
             _ => None,
         };
         if let Some(scalar) = scalar {
-            if name == "Cow" && !matches!(args.first(), Some(Type::Path(p)) if p.path.is_ident("str")) {
+            if name == "Cow"
+                && !matches!(args.first(), Some(Type::Path(p)) if p.path.is_ident("str"))
+            {
                 return one(self, index, 0);
             }
             return Shape::Scalar(scalar);

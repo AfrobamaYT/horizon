@@ -270,7 +270,11 @@ impl<'a> Index<'a> {
     }
 
     /// `path`, written in `module`, as a module of an indexed crate, if it is one.
-    pub(super) fn absolute(&self, module: usize, path: &[String]) -> Option<(&'static str, Vec<String>)> {
+    pub(super) fn absolute(
+        &self,
+        module: usize,
+        path: &[String],
+    ) -> Option<(&'static str, Vec<String>)> {
         let m = &self.modules[module];
         let (first, rest) = path.split_first()?;
         let mut base = match first.as_str() {
@@ -316,7 +320,11 @@ fn defines(item: &Item, name: &str) -> bool {
 }
 
 /// Each path `tree` imports, with the name it binds (`None` for a glob).
-pub(super) fn uses(tree: &UseTree, prefix: &mut Vec<String>, f: &mut impl FnMut(Vec<String>, Option<String>)) {
+pub(super) fn uses(
+    tree: &UseTree,
+    prefix: &mut Vec<String>,
+    f: &mut impl FnMut(Vec<String>, Option<String>),
+) {
     match tree {
         UseTree::Path(path) => {
             prefix.push(path.ident.to_string());

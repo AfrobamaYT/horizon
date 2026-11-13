@@ -373,7 +373,9 @@ impl<'i, 'a> Walker<'i, 'a> {
                 path.push(child);
                 match self.index.module(krate, &path) {
                     Ok(id) => out.push(id),
-                    Err(why) => self.notes.push(format!("module {krate}::{}: {why}", path.join("::"))),
+                    Err(why) => self
+                        .notes
+                        .push(format!("module {krate}::{}: {why}", path.join("::"))),
                 }
             }
         }

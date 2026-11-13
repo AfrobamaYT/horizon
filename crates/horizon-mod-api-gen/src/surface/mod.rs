@@ -47,9 +47,7 @@ impl Boundary {
             boundary.roles.insert(trait_name(owner), Role::Implement);
         }
         for (owner, area) in &surface.parts {
-            boundary
-                .unions
-                .insert(trait_name(area), trait_name(owner));
+            boundary.unions.insert(trait_name(area), trait_name(owner));
         }
         for unbound in &surface.unbound {
             boundary.unbound.insert(
@@ -265,11 +263,7 @@ impl<'a> Writer<'_, 'a> {
         )
     }
 
-    fn generics(
-        &mut self,
-        module: usize,
-        generics: &syn::Generics,
-    ) -> (String, Vec<String>) {
+    fn generics(&mut self, module: usize, generics: &syn::Generics) -> (String, Vec<String>) {
         let mut generics = generics.clone();
         let params = param_names(&generics);
         let mut paths = self.paths(module, &params);
@@ -333,8 +327,11 @@ pub(crate) fn build(
         public: &nameable,
     };
     let inherent = inherent_methods(&mut writer, &modules, &nameable);
-    let mut queue: Vec<(ItemId, Vec<String>)> =
-        public.items.iter().map(|(id, path)| (*id, path.clone())).collect();
+    let mut queue: Vec<(ItemId, Vec<String>)> = public
+        .items
+        .iter()
+        .map(|(id, path)| (*id, path.clone()))
+        .collect();
     queue.sort_by(|a, b| b.1.cmp(&a.1));
     // A hook's event type is part of the surface even when no public signature names it (a
     // scoped hook's event).
@@ -445,14 +442,20 @@ pub(crate) fn build(
     // Shapes, over every type the public types contain.
     let keys: Vec<Option<String>> = pending
         .iter()
-        .map(|record| record.shaped.then(|| layouts.key(writer.index, record.item)))
+        .map(|record| {
+            record
+                .shaped
+                .then(|| layouts.key(writer.index, record.item))
+        })
         .collect();
     layouts.finish(writer.index);
     let mut shapes = Shapes::new(&layouts.table);
     let mut types = Vec::new();
     for (record, key) in pending.into_iter().zip(keys) {
         let shape = match key {
-            Some(key) => shapes.shape(&key).map_err(|e| format!("{}: {e}", record.id))?,
+            Some(key) => shapes
+                .shape(&key)
+                .map_err(|e| format!("{}: {e}", record.id))?,
             None => String::new(),
         };
         types.push(Type::new(
@@ -630,34 +633,35 @@ fn type_record(writer: &mut Writer<'_, '_>, item_id: ItemId, path: &str, item: &
     };
     let (generics, _) = writer.generics(module, item_generics);
     let params = param_names(item_generics);
-    let mut field_records = |writer: &mut Writer<'_, '_>, list: &syn::Fields| -> (bool, Vec<String>) {
-        let mut all_public = true;
-        let mut written = Vec::new();
-        for (position, field) in list.iter().enumerate() {
-            let (ty, refs) = writer.ty(module, &params, &field.ty);
-            let name = field
-                .ident
-                .as_ref()
-                .map_or_else(|| position.to_string(), ToString::to_string);
-            written.push(match &field.ident {
-                Some(ident) => format!("{ident}: {ty}"),
-                None => ty.clone(),
-            });
-            if !matches!(field.vis, Visibility::Public(_)) {
-                all_public = false;
-                continue;
+    let mut field_records =
+        |writer: &mut Writer<'_, '_>, list: &syn::Fields| -> (bool, Vec<String>) {
+            let mut all_public = true;
+            let mut written = Vec::new();
+            for (position, field) in list.iter().enumerate() {
+                let (ty, refs) = writer.ty(module, &params, &field.ty);
+                let name = field
+                    .ident
+                    .as_ref()
+                    .map_or_else(|| position.to_string(), ToString::to_string);
+                written.push(match &field.ident {
+                    Some(ident) => format!("{ident}: {ty}"),
+                    None => ty.clone(),
+                });
+                if !matches!(field.vis, Visibility::Public(_)) {
+                    all_public = false;
+                    continue;
+                }
+                if hidden(&field.attrs) {
+                    continue;
+                }
+                fields.push(Field::new(
+                    format!("{id}.{name}"),
+                    doc(&field.attrs),
+                    FieldContract { ty, refs },
+                ));
             }
-            if hidden(&field.attrs) {
-                continue;
-            }
-            fields.push(Field::new(
-                format!("{id}.{name}"),
-                doc(&field.attrs),
-                FieldContract { ty, refs },
-            ));
-        }
-        (all_public, written)
-    };
+            (all_public, written)
+        };
     let (kind, constructible, shaped) = match item {
         Item::Struct(s) => {
             let kind = match &s.fields {
@@ -785,16 +789,19 @@ fn capability_key(
     let syn::Expr::Struct(literal) = &*constant.expr else {
         return None;
     };
-    let key = literal.fields.iter().find_map(|field| match (&field.member, &field.expr) {
-        (
-            syn::Member::Named(name),
-            syn::Expr::Lit(syn::ExprLit {
-                lit: syn::Lit::Str(key),
-                ..
-            }),
-        ) if name == "name" => Some(key.value()),
-        _ => None,
-    })?;
+    let key = literal
+        .fields
+        .iter()
+        .find_map(|field| match (&field.member, &field.expr) {
+            (
+                syn::Member::Named(name),
+                syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(key),
+                    ..
+                }),
+            ) if name == "name" => Some(key.value()),
+            _ => None,
+        })?;
     let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
         return None;
     };
@@ -876,16 +883,25 @@ fn macros(
     let mut out = Vec::new();
     if !reexported.is_empty() {
         let path = root.join("crates/horizon-mod-api-macros/src/lib.rs");
-        let source = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let source =
+            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
         let mut defined: BTreeMap<String, (MacroKind, Vec<String>, String)> = BTreeMap::new();
         for item in &file.items {
             let Item::Fn(function) = item else { continue };
             for attr in &function.attrs {
                 let entry = if attr.path().is_ident("proc_macro_attribute") {
-                    (function.sig.ident.to_string(), MacroKind::Attribute, Vec::new())
+                    (
+                        function.sig.ident.to_string(),
+                        MacroKind::Attribute,
+                        Vec::new(),
+                    )
                 } else if attr.path().is_ident("proc_macro") {
-                    (function.sig.ident.to_string(), MacroKind::Function, Vec::new())
+                    (
+                        function.sig.ident.to_string(),
+                        MacroKind::Function,
+                        Vec::new(),
+                    )
                 } else if attr.path().is_ident("proc_macro_derive") {
                     let Ok(args) = attr.parse_args_with(
                         syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
@@ -960,10 +976,7 @@ fn macros(
 }
 
 fn hook_records(hooks: &[catalog::Hook], types: &[Type], notes: &mut Vec<String>) -> Vec<Hook> {
-    let events: BTreeMap<&str, &Type> = types
-        .iter()
-        .map(|t| (leaf(&t.id), t))
-        .collect();
+    let events: BTreeMap<&str, &Type> = types.iter().map(|t| (leaf(&t.id), t)).collect();
     let mut out = Vec::new();
     for hook in hooks {
         let event = format!("{}Event", crate::hook_id(&hook.name));
@@ -1065,7 +1078,10 @@ fn part_records(hooks: &[Hook], traits: &[Trait], notes: &mut Vec<String>) -> Ve
     let mut kinds: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for hook in hooks {
         if let Some(scope) = &hook.contract.scope {
-            kinds.entry(scope.kind.clone()).or_default().push(hook.id.clone());
+            kinds
+                .entry(scope.kind.clone())
+                .or_default()
+                .push(hook.id.clone());
         }
     }
     let mut out = Vec::new();

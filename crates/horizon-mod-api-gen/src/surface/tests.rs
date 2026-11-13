@@ -4,7 +4,10 @@ use std::collections::BTreeMap;
 
 /// The fixture: path below the root, and text.
 const FILES: &[(&str, &str)] = &[
-    ("crates/horizon-mod-api/src/lib.rs", "pub use mod_vocab::*;\n"),
+    (
+        "crates/horizon-mod-api/src/lib.rs",
+        "pub use mod_vocab::*;\n",
+    ),
     (
         "crates/horizon-mod-vocab/src/lib.rs",
         r#"
@@ -267,12 +270,7 @@ fn the_fixture_exports_the_expected_document() {
     let written: serde_json::Value = serde_json::from_str(&export.surface.to_json()).unwrap();
     let expected: serde_json::Value =
         serde_json::from_str(include_str!("fixture_expected.json")).unwrap();
-    assert_eq!(
-        masked(written),
-        expected,
-        "{}",
-        export.surface.to_json()
-    );
+    assert_eq!(masked(written), expected, "{}", export.surface.to_json());
     assert_eq!(
         export.notes,
         ["constant LIMIT: no record kind for constants"]
@@ -292,7 +290,11 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
     let cases: &[(&str, &[(&str, &str, &str)], &str, &[&str])] = &[
         (
             "a method's argument type",
-            &[(LIB, "fn save(&mut self, slot: u8);", "fn save(&mut self, slot: u16);")],
+            &[(
+                LIB,
+                "fn save(&mut self, slot: u8);",
+                "fn save(&mut self, slot: u16);",
+            )],
             HOOKS,
             &["method:ServerHost::save"],
         ),
@@ -304,7 +306,11 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
         ),
         (
             "a field added to a constructible struct",
-            &[(LIB, "    pub y: i32,\n", "    pub y: i32,\n    pub z: i32,\n")],
+            &[(
+                LIB,
+                "    pub y: i32,\n",
+                "    pub y: i32,\n    pub z: i32,\n",
+            )],
             HOOKS,
             &["type:Point"],
         ),
@@ -328,7 +334,11 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
         ),
         (
             "a required method added to a trait mods implement",
-            &[(LIB, "    fn name(&self)", "    fn more(&self);\n    fn name(&self)")],
+            &[(
+                LIB,
+                "    fn name(&self)",
+                "    fn more(&self);\n    fn name(&self)",
+            )],
             HOOKS,
             &["trait:Hooks"],
         ),
@@ -350,7 +360,11 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
         ),
         (
             "a hook argument's type",
-            &[(LIB, "pub cancelled: bool,", "pub cancelled: bool,\n        pub extra: u8,")],
+            &[(
+                LIB,
+                "pub cancelled: bool,",
+                "pub cancelled: bool,\n        pub extra: u8,",
+            )],
             HOOKS,
             &["hook:ping", "type:PingEvent"],
         ),
@@ -371,19 +385,31 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
         ),
         (
             "a method added to a trait mods call",
-            &[(LIB, "    fn time(&self) -> u64;", "    fn time(&self) -> u64;\n    fn day(&self) -> u64;")],
+            &[(
+                LIB,
+                "    fn time(&self) -> u64;",
+                "    fn time(&self) -> u64;\n    fn day(&self) -> u64;",
+            )],
             HOOKS,
             &[],
         ),
         (
             "a defaulted method added to a trait mods implement",
-            &[(LIB, "    fn name(&self)", "    fn more(&self) {}\n    fn name(&self)")],
+            &[(
+                LIB,
+                "    fn name(&self)",
+                "    fn more(&self) {}\n    fn name(&self)",
+            )],
             HOOKS,
             &[],
         ),
         (
             "a field added to a type mods cannot build",
-            &[(LIB, "    style: u8,\n", "    style: u8,\n    pub size: u8,\n")],
+            &[(
+                LIB,
+                "    style: u8,\n",
+                "    style: u8,\n    pub size: u8,\n",
+            )],
             HOOKS,
             &[],
         ),
@@ -404,7 +430,11 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
         "fn tick_block();\n    /// Ponged.\n    #[hook(side = \"client\", contract = \"listen\", target = \"x::pong\", neoforge = \"none\")]\n    fn pong();\n}",
     );
     let (changed, added) = changes(
-        &[(LIB, "mod events {\n    use super::*;", "mod events {\n    use super::*;\n    /// The event of `pong`.\n    pub struct PongEvent { pub n: u8 }")],
+        &[(
+            LIB,
+            "mod events {\n    use super::*;",
+            "mod events {\n    use super::*;\n    /// The event of `pong`.\n    pub struct PongEvent { pub n: u8 }",
+        )],
         &pong,
     );
     assert_eq!(changed, Vec::<String>::new());
@@ -426,7 +456,11 @@ fn shapes_follow_the_wire_layout() {
     };
     // Reordering fields changes the shape, not the contract of a type mods cannot build.
     let reordered = export_fixture(
-        &[(LIB, "    pub parts: Vec<Text>,\n    style: u8,", "    style: u8,\n    pub parts: Vec<Text>,")],
+        &[(
+            LIB,
+            "    pub parts: Vec<Text>,\n    style: u8,",
+            "    style: u8,\n    pub parts: Vec<Text>,",
+        )],
         HOOKS,
     );
     assert_ne!(shape(&base, "type:Text"), shape(&reordered, "type:Text"));
@@ -435,12 +469,20 @@ fn shapes_follow_the_wire_layout() {
     let holder = |e: &Export| shape(e, "type:PingEvent");
     assert_eq!(holder(&base), holder(&export_fixture(&[], HOOKS)));
     let with_point = export_fixture(
-        &[(LIB, "pub cancelled: bool,", "pub cancelled: bool,\n        pub at: Point,")],
+        &[(
+            LIB,
+            "pub cancelled: bool,",
+            "pub cancelled: bool,\n        pub at: Point,",
+        )],
         HOOKS,
     );
     let with_wider_point = export_fixture(
         &[
-            (LIB, "pub cancelled: bool,", "pub cancelled: bool,\n        pub at: Point,"),
+            (
+                LIB,
+                "pub cancelled: bool,",
+                "pub cancelled: bool,\n        pub at: Point,",
+            ),
             (LIB, "    pub y: i32,\n}", "    pub y: i64,\n}"),
         ],
         HOOKS,
@@ -466,7 +508,11 @@ fn the_real_tree_exports() {
     let catalog = Catalog::load(&root).unwrap();
     let ids: BTreeSet<&str> = read.hooks.iter().map(|h| h.id.as_str()).collect();
     for hook in &catalog.hooks {
-        assert!(ids.contains(format!("hook:{}", hook.name).as_str()), "{}", hook.name);
+        assert!(
+            ids.contains(format!("hook:{}", hook.name).as_str()),
+            "{}",
+            hook.name
+        );
     }
     assert!(read.traits.iter().any(|t| t.id == "trait:Hooks"));
 }
