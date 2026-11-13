@@ -4,8 +4,9 @@
 crates/horizon-mod-wasm/wire-loopback/build.rs declares one module per file of its tests/wire_loopback/, so
 the root may not name one of them with a hand-written `#[path = "wire_loopback/..."]` line, and its number of
 `#[test]` attributes may not exceed the number at the branch's merge base. Independent pull requests that each
-appended to the root kept conflicting; a file of their own does not. Without --base only the module lines are
-checked (main's pushes have nothing to compare with).
+appended to the root kept conflicting; a file of their own does not. The target's old place in horizon-mod-wasm's
+tests/ may not come back: nothing compiles a file there, so a test carried to it would vanish silently. Without
+--base the test count is not checked (main's pushes have nothing to compare with).
 
     python3 tools/hotspots/check_wire_loopback.py --base origin/main
 """
@@ -24,7 +25,9 @@ check_file_size = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check_file_size)
 
 ROOT_FILE = "crates/horizon-mod-wasm/wire-loopback/tests/wire_loopback.rs"
-ADVICE = "add tests/wire_loopback/<topic>.rs; it is discovered"
+FOLDER = "crates/horizon-mod-wasm/wire-loopback/tests/wire_loopback/"
+ADVICE = f"add {FOLDER}<topic>.rs; it is discovered"
+RETIRED = ("crates/horizon-mod-wasm/tests/wire_loopback.rs", "crates/horizon-mod-wasm/tests/wire_loopback")
 MODULE_LINE = re.compile(r'#\[path\s*=\s*"wire_loopback/')
 TEST = re.compile(r"^\s*#\[test\]", re.M)
 
@@ -37,6 +40,17 @@ def problems(now, before):
         tests, base_tests = len(TEST.findall(now)), len(TEST.findall(before))
         if tests > base_tests:
             found.append(f"{ROOT_FILE}: {tests} #[test]s, {base_tests} at the merge base; {ADVICE}")
+    return found
+
+
+def retired(root):
+    """The files at the target's old place under `root`, the repository's top folder: nothing compiles them."""
+    found = []
+    for old in RETIRED:
+        path = root / old
+        files = sorted(path.rglob("*")) if path.is_dir() else [path] if path.exists() else []
+        found += [f"{file.relative_to(root).as_posix()}: nothing compiles this; move it to {FOLDER}<topic>.rs"
+                  for file in files if file.is_file()]
     return found
 
 
@@ -62,12 +76,12 @@ def main(argv=None):
                   f"(a shallow clone? fetch --unshallow): {shown.stderr.strip()}")
             return 1
         before = shown.stdout
-    found = problems((ROOT / ROOT_FILE).read_text(encoding="utf-8"), before)
+    found = retired(ROOT) + problems((ROOT / ROOT_FILE).read_text(encoding="utf-8"), before)
     for problem in found:
         print(problem)
     if found:
         return 1
-    print("wire_loopback root: no module line" + ("" if before is None else ", no new test") + ".")
+    print("wire_loopback root: no module line" + ("" if before is None else ", no new test") + "; old place empty.")
     return 0
 
 
