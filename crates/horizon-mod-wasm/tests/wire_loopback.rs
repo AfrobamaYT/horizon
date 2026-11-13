@@ -1769,8 +1769,35 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
         fn provided(&self, _: ProvidedBy, _: &str) -> bool {
             true
         }
+        fn block_capability_names(&self) -> Vec<String> {
+            Vec::new()
+        }
+        fn block_capability_proxyable(&self, _: &str) -> bool {
+            false
+        }
+        fn block_capability_proxyable_names(&self) -> Vec<String> {
+            Vec::new()
+        }
         fn mods_switched(&self) -> u64 {
             7
+        }
+    }
+    impl DefaultCapabilitiesCapabilityProviders for Table {
+        fn block_container(&self, _: &str) -> Option<ModContainer> {
+            None
+        }
+        fn block_fluids(&self, _: &str) -> Option<ModFluidTanks> {
+            None
+        }
+        fn block_energy(&self, _: &str) -> Option<ModEnergyBuffer> {
+            None
+        }
+        fn item_container_provider(
+            &self,
+            _: &str,
+            _: &mut u32,
+        ) -> Option<Arc<dyn ItemContainerProvider>> {
+            None
         }
     }
     struct World;
