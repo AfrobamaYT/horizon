@@ -331,13 +331,15 @@ mod tests {
     }
 
     /// What a crashed game leaves: the file, and nothing on its port.
+    /// A crashed game's file: its port is free again, and the system may hand it to anything, a
+    /// parallel test's live endpoint included, so its token is one no live endpoint here accepts.
     fn stale_endpoint(path: &Path) {
         let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .unwrap()
             .local_addr()
             .unwrap()
             .port();
-        write_endpoint(path, port, "secret");
+        write_endpoint(path, port, "crashed-game");
     }
 
     #[test]
