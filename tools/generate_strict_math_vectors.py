@@ -27,7 +27,7 @@ SIGN = 1 << 63
 MIN_CASES = 768
 DEFAULT_OUTPUT = (
     Path(__file__).resolve().parents[1]
-    / "crates/horizon-mod-vocab/src/strict_math_vectors.rs"
+    / "crates/horizon-mod-wasm/tests/fixture/src/strict_math_vectors.rs"
 )
 
 JAVA_ORACLE = r"""

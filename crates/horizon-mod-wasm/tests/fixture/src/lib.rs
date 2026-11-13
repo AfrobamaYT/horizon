@@ -25,7 +25,6 @@ pub use replace::own_average;
 pub use shutdown::on_shutdown;
 pub use turn::turn_angle;
 
-#[path = "../../../../horizon-mod-vocab/src/strict_math_checks.rs"]
 mod strict_math_checks;
 
 #[derive(Default)]

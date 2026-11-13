@@ -8,7 +8,3 @@ pub use horizon_core::jmath::{acos, asin, atan, atan2};
 #[cfg(test)]
 #[path = "strict_math_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "strict_math_checks.rs"]
-mod vector_tests;
