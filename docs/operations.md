@@ -44,9 +44,10 @@ the branch.
 
 Everything below runs by itself on GitHub; you only step in when something is wrong.
 
-- **The Nightly** is the only build players get. The train (`release.yml`, every 10 minutes) starts one after 5
-  player-facing merges, or when the oldest has waited 6 hours, or at once for a pull request labelled
-  `release-now`. Only a commit where both `checks` and `parity-main` passed ships. Who may add `release-now` is the
+- **The Nightly** is the only build players get. The train (`release.yml`; on the fork the daily run calls it when
+  every leg is green) starts one after 5 player-facing merges, or when the oldest has waited 6 hours, or at once for
+  a pull request labelled `release-now`. Only a commit where both `checks` and `parity-main` passed ships (on the
+  fork: `daily-green` or an ancestor of it, [release-flow](release-flow.md#daily-run)). Who may add `release-now` is the
   council's choice; until it decides, leave the label to the maintainer.
 - **Stopping Nightlies:** open an issue about the problem and label it `release-blocker`. Nothing is published
   while it is open, forced builds included. Close it when the fix is on main.

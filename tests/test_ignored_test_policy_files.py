@@ -1,6 +1,7 @@
 """The ignored-test policy rows live in one file per topic, and a `needs` variable's tests run one per process."""
 import contextlib
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -96,7 +97,12 @@ class PolicyFiles(unittest.TestCase):
 
         with patch.dict(os.environ, {"VAR": "fixture"}), patch.object(ignored_tests.subprocess, "Popen", Process), \
                 contextlib.redirect_stdout(io.StringIO()) as log:
-            self.assertEqual(ignored_tests.run_one_process_each("VAR", jobs=3), 1)
+            report = Path(self.folder.parent) / "report.json"
+            self.assertEqual(ignored_tests.run_one_process_each("VAR", jobs=3, report=str(report)), 1)
+        verdict = json.loads(report.read_text())
+        self.assertEqual([(item["package"], item["test"]) for item in verdict["problems"]],
+                         [("pkg-lib", "b::two"), ("pkg", "c::three")])
+        self.assertEqual(verdict["passed"], [{"package": "pkg", "test": "a::one"}])
         self.assertEqual(commands, [
             ["cargo", "test", "-j3", "-p", "pkg", "--lib", "--", "--ignored", "--exact", "a::one"],
             ["cargo", "test", "-j3", "-p", "pkg-lib", "--lib", "--", "--exact", "b::two"],

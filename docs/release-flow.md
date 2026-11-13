@@ -198,8 +198,28 @@ A pull request still runs its own parity job when it changes a harness script, a
 
 `.github/workflows/release.yml` is the batch train: it decides when a new Nightly goes out and starts
 `nightly build` (`.github/workflows/nightly-build.yml`, [Nightly channel](#nightly-channel)) on the commit it
-decided, which builds, signs and publishes it. It starts after every green `checks` or `parity-main` run of a push to
-main, every 10 minutes (so a batch waiting for merges to settle goes out without another merge), and by hand.
+decided, which builds, signs and publishes it. On the fork it runs only when the [daily run](#daily-run) calls it
+with a fully green commit, or by hand (`kind`: `nightly` or `snapshot`); it has no schedule and no `workflow_run`
+trigger since 2026-11-13.
+
+### Daily run
+
+`.github/workflows/daily.yml` runs every in-game test once a day, at 09:00 UTC on main's head, and when root
+dispatches it (`-f commit=<sha>`, `-f dry_run=false` to write). Its legs are the workflows that left main pushes:
+the ignored-tests data shards (`ignored-tests.yml`), the wasm fixture and guest stacks (`wasm-mods.yml`),
+`fn-replace-check.yml` and the native linkage probe (`native-dylib-probe.yml`), each called with the commit. Its
+summary (`tools/ci/daily_summary.py`) reads each leg's result and its sanitised verdict file, never a log:
+
+- every leg green: the tag `daily-green` moves to the commit, and `release.yml` (kind `nightly`) decides the
+  Nightly of that commit;
+- a failing test: one issue `Daily: <crate> <test>` (label `bug`) with its panic location, the first daily run that
+  saw it and the pull requests merged since the last green daily as suspects; later runs comment on it, and the
+  first run where it passes closes it. A leg that failed without a test name gets one issue per leg.
+
+Only a run on `main` with `dry_run` false moves the tag, files issues or publishes; any other run prints what it
+would do. A Nightly ships only a commit that is `daily-green` or an ancestor of it (`release.yml`, `nightly build`).
+A snapshot (`release.yml -f kind=snapshot`) needs only dyna-checks' gate on main's head; publishing it under its own
+tag and channel is not built yet, so it checks and stops.
 
 ```mermaid
 flowchart LR
@@ -208,7 +228,7 @@ flowchart LR
     merge --> main(["main"])
     main --> mainchecks{"checks and<br/>parity-main"}
     mainchecks -- green --> decide{"decide<br/>tools/release_train.py"}
-    cron(["every 10 minutes"]) --> decide
+    daily(["daily run, every leg green"]) --> decide
     decide -- "5 player-facing PRs settled 5 min,<br/>the oldest waited 6 h, or release-now" --> nightly["nightly build:<br/>that commit + the reviewers' picks"]
     decide -- otherwise --> wait(["wait"])
     nightly --> gate{"smoke test drew a world,<br/>no release-blocker is open"}
@@ -239,6 +259,7 @@ commits) since the commit the published Nightly was built on:
   `force=true`.
 - A scheduled run takes main's newest commit where `checks` and `parity-main` passed (a later failed
   parity-main batch doesn't change it); after a run of either, the commit it passed on, once both passed there.
+  On the fork the commit is the daily run's (`daily-green` by default), never a scheduled pick.
 
 ### Nightly only
 

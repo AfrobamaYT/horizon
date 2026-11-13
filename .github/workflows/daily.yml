@@ -1,0 +1,154 @@
+name: daily
+run-name: daily ${{ inputs.commit || github.sha }}${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run || github.ref != 'refs/heads/main') && ' (dry run)' || '' }}
+# The daily tier (CI tiers, owner 2026-11-13; docs/release-flow.md "Daily run"): every in-game test, once a day on
+# main's head and by root's dispatch. Its legs are the workflows that used to run on main pushes, called unchanged:
+# the ignored-tests data shards, the wasm fixture and guest stacks, fn-replace-check and the native linkage probe.
+# The summary then moves the tag `daily-green` to the commit when every leg passed, or files one issue per failing
+# test (tools/ci/daily_summary.py), and on all green the nightly is published from that commit (release.yml).
+# Only a run on main with dry_run false writes anything: tags, issues, the nightly.
+#   gh workflow run daily.yml --ref main -f dry_run=false             # the real run, as the schedule starts it
+#   gh workflow run daily.yml --ref <branch> -f dry_run=true          # writes nothing; prints what it would do
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: The commit to test (default the dispatched ref's head)
+        type: string
+        default: ''
+      dry_run:
+        description: Print the tag move, issues and nightly the run would make; write nothing
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  # One daily run at a time; a dispatch while one runs waits and never cancels it. The scheduled event only
+  # dispatches (below), so it never queues in this group.
+  group: daily${{ github.event_name == 'schedule' && format('-schedule-{0}', github.run_id) || '' }}
+  cancel-in-progress: false
+env:
+  # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
+  HORIZON_TELEMETRY_URL: "off"
+jobs:
+  # Dyna runners accept dispatches, not scheduled events (as dyna-checks' nightly-dispatch).
+  schedule-dispatch:
+    if: github.repository == 'arismoko/horizon' && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run daily.yml --repo "$GITHUB_REPOSITORY" --ref main -f dry_run=false
+
+  # The commit, and whether it already has a finished real daily run (then this one stops).
+  resolve:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      commit: ${{ steps.commit.outputs.commit }}
+      skip: ${{ steps.commit.outputs.skip }}
+      dry_run: ${{ steps.commit.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ inputs.commit || github.sha }}
+          # Only main writes: a run on any other ref is a dry run whatever its input says.
+          DRY_RUN: ${{ inputs.dry_run || github.ref != 'refs/heads/main' }}
+        run: |
+          sha=$(git rev-parse --verify --quiet "$COMMIT^{commit}") || { echo "::error::$COMMIT is not a commit of this repository"; exit 1; }
+          skip=false
+          if [ "$DRY_RUN" != true ]; then
+            # A finished (not cancelled) real daily run of this commit: its title is `daily <sha>`.
+            done=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows/daily.yml/runs?status=completed&per_page=100" \
+              --jq ".workflow_runs[] | select(.id != $GITHUB_RUN_ID and .display_title == \"daily $sha\" and (.conclusion == \"success\" or .conclusion == \"failure\")) | .html_url" | head -1)
+            if [ -n "$done" ]; then
+              skip=true
+              echo "### $sha already has a finished daily run: $done" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          { echo "commit=$sha"; echo "skip=$skip"; echo "dry_run=$DRY_RUN"; } >> "$GITHUB_OUTPUT"
+
+  shards:
+    needs: resolve
+    if: needs.resolve.outputs.skip == 'false'
+    uses: ./.github/workflows/ignored-tests.yml
+    with:
+      commit: ${{ needs.resolve.outputs.commit }}
+  wasm-mods:
+    needs: resolve
+    if: needs.resolve.outputs.skip == 'false'
+    uses: ./.github/workflows/wasm-mods.yml
+    with:
+      commit: ${{ needs.resolve.outputs.commit }}
+  fn-replace-check:
+    needs: resolve
+    if: needs.resolve.outputs.skip == 'false'
+    uses: ./.github/workflows/fn-replace-check.yml
+    with:
+      commit: ${{ needs.resolve.outputs.commit }}
+  linkage:
+    needs: resolve
+    if: needs.resolve.outputs.skip == 'false'
+    uses: ./.github/workflows/native-dylib-probe.yml
+    with:
+      commit: ${{ needs.resolve.outputs.commit }}
+
+  # Reads every leg's result and verdict file (never a log) and moves `daily-green` or files the issues.
+  summary:
+    needs: [resolve, shards, wasm-mods, fn-replace-check, linkage]
+    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write  # the daily-green tag
+      issues: write
+      actions: read
+    outputs:
+      green: ${{ steps.summary.outputs.green }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # No verdict file (a leg that never ran or died first) means that leg did not complete, never green.
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: daily-report-*
+          path: ${{ runner.temp }}/reports
+      - id: summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ needs.resolve.outputs.commit }}
+          DRY_RUN: ${{ needs.resolve.outputs.dry_run }}
+          RESULTS: ${{ toJSON(needs) }}
+          REPORTS: ${{ runner.temp }}/reports
+        run: python3 tools/ci/daily_summary.py
+
+  # The nightly: the daily-green commit, published through the release train (release.yml, kind nightly). A dry run
+  # moved no tag, so it stops at the summary, which says it would publish.
+  nightly:
+    needs: [resolve, summary]
+    if: needs.summary.outputs.green == 'true' && needs.resolve.outputs.dry_run == 'false'
+    permissions:
+      contents: read
+      issues: read
+      actions: write  # release.yml starts `nightly build`
+    uses: ./.github/workflows/release.yml
+    with:
+      kind: nightly
+      commit: ${{ needs.resolve.outputs.commit }}
+      dry_run: false
