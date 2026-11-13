@@ -619,7 +619,7 @@ projectile attacks keep their existing sounds. Native and wasm packages use this
 content definition and resource table.
 
 A code mod can also register an attribute type of its own with `Registrar::declare_attribute(path, default,
-min, max, syncable, sentiment)` (vanilla's `RangedAttribute` in the attribute registry). Only both-side
+min, max, syncable, sentiment, tooltip)` (vanilla's `RangedAttribute` in the attribute registry). Only both-side
 packages may declare attributes; client-only packages refuse with `WrongSide` so extra
 client mods cannot shift packet IDs. `mod_api::Sentiment` is `Positive`, `Negative`, or `Neutral`.
 The id lands in the
@@ -630,6 +630,23 @@ id, so the network ids are the same on every side running the same mods — befo
 so a mod's entity set may name its own new attribute. Values sanitize through the definition (NaN maps to the
 minimum, everything else clamps), and saves, item modifiers and the sync set carry the attribute by its string
 id.
+
+`tooltip` (`mod_api::AttributeTooltip`, `Default::default()` for vanilla's look) sets how the attribute's
+modifier lines read on item tooltips, as NeoForge's `IAttributeExtension` does:
+
+- `display: AttributeDisplay::Percentage` (NeoForge's `PercentageAttribute`) shows added values as percentages
+  too, so `+0.05` reads `+5% Swim Speed`. `AttributeDisplay::Boolean` (`BooleanAttribute`) shows an added
+  value above zero as enabled and any other as disabled (`horizon.attribute.modifier.enabled` and
+  `.disabled`). `Ranged`, the default, is vanilla's.
+- `base_modifier: Some("mymod:base_mana")` (`getBaseId`) makes a modifier with that namespaced id read as the
+  green total of the player's base value and its amount, as attack damage's base modifier does. The recipe
+  search, which has no player, shows it as a plain line. A base modifier that is not a namespaced id refuses
+  with `InvalidId`.
+- With advanced tooltips (F3+H), a mod attribute's line is followed by its modifier id, as NeoForge's default
+  `getDebugInfo` does. There is no per-attribute callback for it.
+
+The display is fixed per attribute type: NeoForge's `toValueComponent` and `toComponent` callbacks, and its
+merged attribute tooltips (`getMergedStyle`), have no counterpart.
 
 A code mod can widen the bounds of an attribute that already exists, vanilla's or another mod's, with
 `Registrar::widen_attribute_bounds(id, min, max)` (Java mods use a mixin or an access transformer on

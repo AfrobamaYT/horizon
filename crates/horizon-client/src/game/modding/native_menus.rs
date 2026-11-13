@@ -104,6 +104,56 @@ impl Game<'_> {
             items,
         )
     }
+    /// `ServerPlayer.openMenu(provider, extraDataWriter)` for a content mod menu type and no
+    /// block: the type's container slots show empty and their clicks reach the mods, as
+    /// `open_menu`'s do; `extra` and `pos` go first in its `horizon:menu_extra` payload.
+    pub(super) fn player_open_mod_menu(
+        &mut self,
+        player: mod_api::PlayerRef,
+        menu: mod_api::MenuKey,
+        title: Text,
+        extra: Vec<u8>,
+        pos: Option<[i32; 3]>,
+    ) -> Result<Option<i32>, mod_api::OpenMenuError> {
+        use mod_api::OpenMenuError;
+        let id = self.menu_key_id(menu);
+        let kind =
+            horizon_client::containers::mod_menu_type(&id).ok_or(OpenMenuError::NotModMenu)?;
+        if extra.len() > horizon_protocol::menu_extra::MAX_DATA {
+            return Err(OpenMenuError::TooLarge);
+        }
+        // A live handle of a connected player; a fake player has no connection.
+        self.online_player_record(player)
+            .ok_or(OpenMenuError::PlayerUnavailable)?;
+        let conn = self
+            .native_conn(player.uuid())
+            .ok_or(OpenMenuError::PlayerUnavailable)?;
+        let guest = self.lan.as_ref().and_then(|host| host.hub.guest(conn));
+        let brand = guest.map_or("", |g| g.brand.as_str());
+        if !horizon_client::containers::menu_reaches(brand, &id)
+            // An older Horizon client reads no menu opened without a block: its
+            // legacy menu-extra layout has no way to carry "no position".
+            || guest.is_some_and(|g| g.sender.menu_extra_rev == 0)
+        {
+            return Err(OpenMenuError::PlayerUnavailable);
+        }
+        // The mods may stop the menu, as for a block's.
+        if !self.guest_may_open(conn, &id, pos) {
+            return Ok(None);
+        }
+        // ServerPlayer.openMenu closes the menu that was open.
+        self.guest_close_all(conn);
+        let host = self.lan.as_mut().ok_or(OpenMenuError::PlayerUnavailable)?;
+        Ok(host.hub.open_menu_window(
+            conn,
+            &id,
+            component_nbt(&title.component()),
+            pos.map(|[x, y, z]| (x, y, z)),
+            horizon_client::lan::menu::Slots::Native,
+            vec![None; kind.slots],
+            Some(extra),
+        ))
+    }
     /// The native menu the player has open as window `window`, for its slots;
     /// None for another window, a menu the game opened, or a player not here.
     pub(super) fn menu(&self, uuid: u128, window: i32) -> Option<MenuRef> {
@@ -534,6 +584,109 @@ mod tests {
                 .position(|p| matches!(p, C::OpenScreen(_)))
                 .unwrap();
             assert!(close_at < open_at);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources; isolated menu registration"]
+    fn mod_menu_backend_payload_and_refusals() {
+        if super::super::native_entity_refs::tests::run_fresh_cases(
+            "game::native_menus::tests::mod_menu_backend_payload_and_refusals",
+            "HORIZON_MOD_MENU_BACKEND_CHILD",
+            &["backend"],
+        ) {
+            return;
+        }
+        // Reuse a prepared registry slot for this synthetic content-menu definition.
+        // The isolated process keeps the one-shot menu table out of other fixtures.
+        let id = "minecraft:generic_9x1";
+        assert!(horizon_client::containers::register_mod_menu_types([(
+            id.into(),
+            9,
+            0,
+            Vec::new(),
+            None,
+            None,
+        )]));
+        with_game(|game| {
+            let rx = watched_guest(game);
+            game.lan.as_mut().unwrap().hub.guests.update(0, |g| {
+                g.brand = "horizon".into();
+                g.sender.menu_extra_rev = 1;
+            });
+            let key = mod_api::__private::menu_keys()
+                .into_iter()
+                .find(|key| mod_api::__private::menu_key_id(*key).as_deref() == Some(id))
+                .unwrap();
+            let player = game.player(123).unwrap();
+            let old = open(game, 1, "old", MenuReplace::CloseFirst);
+            sent(&rx);
+            let bytes = vec![0, 255, 17];
+            let window = game
+                .player_open_mod_menu(player, key, Text::literal("new"), bytes.clone(), None)
+                .unwrap()
+                .unwrap();
+            assert_eq!(window, old + 1);
+            let packets = sent(&rx);
+            let payload_at = packets
+                .iter()
+                .position(|p| {
+                    matches!(p,
+                        C::CustomPayload(p) if p.channel == horizon_protocol::menu_extra::CHANNEL
+                    )
+                })
+                .unwrap();
+            let open_at = packets
+                .iter()
+                .position(|p| {
+                    matches!(p,
+                        C::OpenScreen(p) if p.container == window
+                    )
+                })
+                .unwrap();
+            assert!(payload_at < open_at, "extra data must precede its window");
+            let C::CustomPayload(payload) = &packets[payload_at] else {
+                unreachable!()
+            };
+            assert_eq!(
+                horizon_protocol::menu_extra::decode(&payload.data).unwrap(),
+                horizon_protocol::menu_extra::Message {
+                    window,
+                    pos: None,
+                    data: bytes
+                }
+            );
+            assert_eq!(
+                game.lan.as_ref().unwrap().hub.guests[0]
+                    .menu
+                    .as_ref()
+                    .map(|m| (m.window, m.pos)),
+                Some((window, None))
+            );
+
+            for (revision, extra, expected) in [
+                (1, vec![0; 33 * 1024], mod_api::OpenMenuError::TooLarge),
+                (0, vec![1], mod_api::OpenMenuError::PlayerUnavailable),
+            ] {
+                game.lan.as_mut().unwrap().hub.guests.update(0, |g| {
+                    g.sender.menu_extra_rev = revision;
+                });
+                game.lan.as_mut().unwrap().hub.native_menu_events.clear();
+                assert_eq!(
+                    game.player_open_mod_menu(player, key, Text::literal("refused"), extra, None,),
+                    Err(expected)
+                );
+                assert_eq!(
+                    game.lan.as_ref().unwrap().hub.guests[0]
+                        .menu
+                        .as_ref()
+                        .map(|m| m.window),
+                    Some(window),
+                    "refusal preserves the current menu"
+                );
+                assert!(game.lan.as_ref().unwrap().hub.native_menu_events.is_empty());
+                assert!(sent(&rx).is_empty(), "refusal sends neither close nor open");
+            }
         });
     }
 
