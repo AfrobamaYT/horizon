@@ -83,6 +83,7 @@ pub fn with_dispatch<R>(mods: Mods, f: impl FnOnce() -> R) -> R {
 /// On success the replacement stays installed. An error or unwinding restores the previous snapshot.
 /// Production registries remain frozen; only game fixtures that need a complete key table
 /// after their initial synthetic registration should use this.
+// hidden: game fixture epoch reconstruction, not a mod authoring capability.
 #[doc(hidden)]
 pub fn rebuild_parts<R, E>(f: impl FnOnce() -> Result<R, E>) -> Result<R, E> {
     struct Restore {
