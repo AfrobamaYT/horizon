@@ -560,6 +560,41 @@ impl Registry<'_> {
         Ok(out)
     }
 
+    // Determine the edge to drop from the graph, not from traversal order.
+    fn removal_reaches(&self, start: &str, goal: &str) -> bool {
+        let mut pending = vec![start.to_owned()];
+        let mut visited = BTreeSet::new();
+        while let Some(tag) = pending.pop() {
+            if tag == goal {
+                return true;
+            }
+            if !visited.insert(tag.clone()) {
+                continue;
+            }
+            let Some(doc) = self
+                .tags
+                .get(&tag)
+                .and_then(|text| serde_json::from_str::<Value>(text).ok())
+            else {
+                continue;
+            };
+            for value in doc["remove"].as_array().into_iter().flatten().chain(
+                doc["values"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|v| v["remove"].as_bool() == Some(true)),
+            ) {
+                if let Some(inner) =
+                    horizon_world::tag_layers::entry_id(value).and_then(|id| id.strip_prefix('#'))
+                {
+                    pending.push(full(inner));
+                }
+            }
+        }
+        false
+    }
+
     fn expand(
         &self,
         tag: &str,
@@ -575,57 +610,49 @@ impl Registry<'_> {
             .ok_or_else(|| format!("unknown {} tag #{tag}", self.what))?;
         let doc: Value = serde_json::from_str(text).map_err(|e| format!("#{tag}: {e}"))?;
         let mut own = Vec::new();
-        let out_all = out;
-        let out = &mut own;
-        for v in doc["values"].as_array().into_iter().flatten() {
-            let (id, required) = match v {
-                Value::String(s) => (s.as_str(), true),
-                Value::Object(o) => match o.get("id").and_then(Value::as_str) {
-                    Some(id) => (id, o.get("required") != Some(&Value::Bool(false))),
-                    None => continue,
-                },
-                _ => continue,
-            };
-            match id.strip_prefix('#') {
-                Some(inner) if required || self.tags.contains_key(&full(inner)) => {
-                    self.expand(&full(inner), out, seen)?
-                }
-                Some(_) => {}
-                None if self.ids.contains(&full(id)) => extend(out, [full(id)]),
-                None => {}
-            }
-        }
-        // NeoForge's `remove` list, after the values: optional, so an
-        // unknown id or tag takes nothing out, and a tag a removal names
-        // that itself fails resolves to nothing — a removal never fails
-        // the tag that carries it.
-        for v in doc["remove"].as_array().into_iter().flatten() {
-            let Some(id) = horizon_world::tag_layers::entry_id(v) else {
+        let operations = doc["values"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|v| (v, v["remove"].as_bool() == Some(true)))
+            .chain(
+                doc["remove"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|v| (v, true)),
+            );
+        for (value, removes) in operations {
+            let Some(id) = horizon_world::tag_layers::entry_id(value) else {
                 continue;
             };
-            let mut removed = Vec::new();
-            match id.strip_prefix('#') {
-                Some(inner) if self.tags.contains_key(&full(inner)) => {
-                    let target = full(inner);
-                    if seen.contains(&target) {
-                        // A cycle through removal references: the closing
-                        // edge is dropped (the removal takes nothing) and
-                        // one warning names both tags.
-                        log::warn!(
-                            "Horizon: the tags {tag} and {target} remove                              each other; neither removal applies"
-                        );
-                        continue;
-                    }
-                    if self.expand(&target, &mut removed, seen).is_err() {
-                        continue;
-                    }
+            let required = !removes && value["required"].as_bool() != Some(false);
+            let mut members = Vec::new();
+            if let Some(inner) = id.strip_prefix('#') {
+                let target = full(inner);
+                if removes && target.as_str() > tag && self.removal_reaches(&target, tag) {
+                    log::warn!(
+                        "Horizon: tags {tag} and {target} form a removal cycle; only removal edge {tag} -> {target} is ignored"
+                    );
+                    continue;
                 }
-                Some(_) => continue,
-                None => removed.push(full(id)),
+                if let Err(error) = self.expand(&target, &mut members, seen) {
+                    if required {
+                        return Err(error);
+                    }
+                    continue;
+                }
+            } else if self.ids.contains(&full(id)) {
+                members.push(full(id));
             }
-            own.retain(|e| !removed.contains(e));
+            if removes {
+                own.retain(|id| !members.contains(id));
+            } else {
+                extend(&mut own, members);
+            }
         }
-        extend(out_all, own);
+        seen.remove(tag);
+        extend(out, own);
         Ok(())
     }
 }
@@ -1258,7 +1285,7 @@ mod removal_cycles {
     use super::*;
 
     /// Two tags that remove each other resolve without an overflow, and the
-    /// removal between them takes nothing out.
+    /// edge toward the later id is ignored, independently of the starting tag.
     #[test]
     fn mutual_removals_resolve_without_an_overflow() {
         let tags: BTreeMap<String, String> = BTreeMap::from([
@@ -1268,7 +1295,7 @@ mod removal_cycles {
             ),
             (
                 "test:b".into(),
-                r##"{"values": ["test:two"], "remove": ["#test:a"]}"##.into(),
+                r##"{"values": ["test:one", "test:two"], "remove": ["#test:a"]}"##.into(),
             ),
         ]);
         let ids: BTreeSet<String> = ["test:one", "test:two"]

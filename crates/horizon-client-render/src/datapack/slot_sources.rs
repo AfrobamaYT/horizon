@@ -28,6 +28,33 @@ impl DataStore {
                                 || store.slot_source_tags.contains_key(what)
                         };
                         if let Some(tag) = entry.strip_prefix('#') {
+                            let mut pending = vec![tag];
+                            let mut walked = BTreeSet::new();
+                            let mut cyclic = false;
+                            while let Some(next) = pending.pop() {
+                                if next == id {
+                                    cyclic = true;
+                                    break;
+                                }
+                                if !walked.insert(next) {
+                                    continue;
+                                }
+                                for (target, _, removes) in
+                                    store.slot_source_tags.get(next).into_iter().flatten()
+                                {
+                                    if *removes {
+                                        if let Some(target) = target.strip_prefix('#') {
+                                            pending.push(target);
+                                        }
+                                    }
+                                }
+                            }
+                            if cyclic && tag > id {
+                                log::warn!(
+                                    "Horizon: tags {id} and {tag} form a removal cycle; only removal edge {id} -> {tag} is ignored"
+                                );
+                                continue;
+                            }
                             let mut members = Vec::new();
                             if let Ok(found) = visit(store, tag, active) {
                                 members.extend(found);
