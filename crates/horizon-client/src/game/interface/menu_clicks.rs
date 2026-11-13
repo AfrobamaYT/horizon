@@ -1,5 +1,5 @@
 //! Clicks on an open container menu: `AbstractContainerMenu.clicked` run by the menu engine
-//! (`menu_session`, `menu_click`, `menu_ops`), a shift-click's quick move, the creative screen's own
+//! (`menu_session`, `click_open_inventory`, `menu_ops`), a shift-click's quick move, the creative screen's own
 //! display and throw clicks, and a mouse button over the inventory (`click_inventory`).
 use super::*;
 
@@ -12,7 +12,7 @@ impl Game<'_> {
     /// chest, hopper, dispenser or furnace menu, run by the verified menu
     /// engine (`horizon_client::menu`). `slot` None is outside the window.
     /// False when the open screen is not one the engine models.
-    pub(super) fn menu_click(
+    pub(super) fn click_open_inventory(
         &mut self,
         slot: Option<usize>,
         button: i32,

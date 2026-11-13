@@ -5707,34 +5707,6 @@ impl Game<'_> {
         }
         self.close_ender_chest();
     }
-    /// `AbstractContainerMenu.clicked` on the open inventory, crafting table,
-    /// chest, hopper, dispenser or furnace menu, run by the verified menu
-    /// engine (`horizon_client::menu`). `slot` None is outside the window.
-    /// False when the open screen is not one the engine models.
-    fn click_open_inventory(
-        &mut self,
-        slot: Option<usize>,
-        button: i32,
-        input: horizon_client::menu::Input,
-    ) -> bool {
-        if let Some(slot) = slot
-            && slot >= Creative::DISPLAY
-            && self.creative_tab_open()
-        {
-            self.creative_display_click(slot, button, input);
-            return true;
-        }
-        if let Some(slot) = slot
-            && input == horizon_client::menu::Input::Throw
-            && self.carried.is_some()
-            && self.remote.is_some()
-            && ((slot < 9 && self.creative_tab_open()) || self.creative_inventory_open())
-        {
-            self.creative_throw_carrying(slot, button);
-            return true;
-        }
-        self.menu_ops(&[(slot, button, input)])
-    }
 
     /// `Camera.setRotation`: the camera's orientation, turned round in
     /// third-person front view.
