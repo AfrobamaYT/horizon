@@ -6,8 +6,9 @@ native trait mods against it with rustc alone, in seconds, without the game's so
     python3 tools/prebuilt_game.py smoke OUT              # build the starter mod and the game executable against OUT only
     python3 tools/prebuilt_game.py start OUT              # start smoke's executable, as installed, as far as no game data allows
     python3 tools/prebuilt_game.py exports OUT            # each DLL's exported names, toward Windows' limit
-    python3 tools/prebuilt_game.py pack OUT DIST          # the SDK's assets from OUT: engine-<target>[-server].tar.xz,
-                                                          # build-data.tar.xz and surface.json, in DIST
+    python3 tools/prebuilt_game.py pack OUT DIST          # the SDK's assets from OUT: runtime-, api- and
+                                                          # engine-<target>[-server].tar.xz, build-data.tar.xz
+                                                          # and surface.json, in DIST
     python3 tools/prebuilt_game.py index DIST [--nightly NAME]  # DIST/sdk.json over every asset in DIST
 
 Each OS's folder is built on that OS: the proc-macro libraries in it run inside the player's own rustc.
@@ -41,14 +42,31 @@ LOCK = "Cargo.lock"
 # Where `smoke` installs the executable it builds, as the launcher does, for `start`: beside OUT, never inside it,
 # since the archive is OUT alone.
 SMOKE = "prebuilt-smoke"
+# Where `smoke` installs the API route's executable with its stub (no mods), for `start`.
+SMOKE_API = "prebuilt-smoke-api"
 EXECUTABLE = "horizon-client.exe" if sys.platform == "win32" else "horizon-client"
 # The furthest a game started without its prepared files gets (game.rs `missing_resources`): past loading the
 # game's libraries and the mods' runtime environment (`entry::main_with`), where a split allocator aborts (#3877).
 NO_RESOURCES = "Horizon's prepared game files are missing"
 # The launcher's generated `main.rs` comes from the game it links against.
 TEMPLATE = "native_main.rs.template"
+# The API route's mods library (`horizon_native_mods`): the SDK builds it from this template with no rows as the stub
+# the API route's executable links against; the launcher builds it with the instance's rows and replaces the stub.
+NATIVE_MODS_TEMPLATE = "native_mods.rs.template"
+NATIVE_MODS = "horizon_native_mods"
+# Fixed, so the stub and the launcher's library mangle their three functions alike. Recorded in the identity.
+NATIVE_MODS_METADATA = "horizon-native-mods"
+# The API route's executable: built here once against the stub, never relinked on the player's machine.
+API_MAIN = ROOT / "crates/horizon-client/src/native_api_main.rs"
+# The folder holding that executable and the stub.
+RUNTIME = "runtime"
+# The crates an API-only mod may name; their closure is the `api` archive.
+API_ROOTS = ("horizon-mod-api", "horizon-mod-points")
+# The two game libraries every executable loads, in the `runtime` archive.
+GAME_LIBRARIES = ("horizon_mod_host", "horizon_mod_wasm")
 # Source files the folder carries besides compiler outputs.
-CARRIED = {"Cargo.toml": None, IDENTITY: None, LOCK: ROOT / LOCK, TEMPLATE: ROOT / "crates/horizon-client/src" / TEMPLATE}
+CARRIED = {"Cargo.toml": None, IDENTITY: None, LOCK: ROOT / LOCK, TEMPLATE: ROOT / "crates/horizon-client/src" / TEMPLATE,
+           NATIVE_MODS_TEMPLATE: ROOT / "crates/horizon-client/src" / NATIVE_MODS_TEMPLATE}
 # What the game's build script asks the `horizon-client` executable's link for (Windows' 8 MB main stack).
 LINK_ARG = "cargo:horizon-executable-link-arg="
 # Native libraries the build scripts point the final link at (the `windows` crates' MinGW import libraries):
@@ -147,12 +165,14 @@ def cargo_features(server: bool, platform: str) -> list[str]:
     return features
 
 
-def copy_artifacts(messages: list[dict], deps: Path, host: Path, target_dir: Path) -> None:
-    """Keep target metadata separate from the host proc-macros loaded by rustc.
+def copy_artifacts(messages: list[dict], deps: Path, host: Path, target_dir: Path) -> dict[str, list[str]]:
+    """Keep target metadata separate from the host proc-macros loaded by rustc. Returns each package's copied files,
+    relative to the package folder.
 
     An explicit Cargo --target keeps host build dependencies outside target_dir;
     those libraries are not part of the target SDK. Proc-macros alone run on the host.
     """
+    copied: dict[str, list[str]] = {}
     for message in messages:
         if message["reason"] != "compiler-artifact":
             continue
@@ -164,8 +184,92 @@ def copy_artifacts(messages: list[dict], deps: Path, host: Path, target_dir: Pat
             if proc_macro:
                 if name.endswith((".so", ".dll", ".dylib", ".dll.a")):
                     shutil.copy2(file, host / file.name)
+                    copied.setdefault(message["package_id"], []).append(f"{host.name}/{file.name}")
             elif file.is_relative_to(target_dir):
                 shutil.copy2(file, deps / file.name)
+                copied.setdefault(message["package_id"], []).append(f"{deps.name}/{file.name}")
+    return copied
+
+
+def api_closure(metadata: dict, roots=API_ROOTS) -> set[str]:
+    """The package IDs an API-only mod's build reads: `roots` and their normal dependencies. A proc macro is a leaf,
+    since its own dependencies are inside its library."""
+    packages = {package["id"]: package for package in metadata["packages"]}
+    nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
+    pending = [package["id"] for package in metadata["packages"] if package["name"] in roots]
+    closure = set()
+    while pending:
+        package_id = pending.pop()
+        if package_id in closure:
+            continue
+        closure.add(package_id)
+        if any("proc-macro" in target["kind"] for target in packages[package_id]["targets"]):
+            continue
+        pending.extend(dependency["pkg"] for dependency in nodes[package_id]["deps"]
+                       if any(kind["kind"] is None for kind in dependency["dep_kinds"]))
+    return closure
+
+
+def slices(metadata: dict, copied: dict[str, list[str]], api_route: list[str]) -> dict[str, list[str]]:
+    """The package's files for the `runtime` and `api` archives, from the build's own records (never a hand-kept list);
+    every other file is the `engine` archive's. `runtime`: the identity, the game's two libraries and `api_route` (the
+    API route's executable and stub). `api`: the API closure's compiled files, the point data and the mods library's
+    template."""
+    names = {package["id"]: package["name"] for package in metadata["packages"]}
+    libraries = {crate.replace("_", "-") for crate in GAME_LIBRARIES}
+    runtime = [IDENTITY, *api_route] + [file for package_id, files in copied.items()
+                                        if names.get(package_id) in libraries for file in files]
+    api = [file for package_id in api_closure(metadata) for file in copied.get(package_id, [])
+           if file not in runtime] + [*BUILD_DATA, NATIVE_MODS_TEMPLATE]
+    return {"runtime": sorted(set(runtime)), "api": sorted(set(api))}
+
+
+def api_route(out: Path, link_args: list[str]) -> list[str]:
+    """The API route's executable and its stub `horizon_native_mods`, built against the package in OUT/runtime. The
+    stub is the launcher's template with no rows, built as a dylib with the fixed metadata the launcher's library uses,
+    so the executable's imports name what the launcher's library exports. Returns their paths in the package."""
+    deps = out / "deps"
+    folder = out / RUNTIME
+    folder.mkdir()
+    common = ["--edition", "2024", "-C", "prefer-dynamic", "-C", "opt-level=3", "-L", f"dependency={deps}",
+              "-L", f"dependency={out / 'host'}", "-L", f"native={out / NATIVE}"]
+    library = f"{dylib_prefix()}{NATIVE_MODS}{dylib_suffix()}"
+    # macOS records a dylib's own path as its install name: the executable must find it through its rpath instead.
+    install_name = ["-C", f"link-arg=-Wl,-install_name,@rpath/{library}"] if sys.platform == "darwin" else []
+    with tempfile.TemporaryDirectory(dir=out.parent) as scratch:
+        stub = Path(scratch) / f"{NATIVE_MODS}.rs"
+        template = (out / NATIVE_MODS_TEMPLATE).read_text()
+        for marker in ("/* MOD_ENTRIES */", "/* MOD_SLOTS */", "/* BUILT_MODS */"):
+            template = template.replace(marker, "")
+        # The stub takes the API from the game's library, as the launcher's library does at its C link.
+        stub.write_text(f"extern crate {GAME_LIBRARIES[0]} as _;\n{template}")
+        run(["rustc", *common, *install_name, "--crate-type", "dylib", "--crate-name", NATIVE_MODS,
+             "-C", f"metadata={NATIVE_MODS_METADATA}", *extern_args(deps, "mod_api"),
+             "--extern", f"{GAME_LIBRARIES[0]}={dylib(deps, GAME_LIBRARIES[0])}", "--out-dir", str(folder), str(stub)])
+    origin = {"linux": ["-Wl,-rpath,$ORIGIN"], "darwin": ["-Wl,-rpath,@executable_path"]}.get(sys.platform, [])
+    run(["rustc", *common, "--crate-type", "bin", "--crate-name", "horizon_native_game",
+         *(flag for arg in origin + link_args for flag in ("-C", f"link-arg={arg}")),
+         *extern_args(deps, "horizon_client"), *extern_args(deps, "mod_api"), *extern_args(deps, "horizon_mod_package"),
+         "--extern", f"{GAME_LIBRARIES[0]}={dylib(deps, GAME_LIBRARIES[0])}",
+         "--extern", f"{NATIVE_MODS}={folder / library}", "-o", str(folder / EXECUTABLE), str(API_MAIN)])
+    built = sorted(path.relative_to(out).as_posix() for path in folder.iterdir())
+    if not {path.name for path in folder.iterdir()} <= api_route_files():
+        sys.exit(f"the API route's build left {built}, not only {sorted(api_route_files())}")
+    return built
+
+
+def api_route_files() -> set[str]:
+    """What OUT/runtime may hold: the executable and the stub, with its import library on Windows."""
+    library = f"{dylib_prefix()}{NATIVE_MODS}{dylib_suffix()}"
+    return {EXECUTABLE, library, *([f"{library}.a"] if sys.platform == "win32" else [])}
+
+
+def dylib_prefix() -> str:
+    return "" if sys.platform == "win32" else "lib"
+
+
+def dylib_suffix() -> str:
+    return {"win32": ".dll", "darwin": ".dylib"}.get(sys.platform, ".so")
 
 
 def runtime_packages(metadata: dict, root: str) -> set[str]:
@@ -261,7 +365,7 @@ def build(out: Path, server: bool) -> None:
     deps.mkdir(parents=True)
     macros = out / "host"
     macros.mkdir()
-    copy_artifacts(artifacts, deps, macros, target_dir / host)
+    copied = copy_artifacts(artifacts, deps, macros, target_dir / host)
     metadata = json.loads(run([
         "cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", host,
         *features,
@@ -293,6 +397,7 @@ def build(out: Path, server: bool) -> None:
         shutil.copy2(staged / manifest, out / manifest)
     output = Path(game["out_dir"]).parent / "output"
     link_args = executable_link_args(output)
+    sliced = slices(metadata, copied, api_route(out, link_args))
     files = {str(path.relative_to(out).as_posix()): sha256(path) for path in sorted(out.rglob("*")) if path.is_file()}
     identity = {
         "package_format": layout,
@@ -316,6 +421,10 @@ def build(out: Path, server: bool) -> None:
         "patch_files": {name: digest for name, digest in files.items() if name.startswith("patches/")},
         "registry_lock": (staged / "Cargo.lock").read_text(),
         "native_links": native_links(metadata, GAME),
+        # The API route: the mods library's crate name and metadata, and which files the `runtime` and `api` archives
+        # hold (every other file is the `engine` archive's).
+        "native_mods": {"crate": NATIVE_MODS, "metadata": NATIVE_MODS_METADATA},
+        "slices": sliced,
         "files": files,
     }
     (out / IDENTITY).write_text(json.dumps(identity, indent=2) + "\n")
@@ -388,6 +497,7 @@ def check(out: Path) -> None:
         and not (path.parent == out / "deps" and path.name.endswith(SUFFIXES))
         and not (path.parent == out / "host" and path.name.endswith((".so", ".dll", ".dylib", ".dll.a")))
         and not (path.parent == out / NATIVE and path.name.endswith(NATIVE_SUFFIXES))
+        and not (path.parent == out / RUNTIME and path.name in api_route_files())
     ]
     if stray:
         sys.exit(f"prebuilt folder holds files that aren't compiler outputs: {stray}")
@@ -403,6 +513,11 @@ def check(out: Path) -> None:
         build = header.get("build")
         if header.get("schema") != BUILD_DATA_SCHEMA or not isinstance(build, dict) or build.get("commit") != commit:
             sys.exit(f"prebuilt {name} is missing or has no build-data header for commit {commit}")
+    sliced = identity.get("slices", {})
+    listed = [name for kind in ("runtime", "api") for name in sliced.get(kind, [])]
+    absent = [name for name in listed if not (out / name).is_file()]
+    if not sliced.get("runtime") or not sliced.get("api") or absent or len(listed) != len(set(listed)):
+        sys.exit(f"prebuilt slices are missing, name absent files {absent} or overlap")
 
 
 def smoke(out: Path) -> None:
@@ -442,6 +557,13 @@ def smoke(out: Path) -> None:
     for library in runtime_libraries(deps):
         shutil.copy2(library, installed / library.name)
     install_package(installed / "horizon-native-mods" / "smoke", starter.replace("{id}", "smoke"))
+    # The API route's executable as shipped, beside the same libraries, with its stub's empty mod list.
+    api = out.parent / SMOKE_API
+    if api.exists():
+        shutil.rmtree(api)
+    shutil.copytree(out / RUNTIME, api)
+    for library in runtime_libraries(deps):
+        shutil.copy2(library, api / library.name)
     print(f"smoke: the starter mod and the game executable built against {out} alone, installed in {installed}")
 
 
@@ -478,28 +600,31 @@ def runtime_libraries(deps: Path) -> list[Path]:
 
 
 def start(out: Path) -> None:
-    """Start the executable `smoke` installed, as a dedicated server with no game data: it loads the game's libraries
+    """Start both executables `smoke` installed (the engine route's with the starter mod, the API route's with its stub),
+    each as a dedicated server with no game data: it loads the game's libraries
     and sets up the mods' runtime, then stops at the missing prepared files. Fails on a crash, a hang or any other
     stop, so an archive whose libraries disagree (two allocators, #3877) cannot ship."""
     # Run as a script, so lab sits on the path beside it; tests import this module without running `start`.
     import lab
 
-    installed = out.parent / SMOKE
-    with tempfile.TemporaryDirectory(dir=out.parent) as scratch:
-        scratch = Path(scratch)
-        # Never a real player's folders: lab.game_env gives the game fresh homes and no audio.
-        environment = lab.game_env(RUST_BACKTRACE="1")
-        game = scratch / "game"
-        game.mkdir()
-        command = [str(installed / EXECUTABLE), "--resources", str(scratch / "no-resources"), "--dedicated", "--nogui"]
-        print("+", " ".join(command), flush=True)
-        result = subprocess.run(command, cwd=game, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                encoding="utf-8", errors="replace", timeout=300)
-    print(result.stdout, end="")
-    print(f"start: exit {result.returncode}")
-    if result.returncode < 0 or NO_RESOURCES not in result.stdout or "panicked" in result.stdout:
-        sys.exit(f"start: the executable stopped before the prepared-files check (exit {result.returncode})")
-    print(f"start: the executable loaded the game's libraries and the mods' runtime and stopped at: {NO_RESOURCES}")
+    for installed in (out.parent / SMOKE, out.parent / SMOKE_API):
+        with tempfile.TemporaryDirectory(dir=out.parent) as scratch:
+            scratch = Path(scratch)
+            # Never a real player's folders: lab.game_env gives the game fresh homes and no audio.
+            environment = lab.game_env(RUST_BACKTRACE="1")
+            game = scratch / "game"
+            game.mkdir()
+            command = [str(installed / EXECUTABLE), "--resources", str(scratch / "no-resources"), "--dedicated",
+                       "--nogui"]
+            print("+", " ".join(command), flush=True)
+            result = subprocess.run(command, cwd=game, env=environment, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, encoding="utf-8", errors="replace", timeout=300)
+        print(result.stdout, end="")
+        print(f"start: exit {result.returncode}")
+        if result.returncode < 0 or NO_RESOURCES not in result.stdout or "panicked" in result.stdout:
+            sys.exit(f"start: {installed.name} stopped before the prepared-files check (exit {result.returncode})")
+        print(f"start: {installed.name} loaded the game's libraries and the mods' runtime and stopped at: "
+              f"{NO_RESOURCES}")
 
 
 def tar_xz(folder: Path, names: list[str], archive: Path) -> None:
@@ -520,16 +645,29 @@ def tree(folder: Path) -> list[str]:
     return ["."] + [path.relative_to(folder).as_posix() for path in folder.rglob("*")]
 
 
+def archives(out: Path, sliced: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Each archive's entries: the identity's `runtime` and `api` files, and every other file for `engine`, each with
+    the folders above it, so the three unpacked into one folder are the whole package."""
+    files = {name: kind for kind in ("runtime", "api") for name in sliced[kind]}
+    every = [name for name in tree(out) if (out / name).is_file()]
+    chosen = {"runtime": [], "api": [], "engine": []}
+    for name in every:
+        chosen[files.get(name, "engine")].append(name)
+    return {kind: sorted({".", *(parent.as_posix() for name in names for parent in Path(name).parents
+                                if parent != Path("."))} | set(names)) for kind, names in chosen.items()}
+
+
 def pack(out: Path, dist: Path, stage_tool: Path | None = None) -> None:
-    """The SDK release's assets from a checked folder OUT, into DIST: the whole package as one `engine` archive for
-    its target and side (one until the package is sliced), the build data, and the surface export of this source."""
+    """The SDK release's assets from a checked folder OUT, into DIST: the package as its `runtime`, `api` and `engine`
+    archives for its target and side ([`archives`]), the build data, and the surface export of this source."""
     check(out)
     identity = json.loads((out / IDENTITY).read_text())
     if identity.get("package_format") != package_format(ROOT) or identity.get("commit") != head():
         sys.exit(f"{out} is not this source's package (format {package_format(ROOT)}, commit {head()})")
     dist.mkdir(parents=True, exist_ok=True)
     suffix = "-server" if identity["side"] == "server" else ""
-    tar_xz(out, tree(out), dist / f"engine-{identity['target']}{suffix}.tar.xz")
+    for kind, names in archives(out, identity["slices"]).items():
+        tar_xz(out, names, dist / f"{kind}-{identity['target']}{suffix}.tar.xz")
     tar_xz(out, [".", *BUILD_DATA], dist / BUILD_DATA_ARCHIVE)
     command = ([str(stage_tool.resolve())] if stage_tool is not None else
                ["cargo", "run", "--locked", "--release", "-q", "-p", "horizon-mod-api-gen", "--bin", "horizon-stage", "--"])

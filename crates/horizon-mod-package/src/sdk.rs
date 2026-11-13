@@ -123,11 +123,14 @@ pub enum Kind {
     BuildData,
     /// The API crates with their generated code written out.
     ApiSource,
-    /// Game libraries, the prebuilt executable's inputs, the stub mods library.
+    /// The game's libraries, the API route's prebuilt executable and its stub mods library, and
+    /// the package identity.
     Runtime,
-    /// Metadata of the API closure and its proc macros.
+    /// Metadata of the API closure and its proc macros, the point data and the mods library's
+    /// template: what an API-only mod builds against.
     Api,
-    /// Every other compiled file. Until the package is sliced, the whole prebuilt game.
+    /// Every other file of the prebuilt game: what the engine route (a `[native]` table,
+    /// internals or a registry dependency) builds against, with the other two.
     Engine,
 }
 

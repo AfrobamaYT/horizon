@@ -1,20 +1,13 @@
 //! The native mods compiled into a game, and their executable-adjacent packages.
 use crate::{
-    Manifest, Side,
+    Manifest,
     mod_list::NATIVE_DIR,
     packages::{self, AdjacentManifest, ReadError},
 };
 use std::path::{Path, PathBuf};
 
-/// Launcher-to-game build contract, not a mod-facing API. Generated from the selected
-/// manifests independently of the mods' hook factories.
 #[doc(hidden)]
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BuiltMod {
-    pub id: &'static str,
-    pub version: &'static str,
-    pub side: Side,
-}
+pub use mod_vocab::__private::native::BuiltMod;
 
 /// Validated once before installing hooks. Vanilla explicitly supplies an empty inventory.
 #[derive(Debug, Default)]

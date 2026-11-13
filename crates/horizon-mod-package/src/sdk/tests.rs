@@ -218,17 +218,28 @@ fn a_release_folders_index_lists_each_asset_and_reads_back() {
 
 #[test]
 fn a_route_names_its_assets_for_the_target_and_every_missing_one() {
-    let listed = index(&[(ENGINE, b"engine")]);
+    let runtime = "runtime-x86_64-unknown-linux-gnu.tar.xz";
+    let api = "api-x86_64-unknown-linux-gnu.tar.xz";
+    let listed = index(&[(runtime, b"runtime"), (api, b"api"), (ENGINE, b"engine")]);
     let target = "x86_64-unknown-linux-gnu";
+    // The API route never needs the engine archive; the engine route needs all three.
     assert_eq!(
         listed.route_assets("api", target, Side::Client).unwrap(),
-        [ENGINE]
+        [runtime, api]
+    );
+    assert_eq!(
+        listed.route_assets("engine", target, Side::Client).unwrap(),
+        [runtime, api, ENGINE]
     );
     assert_eq!(
         listed
             .route_assets("engine", target, Side::Server)
             .unwrap_err(),
-        Refusal::Missing(vec!["engine-x86_64-unknown-linux-gnu-server.tar.xz".into()])
+        Refusal::Missing(vec![
+            "runtime-x86_64-unknown-linux-gnu-server.tar.xz".into(),
+            "api-x86_64-unknown-linux-gnu-server.tar.xz".into(),
+            "engine-x86_64-unknown-linux-gnu-server.tar.xz".into(),
+        ])
     );
 }
 
