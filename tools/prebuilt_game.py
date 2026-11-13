@@ -461,7 +461,8 @@ def start(out: Path) -> None:
                  ("HORIZON_HOME", "HORIZON_LAUNCHER_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME")}
         for home in homes.values():
             home.mkdir()
-        environment = lab.game_env(RUST_BACKTRACE="1", **homes)
+        environment = lab.game_env(RUST_BACKTRACE="1")
+        environment.update({key: str(home) for key, home in homes.items()})
         game = scratch / "game"
         game.mkdir()
         # A dedicated server stops at an unaccepted EULA before it reaches the prepared files (the EULA is accepted).
