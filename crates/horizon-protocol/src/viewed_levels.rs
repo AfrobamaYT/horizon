@@ -85,6 +85,9 @@ pub enum ViewedLevelsError {
     UnknownKind(u8),
     /// A wrapped packet of a kind that is not level-scoped: its play clientbound id.
     NotLevelScoped(i32),
+    /// A wrapped packet whose bytes its play clientbound codec does not read exactly (cut short or
+    /// with bytes left over): its id.
+    MalformedPacket(i32),
     /// A `run` with no packet.
     EmptyRun,
     /// Bytes cut short, or not what their codec reads.
@@ -103,6 +106,9 @@ impl std::fmt::Display for ViewedLevelsError {
         match self {
             Self::UnknownKind(kind) => write!(f, "unknown kind {kind}"),
             Self::NotLevelScoped(id) => write!(f, "packet {id} is not level-scoped"),
+            Self::MalformedPacket(id) => {
+                write!(f, "packet {id} is cut short or has bytes left over")
+            }
             Self::EmptyRun => f.write_str("a run with no packet"),
             Self::CutShort => f.write_str("bytes cut short"),
             Self::LeftOver => f.write_str("bytes left over"),
@@ -161,7 +167,7 @@ pub enum Message<'a> {
     /// The client makes a world for `level`.
     Open { level: i32, spawn: SpawnInfo },
     /// Packets of `level`, in order: each its play clientbound id and the bytes after it, for
-    /// `play::Clientbound::decode`. Every one is level-scoped.
+    /// `play::Clientbound::decode`. Every one is level-scoped and read exactly by its codec.
     Run {
         level: i32,
         packets: Vec<(i32, &'a [u8])>,
@@ -235,7 +241,7 @@ impl Run {
     }
 
     /// Adds `packet` (a play clientbound packet as `Clientbound::encode` writes it), refusing one
-    /// that is not level-scoped.
+    /// that is not level-scoped or that its codec does not read exactly.
     pub fn push(&mut self, packet: &[u8]) -> Result<(), ViewedLevelsError> {
         let mut r = Reader::new(packet);
         let id = r.varint()?;
@@ -262,14 +268,18 @@ fn head(kind: u8, level: i32) -> Writer {
     w
 }
 
+/// Refuses a packet (its id and the bytes after it) that is not level-scoped, or that its play
+/// clientbound codec does not read exactly.
 fn check_level_scoped(id: i32, body: &[u8]) -> Result<(), ViewedLevelsError> {
-    let scoped = match id {
-        id::GAME_EVENT => body.first().is_some_and(|e| WEATHER_EVENTS.contains(e)),
-        id::LEVEL_EVENT => {
-            matches!(Clientbound::decode(id, body), Ok(Clientbound::LevelEvent(e)) if !e.global)
-        }
-        _ => LEVEL_SCOPED.contains(&id),
-    };
+    if !LEVEL_SCOPED.contains(&id) {
+        return Err(ViewedLevelsError::NotLevelScoped(id));
+    }
+    let scoped =
+        match Clientbound::decode(id, body).map_err(|_| ViewedLevelsError::MalformedPacket(id))? {
+            Clientbound::GameEvent(e) => WEATHER_EVENTS.contains(&e.event),
+            Clientbound::LevelEvent(e) => !e.global,
+            _ => true,
+        };
     if scoped {
         Ok(())
     } else {
@@ -404,6 +414,78 @@ mod tests {
                 Some(ViewedLevelsError::NotLevelScoped(packet_id))
             );
         }
+    }
+
+    #[test]
+    fn a_wrapped_packet_cut_short_or_with_bytes_left_over_is_refused() {
+        // Run kind, level 0, then one entry: its length, the packet id, the packet's bytes.
+        // A block update (8) with no position or state.
+        assert_eq!(
+            Message::decode(&[1, 0, 1, 8]),
+            Err(ViewedLevelsError::MalformedPacket(8))
+        );
+        // A rain level change (game event 39, event 7) with no float parameter.
+        assert_eq!(
+            Message::decode(&[1, 0, 2, 39, 7]),
+            Err(ViewedLevelsError::MalformedPacket(39))
+        );
+        // A whole block update at (0, 0, 0) with state 1, then one byte left over.
+        assert_eq!(
+            Message::decode(&[1, 0, 11, 8, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0]),
+            Err(ViewedLevelsError::MalformedPacket(8))
+        );
+        // A whole rain level change of 0.5, then one byte left over.
+        assert_eq!(
+            Message::decode(&[1, 0, 7, 39, 7, 0x3f, 0, 0, 0, 9]),
+            Err(ViewedLevelsError::MalformedPacket(39))
+        );
+        for packet in [
+            &[8][..],
+            &[39, 7],
+            &[8, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+            &[39, 7, 0x3f, 0, 0, 0, 9],
+        ] {
+            assert_eq!(
+                Run::new(0, packet).err(),
+                Some(ViewedLevelsError::MalformedPacket(i32::from(packet[0])))
+            );
+        }
+    }
+
+    #[test]
+    fn the_wire_bytes_of_open_run_and_close() {
+        let channel = b"horizon:levels";
+        let head = |kind: u8, level: u8| [&[24, 14][..], channel, &[kind, level]].concat();
+        let the_end = SpawnInfo {
+            dimension_type: 0,
+            dimension: "minecraft:the_end".into(),
+            seed: 0,
+            game_type: 0,
+            previous_game_type: None,
+            debug: false,
+            flat: false,
+            last_death: None,
+            portal_cooldown: 0,
+            sea_level: 0,
+        };
+        // SpawnInfo: type 0, the dimension's name, a zero seed, then game type, no previous
+        // game type, not debug, not flat, no last death, cooldown 0 and sea level 0.
+        let spawn = [&[0, 17][..], b"minecraft:the_end", &[0; 8], &[0; 7]].concat();
+        assert_eq!(open(1, &the_end), [head(0, 1), spawn].concat());
+        let block_update = [8, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        let rain = [39, 7, 0x3f, 0, 0, 0];
+        let mut run = Run::new(2, &block_update).unwrap();
+        run.push(&rain).unwrap();
+        let wire = [
+            head(1, 2),
+            vec![10],
+            block_update.to_vec(),
+            vec![6],
+            rain.to_vec(),
+        ]
+        .concat();
+        assert_eq!(run.finish(), wire);
+        assert_eq!(close(3), head(2, 3));
     }
 
     #[test]
