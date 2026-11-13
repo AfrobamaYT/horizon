@@ -90,8 +90,8 @@ pub(super) struct Level {
     players: HashMap<u128, KeptPlayer>,
     /// Synced player health and its unpublished update events before set_health.
     player_health: HashMap<u128, KeptPlayerHealth>,
-    /// Mob health and synchronization dirtiness before set_health.
-    mob_health: HashMap<u32, (f32, bool)>,
+    /// Mob health, absorption and synchronization dirtiness before set_health or set_absorption.
+    mob_health: HashMap<u32, (f32, f32, bool)>,
     /// Each entity's inventory (`entity_slots`) before this transaction first wrote it.
     entities: HashMap<u32, Vec<Option<ItemStack>>>,
     /// Each mob's or armor stand's equipment before this transaction first
@@ -550,7 +550,7 @@ impl Game<'_> {
             level
                 .mob_health
                 .entry(id)
-                .or_insert((mob.health, mob.needs_sync));
+                .or_insert((mob.health, mob.absorption, mob.needs_sync));
         }
     }
     /// Keeps `player`'s menu storage as it is, if a transaction is open and hasn't yet.
@@ -861,9 +861,10 @@ impl Game<'_> {
                 });
             }
         }
-        for (id, (health, needs_sync)) in level.mob_health {
+        for (id, (health, absorption, needs_sync)) in level.mob_health {
             if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) {
                 mob.health = health;
+                mob.absorption = absorption;
                 mob.needs_sync = needs_sync;
             }
         }
