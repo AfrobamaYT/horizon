@@ -226,5 +226,37 @@ mod tests {
         let release = serving("v0.2.81", "v0.2.81");
         assert!(digest("v0.2.81", "horizon.zip", &keys, &release).is_ok());
         assert!(build_digest("nightly", VERSION, "horizon.zip", &keys, &release).is_err());
+        // A snapshot installs with its own version's signature; it never passes for a Nightly, nor a
+        // Nightly for it, nor a snapshot for a release.
+        const SNAPSHOT: &str = "snapshot-2026-10-28-0c02067";
+        let snapshot = serving(horizon_release_sign::SNAPSHOT, SNAPSHOT);
+        assert_eq!(
+            build_digest(SNAPSHOT, SNAPSHOT, "horizon.zip", &keys, &snapshot),
+            Ok(sha256_hex(b"game"))
+        );
+        assert!(build_digest("nightly", VERSION, "horizon.zip", &keys, &snapshot).is_err());
+        assert!(build_digest(SNAPSHOT, SNAPSHOT, "horizon.zip", &keys, &nightly).is_err());
+        // A genuine snapshot served under the Nightly's tag: its title is no Nightly's, and its
+        // version is refused on the Nightly channel before its (valid) signature is read.
+        assert_eq!(
+            title_version("nightly", "Snapshot 2026-10-28 · 0c02067"),
+            None
+        );
+        assert_eq!(
+            title_version(SNAPSHOT, "Nightly 2026-10-28 · 0c02067"),
+            None
+        );
+        assert_eq!(
+            title_version(SNAPSHOT, "Snapshot 2026-10-28 · 0c02067").as_deref(),
+            Some(SNAPSHOT)
+        );
+        assert!(build_digest("nightly", SNAPSHOT, "horizon.zip", &keys, &snapshot).is_err());
+        assert!(build_digest(SNAPSHOT, VERSION, "horizon.zip", &keys, &nightly).is_err());
+        for tag in [SNAPSHOT, "snapshot"] {
+            assert!(
+                digest(tag, "horizon.zip", &keys, &snapshot).is_err(),
+                "{tag}"
+            );
+        }
     }
 }
