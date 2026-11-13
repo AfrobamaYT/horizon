@@ -130,6 +130,19 @@ log=$data/native/build.log
 # Where the build's time went: each command's time and the whole prebuilt compile.
 grep -E ': [0-9]+ ms$|^Mods compiled against the prebuilt game in ' "$log" || true
 echo "Runner load: $(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null) on $(nproc 2>/dev/null) CPUs"
+# The registry route's one cargo command, split by crate (cargo's own timings), longest first.
+timings=$(find "$data/native" -path '*cargo-timings/cargo-timing.html' 2>/dev/null | head -1)
+if [ -n "$timings" ]; then
+  python3 - "$timings" <<'PY'
+import json, re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+match = re.search(r"UNIT_DATA = (\[.*?\]);", text, re.S)
+units = json.loads(match.group(1)) if match else []
+for unit in sorted(units, key=lambda u: -u.get("duration", 0)):
+    label = f"{unit['name']}{unit.get('target', '')}".replace('"', "")
+    print(f"cargo unit {label}: {round(unit.get('duration', 0) * 1000)} ms")
+PY
+fi
 # Only a `[[native.*]]` row patches a function; a mod of hooks alone must not say it did.
 if grep -qs '^\[\[native\.' "$mods"/*/horizon-mod.toml; then
   grep -F 'Function replacement:' "$log"

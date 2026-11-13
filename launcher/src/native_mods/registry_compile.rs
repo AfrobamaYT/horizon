@@ -391,7 +391,9 @@ pub(super) fn compile(
         ])
         .arg("--target-dir")
         .arg(&target_dir)
-        .arg("--message-format=json-render-diagnostics");
+        .arg("--message-format=json-render-diagnostics")
+        // Cargo's per-crate timings (`target/cargo-timings/`), for where a registry build's time went.
+        .arg("--timings");
     let wrapper = compiler_plan(rust, game, bindings);
     wrapper.configure(&mut command, &out.join("rustc-plan.json"), options.adapter)?;
     let messages = out.join("cargo-messages.jsonl");
