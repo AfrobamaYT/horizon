@@ -171,15 +171,9 @@ fn command(
     entities: &Entities,
     transfers: Option<&str>,
 ) -> std::io::Result<Command> {
-    let mut command = horizon_server_launch::command(program, resources, dir, low_memory)?;
-    if let Some(transfers) = transfers {
-        let args: Vec<_> = command.get_args().map(std::ffi::OsStr::to_owned).collect();
-        command
-            .args_clear()
-            .arg("--transfers")
-            .arg(transfers)
-            .args(args);
-    }
+    let mut command = horizon_server_launch::command_with_transfers(
+        program, resources, dir, low_memory, transfers,
+    )?;
     // `[engine] parallel_tick`: the game's switch, for a host that cannot set its environment. Off leaves
     // the variable alone, so one the operator set still works.
     if parallel_tick {
