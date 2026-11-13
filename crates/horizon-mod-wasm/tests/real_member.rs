@@ -268,6 +268,40 @@ fn real_member() {
                     "wasm_fixture"
                 )]
             );
+            // Both standalone outputs cross the real wasm boundary, with host-owned
+            // attribution even when source/result namespaces do not match the mod.
+            {
+                use mod_api::__private::game::RegistrationContextNew;
+                let mut models = vec!["native:kept".to_owned()];
+                let mut forms = Vec::new();
+                mod_api::dispatch_standalone_models(
+                    &mod_api::RegistrationContext::new(),
+                    &mut models,
+                    &mut forms,
+                );
+                assert_eq!(models, ["native:kept", "wasm_fixture:block/plain"]);
+                assert_eq!(forms.len(), 2);
+                assert!(forms.iter().all(|entry| entry.mod_id == "wasm_fixture"));
+                assert_eq!(
+                    forms[0].answer,
+                    mod_api::StandaloneModelForm::Rotated {
+                        id: "another_namespace:east".into(),
+                        model: "dependency:block/arrow".into(),
+                        turns: [2, 1, 3],
+                        uvlock: true,
+                    }
+                );
+                assert_eq!(
+                    forms[1].answer,
+                    mod_api::StandaloneModelForm::Combined {
+                        id: "wasm_fixture:assembly".into(),
+                        parts: vec![
+                            "dependency:block/base".into(),
+                            "dependency:block/overlay".into()
+                        ],
+                    }
+                );
+            }
         });
         if !mod_points::STAGED {
             return;

@@ -991,21 +991,14 @@ impl Game<'_> {
     ) {
         Self::fire_items(context, items);
     }
-    /// Models no blockstate names that this client bakes beside the block
-    /// models (NeoForge's `ModelEvent.RegisterStandalone`): push their ids
-    /// (`mymod:block/shaft_half`, the model at
-    /// `assets/mymod/models/block/shaft_half.json`). Parts a block entity or
-    /// a mob draws, with `native_draw_model`, so that no block is registered
-    /// only to bake its model. Asked once at start, before the resources
-    /// load; every resource load, a pack reload included, bakes them again
-    /// from that pack's files. A model that doesn't read is logged and left
-    /// out; an id without a namespace is dropped. Only the client asks it,
-    /// as NeoForge's ModelEvent.RegisterStandalone is a client mod-bus event.
+    /// File-backed standalone models and bake-time forms, registered before resource loading.
+    /// Every resource load rebakes them; dispatch attributes each form to its owning mod.
     pub(in crate::game) fn native_standalone_models(
         context: &mod_api::RegistrationContext,
         models: &mut Vec<String>,
+        forms: &mut Vec<mod_api::Answered<mod_api::StandaloneModelForm>>,
     ) {
-        Self::fire_standalone_models(context, models);
+        Self::fire_standalone_models(context, models, forms);
     }
     /// The player changed setting `key` of mod `mod_id` on its page in Options > Mods; the new
     /// value is kept already.

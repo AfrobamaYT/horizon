@@ -369,3 +369,28 @@ shearing when no part answers. Entity parts are native-only, so wasm mods do not
 | `isValidRailShape(shape)` | **Covered** | Server `BlockPart::rail_valid_shape` (`hooks/rail_valid_shape.rs`), with the rail's state, asked before `RailState` writes a shape; a refused shape keeps the current one. It starts false for a value the rail's `shape` property lacks, as NeoForge's default answers. |
 
 A minecart now treats any block in `#minecraft:rails` built on `BaseRailBlock` as track (`BaseRailBlock.isRail`), where it used to accept only the four vanilla rail names.
+
+## Standalone model baking
+
+These are model-registration counterparts, not object-extension methods (#3430).
+
+| NeoForge | Verdict | Horizon route |
+| --- | --- | --- |
+| `ModelEvent.RegisterStandalone.register` | **Covered for quad results** | Client `standalone_models` contract version 2 retains plain file ids in `models` and adds `forms: Vec<StandaloneModelForm>` on the same hook, with `RegistrationContext` on native and wasm. |
+| `SimpleUnbakedStandaloneModel` with a `ModelState` | **Covered for quad results** | `Rotated { id, model, turns, uvlock }` uses the blockstate baker's centered negative XYZ quarter-turns and inverse face UV transform; no draw-pose substitution. |
+| `UnbakedStandaloneModel.resolveDependencies` and quad composition | **Covered for declared file dependencies** | `Combined { id, parts }` loads all sources and their transitive dependencies, concatenates their quads and publishes one `ModelRef`. A missing dependency drops the entire form and logs its registering mod. |
+| Mod-defined baked result type `T` | **Out of scope** | Horizon's standalone result is baked quads, not arbitrary mod-owned objects. |
+
+The namespace rule, `RenderAssets::model` resolution and `model_baking_completed` publication
+are unchanged. Forms rebake on every resource load; failed reloads leave old handles valid.
+See [the model drawing guide](../../modding/src/how-to/client/model-drawing.md#bake-time-standalone-forms).
+
+CPU proof selectors in `horizon-client-render` are
+`models::catalog::standalone_tests::standalone_rotated_arrow_has_literal_geometry_and_world_locked_uvs`,
+`models::catalog::standalone_tests::standalone_combined_keeps_both_cubes_and_rebakes_changed_dependencies`
+and `models::catalog::standalone_tests::standalone_missing_dependency_drops_entire_form_and_logs_registering_mod`.
+The resource-backed `horizon-client` test
+`game::model_baking_completed_tests::standalone_forms_resolve_as_one_model_and_republish_after_resource_reload`
+exercises real Game publication, model-registry lookup, distinct full-block/slab geometry,
+missing-form refusal and stale/replacement handles. It requires `HORIZON_TEST_RESOURCES`
+and `--ignored`. These are CPU/model-registry proofs, not GPU rendering or screenshot proof.
