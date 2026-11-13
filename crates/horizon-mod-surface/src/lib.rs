@@ -66,7 +66,9 @@
 //! hashes: a newer writer may hash contract fields this reader does not know, and the file's
 //! integrity is the signature's job.
 pub mod records;
+pub mod scan;
 pub mod shape;
+pub mod uses;
 
 pub use records::*;
 use serde::{Deserialize, Serialize};
@@ -460,6 +462,24 @@ impl Surface {
     /// references are those of its fields, variants and alias target; a trait's, those of its
     /// supertraits when mods implement it, and none otherwise. Unknown ids are kept and lead nowhere.
     pub fn closure<'a>(&self, ids: impl IntoIterator<Item = &'a str>) -> BTreeSet<String> {
+        let refs = self.refs();
+        let mut out = BTreeSet::new();
+        let mut pending: Vec<String> = ids.into_iter().map(str::to_owned).collect();
+        while let Some(id) = pending.pop() {
+            if let Some(next) = refs.get(id.as_str()) {
+                pending.extend(
+                    next.iter()
+                        .filter(|r| !out.contains(**r))
+                        .map(|r| (*r).to_owned()),
+                );
+            }
+            out.insert(id);
+        }
+        out
+    }
+
+    /// Each record's direct references, the edges [`Surface::closure`] follows.
+    pub(crate) fn refs(&self) -> BTreeMap<&str, Vec<&str>> {
         let mut refs: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for hook in &self.hooks {
             refs.insert(
@@ -531,19 +551,7 @@ impl Surface {
                     .collect(),
             );
         }
-        let mut out = BTreeSet::new();
-        let mut pending: Vec<String> = ids.into_iter().map(str::to_owned).collect();
-        while let Some(id) = pending.pop() {
-            if let Some(next) = refs.get(id.as_str()) {
-                pending.extend(
-                    next.iter()
-                        .filter(|r| !out.contains(**r))
-                        .map(|r| (*r).to_owned()),
-                );
-            }
-            out.insert(id);
-        }
-        out
+        refs
     }
 
     /// Reads a document: refuses an unknown schema, malformed JSON and repeated ids.
@@ -577,4 +585,8 @@ impl Surface {
 }
 
 #[cfg(test)]
+mod scan_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod uses_tests;
