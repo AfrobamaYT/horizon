@@ -800,3 +800,209 @@ fn a_delete_marks_an_open_level_closing_and_a_second_unload_finds_it_not_open() 
     assert_eq!(table.queue_delete("test", "del:none"), Ok(()));
     assert!(!table.holds("del:none"));
 }
+
+/// The folders of levels nest: a delete of a level with a level below it, open or only a folder,
+/// is refused and removes nothing of either.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_delete_of_a_level_with_a_level_below_it_is_refused() {
+    with_opener("kid", "kid:instance/ab", flat(), |game, _| {
+        let parent_file = game.world_root.join("dimensions/kid/instance/region/r.0.0.mca");
+        write_file(&parent_file);
+        tick_post(game);
+        // Waiting to open, then open: the table knows the level below.
+        for _ in 0..2 {
+            assert_eq!(
+                delete_as(game, "kid", "kid:instance"),
+                Err(RuntimeLevelError::LevelsBelow)
+            );
+            game.apply_runtime_levels();
+        }
+        assert!(game.runtime_level_is_open("kid:instance/ab"));
+        place_block(game, "kid:instance/ab", "minecraft:stone");
+        assert!(parent_file.is_file());
+        // The child goes: the parent's own files stay, and the parent can go next.
+        assert_eq!(delete_as(game, "kid", "kid:instance/ab"), Ok(()));
+        game.apply_runtime_levels();
+        assert!(!game.world_root.join("dimensions/kid/instance/ab").exists());
+        assert!(
+            parent_file.is_file(),
+            "a level's own files are not the parent's"
+        );
+        assert_eq!(delete_as(game, "kid", "kid:instance"), Ok(()));
+        game.apply_runtime_levels();
+        assert!(!game.world_root.join("dimensions/kid/instance").exists());
+    });
+}
+
+/// A level below that only exists as a folder, as after a crash, stops the delete too, even when
+/// its folder has the name of one a level writes.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_delete_stops_at_a_folder_that_holds_a_level() {
+    with_opener("fold", "fold:unused", flat(), |game, _| {
+        let child = game.world_root.join("dimensions/fold/p/ab/region/r.0.0.mca");
+        // `fold:q/region` is a level too, and its folder is where `fold:q` keeps its regions.
+        let named_region = game
+            .world_root
+            .join("dimensions/fold/q/region/data/minecraft/raids.dat");
+        let own = game.world_root.join("dimensions/fold/p/region/r.0.0.mca");
+        write_file(&child);
+        write_file(&own);
+        write_file(&named_region);
+        for id in ["fold:p", "fold:q"] {
+            assert_eq!(
+                delete_as(game, "fold", id),
+                Err(RuntimeLevelError::LevelsBelow),
+                "{id}"
+            );
+        }
+        game.apply_runtime_levels();
+        assert!(child.is_file() && own.is_file() && named_region.is_file());
+        // Only the level itself: `fold:p/ab` has no folder below it.
+        assert_eq!(delete_as(game, "fold", "fold:p/ab"), Ok(()));
+        game.apply_runtime_levels();
+        assert!(!child.exists() && own.is_file());
+        assert_eq!(delete_as(game, "fold", "fold:p"), Ok(()));
+        game.apply_runtime_levels();
+        assert!(!own.exists());
+    });
+}
+
+/// Two ids can name one structure references file (`a_b:c`, `a:b_c`): a delete of one keeps the
+/// file while the other exists, and removes it once the other is gone.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_delete_keeps_a_references_file_another_level_shares() {
+    with_opener("a_b", "a_b:c", flat(), |game, _| {
+        let mine = game.world_root.join("dimensions/a_b/c/region/r.0.0.mca");
+        let other = game.world_root.join("dimensions/a/b_c/region/r.0.0.mca");
+        let shared = game
+            .world_root
+            .join("data/horizon_structure_references_a_b_c.json");
+        write_file(&mine);
+        write_file(&other);
+        write_file(&shared);
+        assert_eq!(delete_as(game, "a_b", "a_b:c"), Ok(()));
+        game.apply_runtime_levels();
+        assert!(!mine.exists());
+        assert!(other.is_file(), "the other namespace's level is not touched");
+        assert!(shared.is_file(), "its references file is kept");
+        std::fs::remove_dir_all(game.world_root.join("dimensions/a")).unwrap();
+        assert_eq!(delete_as(game, "a_b", "a_b:c"), Ok(()));
+        game.apply_runtime_levels();
+        assert!(!shared.exists(), "nothing else shares it now");
+    });
+}
+
+/// A removal that fails leaves the level closed, its id kept from `open` until a `delete` has
+/// removed the files.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_failed_removal_leaves_the_level_closed_and_its_id_closed_to_open() {
+    with_opener("stuck2", "stuck2:a", flat(), |game, seen| {
+        tick_post(game);
+        game.apply_runtime_levels();
+        let first = seen.answers.lock().unwrap()[0].unwrap();
+        let marker = game.world_root.join("dimensions/stuck2/a/data/marker.dat");
+        write_file(&marker);
+        game.levels.runtime.fail_erase = true;
+        assert_eq!(delete_as(game, "stuck2", "stuck2:a"), Ok(()));
+        game.apply_runtime_levels();
+        // Closed: not open, out of the world's levels, its handle stale, `level_unload` heard.
+        assert!(!game.runtime_level_is_open("stuck2:a"));
+        assert!(super::Dim::extra("stuck2:a").is_none());
+        assert!(!game.level_handle_current(first));
+        assert_eq!(*seen.unloads.lock().unwrap(), ["stuck2:a"]);
+        assert!(marker.is_file(), "the files are left");
+        // Its id cannot be opened while they are.
+        seen.answers.lock().unwrap().clear();
+        tick_post(game);
+        assert_eq!(
+            seen.answers.lock().unwrap()[0],
+            Err(RuntimeLevelError::Removing)
+        );
+        assert_eq!(delete_as(game, "stuck2", "stuck2:a"), Ok(()));
+        game.apply_runtime_levels();
+        assert!(marker.is_file(), "the removal failed again");
+        // Once it can, a second delete finishes it and the id opens again, empty.
+        game.levels.runtime.fail_erase = false;
+        assert_eq!(delete_as(game, "stuck2", "stuck2:a"), Ok(()));
+        game.apply_runtime_levels();
+        assert!(!marker.exists());
+        seen.answers.lock().unwrap().clear();
+        tick_post(game);
+        game.apply_runtime_levels();
+        assert!(seen.answers.lock().unwrap()[0].is_ok());
+        assert!(game.runtime_level_is_open("stuck2:a"));
+        assert!(!marker.exists());
+    });
+}
+
+/// An `open` made after the `delete` of leftovers is applied after it; if the removal failed it
+/// is dropped, so the level never starts from the files that are left.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn an_open_queued_behind_a_failed_removal_is_dropped() {
+    with_opener("behind2", "behind2:a", flat(), |game, seen| {
+        let leftover = game.world_root.join("dimensions/behind2/a/region/r.0.0.mca");
+        write_file(&leftover);
+        game.levels.runtime.fail_erase = true;
+        assert_eq!(delete_as(game, "behind2", "behind2:a"), Ok(()));
+        tick_post(game);
+        assert!(seen.answers.lock().unwrap()[0].is_ok());
+        game.apply_runtime_levels();
+        assert!(!game.runtime_level_is_open("behind2:a"));
+        assert!(!game.levels.runtime.holds("behind2:a"));
+        assert!(super::Dim::extra("behind2:a").is_none());
+        assert!(leftover.is_file());
+        assert!(seen.loads.lock().unwrap().is_empty());
+    });
+}
+
+/// A link under `dimensions` or `data` is never followed out of the world.
+#[test]
+fn a_removal_does_not_follow_links_out_of_the_world() {
+    let root = TempRoot::new("links");
+    let outside = root.0.join("outside");
+    let victim = outside.join("region/r.0.0.mca");
+    write_file(&victim);
+    let link = |to: &std::path::Path, at: &std::path::Path| -> bool {
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        // A symbolic link needs a privilege on Windows; a junction does not.
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_dir(to, at).or_else(|_| {
+            std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(at.to_string_lossy().replace('/', "\\"))
+                .arg(to.to_string_lossy().replace('/', "\\"))
+                .output()
+                .map(|_| ())
+                .and_then(|()| std::fs::symlink_metadata(at).map(|_| ()))
+        });
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(to, at);
+        made.is_ok()
+    };
+    let world = root.0.join("world");
+    // The namespace folder is a link.
+    if !link(&outside, &world.join("dimensions/lnk")) {
+        eprintln!("symbolic links are not available here: not checked");
+        return;
+    }
+    assert!(super::runtime_levels::erase_level_files(&world, "lnk:x", true).is_err());
+    // The level's own folder is a link.
+    std::fs::remove_dir(world.join("dimensions/lnk")).unwrap();
+    assert!(link(&outside, &world.join("dimensions/ns/x")));
+    assert!(super::runtime_levels::erase_level_files(&world, "ns:x", true).is_err());
+    // The folder of the references file is a link; nothing of the level's own is removed first.
+    let own = world.join("dimensions/ns/y/region/r.0.0.mca");
+    write_file(&own);
+    write_file(&outside.join("ab.json"));
+    assert!(link(
+        &outside,
+        &world.join("data/horizon_structure_references_ns_y")
+    ));
+    assert!(super::runtime_levels::erase_level_files(&world, "ns:y/ab", true).is_err());
+    assert!(victim.is_file() && outside.join("ab.json").is_file() && own.is_file());
+}

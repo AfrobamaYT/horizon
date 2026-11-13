@@ -235,12 +235,18 @@ pub trait RuntimeLevels {
     /// have ticked. A level that is open is saved and closed first (`level_unload` fires), as by
     /// `unload`; a level that is not open, such as the leftovers of a crash, only has its files
     /// removed, and a level with no files is nothing to delete. The structure references the
-    /// game keeps beside the world for the level go with its folder. Refused with
-    /// [`RuntimeLevelError::PlayersInside`] while a player or an arrival not yet landed is in
-    /// the level, now and again when it is applied, and with [`RuntimeLevelError::AlreadyOpen`]
-    /// for a level still waiting to open. An `open` of a level that is open and being deleted is
-    /// `AlreadyOpen` until the delete is applied; one of a level that was not open, made after
-    /// the `delete`, is applied after it and starts empty.
+    /// game keeps beside the world for the level go with its folder, unless another id would
+    /// share the file (`a_b:c` and `a:b_c` do) and that level exists. Links under `dimensions` or
+    /// `data` are never followed: the removal fails and is logged. Refused, now and again when
+    /// it is applied, with [`RuntimeLevelError::PlayersInside`] while a player or an arrival not
+    /// yet landed is in the level, with [`RuntimeLevelError::LevelsBelow`] while a level below
+    /// the id exists (`mymod:instance/ab` below `mymod:instance`: the folders nest), and with
+    /// [`RuntimeLevelError::AlreadyOpen`] for a level still waiting to open. An `open` of a level
+    /// that is open and being deleted is `AlreadyOpen` until the delete is applied; one of a
+    /// level that was not open, made after the `delete`, is applied after it and starts empty.
+    /// If the level closed but its files could not all be removed, it stays closed and
+    /// `is_open` is false, `open` of the id is [`RuntimeLevelError::Removing`] and an `open`
+    /// already queued is dropped with a log line, until a second `delete` has removed them.
     fn delete(&mut self, id: &str) -> Result<(), RuntimeLevelError> {
         crate::world::phase::unprovided(
             "RuntimeLevels::delete",

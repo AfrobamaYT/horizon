@@ -20,6 +20,9 @@ impl ServicesServerHost for World {
 impl mod_api::RuntimeLevels for World {
     fn open(&mut self, id: &str, level: RuntimeLevel) -> Result<LevelRef, RuntimeLevelError> {
         assert_eq!(id, "wire:room");
+        if self.deletes == 3 {
+            return Err(RuntimeLevelError::Removing);
+        }
         assert_eq!(level.dimension_type, "minecraft:overworld");
         assert_eq!(level.generator, RuntimeGenerator::Void);
         assert_eq!(level.seed, -41);
@@ -45,9 +48,13 @@ impl mod_api::RuntimeLevels for World {
     fn delete(&mut self, id: &str) -> Result<(), RuntimeLevelError> {
         assert_eq!(id, "wire:room");
         self.deletes += 1;
-        // The first answers as a level with a player in it does.
+        // The first answers as a level with a player in it does, the second as one with a level
+        // below it.
         if self.deletes == 1 {
             return Err(RuntimeLevelError::PlayersInside);
+        }
+        if self.deletes == 2 {
+            return Err(RuntimeLevelError::LevelsBelow);
         }
         self.open = false;
         Ok(())
@@ -105,10 +112,18 @@ fn runtime_level_hostcalls_preserve_requests_refusals_and_generations() {
         Err(RuntimeLevelError::PlayersInside)
     );
     assert!(host.runtime_levels().is_open("wire:room"));
+    assert_eq!(
+        host.runtime_levels().delete("wire:room"),
+        Err(RuntimeLevelError::LevelsBelow)
+    );
     assert_eq!(host.runtime_levels().delete("wire:room"), Ok(()));
     assert!(!host.runtime_levels().is_open("wire:room"));
+    assert_eq!(
+        host.runtime_levels().open("wire:room", spec()),
+        Err(RuntimeLevelError::Removing)
+    );
     guest::set_transport(None);
     assert_eq!(world.generation, 2);
-    assert_eq!(world.deletes, 2);
+    assert_eq!(world.deletes, 3);
     assert!(!world.open);
 }

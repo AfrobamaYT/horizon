@@ -70,4 +70,11 @@ pub enum RuntimeLevelError {
     CapReached,
     /// A player, or an arrival not yet landed, is in the level.
     PlayersInside,
+    /// `delete` of a level that has levels below it: an id that continues it with `/`
+    /// (`mymod:instance/ab` below `mymod:instance`) that is open, waiting, a level of the world or
+    /// has a folder under it. Delete those first, or delete only the level without a level below.
+    LevelsBelow,
+    /// `open` of an id whose `delete` closed the level but could not remove all its files. A
+    /// second `delete` of the id finishes the removal; only then can it be opened.
+    Removing,
 }

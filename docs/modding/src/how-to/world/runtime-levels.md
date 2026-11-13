@@ -70,34 +70,50 @@ answer for a level that is not open (or still waiting to open). The idle close t
 every level without players applies too, as to any other level: a runtime level nobody is in and
 no forced chunk holds is saved and dropped from memory after 300 ticks (`level_unload` fires), but
 it stays open: `is_open` still says true, and the level opens again from its folder, with
-`level_load`, when a player or a mod enters it. Only `unload` closes it for good.
+`level_load`, when a player or a mod enters it. Only `unload` or `delete` closes it for good.
 
 ## Deleting
 
 `delete(id)` removes a level for good: its folder `dimensions/<namespace>/<path>/` and the
 structure references the game keeps beside the world for it
-(`data/horizon_structure_references_<namespace>_<path>.json`), then the folders those leave
-empty. It works for the levels of the calling mod's namespace only, with the same refusals as
+(`data/horizon_structure_references_<namespace>_<path>.json`, kept if another id would share that
+file and its level exists: `a_b:c` and `a:b_c` do), then the folders those leave empty. It works for the levels of the calling mod's namespace only, with the same refusals as
 `unload` (`InvalidId`, `OutsideNamespace`, `ReservedId`), and the folder it removes comes from
 the validated id and nothing else.
 
 - A level that is **open** is unloaded first, as by `unload` (saved, `level_unload` fires), and
   its files are removed in the same pass. It refuses with `PlayersInside` while a player or an
   arrival that has not landed is in the level, when called and again when applied: move the
-  players out first. `is_open` stays true until the delete is applied.
+  players out first. `is_open` stays true until the delete is applied, which closes it.
 - A level that is **not open** is only files, the leftovers of a crash or of an earlier
   `unload`. They are removed, and a level with no files is not an error. Nothing fires, since
   nothing was open.
 - A level still **waiting to open** refuses with `AlreadyOpen`: its `open` comes first.
+- A level with a **level below it** refuses with `LevelsBelow`, when called and again when
+  applied. Folders nest: `mymod:instance/ab` lives inside the folder of `mymod:instance`, so
+  removing the parent would remove the child, which may be open, with players or a save waiting.
+  A level is below when its id continues the id with `/` and it is open, waiting, a level of the
+  world, or has a folder under the level's own. A folder under it is any folder other than
+  `region`, `entities`, `poi` and `data`, or one of the first three holding a folder; what is in
+  `data` is not looked into. Delete the level below first.
 
 The removal happens on the server thread, in the pass that applies the queue, after the level
 has been saved and dropped, so no save is running against the files. A request in the queue is
 applied in the order it was made. A reopen therefore waits for the removal: an `open` of a level
 that is open and being deleted is `AlreadyOpen` until the delete is applied; an `open` of a level
 that was not open, made after the `delete`, is applied after it and starts from nothing. A save a
-mod asked for with `level_request_save` is dropped with the level. If a file cannot be removed (another
-program holds it open), the level stays closed, the failure is logged with the mod and the id, and a
-second `delete` removes what is left.
+mod asked for with `level_request_save` is dropped with the level.
+
+A link (symbolic link, junction) on the way to the folder under `dimensions`, or to the
+references file under `data`, is never followed: the removal fails before anything is removed.
+
+If the removal fails (a link, a file another program holds), the failure is logged with the mod
+and the id, and what happened to the level depends on how far the delete got. A level that could
+not be closed, or has a level below it, stays open and `is_open` stays true; delete it again.
+A level that closed but whose files could not all be removed stays **closed**: `is_open` is
+false, its handle is stale, `open` of the id answers `Removing`, and an `open` already waiting
+behind the delete is dropped with a log line instead of starting from the files that are left.
+A second `delete` of the id finishes the removal, and only then can it be opened.
 
 A handle from before the delete reads as stale, as after an `unload`.
 

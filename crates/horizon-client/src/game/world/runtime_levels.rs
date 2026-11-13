@@ -18,7 +18,7 @@ use horizon_world::{
     },
 };
 use mod_api::{LevelRef, RuntimeGenerator, RuntimeLevel, RuntimeLevelError};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// How many runtime levels a server keeps open unless `horizon-max-runtime-levels` says otherwise.
@@ -51,23 +51,31 @@ enum Request {
 /// The runtime levels of one world open: pure bookkeeping, which the game applies.
 pub(in crate::game) struct RuntimeTable {
     entries: BTreeMap<String, Entry>,
+    /// Ids whose level is closed but whose files a delete could not all remove: not open, and not
+    /// to be opened before a `delete` has finished the removal.
+    erasing: BTreeSet<String>,
     queue: Vec<Request>,
     /// The last generation given; never reset, so no two opens of an id share one.
     last_generation: u32,
     cap: usize,
     #[cfg(test)]
     pub(super) fail_open_after_publication: bool,
+    #[cfg(test)]
+    pub(super) fail_erase: bool,
 }
 
 impl Default for RuntimeTable {
     fn default() -> Self {
         Self {
             entries: BTreeMap::new(),
+            erasing: BTreeSet::new(),
             queue: Vec::new(),
             last_generation: 0,
             cap: DEFAULT_CAP,
             #[cfg(test)]
             fail_open_after_publication: false,
+            #[cfg(test)]
+            fail_erase: false,
         }
     }
 }
@@ -76,6 +84,7 @@ impl RuntimeTable {
     /// Forget every level, at the end of a world open. The cap and the generations stay.
     pub(in crate::game) fn clear(&mut self) {
         self.entries.clear();
+        self.erasing.clear();
         self.queue.clear();
     }
 
@@ -93,6 +102,9 @@ impl RuntimeTable {
     ) -> Result<u32, RuntimeLevelError> {
         if self.entries.contains_key(id) {
             return Err(RuntimeLevelError::AlreadyOpen);
+        }
+        if self.erasing.contains(id) {
+            return Err(RuntimeLevelError::Removing);
         }
         if self.entries.len() >= self.cap {
             return Err(RuntimeLevelError::CapReached);
@@ -164,6 +176,34 @@ impl RuntimeTable {
         self.entries.get(id).map(|entry| &entry.level)
     }
 
+    /// Whether a level below `id` (`id/...`) is in the table, open, waiting or with files to
+    /// remove.
+    pub(in crate::game) fn any_below(&self, id: &str) -> bool {
+        let below = format!("{id}/");
+        self.entries
+            .keys()
+            .chain(self.erasing.iter())
+            .any(|other| other.starts_with(&below))
+    }
+
+    /// Whether the table knows `id` at all, as a level or as files left to remove.
+    fn knows(&self, id: &str) -> bool {
+        self.entries.contains_key(id) || self.erasing.contains(id)
+    }
+
+    fn is_erasing(&self, id: &str) -> bool {
+        self.erasing.contains(id)
+    }
+
+    /// `id` is closed and its files are not all gone: it waits for a `delete` to finish.
+    fn mark_erasing(&mut self, id: &str) {
+        self.erasing.insert(id.to_owned());
+    }
+
+    fn finish_erasing(&mut self, id: &str) {
+        self.erasing.remove(id);
+    }
+
     /// Whether `id` is a runtime level that is open or closing: a level whose open is still
     /// waiting has nothing to close.
     fn is_live(&self, id: &str) -> bool {
@@ -184,7 +224,9 @@ impl RuntimeTable {
 
     /// Put a level that was to close back in use: a player came in, or the close failed.
     fn keep_open(&mut self, id: &str) {
-        if let Some(entry) = self.entries.get_mut(id) {
+        if let Some(entry) = self.entries.get_mut(id)
+            && entry.state == State::Closing
+        {
             entry.state = State::Open;
         }
     }
@@ -277,21 +319,103 @@ fn portable_level_id(id: &str) -> bool {
     })
 }
 
+/// Whether the folder of a level holds a level of its own: a folder that is not one a level's
+/// save writes (`region`, `entities`, `poi`, `data`), or one of those three holding a folder, as
+/// the level `mymod:a/region` does under `mymod:a`. Plain files are not levels. What `data`
+/// holds is open-ended (mods keep their own files there) and is not looked into.
+fn folder_holds_levels(folder: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let Ok(kind) = entry.file_type() else {
+            return true;
+        };
+        if kind.is_file() {
+            continue;
+        }
+        // A link, or a folder no level's save writes.
+        let name = entry.file_name();
+        let own = !kind.is_symlink()
+            && match name.to_str() {
+                Some("data") => true,
+                Some("region" | "entities" | "poi") => !std::fs::read_dir(entry.path())
+                    .is_ok_and(|inner| {
+                        inner.flatten().any(|child| {
+                            child.file_type().map_or(true, |kind| !kind.is_file())
+                        })
+                    }),
+                _ => false,
+            };
+        if !own {
+            return true;
+        }
+    }
+    false
+}
+
+/// The ids other than `id` whose structure references file is `id`'s: each way of putting a `:`
+/// back in place of a `_` of the file name that gives a valid id.
+fn sharing_references_file(id: &str) -> Vec<String> {
+    let name = id.replace(':', "_");
+    let namespace_end = name.find('/').unwrap_or(name.len());
+    name.char_indices()
+        .filter(|(at, c)| *c == '_' && *at < namespace_end)
+        .map(|(at, _)| format!("{}:{}", &name[..at], &name[at + 1..]))
+        .filter(|other| other != id && horizon_core::level_id::valid_level_id(other))
+        .collect()
+}
+
+/// Fail if `path`, or a folder above it up to `stop` (not included), is a link: a link would be
+/// followed out of the world. What does not exist is no link.
+fn ensure_no_links(path: &Path, stop: &Path, include_path: bool) -> std::io::Result<()> {
+    for folder in path.ancestors().skip(usize::from(!include_path)) {
+        if folder == stop {
+            break;
+        }
+        match std::fs::symlink_metadata(folder) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(std::io::Error::other(format!(
+                    "{} is a link",
+                    folder.display()
+                )));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
 /// Remove the files of the level `id` from the world `root`: its folder, and the structure
-/// references kept beside the world for it, with the folders they leave empty. Whatever is not
-/// there is not an error. `id` has passed `owned_level_id`; the folder comes from it alone.
-fn erase_level_files(root: &Path, id: &str) -> std::io::Result<()> {
+/// references kept beside the world for it unless `references` says another level shares that
+/// file, with the folders they leave empty. Whatever is not there is not an error; a link on the
+/// way is, before anything is removed. `id` has passed `owned_level_id`; the folder comes from it
+/// alone.
+pub(in crate::game) fn erase_level_files(root: &Path, id: &str, references: bool) -> std::io::Result<()> {
     let dimensions = root.join("dimensions");
     let folder = horizon_client::save::dimension_dir(root, id);
     // Never the folder of anything but a level: `dimension_dir` gives one under `dimensions/`.
     if folder == dimensions || !folder.starts_with(&dimensions) {
         return Err(std::io::Error::other("not a level folder"));
     }
-    let references = super::world_loading::structure_references_file(root, id);
+    let file = super::world_loading::structure_references_file(root, id);
+    let data = root.join("data");
+    ensure_no_links(&folder, &dimensions, true)?;
+    if references {
+        ensure_no_links(&file, &data, false)?;
+    }
     let folder_gone = ignore_missing(std::fs::remove_dir_all(&folder));
-    let file_gone = ignore_missing(std::fs::remove_file(&references));
+    let file_gone = if references {
+        ignore_missing(std::fs::remove_file(&file))
+    } else {
+        Ok(())
+    };
     prune_empty_parents(&folder, &dimensions);
-    prune_empty_parents(&references, &root.join("data"));
+    if references {
+        prune_empty_parents(&file, &data);
+    }
     folder_gone.and(file_gone)
 }
 
@@ -467,7 +591,32 @@ impl Game<'_> {
         if self.levels.runtime.is_open(id) && self.level_has_players(Dim::from_id(id)) {
             return Err(RuntimeLevelError::PlayersInside);
         }
+        if self.levels_below(id) {
+            return Err(RuntimeLevelError::LevelsBelow);
+        }
         self.levels.runtime.queue_delete(owner, id)
+    }
+
+    /// Whether a level exists below `id` (`id/...`): in the table, among the world's levels, or
+    /// as a folder in the level's own. Folders nest, so removing `id` would remove it.
+    fn levels_below(&self, id: &str) -> bool {
+        let below = format!("{id}/");
+        self.levels.runtime.any_below(id)
+            || Dim::all().iter().any(|dim| dim.id().starts_with(&below))
+            || folder_holds_levels(&horizon_client::save::dimension_dir(&self.world_root, id))
+    }
+
+    /// Whether the structure references file of `id` is also the file of a level that exists.
+    fn references_file_shared(&self, id: &str) -> bool {
+        sharing_references_file(id).iter().any(|other| {
+            self.levels.runtime.knows(other)
+                || Dim::exists(other)
+                || std::fs::symlink_metadata(horizon_client::save::dimension_dir(
+                    &self.world_root,
+                    other,
+                ))
+                .is_ok()
+        })
     }
 
     /// `RuntimeLevels::is_open`.
@@ -533,18 +682,15 @@ impl Game<'_> {
                         );
                     }
                 }
-                Request::Delete(owner, id) => {
-                    if let Err(why) = self.apply_runtime_delete(owner, &id) {
-                        // A level that could not close is still open, for another try.
-                        self.levels.runtime.keep_open(&id);
-                        log::warn!("mod {owner}: runtime level {id} was not deleted: {why}");
-                    }
-                }
+                Request::Delete(owner, id) => self.apply_runtime_delete(owner, &id),
             }
         }
     }
 
     fn apply_runtime_open(&mut self, id: &str) -> horizon_client::Result<()> {
+        if self.levels.runtime.is_erasing(id) {
+            return Err("the files of an earlier delete are not all removed".into());
+        }
         let level = self
             .levels
             .runtime
@@ -607,23 +753,50 @@ impl Game<'_> {
         Ok(())
     }
 
-    /// Close the level `id` if it is open, then remove its files. A failure to remove them leaves
-    /// the level closed, and a `delete` asked again removes what is left.
-    fn apply_runtime_delete(
-        &mut self,
-        owner: &'static str,
-        id: &str,
-    ) -> horizon_client::Result<()> {
+    /// Delete the level `id`: close it if it is open, then remove its files. A level that cannot
+    /// close, or has a level below it, stays as it was. One that closed but whose files cannot
+    /// all be removed stays closed, with its id kept from `open` until a `delete` finishes.
+    fn apply_runtime_delete(&mut self, owner: &'static str, id: &str) {
+        if let Err(why) = self.close_to_delete(owner, id) {
+            // Still open, for another try.
+            self.levels.runtime.keep_open(id);
+            log::warn!("mod {owner}: runtime level {id} was not deleted: {why}");
+            return;
+        }
+        match self.erase_runtime_files(id) {
+            Ok(()) => self.levels.runtime.finish_erasing(id),
+            Err(why) => {
+                self.levels.runtime.mark_erasing(id);
+                log::warn!(
+                    "mod {owner}: runtime level {id} is closed but its files were not all \
+                     removed ({why}); delete it again"
+                );
+            }
+        }
+    }
+
+    fn close_to_delete(&mut self, owner: &'static str, id: &str) -> horizon_client::Result<()> {
         // The request passed this when it was made; the folder is derived from nothing less.
         Self::owned_level_id(owner, id).map_err(|error| format!("{error:?}"))?;
         if !self.levels.runtime.holds(id) && Dim::exists(id) {
             return Err("a level every world has".into());
         }
+        if self.levels_below(id) {
+            return Err("a level exists below it".into());
+        }
         // A level whose open is still waiting comes after this request: only files are removed.
         if self.levels.runtime.is_live(id) {
             self.apply_runtime_unload(id)?;
         }
-        Ok(erase_level_files(&self.world_root, id)?)
+        Ok(())
+    }
+
+    fn erase_runtime_files(&self, id: &str) -> std::io::Result<()> {
+        #[cfg(test)]
+        if self.levels.runtime.fail_erase {
+            return Err(std::io::Error::other("injected removal failure"));
+        }
+        erase_level_files(&self.world_root, id, !self.references_file_shared(id))
     }
 
     /// The runtime level `id` was unloaded, or failed to open: it leaves every table it was added
