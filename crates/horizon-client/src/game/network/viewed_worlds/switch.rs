@@ -389,6 +389,46 @@ mod tests {
         );
     }
 
+    /// Removing both placed block entities clears both retained stores before travel.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn removed_block_entities_at_two_positions_do_not_return_on_travel() {
+        let mut resources = None;
+        let mut game = client(&mut resources);
+        let chest = with_chests(&mut game);
+        game.handle_packet(open(1, NETHER)).unwrap();
+        game.handle_packet(run(1, &[column(5, 5)])).unwrap();
+        for [x, y, z] in [[83, 70, 85], [86, 70, 85]] {
+            game.handle_packet(run(1, &[block(x, y, z, chest), diamonds([x, y, z])]))
+                .unwrap();
+        }
+        {
+            let nether = game.remote.as_ref().unwrap().viewed.get(1).unwrap();
+            assert_eq!(nether.block_entities[&(5, 5)].len(), 2);
+            assert_eq!(nether.world.block_entities.len(), 2);
+        }
+        game.handle_packet(run(1, &[block(83, 70, 85, AIR)]))
+            .unwrap();
+        {
+            let nether = game.remote.as_ref().unwrap().viewed.get(1).unwrap();
+            assert_eq!(nether.block_entities[&(5, 5)].len(), 1);
+            assert!(nether.world.block_entities.contains_key(&(86, 70, 85)));
+            assert!(!nether.world.block_entities.contains_key(&(83, 70, 85)));
+        }
+        game.handle_packet(run(1, &[block(86, 70, 85, AIR)]))
+            .unwrap();
+        {
+            let nether = game.remote.as_ref().unwrap().viewed.get(1).unwrap();
+            assert!(nether.block_entities.values().all(Vec::is_empty));
+            assert!(nether.world.block_entities.is_empty());
+        }
+        game.handle_packet(respawn(NETHER, 3)).unwrap();
+        for pos in [(83, 70, 85), (86, 70, 85)] {
+            assert!(!game.world.block_entities.contains_key(&pos));
+            assert_eq!(game.world.block(pos.0, pos.1, pos.2), AIR);
+        }
+    }
+
     /// A travel into a level the client does not view enters it afresh: every viewed world goes,
     /// with the player's, and the loading screen waits for the server.
     #[test]
