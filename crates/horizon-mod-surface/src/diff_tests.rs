@@ -765,3 +765,48 @@ fn a_folded_member_can_make_its_container_breaking() {
         )
     );
 }
+
+#[test]
+fn a_struct_that_stops_being_constructible_is_conditional() {
+    let open = types(vec![structure("Pos", true, &[("x", "i32")])]);
+    let closed = types(vec![structure("Pos", false, &[("x", "i32")])]);
+    assert_eq!(
+        only(&diff(&open, &closed)),
+        (
+            "type:Pos",
+            ChangeKind::Changed,
+            Class::Conditional,
+            vec!["no longer constructible: breaks only a mod that builds it with a literal"],
+            vec![]
+        )
+    );
+    let d = diff(&closed, &open);
+    let (_, _, class, what, _) = only(&d);
+    assert_eq!(
+        (class, what),
+        (Class::Additive, vec!["now constructible with a literal"])
+    );
+}
+
+#[test]
+fn a_public_path_that_goes_is_conditional_and_a_new_one_adds() {
+    let at = |paths: &[&str]| {
+        let mut surface = types(vec![structure("Pos", false, &[])]);
+        surface.types[0].paths = paths.iter().map(|p| (*p).into()).collect();
+        surface
+    };
+    let (old, new) = (at(&["Pos", "world::Pos"]), at(&["Pos", "math::Pos"]));
+    assert_eq!(
+        only(&diff(&old, &new)),
+        (
+            "type:Pos",
+            ChangeKind::Changed,
+            Class::Conditional,
+            vec![
+                "now also exported as `mod_api::math::Pos`",
+                "`mod_api::world::Pos` is no longer exported under that path: affects only a mod that names it by that path"
+            ],
+            vec![]
+        )
+    );
+}

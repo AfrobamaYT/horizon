@@ -14,12 +14,14 @@
 //!   a type no longer has.
 //! - **Conditional**: it breaks only some mods, which the fit test finds from each mod's source.
 //!   A field added to a struct mods can build, or an argument added to a hook (only a mod that
-//!   builds the value with a full literal, without `..`); a hook's `version` (only a mod whose
-//!   manifest names it); a type's wire form (wasm mods only).
+//!   builds the value with a full literal, without `..`); a struct that is no longer
+//!   constructible (only a mod that builds it with a literal); a public path that goes (only a
+//!   mod that names the item by it); a hook's `version` (only a mod whose manifest names it); a
+//!   type's wire form (wasm mods only).
 //! - **Additive**: a new record (a field of a struct mods cannot build, a variant of a
 //!   `#[non_exhaustive]` enum, a defaulted method), and changes that only widen an item: now on
-//!   wasm, now crossing the wasm boundary, now constructible, an impl gained, an item no longer
-//!   required.
+//!   wasm, now crossing the wasm boundary, now constructible, an impl gained, a new public path,
+//!   an item no longer required.
 //!
 //! A container's members are reported with it once: when a type, trait or hook is added or
 //! removed, or its hashed member set (`members`, `required`, whether a hook has an output)
@@ -121,6 +123,11 @@ fn take(value: &mut Value, keys: &[&str]) -> Map<String, Value> {
         .collect()
 }
 
+/// The public paths a mod can name a record by, compared outside the hash.
+fn paths(paths: &[String]) -> Map<String, Value> {
+    Map::from_iter([("paths".to_owned(), json(&paths))])
+}
+
 fn entries(surface: &Surface) -> BTreeMap<String, Entry> {
     let mut map = BTreeMap::new();
     let mut put = |id: &str, hash: &str, view: Value, extra: Map<String, Value>| {
@@ -147,10 +154,10 @@ fn entries(surface: &Surface) -> BTreeMap<String, Entry> {
     }
     for r in &surface.traits {
         let mut view = json(&r.contract);
-        if r.contract.role != Role::Implement {
+        if r.contract.role == Role::Call {
             take(&mut view, &["bounds", "refs"]);
         }
-        put(&r.id, &r.hash, view, Map::new());
+        put(&r.id, &r.hash, view, paths(&r.paths));
         for m in &r.methods {
             put(&m.id, &m.hash, json(&m.contract), Map::new());
         }
@@ -159,15 +166,20 @@ fn entries(surface: &Surface) -> BTreeMap<String, Entry> {
         }
     }
     for r in surface.handles.iter().chain(&surface.functions) {
-        put(&r.id, &r.hash, json(&r.contract), Map::new());
+        put(&r.id, &r.hash, json(&r.contract), paths(&r.paths));
     }
     for r in &surface.macros {
-        put(&r.id, &r.hash, json(&r.contract), Map::new());
+        put(&r.id, &r.hash, json(&r.contract), paths(&r.paths));
     }
     for r in &surface.types {
         let mut view = json(&r.contract);
-        let mut extra = take(&mut view, &["wire", "wire_form"]);
+        let mut extra = take(&mut view, &["wire", "wire_form", "constructible"]);
+        // An enum's `constructible` is its `non_exhaustive`, which stays in the view.
+        if r.contract.kind == TypeKind::Enum {
+            extra.remove("constructible");
+        }
         extra.insert("impls".into(), json(&r.impls));
+        extra.extend(paths(&r.paths));
         put(&r.id, &r.hash, view, extra);
         for f in &r.fields {
             put(&f.id, &f.hash, json(&f.contract), Map::new());
@@ -326,18 +338,19 @@ fn literal_added(id: &str, owner: &str, view: &Value) -> String {
     }
 }
 
-/// What changed outside the hash: impls, a hook's version, the wire form.
+/// What changed outside the hash: impls, public paths, whether a struct is constructible, a
+/// hook's version, the wire form.
 fn extras(id: &str, old: &Map<String, Value>, new: &Map<String, Value>) -> Vec<(String, Class)> {
     let name = crate::leaf(id);
     let get = |map: &Map<String, Value>, key: &str| map.get(key).cloned().unwrap_or(Value::Null);
     let mut lines = Vec::new();
-    let list = |map: &Map<String, Value>| -> Vec<String> {
-        match map.get("impls") {
+    let strings = |map: &Map<String, Value>, key: &str| -> Vec<String> {
+        match map.get(key) {
             Some(Value::Array(items)) => items.iter().map(show).collect(),
             _ => Vec::new(),
         }
     };
-    let (x, y) = (list(old), list(new));
+    let (x, y) = (strings(old, "impls"), strings(new, "impls"));
     for gained in y.iter().filter(|t| !x.contains(t)) {
         lines.push((format!("now implements `{gained}`"), Class::Additive));
     }
@@ -346,6 +359,31 @@ fn extras(id: &str, old: &Map<String, Value>, new: &Map<String, Value>) -> Vec<(
             format!("the type `{name}` no longer implements `{lost}`"),
             Class::Breaking,
         ));
+    }
+    let (x, y) = (strings(old, "paths"), strings(new, "paths"));
+    for gained in y.iter().filter(|p| !x.contains(p)) {
+        lines.push((
+            format!("now also exported as `mod_api::{gained}`"),
+            Class::Additive,
+        ));
+    }
+    for lost in x.iter().filter(|p| !y.contains(p)) {
+        lines.push((
+            format!(
+                "`mod_api::{lost}` is no longer exported under that path: affects only a mod that names it by that path"
+            ),
+            Class::Conditional,
+        ));
+    }
+    match (get(old, "constructible"), get(new, "constructible")) {
+        (Value::Bool(false), Value::Bool(true)) => {
+            lines.push(("now constructible with a literal".into(), Class::Additive))
+        }
+        (Value::Bool(true), Value::Bool(false)) => lines.push((
+            "no longer constructible: breaks only a mod that builds it with a literal".into(),
+            Class::Conditional,
+        )),
+        _ => {}
     }
     let (x, y) = (get(old, "version"), get(new, "version"));
     if x != y {
@@ -560,13 +598,6 @@ fn describe(id: &str, old: &Value, new: &Value) -> Vec<(String, Class)> {
             }
             ("required", _, Value::Bool(true)) => lines.push((
                 "no longer has a default: every implementation must write it".into(),
-                Breaking,
-            )),
-            ("constructible", _, Value::Bool(true)) => {
-                lines.push(("now constructible with a literal".into(), Additive))
-            }
-            ("constructible", _, Value::Bool(false)) => lines.push((
-                "no longer constructible: a mod can't build it with a literal".into(),
                 Breaking,
             )),
             ("non_exhaustive", _, Value::Bool(true)) => {
