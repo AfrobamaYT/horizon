@@ -293,7 +293,14 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertEqual(jobs["nightly"]["if"],
                          "needs.summary.outputs.green == 'true' && needs.resolve.outputs.dry_run == 'false'")
         self.assertEqual(self.workflow["concurrency"]["cancel-in-progress"], "false")
-        self.assertEqual(jobs["sdk"]["with"]["publish"], "${{ needs.resolve.outputs.dry_run == 'false' }}")
+        self.assertEqual(jobs["sdk"]["with"], {"commit": "${{ needs.resolve.outputs.commit }}"})
+        self.assertNotIn("permissions", jobs["sdk"], "the build leg publishes nothing")
+        publish = jobs["sdk-publish"]
+        self.assertEqual(publish["needs"], ["resolve", "summary"])
+        self.assertEqual(publish["if"], "needs.summary.outputs.green == 'true' && needs.resolve.outputs.dry_run == 'false'")
+        self.assertEqual(publish["env"]["TAG"], "prebuilt-${{ needs.resolve.outputs.commit }}")
+        self.assertEqual([step.get("name") for step in publish["steps"]][-1], "Release prebuilt-<sha>")
+        self.assertIn("sdk-publish", jobs["nightly"]["needs"])
         self.assertEqual(jobs["nightly"]["with"]["daily"], "true")
         self.assertTrue(jobs["summary"]["name"].startswith("summary ${{ needs.resolve.outputs.commit }}"))
 

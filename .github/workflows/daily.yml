@@ -113,17 +113,14 @@ jobs:
     uses: ./.github/workflows/native-dylib-probe.yml
     with:
       commit: ${{ needs.resolve.outputs.commit }}
-  # The prebuilt SDK of this commit (prebuilt-<sha>), which the nightly needs before it publishes; a dry run builds
-  # and smokes it but publishes nothing.
+  # The prebuilt SDK of this commit, built and smoked on every OS; its archives stay this run's artifacts until
+  # sdk-publish releases them after a green summary (a red daily publishes no SDK, as it publishes no nightly).
   sdk:
     needs: resolve
     if: needs.resolve.outputs.skip == 'false'
-    permissions:
-      contents: write  # the prebuilt-<sha> release
     uses: ./.github/workflows/prebuilt-game.yml
     with:
       commit: ${{ needs.resolve.outputs.commit }}
-      publish: ${{ needs.resolve.outputs.dry_run == 'false' }}
 
   # Reads every leg's result and verdict file (never a log) and moves `daily-green` or files the issues.
   summary:
@@ -159,10 +156,45 @@ jobs:
           REPORTS: ${{ runner.temp }}/reports
         run: python3 tools/ci/daily_summary.py
 
-  # The nightly: the daily-green commit, published through the release train (release.yml, kind nightly). A dry run
-  # moved no tag, so it stops at the summary, which says it would publish.
-  nightly:
+  # The SDK of the daily-green commit, from the sdk leg's archives in this run (no rebuild), before the nightly that
+  # needs it. A dry run moved no tag and publishes nothing: it stops at the summary, which says what it would do.
+  sdk-publish:
     needs: [resolve, summary]
+    if: needs.summary.outputs.green == 'true' && needs.resolve.outputs.dry_run == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write  # the prebuilt-<sha> release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      COMMIT: ${{ needs.resolve.outputs.commit }}
+      TAG: prebuilt-${{ needs.resolve.outputs.commit }}
+    steps:
+      # None when the sdk leg skipped its build because the release already exists; the step below says so.
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: horizon-prebuilt-*
+          path: archives
+          merge-multiple: true
+      - name: Release prebuilt-<sha>
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "### $TAG is already published" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          cd archives
+          sha256sum horizon-prebuilt-*.tar.gz > SHA256SUMS
+          gh release create "$TAG" horizon-prebuilt-*.tar.gz SHA256SUMS --target "$COMMIT" --prerelease \
+            --latest=false --title "Prebuilt game ${COMMIT::10}" \
+            --notes "The game as a Rust dylib plus crate metadata, for the launcher's native mod builds (#589). Compiler outputs plus game-owned registry patch sources."
+
+  # The nightly: the daily-green commit, published through the release train (release.yml, kind nightly), after its
+  # SDK.
+  nightly:
+    needs: [resolve, summary, sdk-publish]
     if: needs.summary.outputs.green == 'true' && needs.resolve.outputs.dry_run == 'false'
     permissions:
       contents: read

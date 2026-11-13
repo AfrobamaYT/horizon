@@ -7,7 +7,8 @@ name: prebuilt game
 # release stops early), and published as a prerelease tagged prebuilt-<sha>, never marked latest. Exact-SHA SDKs are retained: Nightlies and installed
 # games can continue referencing older builds. Only compiler outputs go in:
 # tools/prebuilt_game.py refuses anything else, and nothing here reads vanilla data. A run on another branch, or a
-# daily call that is a dry run, builds and smokes every OS and publishes nothing.
+# call from the daily run, builds and smokes every OS and publishes nothing: the daily run publishes these archives
+# itself (daily.yml, sdk-publish) once every leg is green.
 on:
   workflow_call:
     inputs:
@@ -15,10 +16,6 @@ on:
         description: The commit to build (the daily run's)
         type: string
         default: ''
-      publish:
-        description: Publish prebuilt-<commit> (the daily run on main with dry_run false)
-        type: boolean
-        default: false
   workflow_dispatch:
 permissions:
   contents: read
@@ -137,9 +134,8 @@ jobs:
 
   publish:
     needs: build
-    # A run on any other branch builds and smokes every OS but releases nothing; so does a daily dry run (a call
-    # with a commit publishes only when the daily run asks).
-    if: github.ref == 'refs/heads/main' && (inputs.commit == '' || inputs.publish)
+    # A run on any other branch builds and smokes every OS but releases nothing; so does a call from the daily run.
+    if: github.ref == 'refs/heads/main' && inputs.commit == ''
     runs-on: ubuntu-latest
     permissions:
       contents: write

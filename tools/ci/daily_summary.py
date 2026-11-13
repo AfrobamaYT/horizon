@@ -38,8 +38,8 @@ DISCLOSURE = "> 🤖 Filed by Aria's agent swarm, Dyna, not by Aria."
 # daily.yml's leg jobs (each a called workflow), and the called workflows' own routing jobs, which test nothing.
 LEGS = ("shards", "wasm-mods", "fn-replace-check", "linkage", "sdk")
 HELPERS = ("plan", "route", "fresh")
-# Legs whose skipped jobs are not missing coverage: the SDK skips its build when prebuilt-<sha> already exists and
-# its publish on a dry run.
+# Legs whose skipped jobs are not missing coverage: the SDK skips its build when prebuilt-<sha> already exists, and
+# its own publish job always when called (daily.yml publishes after a green summary).
 SKIP_IS_FINE = ("sdk",)
 # The wasm fixture step whose failures its verdict file names test by test.
 FIXTURE_TESTS_STEP = "Run the client tests that load the compiled fixture"
@@ -106,7 +106,7 @@ def report_for(job, reports):
 
 def known(name):
     """daily.yml's own jobs and its legs' jobs; any other job is one the summary cannot judge."""
-    return (name in ("resolve", "schedule-dispatch") or name.startswith(("summary ", "nightly / "))
+    return (name in ("resolve", "schedule-dispatch", "sdk-publish") or name.startswith(("summary ", "nightly / "))
             or name.split(" / ", 1)[0] in LEGS and " / " in name)
 
 
