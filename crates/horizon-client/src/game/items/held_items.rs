@@ -115,7 +115,7 @@ impl Game<'_> {
     }
 
     /// Inventory.add: returns the stack that did not fit.
-    pub(super) fn give(&mut self, mut stack: ItemStack) -> Option<ItemStack> {
+    pub(super) fn add_stack_to_inventory(&mut self, mut stack: ItemStack) -> Option<ItemStack> {
         let tutorial_item = matches!(
             self.tutorial.step,
             tutorial::Step::FindTree | tutorial::Step::PunchTree | tutorial::Step::CraftPlanks
