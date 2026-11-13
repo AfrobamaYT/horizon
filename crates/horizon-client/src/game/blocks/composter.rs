@@ -11,6 +11,11 @@ use horizon_client::{
 use horizon_core::{position::BlockPos, random::RandomSource};
 use horizon_world::registry::BlockStateId;
 
+/// Whether a block type provides the composter's state-backed container ports.
+pub(super) fn is_composter(kind: &str) -> bool {
+    kind == "minecraft:composter"
+}
+
 /// State-backed container feedback, published only by the outermost successful transaction.
 pub(super) enum Effects {
     Insert {
@@ -45,7 +50,7 @@ impl Game<'_> {
     pub(super) fn composter_level(&self, pos: [i32; 3]) -> Option<i32> {
         let state = self.world.block(pos[0], pos[1], pos[2]);
         let s = self.pack.assets.registry.state(state)?;
-        if &*s.name != "minecraft:composter" {
+        if !is_composter(&s.name) {
             return None;
         }
         s.properties.get("level")?.parse().ok()

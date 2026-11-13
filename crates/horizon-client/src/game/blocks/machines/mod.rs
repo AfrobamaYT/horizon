@@ -3,7 +3,7 @@
 //! the vanilla dispense behaviours Horizon has entities for, and container
 //! comparator signals (`AbstractContainerMenu.getRedstoneSignalFromContainer`).
 mod loot_access;
-use super::{Game, spill, storage::is_shulker_box};
+use super::{Game, composter::is_composter, spill, storage::is_shulker_box};
 use horizon_core::nbt::Tag;
 use mod_api::__private::game::*;
 
@@ -296,7 +296,7 @@ impl Containers<'_> {
     fn view(&self, pos: Pos, blocked_chests: bool) -> Option<View> {
         let state = self.world.block(pos.0, pos.1, pos.2);
         let name = self.name(state);
-        if name == "minecraft:composter" {
+        if is_composter(name) {
             let level = self.prop(state, "level").and_then(|l| l.parse().ok())?;
             return Some(View {
                 parts: vec![(pos, usize::from(level != 7))],
