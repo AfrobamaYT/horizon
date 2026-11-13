@@ -27,7 +27,8 @@ namespace. Both checks run once, when the mods register.
 
 Storage for a holder without a block entity (an entity, a player, a chunk, the level) comes stock, kept in an
 attachment the mod declares, as NeoForge mods keep a `ItemStacksResourceHandler` or `SimpleEnergyHandler` in one:
-`AttachedItems::new(&SLOTS, holder, size, capacity, valid)` and `AttachedFluids` (`AttachedStacks<R>`, a
+`AttachedItems::new(&SLOTS, holder, size, capacity, valid)` (returns `None` for more than 4096
+indices) and `AttachedFluids` (`AttachedStacks<R>`, a
 `ResourceHandler<R>` over an `AttachmentType<StackList<R>>`, `single` for one index) and
 `AttachedEnergy::new(&ENERGY, holder, capacity, max_insert, max_extract)` over an `AttachmentType<u32>`. Give the
 item or fluid attachment the codec `ITEM_STACKS` or `FLUID_STACKS` to save it. Every write is an attachment write, so

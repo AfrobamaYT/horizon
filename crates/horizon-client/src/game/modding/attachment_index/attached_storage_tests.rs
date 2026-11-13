@@ -41,7 +41,7 @@ fn attached_items_are_undone_by_an_abort_and_saved_by_their_codec() {
     with_game(|game| {
         chunk_game(game);
         let dirt = ItemResource::of(&ItemStack::new("minecraft:dirt", 1).try_into_api().unwrap());
-        let slots = AttachedItems::new(&ITEMS, CHUNK, 9, 64, |_| true);
+        let slots = AttachedItems::new(&ITEMS, CHUNK, 9, 64, |_| true).unwrap();
         let host: &mut dyn ServerHost = game;
         let aborted =
             host.transaction(|host, tx| Err::<(), _>(slots.insert(host, tx, 4, &dirt, 10)));

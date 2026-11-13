@@ -59,21 +59,24 @@ pub type AttachedFluids = AttachedStacks<FluidResource>;
 
 impl<R: StackedResource> AttachedStacks<R> {
     /// `size` indices of `attachment` on `holder`, each holding up to `capacity` of what `valid`
-    /// accepts.
+    /// accepts. Returns `None` if `size` exceeds the codecs' 4096-index limit.
     pub fn new(
         attachment: &'static AttachmentType<StackList<R>>,
         holder: Holder,
         size: usize,
         capacity: u32,
         valid: fn(&R) -> bool,
-    ) -> Self {
-        Self {
+    ) -> Option<Self> {
+        if size > MAX_SLOTS {
+            return None;
+        }
+        Some(Self {
             attachment,
             holder,
             size,
             capacity,
             valid,
-        }
+        })
     }
     /// One index (`ItemStackResourceHandler`, a single tank).
     pub fn single(
@@ -83,6 +86,7 @@ impl<R: StackedResource> AttachedStacks<R> {
         valid: fn(&R) -> bool,
     ) -> Self {
         Self::new(attachment, holder, 1, capacity, valid)
+            .expect("one index is within the codec limit")
     }
     /// What index `index` holds; none past the handler's `size`, or where the holder has none
     /// or is gone. One borrowed read of the stored list: only the entry is cloned.
@@ -265,6 +269,7 @@ impl EnergyHandler for AttachedEnergy {
 /// each held index as vanilla saves a container's items. An amount past what a signed `Int`
 /// saves (`i32::MAX`) fails the encode rather than wrapping; the handler's capacity is far
 /// below it.
+/// At most 4096 indices (slots 0 through 4095) can be encoded or decoded.
 pub const ITEM_STACKS: AttachmentCodec<StackList<ItemResource>> = AttachmentCodec {
     encode: |list| {
         encode_stacks(list, |item, amount| {
@@ -305,6 +310,7 @@ pub const ITEM_STACKS: AttachmentCodec<StackList<ItemResource>> = AttachmentCode
 };
 
 /// The codec of an [`AttachedFluids`] attachment: `{stacks: [{Slot, id, amount, components}]}`.
+/// At most 4096 indices (slots 0 through 4095) can be encoded or decoded.
 /// An amount past what a signed `Int` saves (`i32::MAX`) fails the encode, as the items codec
 /// does; a fluid tank that can hold more carries it in a mod's own codec (NeoForge saves the
 /// same `Int`).
@@ -354,6 +360,9 @@ fn encode_stacks<R>(
     list: &StackList<R>,
     entry: impl Fn(&R, u32) -> Option<Compound>,
 ) -> Result<Compound, AttachmentError> {
+    if list.len() > MAX_SLOTS {
+        return Err(AttachmentError::Encode);
+    }
     let mut stacks = Vec::new();
     for (slot, (resource, amount)) in list
         .iter()
@@ -370,9 +379,8 @@ fn encode_stacks<R>(
     Ok(saved)
 }
 
-/// The most indices one saved stack list may span. A handler's `size` a mod picks is bounded by
-/// this at the codec: a saved `Slot` past it is hostile, and a hostile save must not drive the
-/// allocation of the list it names.
+/// The most indices a handler or saved stack list may span. Checked at construction and
+/// at both codec boundaries, before a hostile saved slot can drive allocation.
 const MAX_SLOTS: usize = 4096;
 
 /// The list `saved` holds, each index read by `entry`; one it can't read fails the decode. A

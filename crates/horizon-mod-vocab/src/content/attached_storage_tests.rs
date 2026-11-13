@@ -104,7 +104,7 @@ fn a_fluid_tank_round_trips_through_its_codec_and_moves() {
         resolve(&[], &["minecraft:water"]);
         let mut host = FakeHost::new();
         let water = fluid("minecraft:water");
-        let tanks = AttachedFluids::new(&FLUIDS, CHUNK, 3, 1000, |_| true);
+        let tanks = AttachedFluids::new(&FLUIDS, CHUNK, 3, 1000, |_| true).unwrap();
         let moved =
             host.transaction(|host, tx| Ok::<_, ()>(tanks.insert(host, tx, 1, &water, 250)));
         assert_eq!(moved, Ok(250));
@@ -133,7 +133,7 @@ fn extraction_takes_part_and_none_of_another_resource() {
         let mut host = FakeHost::new();
         let dirt = item("minecraft:dirt");
         let cobble = item("minecraft:cobblestone");
-        let slots = AttachedItems::new(&ITEMS, CHUNK, 9, 64, |_| true);
+        let slots = AttachedItems::new(&ITEMS, CHUNK, 9, 64, |_| true).unwrap();
         let went = host.transaction(|host, tx| Ok::<_, ()>(slots.insert(host, tx, 4, &dirt, 30)));
         assert_eq!(went, Ok(30));
         let none =
@@ -155,7 +155,8 @@ fn capacity_stays_physical_while_validity_refuses_inserts_only() {
         let dirt = item("minecraft:dirt");
         let cobble = item("minecraft:cobblestone");
         CHOSEN.with_borrow_mut(|chosen| *chosen = Some(dirt.to_stack(1).unwrap().item()));
-        let only_dirt = AttachedItems::new(&VALID_ITEMS, CHUNK, 4, 500, accepts_the_chosen);
+        let only_dirt =
+            AttachedItems::new(&VALID_ITEMS, CHUNK, 4, 500, accepts_the_chosen).unwrap();
         assert_eq!(
             only_dirt.capacity(&mut host, 2, &cobble),
             64,
@@ -169,7 +170,7 @@ fn capacity_stays_physical_while_validity_refuses_inserts_only() {
             host.transaction(|host, tx| Ok::<_, ()>(only_dirt.insert(host, tx, 2, &dirt, 120)));
         assert_eq!(went, Ok(64), "at most the item's stack size per index");
         // A cobblestone another (permissive) handler's write stored reads out through this one.
-        let anything = AttachedItems::new(&VALID_ITEMS, CHUNK, 4, 500, |_| true);
+        let anything = AttachedItems::new(&VALID_ITEMS, CHUNK, 4, 500, |_| true).unwrap();
         let _ = host.transaction(|host, tx| Ok::<_, ()>(anything.insert(host, tx, 3, &cobble, 7)));
         let came =
             host.transaction(|host, tx| Ok::<_, ()>(only_dirt.extract(host, tx, 3, &cobble, 7)));
@@ -215,10 +216,10 @@ fn a_smaller_view_keeps_higher_indices() {
         resolve(&["minecraft:dirt"], &[]);
         let mut host = FakeHost::new();
         let dirt = item("minecraft:dirt");
-        let big = AttachedItems::new(&ITEMS, CHUNK, 9, 64, |_| true);
+        let big = AttachedItems::new(&ITEMS, CHUNK, 9, 64, |_| true).unwrap();
         let went = host.transaction(|host, tx| Ok::<_, ()>(big.insert(host, tx, 7, &dirt, 12)));
         assert_eq!(went, Ok(12));
-        let small = AttachedItems::new(&ITEMS, CHUNK, 3, 64, |_| true);
+        let small = AttachedItems::new(&ITEMS, CHUNK, 3, 64, |_| true).unwrap();
         let went = host.transaction(|host, tx| Ok::<_, ()>(small.insert(host, tx, 0, &dirt, 5)));
         assert_eq!(went, Ok(5));
         assert_eq!(big.amount(&mut host, 7), 12, "the higher index survived");
@@ -255,5 +256,43 @@ fn a_hostile_slot_is_refused_not_allocated() {
         let list = decode_stacks(&hostile((MAX_SLOTS - 1) as i32), |_| Some(((), 1))).unwrap();
         assert_eq!(list.len(), MAX_SLOTS);
         assert_eq!(list[MAX_SLOTS - 1], Some(((), 1)));
+    });
+}
+
+/// The constructor, handler writes and saved slots share the same literal boundary.
+#[test]
+fn handler_and_codec_limits_agree() {
+    in_world(|| {
+        resolve(&["minecraft:dirt"], &[]);
+        let mut host = FakeHost::new();
+        let dirt = item("minecraft:dirt");
+        assert!(AttachedItems::new(&ITEMS, CHUNK, 4097, 64, |_| true).is_none());
+        let slots = AttachedItems::new(&ITEMS, CHUNK, 4096, 64, |_| true).unwrap();
+        assert_eq!(
+            host.transaction(|host, tx| Ok::<_, ()>(slots.insert(host, tx, 4095, &dirt, 1))),
+            Ok(1)
+        );
+        assert_eq!(
+            host.transaction(|host, tx| Ok::<_, ()>(slots.insert(host, tx, 4096, &dirt, 1))),
+            Ok(0)
+        );
+        let server: &mut dyn ServerHost = &mut host;
+        let mut held = ITEMS.get_existing(server, CHUNK).unwrap().unwrap();
+        let codec = ITEMS.codec.as_ref().unwrap();
+        let saved = (codec.encode)(&held).unwrap();
+        let decoded = (codec.decode)(&saved).unwrap();
+        assert_eq!(decoded.len(), 4096);
+        assert_eq!(decoded[4095], Some((dirt.clone(), 1)));
+        let mut hostile = saved;
+        let Some(Tag::List(entries)) = hostile.get_mut(&"stacks".into()) else {
+            panic!("saved stacks")
+        };
+        let Tag::Compound(entry) = &mut entries[0] else {
+            panic!("saved entry")
+        };
+        entry.insert("Slot".into(), Tag::Int(4096));
+        assert_eq!((codec.decode)(&hostile), Err(AttachmentError::Decode));
+        held.push(Some((dirt, 1)));
+        assert_eq!((codec.encode)(&held), Err(AttachmentError::Encode));
     });
 }
