@@ -66,6 +66,22 @@ pub trait ItemsServerHost {
         facing: Direction,
         stack: ItemStack,
     ) -> Result<Option<ItemStack>, StackWriteError>;
+    /// Side: server.
+    /// Holds `stack` outside the world, in the open transaction `tx` (`ItemAccess.forStack`):
+    /// the [`ItemPlace::Scratch`] to run item capabilities against. It lives until the
+    /// outermost transaction closes, and an abort of the one that made it drops it. None
+    /// where `tx` is not open.
+    #[access(WorldOnly)]
+    fn scratch_stack(
+        &mut self,
+        tx: &Transaction,
+        stack: ItemStack,
+    ) -> Result<Option<ItemPlace>, StackWriteError>;
+    /// Side: server.
+    /// Takes the stack out of scratch place `place`, in `tx`, ending the place: none where it
+    /// is empty, no longer held, or not a scratch place.
+    #[access(WorldOnly)]
+    fn scratch_take(&mut self, tx: &Transaction, place: &ItemPlace) -> Option<ItemStack>;
 }
 /// The client host's methods of the `items` area, implemented by the game and reached through [`crate::ClientHost`].
 #[horizon_mod_api_macros::host_area]
@@ -108,6 +124,9 @@ pub trait ItemsBackend {
     /// Side: both. ItemResource's effective use duration, including its Part.
     #[access(WorldOnly)]
     fn item_resource_use_duration(&self, stack: &ItemStack) -> Option<i32>;
+    /// Side: both. The mod that made the stack, including its Part.
+    #[access(WorldOnly)]
+    fn item_resource_creator_mod_id(&self, stack: &ItemStack) -> Option<String>;
     /// Side: both. The effective vanilla bar, before client drawing hooks.
     #[access(WorldOnly)]
     fn item_resource_bar(&self, stack: &ItemStack) -> Option<ItemBar>;
@@ -268,7 +287,7 @@ pub trait ItemsBackend {
     fn entity_automation_size(&self, entity: u32) -> Option<usize>;
     /// Side: server.
     /// How many equipment slots living entity `entity`'s [`ENTITY_ITEMS`](crate::ENTITY_ITEMS)
-    /// answers (#932, NeoForge's `LivingEntityEquipmentWrapper`): a mob's or an armor stand's
+    /// answers (NeoForge's `LivingEntityEquipmentWrapper`): a mob's or an armor stand's
     /// seven (main hand, off hand, feet, legs, chest, head and body, by `EquipmentSlot`'s
     /// ordinal; the saddle is not automation's to move), none for any other entity, and on a
     /// client.
