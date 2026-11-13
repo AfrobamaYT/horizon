@@ -1204,4 +1204,20 @@ fn enchantment_glint_override_decodes_boolean_literals_and_borrowed_numeric_valu
         components::validate(&rule, &items).unwrap_err(),
         "component minecraft:enchantment_glint_override: Not a number",
     );
+    let absence = parse(
+        r#"{"type":"neoforge:components","items":["minecraft:apple","minecraft:stick"],"components":{"!minecraft:enchantment_glint_override":{}}}"#,
+        &items,
+    );
+    let mut removed = ItemStack::new("minecraft:apple", 1);
+    assert!(!absence.test_in(&context, &removed));
+    removed.data_mut().set_loot_component(COMPONENT, &None);
+    assert!(absence.test_in(&context, &removed));
+    assert!(!enabled.test_in(&context, &removed));
+    assert!(!disabled.test_in(&context, &removed));
+    let mut populated = ItemStack::new("minecraft:apple", 1);
+    populated
+        .data_mut()
+        .set_loot_component(COMPONENT, &Some(Tag::Byte(0)));
+    assert!(!absence.test_in(&context, &populated));
+    assert!(absence.test_in(&context, &ItemStack::new("minecraft:stick", 1)));
 }
