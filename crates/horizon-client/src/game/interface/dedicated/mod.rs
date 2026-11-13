@@ -1085,17 +1085,10 @@ impl Game<'_> {
         let folder = world_dir.to_string_lossy().into_owned();
         // The mods' common and server configs, read before the server starts.
         self.native_configs_server_start(&world_dir, true);
-        // MinecraftServer.loadLevel's start: nothing is loaded yet.
-        *startup_began = true;
-        self.native_server_about_to_start(true);
-        self.native_server_starting(true);
-        self.native_lifecycle_open_started();
-        // The registries the server sends are read while the world prepares.
-        let sync = super::lan::preload_sync_data(&self.res.core.item_data);
         if !new_world {
             biome_regions::choose(&world_dir)?;
         }
-        self.load_world(WorldRequest::new(
+        let prepared = self.prepare_world_and_rules(WorldRequest::new(
             &folder,
             Some(&level_name),
             Some(props.seed),
@@ -1103,6 +1096,13 @@ impl Game<'_> {
             None,
             Arc::new(crate::game::api_values::game_rule_registry()),
         )?)?;
+        *startup_began = true;
+        self.native_server_about_to_start(true);
+        self.native_server_starting(true);
+        self.native_lifecycle_open_started();
+        // The registries the server sends are read while the world prepares.
+        let sync = super::lan::preload_sync_data(&self.res.core.item_data);
+        self.finish_open_world(prepared)?;
         // WorldLoader: the world's packs must load before the server starts. The data store is read
         // now rather than at the first tick (reading parses functions; it runs none), and a broken
         // predicate graph stops the start before anything listens (a partial check: predicate_graph.rs).

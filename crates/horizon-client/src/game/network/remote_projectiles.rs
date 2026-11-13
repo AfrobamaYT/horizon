@@ -374,7 +374,6 @@ impl Game<'_> {
             "minecraft:evoker_fangs" => self.insert_fangs(id, position, yaw, 0, 0),
             "minecraft:tnt" => self.tnts.push(super::tnt::PrimedTnt {
                 attachment_lifetime: Default::default(),
-                used_portal: false,
                 rotation: [0.0, 0.0],
                 join: Default::default(),
                 no_gravity: false,
@@ -390,6 +389,7 @@ impl Game<'_> {
                 owner: None,
                 guest: None,
                 power: 4.0,
+                used_portal: false,
                 block_state: None,
             }),
             // FallingBlockEntity.recreateFromPacket: the block state is the data.

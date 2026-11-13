@@ -24,8 +24,6 @@ pub(super) struct PrimedTnt {
     pub(super) join: horizon_client::join_seq::JoinSeq,
     /// The entity id a server tracks it by (0 until it is tracked).
     pub id: u32,
-    /// `PrimedTnt.usedPortal`: set by teleport, never saved.
-    pub used_portal: bool,
     pub position: Vec3,
     pub previous: Vec3,
     pub velocity: Vec3,
@@ -45,6 +43,8 @@ pub(super) struct PrimedTnt {
     /// `PrimedTnt.explosionPower`: 4 by default, saved as `explosion_power`
     /// and clamped to 0..128 when read back.
     pub power: f32,
+    /// `PrimedTnt.teleport`: set on the recreated entity, never saved to NBT.
+    pub used_portal: bool,
     /// PrimedTnt.DATA_BLOCK_STATE_ID; None is the default TNT state.
     pub block_state: Option<horizon_world::registry::BlockStateId>,
 }
@@ -413,7 +413,6 @@ impl Game<'_> {
             horizon_client::save::insecure_uuid(&mut horizon_client::random_source::entity());
         self.persist.uuids.insert(self.next_entity, uuid);
         self.tnts.push(PrimedTnt {
-            used_portal: false,
             attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
@@ -431,6 +430,7 @@ impl Game<'_> {
             guest,
             // PrimedTnt's constructor: 4 when nothing sets it.
             power: 4.0,
+            used_portal: false,
             block_state: None,
         });
     }
@@ -515,6 +515,7 @@ impl Game<'_> {
             ];
             let bounds = t.bounds();
             let (id, owner, guest, power) = (t.id, t.owner, t.guest, t.power);
+            let used_portal = t.used_portal;
             let silent = self.entity_silent(id);
             let (owner, guest) = match owner {
                 Some(_) => (owner, guest),
@@ -555,6 +556,7 @@ impl Game<'_> {
                     false,
                     super::explosion::ExplosionSource::default()
                         .with_silence(silent)
+                        .with_portal_proof(used_portal)
                         .with_entity(id, "minecraft:tnt"),
                 )
             });
@@ -877,7 +879,6 @@ mod tests {
         ]))
         .unwrap();
         let mut tnt = PrimedTnt {
-            used_portal: false,
             attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
@@ -894,6 +895,7 @@ mod tests {
             guest: None,
             no_gravity: true,
             power: 4.0,
+            used_portal: false,
             block_state: Some(BlockStateId(1)),
         };
         let raw = Tag::compound([("block_state", Tag::String("audit_missing:block".into()))]);
@@ -947,7 +949,6 @@ mod tests {
         use horizon_core::geometry::Direction;
         use horizon_world::piston_push::bounce_velocity;
         let mut tnt = PrimedTnt {
-            used_portal: false,
             attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
@@ -964,6 +965,7 @@ mod tests {
             owner: None,
             guest: None,
             power: 4.0,
+            used_portal: false,
             block_state: None,
         };
         tnt.velocity = bounce_velocity(Direction::Up, tnt.velocity);
@@ -999,7 +1001,6 @@ mod tests {
         for bordered in [false, true] {
             let at = Vec3::new(24.0, 4.0, 20.5);
             let mut tnt = PrimedTnt {
-                used_portal: false,
                 attachment_lifetime: Default::default(),
                 rotation: [0.0, 0.0],
                 join: Default::default(),
@@ -1016,6 +1017,7 @@ mod tests {
                 owner: None,
                 guest: None,
                 power: 4.0,
+                used_portal: false,
                 block_state: None,
             };
             let border = bordered.then_some(&border);
@@ -1080,7 +1082,6 @@ mod tests {
             }
             let at = Vec3::new(19.5, top, 20.5);
             let mut tnt = PrimedTnt {
-                used_portal: false,
                 attachment_lifetime: Default::default(),
                 rotation: [0.0, 0.0],
                 join: Default::default(),
@@ -1097,6 +1098,7 @@ mod tests {
                 owner: None,
                 guest: None,
                 power: 4.0,
+                used_portal: false,
                 block_state: None,
             };
             tnt.tick(
@@ -1157,7 +1159,6 @@ mod tests {
         world.set(21, 4, 20, flowing).unwrap();
         let at = Vec3::new(20.5, 4.0, 20.5);
         let mut tnt = PrimedTnt {
-            used_portal: false,
             attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
@@ -1174,6 +1175,7 @@ mod tests {
             owner: None,
             guest: None,
             power: 4.0,
+            used_portal: false,
             block_state: None,
         };
         tnt.tick(
@@ -1321,7 +1323,6 @@ mod tests {
         // (Entity.handleOnInsideBubbleColumn / handleOnAboveBubbleColumn).
         let at = Vec3::new(20.5, 6.0, 20.5);
         let mut tnt = PrimedTnt {
-            used_portal: false,
             attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
@@ -1338,6 +1339,7 @@ mod tests {
             owner: None,
             guest: None,
             power: 4.0,
+            used_portal: false,
             block_state: None,
         };
         for _ in 0..10 {
@@ -1431,7 +1433,6 @@ mod tests {
         world.set(20, 2, 20, soul_sand).unwrap();
         let at = Vec3::new(20.5, 6.0, 20.5);
         let primed = || PrimedTnt {
-            used_portal: false,
             attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
@@ -1448,6 +1449,7 @@ mod tests {
             owner: None,
             guest: None,
             power: 4.0,
+            used_portal: false,
             block_state: None,
         };
         let mut tops = Vec::new();

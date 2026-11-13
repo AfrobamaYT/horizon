@@ -1529,6 +1529,10 @@ impl Game<'_> {
                 continue;
             }
             super::persist::mark_fresh(&mut tag);
+            let immediate = matches!(
+                horizon_client::entity_nbt::kind(&tag).as_deref(),
+                Some("minecraft:item" | "minecraft:tnt")
+            );
             let tag = if tnt_used_portal {
                 PendingEntity::after_tnt_portal(tag)
             } else {
@@ -1536,8 +1540,12 @@ impl Game<'_> {
             };
             let key = ((at.x.floor() as i32) >> 4, (at.z.floor() as i32) >> 4);
             if let Some(TransferredArrivalState::Entity(state)) = transferred {
-                let (tag, reason) = tag.into_parts();
-                self.spawn_loaded_entity_reason(key, tag, Some(state), reason);
+                self.spawn_teleported_entity(key, tag, Some(state));
+                self.native_entities_load(self.dim.id(), [key.0, key.1], 1);
+                continue;
+            }
+            if immediate {
+                self.spawn_teleported_entity(key, tag, None);
                 self.native_entities_load(self.dim.id(), [key.0, key.1], 1);
                 continue;
             }
@@ -1550,6 +1558,86 @@ impl Game<'_> {
                 Some((_, tags)) => tags.push(tag),
                 None => self.world.loaded_entities.push((key, vec![tag])),
             }
+        }
+    }
+
+    /// `ItemEntity.teleport` / `PrimedTnt.teleport`: after the recreated server
+    /// entity joins, merge its stack now or select the portal-safe blast calculator.
+    pub(super) fn spawn_teleported_entity(
+        &mut self,
+        key: (i32, i32),
+        pending: PendingEntity,
+        transferred: Option<super::entity_initialization::TransferredEntityState>,
+    ) {
+        // The portal's runtime reason must reach admission before join callbacks;
+        // saved NBT alone cannot request TNT's transient blast immunity.
+        let (tag, reason) = pending.into_parts();
+        let uuid = horizon_client::entity_nbt::uuid(&tag);
+        let is_item = matches!(tag.get("id"), Some(Tag::String(kind))
+            if kind.0.iter().copied().eq("minecraft:item".encode_utf16()));
+        let is_tnt = matches!(tag.get("id"), Some(Tag::String(kind))
+            if kind.0.iter().copied().eq("minecraft:tnt".encode_utf16()));
+        self.spawn_loaded_entity_reason(key, tag, transferred, reason);
+        if !is_item && !is_tnt {
+            return;
+        }
+        // Construction and join callbacks can insert, cancel, or remove rows.
+        // Resolve the surviving arrival by the resident UUID index after them.
+        let Some(entity) = uuid.and_then(|uuid| {
+            self.entity_by_uuid(mod_api::EntityUuid(
+                horizon_client::lan::playerdata::ints_uuid(uuid),
+            ))
+        }) else {
+            return;
+        };
+        let id = entity.id();
+        if is_tnt {
+            let location = self
+                .resident_entities
+                .table
+                .borrow_mut()
+                .server_admitted_identity(id, |at| self.locate_resident_owner(at))
+                .map(|(at, _, _)| at);
+            if let Some(i) = location.and_then(|at| self.tnts.locate(at.join)) {
+                self.tnts[i].used_portal = true;
+            }
+        } else {
+            let mut items = self.dropped.lift();
+            let mut arrival = None;
+            let mut removed: Vec<_> = items
+                .iter()
+                .enumerate()
+                .map(|(i, item)| {
+                    if item.id == id {
+                        arrival = Some(i);
+                    }
+                    self.persist
+                        .removals
+                        .contains(&super::commands::Target::Item(item.id))
+                })
+                .collect();
+            if let Some(item) = arrival {
+                let mut cells = horizon_client::entities::ItemCells::new(&items);
+                horizon_client::entities::merge_with_neighbours(
+                    &mut items,
+                    &mut removed,
+                    &mut cells,
+                    item,
+                    false,
+                    &|stack| self.stack_max_size(stack).max(1),
+                );
+            }
+            let mut removed = removed.into_iter();
+            // A logically removed row belongs to the native removal sweep, not
+            // this merge's structural retirement.
+            items.retain(|item| {
+                !removed.next().unwrap()
+                    || self
+                        .persist
+                        .removals
+                        .contains(&super::commands::Target::Item(item.id))
+            });
+            self.put_back_dropped(items);
         }
     }
 
@@ -2309,3 +2397,7 @@ mod tests {
 #[cfg(test)]
 #[path = "tests/portal_cooldown_tests.rs"]
 mod cooldown_tests;
+
+#[cfg(test)]
+#[path = "nether_portal/arrival_effects_tests.rs"]
+pub(in crate::game) mod arrival_effects_tests;

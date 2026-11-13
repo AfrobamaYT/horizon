@@ -16,8 +16,9 @@ impl Game<'_> {
         }
     }
 
-    /// Install one disk record or explicitly owned live transfer through the same
+    /// Install one fixture record or explicitly owned live transfer through the same
     /// metadata and join boundary. The transfer token belongs only to this call.
+    #[cfg(test)]
     pub(in crate::game) fn spawn_loaded_entity(
         &mut self,
         key: ChunkKey,

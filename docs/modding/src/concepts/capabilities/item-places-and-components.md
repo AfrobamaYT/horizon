@@ -45,9 +45,21 @@ place's rules:
 An exchange inside a stack of two backpacks changes one backpack and splits it off. The other
 backpack keeps its contents.
 
+## Editing the whole stack
+
+To change components on the **whole stack**, use `place.edit(host, tx, |stack| { ... })`
+with a server host. It reads the stack, applies the closure and exchanges the entire
+count in the same transaction. Missing stacks and edits that change the item or count
+return `false` without changing the place; successful writes return `true` and a parent
+abort restores them. `stack.set` and `stack.remove` edit typed overrides; `get` then
+`set` covers `update`. `stack.apply_components(&patch)` merges values and `!id`
+removals without losing unrelated components, refusing malformed damage atomically.
+`stack.copy_component_from(&other, id)` copies an own value or removal; when `other`
+inherits that component, it clears the target's override rather than recording removal.
+
 ## Component patches
 
-Name a component with `ComponentId::new("minecraft:damage")`. This returns `None` for an invalid
+To change **one item** of a stack instead (NeoForge's `ItemResource.with` and `without`), use a resource and exchange it as below. Name a component with `ComponentId::new("minecraft:damage")`. This returns `None` for an invalid
 namespaced ID, such as `Damage` or `!minecraft:food`.
 
 | Method | Behaviour |

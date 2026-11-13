@@ -875,7 +875,6 @@ mod tests {
         assert!(!push_waits_for_tick(true, 3, None), "not a charge's burst");
         let tnt = crate::game::tnt::PrimedTnt {
             attachment_lifetime: Default::default(),
-            used_portal: false,
             rotation: [0.0, 0.0],
             id: 1,
             position: Vec3::ZERO,
@@ -890,6 +889,7 @@ mod tests {
             guest: None,
             no_gravity: false,
             power: 4.0,
+            used_portal: false,
             block_state: None,
             join: Default::default(),
         };

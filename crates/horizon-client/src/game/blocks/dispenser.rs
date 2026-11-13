@@ -1783,6 +1783,25 @@ impl Game<'_> {
         if !self.with_level(|b, level, ticks| b.directional_can_place(level, ticks, &ctx)) {
             return Ok((Some(stack), FAIL));
         }
+        if mod_api::__private::listened(mod_api::HookId::EntityPlace)
+            && let Some(preview) =
+                self.with_level(|b, level, ticks| b.placement_preview(level, ticks, &ctx))
+        {
+            let against = ctx.placed_against_pos(preview.pos);
+            let against = self.world.block(against.x, against.y, against.z);
+            let mut canceled = false;
+            self.native_entity_place(
+                None,
+                preview.pos,
+                preview.state,
+                against,
+                mod_api::Placement::Single,
+                &mut canceled,
+            );
+            if canceled {
+                return Ok((Some(stack), FAIL));
+            }
+        }
         let outcome = self.with_level(|b, level, ticks| b.place_block(level, ticks, &ctx));
         let PlaceOutcome::Placed { pos: placed, state } = outcome else {
             self.process_level_events()?;
@@ -1798,6 +1817,7 @@ impl Game<'_> {
         if self.world.block_entities.get(&target).is_some() {
             self.apply_placed_item([target.0, target.1, target.2], &stack, false);
         }
+        self.block_item_placed(&stack, None, placed, &ctx);
         self.process_level_events()?;
         Ok((shrink(stack), CLICK))
     }

@@ -7,6 +7,8 @@ use mod_api::{Hooks, LoopContext, StructurePiece};
 use std::{rc::Rc, sync::Arc};
 #[path = "wire_loopback/block_entity_on_load.rs"]
 mod block_entity_on_load;
+#[path = "wire_loopback/game_rule_reads.rs"]
+mod game_rule_reads;
 mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
@@ -16,6 +18,8 @@ mod biome_region_registration;
 mod block_entity_transform;
 #[path = "wire_loopback/crash_sections.rs"]
 mod crash_sections;
+#[path = "wire_loopback/entity_layers.rs"]
+mod entity_layers;
 #[path = "wire_loopback/entity_renderers.rs"]
 mod entity_renderers;
 #[path = "wire_loopback/item_drop_state.rs"]
@@ -269,6 +273,13 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
         ) {
             entity_renderers::register(event.renderers);
         }
+        fn register_entity_layers(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterEntityLayersEvent<'_>,
+        ) {
+            entity_layers::register(event.layers);
+        }
         fn register(
             &self,
             registrar: &mut dyn mod_api::Registrar,
@@ -508,6 +519,13 @@ impl StructurePiece for Piece {
     fn bounding_box(&self) -> mod_api::BoundingBox {
         mod_api::BoundingBox::new([1, 2, 3], [4, 5, 6])
     }
+    fn beardifier(&self) -> Option<mod_api::PieceBeardifier> {
+        Some(mod_api::PieceBeardifier::new(
+            mod_api::BoundingBox::new([1, 2, 3], [4, 5, 6]),
+            mod_api::TerrainAdjustment::BeardThin,
+            2,
+        ))
+    }
     fn post_process(
         &self,
         _: &mut dyn mod_api::PieceContext,
@@ -539,6 +557,11 @@ impl mod_api::BlockEntityPart for MachineBlock {
         _: &mut dyn mod_api::ServerHost,
         event: &mut mod_api::BlockEntityTickEvent<'_>,
     ) {
+        if event.entity.data[0] == -1 {
+            *event.reply = mod_api::BlockEntityTickReply::Unchanged;
+            event.entity.data[0] = 999;
+            return;
+        }
         event.entity.data[0] += 3;
     }
 }
@@ -567,6 +590,7 @@ fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
         &mut guest::Guest,
         &mut mod_api::BlockEntityTickEvent {
             pos: [1, 2, 3],
+            reply: &mut mod_api::BlockEntityTickReply::Changed,
             entity: mod_api::ModBlockEntityView::new(&mut entity),
         },
     );
@@ -587,11 +611,26 @@ fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
         &mut guest::Guest,
         &mut mod_api::BlockEntityTickEvent {
             pos: [1, 2, 3],
+            reply: &mut mod_api::BlockEntityTickReply::Changed,
             entity: mod_api::ModBlockEntityView::new(&mut entity),
         },
     );
     assert_eq!(entity.data, vec![8]);
     assert_eq!(entity.revision().changes(), before);
+    entity.data[0] = -1;
+    let before = entity.revision();
+    let mut reply = mod_api::BlockEntityTickReply::Changed;
+    proxy.block_entity_tick(
+        &mut guest::Guest,
+        &mut mod_api::BlockEntityTickEvent {
+            pos: [1, 2, 3],
+            reply: &mut reply,
+            entity: mod_api::ModBlockEntityView::new(&mut entity),
+        },
+    );
+    assert_eq!(reply, mod_api::BlockEntityTickReply::Unchanged);
+    assert_eq!(entity.data, [-1]);
+    assert_eq!(entity.revision(), before);
 }
 #[test]
 fn borrowed_view_reply_is_byte_identical_to_owned_snapshot() {
@@ -2095,6 +2134,15 @@ fn wire_loopback_roundtrip_and_atomic_writeback() {
         proxy.bounding_box(),
         mod_api::BoundingBox::new([1, 2, 3], [4, 5, 6])
     );
+    let terrain = proxy
+        .beardifier()
+        .expect("piece terrain crosses the worker boundary");
+    assert_eq!(
+        terrain.bounds,
+        mod_api::BoundingBox::new([1, 2, 3], [4, 5, 6])
+    );
+    assert_eq!(terrain.adjustment, mod_api::TerrainAdjustment::BeardThin);
+    assert_eq!(terrain.ground_level_delta, 2);
     let mut release = Writer::new();
     release.put(&vec![id]);
     assert_eq!(

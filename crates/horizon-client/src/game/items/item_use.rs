@@ -111,6 +111,7 @@ impl Game<'_> {
             return false;
         };
         self.using = Some((self.held_slot(), 0));
+        self.use_item = Some(stack.clone());
         self.use_duration = duration;
         self.use_ticks_set = ticks_set;
         // `LivingEntity.startUsingItem`: `causeUseVibration(ITEM_INTERACT_START)`
@@ -336,9 +337,15 @@ impl Game<'_> {
                 return false;
             };
             let Some(stack) = game.stack_in(slot).cloned() else {
+                game.use_item = None;
                 return true;
             };
-            let hand_changed = game.use_hand_changed(slot);
+            // `releaseUsing` only for the same item; `stopUsingItem` always,
+            // from the stack the use began with.
+            let (stack, hand_changed) = match game.use_item.take() {
+                Some(item) if item.item != stack.item => (item, true),
+                _ => (stack, game.use_hand_changed(slot)),
+            };
             let player = (!mod_api::__private::mods().is_empty()).then(|| {
                 let name = game.acting_player_name().to_owned();
                 (game.native_acting_id(), name)
