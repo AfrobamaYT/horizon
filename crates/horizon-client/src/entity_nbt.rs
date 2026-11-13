@@ -21,6 +21,7 @@ mod boat_load;
 pub use boat_load::boat_from_nbt;
 mod projectile_fields;
 use projectile_fields::{load_projectile_entity_fields, put_projectile_entity_fields};
+mod mob_death;
 mod refs;
 mod saved_attributes;
 pub use refs::who_by_uuid;
@@ -586,17 +587,14 @@ pub fn mob_to_nbt(
             Tag::Short(m.fire_ticks.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16),
         ),
         ("Air", Tag::Short(m.air as i16)),
-        ("Health", Tag::Float(m.health.max(0.0).to_bits())),
         ("AbsorptionAmount", Tag::Float(m.absorption.to_bits())),
-        // LivingEntity.addAdditionalSaveData: (short) casts, nothing clamped.
-        ("HurtTime", Tag::Short(m.hurt_time as i16)),
-        ("DeathTime", Tag::Short(m.death_time as i16)),
         // Mob.addAdditionalSaveData writes the current virtual getter, not raw input.
         ("CanPickUpLoot", Tag::Byte(i8::from(m.can_pick_up_loot()))),
         ("PersistenceRequired", Tag::Byte(i8::from(m.persistent))),
     ] {
         put(&mut tag, key, value);
     }
+    mob_death::write(m, &mut tag);
     // Mob.addAdditionalSaveData: hasHome means radius != -1, including -2.
     // Species writers below retain their own home_pos override.
     let Tag::Compound(map) = &mut tag else {
@@ -1909,7 +1907,7 @@ fn mob_from_nbt_at(
         // vanilla); a loaded mob holds only what its file lists.
         m.extra.set_main_hand(None);
     }
-    m.death_time = i32::from(number(tag.get("DeathTime")).unwrap_or(0) as i16);
+    mob_death::read(&mut m, tag);
     m.impulse_grace_time =
         number(tag.get("current_impulse_context_reset_grace_time")).unwrap_or(0) as i32;
     // Mob.readAdditionalSaveData overrides what the constructor set (copper
