@@ -330,3 +330,45 @@ fn own_yaw_is_independent_of_body_rotation_across_a_wrap() {
         assert_eq!(state.living.unwrap().y_rot, 40.0);
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn extracted_living_signs_death_time_and_hurt_overlay_are_literal() {
+    super::native_entity_refs::tests::with_client_game(|game| {
+        let kind = game
+            .res
+            .mob_types()
+            .get("minecraft:zombie")
+            .unwrap()
+            .clone();
+        let mut mob = Mob::new(
+            96,
+            kind,
+            horizon_core::geometry::Vec3::new(0.5, 64.0, 0.5),
+            0.0,
+        );
+        mob.body_yaw = 20.0;
+        mob.previous_body_yaw = 20.0;
+        mob.head_yaw = 50.0;
+        mob.previous_head_yaw = 50.0;
+        mob.head_pitch = 15.0;
+        mob.previous_head_pitch = 15.0;
+        mob.custom_name = Some("Dinnerbone".into());
+        let frame = |mob: &Mob| {
+            super::native_mob_draw::entity_render_state(mob, 96, 0.5)
+                .living
+                .unwrap()
+        };
+        let living = frame(&mob);
+        assert_eq!((living.y_rot, living.x_rot), (-30.0, -15.0));
+        assert!(living.is_upside_down);
+        assert_eq!(living.death_time, 0.0);
+        assert!(!living.has_red_overlay);
+        mob.hurt_time = 2;
+        assert!(frame(&mob).has_red_overlay);
+        mob.hurt_time = 0;
+        mob.death_time = 7;
+        assert_eq!(frame(&mob).death_time, 7.5);
+        assert!(frame(&mob).has_red_overlay);
+    });
+}
