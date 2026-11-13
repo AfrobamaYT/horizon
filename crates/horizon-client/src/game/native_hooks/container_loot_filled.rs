@@ -104,16 +104,13 @@ impl GameLevel<'_> {
                     {
                         loot.components = patch
                             .into_iter()
-                            .filter_map(|(id, tag)| {
+                            .map(|(id, tag)| {
                                 let id = id.to_string_lossy();
-                                if id == "minecraft:damage" {
-                                    return None;
-                                }
-                                Some(if let Some(removed) = id.strip_prefix('!') {
+                                if let Some(removed) = id.strip_prefix('!') {
                                     (removed.to_owned(), None)
                                 } else {
                                     (id, Some(tag))
-                                })
+                                }
                             })
                             .collect();
                     }

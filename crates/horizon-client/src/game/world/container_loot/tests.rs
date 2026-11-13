@@ -1122,3 +1122,61 @@ fn saved_carts_keep_a_loot_table_only_when_they_hold_a_container() {
         }
     });
 }
+
+struct DurableStickListener;
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for DurableStickListener {
+    fn container_loot_filled(
+        &self,
+        _: &dyn mod_api::LevelHost,
+        event: &mut mod_api::ContainerLootFilledEvent<'_>,
+    ) {
+        let key = mod_api::__private::item_key("minecraft:stick").unwrap();
+        let mut stick = mod_api::ItemStack::new(key, 1).unwrap();
+        stick
+            .set_components(
+                [
+                    ("minecraft:max_stack_size".into(), Tag::Int(1)),
+                    ("minecraft:max_damage".into(), Tag::Int(10)),
+                ]
+                .into(),
+            )
+            .unwrap();
+        stick.set_damage(0);
+        event.drops.clear();
+        event.drops.push(stick);
+    }
+}
+
+#[test]
+#[ignore = "requires prepared resources"]
+fn container_fill_preserves_explicit_zero_damage_on_custom_durable_item() {
+    if fresh("container_fill_preserves_explicit_zero_damage_on_custom_durable_item") {
+        return;
+    }
+    with_game(|game| {
+        game.options.dedicated = Some(Vec::new());
+        mod_platform::testing::with_mods(
+            vec![mod_api::ModEntry::new(
+                "durable_stick",
+                Box::new(DurableStickListener),
+            )]
+            .into(),
+            || {
+                place(game, POS, TABLE, 37);
+                open(game, POS, 0.0);
+                let stacks: Vec<_> = game.world.block_entities[&POS]
+                    .slots()
+                    .iter()
+                    .flatten()
+                    .collect();
+                assert_eq!(stacks.len(), 1);
+                let stick = stacks[0];
+                assert_eq!(&*stick.item, "minecraft:stick");
+                assert_eq!(stick.count, 1);
+                assert_eq!(stick.damage, 0);
+                assert_eq!(game.items().stack_max_damage(stick), 10);
+            },
+        );
+    });
+}
