@@ -1,0 +1,573 @@
+//! What changed between two surfaces, and whether it breaks mods.
+//!
+//! [`diff`] compares the records of two documents by id. A record only in the new one is
+//! `added`, only in the old one `removed`, in both with another hash `changed`. A rename shows as
+//! a removal and an addition: renames are never guessed.
+//!
+//! # Classes
+//!
+//! - A removed record is breaking.
+//! - An added record is additive. Where a new member breaks existing users (a field of a
+//!   `constructible` struct, a variant of an exhaustive enum, a required item of a trait mods
+//!   implement), the container's own hash changed too, and the container's change is breaking.
+//! - A changed record is breaking, except for changes that only widen it: a method or function
+//!   now on wasm, a type that now crosses the boundary (`wire`, `wire_form`) or is now
+//!   `constructible`, a derive, impl or macro helper attribute added, a trait method that now
+//!   has a default, a trait item that is no longer required, and the member list a type gains
+//!   when it becomes constructible.
+//!
+//! A container's members are reported with it once: when a type or trait is added or removed,
+//! and when its member list (`members`, `required`) changed, its members' own changes are folded
+//! into its change (listed in `members`) and its class is the worse of all of them.
+//!
+//! Each change says what changed in words a mod author can act on, from the records' contract
+//! fields: `argument `player`: `PlayerRef` → `ServerPlayerRef``, `side: server → both`.
+use crate::Surface;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+use std::collections::{BTreeMap, BTreeSet};
+
+/// Whether a change can break a mod that compiled against the old surface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Class {
+    Additive,
+    Breaking,
+}
+
+/// The whole comparison in one word.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Verdict {
+    Identical,
+    Additive,
+    Breaking,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeKind {
+    Added,
+    Removed,
+    Changed,
+}
+
+/// A note's text, attached to the changes it names (`crates/horizon-mod-vocab/changes/*.toml`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Note {
+    /// The note's file name.
+    pub file: String,
+    pub why: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migrate: Option<String>,
+}
+
+/// One record's change, with its folded members.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Change {
+    pub id: String,
+    pub kind: ChangeKind,
+    pub class: Class,
+    /// What changed, one line per fact.
+    pub what: Vec<String>,
+    /// The ids of member records whose own change is reported here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<Note>,
+}
+
+/// The comparison of two surfaces: breaking changes first, then additive, each by id.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Diff {
+    /// The old document's hash.
+    pub old: String,
+    /// The new document's hash.
+    pub new: String,
+    pub verdict: Verdict,
+    pub changes: Vec<Change>,
+}
+
+/// A record as the diff sees it: its hash and its contract as JSON.
+struct Entry {
+    hash: String,
+    contract: Value,
+}
+
+fn entries(surface: &Surface) -> BTreeMap<String, Entry> {
+    fn put<T: Serialize>(map: &mut BTreeMap<String, Entry>, id: &str, hash: &str, contract: &T) {
+        let contract = serde_json::to_value(contract).expect("contracts serialize");
+        map.insert(
+            id.to_owned(),
+            Entry {
+                hash: hash.to_owned(),
+                contract,
+            },
+        );
+    }
+    let mut map = BTreeMap::new();
+    for r in &surface.hooks {
+        put(&mut map, &r.id, &r.hash, &r.contract);
+    }
+    for r in &surface.traits {
+        put(&mut map, &r.id, &r.hash, &r.contract);
+        for m in &r.methods {
+            put(&mut map, &m.id, &m.hash, &m.contract);
+        }
+        for a in &r.associated {
+            put(&mut map, &a.id, &a.hash, &a.contract);
+        }
+    }
+    for r in surface.handles.iter().chain(&surface.functions) {
+        put(&mut map, &r.id, &r.hash, &r.contract);
+    }
+    for r in &surface.macros {
+        put(&mut map, &r.id, &r.hash, &r.contract);
+    }
+    for r in &surface.types {
+        put(&mut map, &r.id, &r.hash, &r.contract);
+        for f in &r.fields {
+            put(&mut map, &f.id, &f.hash, &f.contract);
+        }
+        for v in &r.variants {
+            put(&mut map, &v.id, &v.hash, &v.contract);
+        }
+    }
+    for r in &surface.parts {
+        put(&mut map, &r.id, &r.hash, &r.contract);
+    }
+    for r in &surface.capabilities {
+        put(&mut map, &r.id, &r.hash, &r.contract);
+    }
+    map
+}
+
+/// The container of a member record: a trait method's or associated item's trait, a field's
+/// or variant's type.
+fn container(id: &str) -> Option<String> {
+    let (kind, rest) = id.split_once(':')?;
+    match kind {
+        "method" | "assoc" => Some(format!("trait:{}", rest.rsplit_once("::")?.0)),
+        "type" => Some(format!("type:{}", rest.rsplit_once('.')?.0)),
+        _ => None,
+    }
+}
+
+/// Compares two surfaces.
+pub fn diff(old: &Surface, new: &Surface) -> Diff {
+    let before = entries(old);
+    let after = entries(new);
+    let ids: BTreeSet<&String> = before.keys().chain(after.keys()).collect();
+    let mut changes: BTreeMap<String, Change> = BTreeMap::new();
+    for id in ids {
+        let (kind, class, what) = match (before.get(id), after.get(id)) {
+            (Some(_), None) => (ChangeKind::Removed, Class::Breaking, vec!["removed".into()]),
+            (None, Some(_)) => (ChangeKind::Added, Class::Additive, vec!["added".into()]),
+            (Some(a), Some(b)) if a.hash != b.hash => {
+                let lines = describe(id, &a.contract, &b.contract);
+                let class = lines
+                    .iter()
+                    .map(|(_, c)| *c)
+                    .max()
+                    .unwrap_or(Class::Breaking);
+                let what = if lines.is_empty() {
+                    vec!["its contract changed in a field this tool does not know".into()]
+                } else {
+                    lines.into_iter().map(|(line, _)| line).collect()
+                };
+                (ChangeKind::Changed, class, what)
+            }
+            _ => continue,
+        };
+        changes.insert(
+            id.clone(),
+            Change {
+                id: id.clone(),
+                kind,
+                class,
+                what,
+                members: Vec::new(),
+                notes: Vec::new(),
+            },
+        );
+    }
+    // Fold members into a container that was added or removed, or whose member list changed.
+    let folds: BTreeSet<String> = changes
+        .values()
+        .filter(|c| {
+            c.kind != ChangeKind::Changed || {
+                let (a, b) = (&before[&c.id].contract, &after[&c.id].contract);
+                ["members", "required"]
+                    .iter()
+                    .any(|k| a.get(k).filter(|v| v.is_array()) != b.get(k).filter(|v| v.is_array()))
+            }
+        })
+        .map(|c| c.id.clone())
+        .collect();
+    let members: Vec<(String, String)> = changes
+        .keys()
+        .filter_map(|id| Some((id.clone(), container(id)?)))
+        .filter(|(_, owner)| folds.contains(owner))
+        .collect();
+    for (id, owner) in members {
+        let member = changes.remove(&id).expect("listed above");
+        let owner = changes.get_mut(&owner).expect("folds are changes");
+        owner.class = owner.class.max(member.class);
+        owner.members.push(id);
+    }
+    let mut changes: Vec<Change> = changes.into_values().collect();
+    changes.sort_by(|a, b| b.class.cmp(&a.class).then_with(|| a.id.cmp(&b.id)));
+    let verdict = match changes.iter().map(|c| c.class).max() {
+        None => Verdict::Identical,
+        Some(Class::Additive) => Verdict::Additive,
+        Some(Class::Breaking) => Verdict::Breaking,
+    };
+    Diff {
+        old: old.hash.clone(),
+        new: new.hash.clone(),
+        verdict,
+        changes,
+    }
+}
+
+/// Keys whose values are words, shown without code quotes.
+const PLAIN: &[&str] = &[
+    "side", "contract", "role", "kind", "context", "host", "version",
+];
+
+fn label(key: &str) -> String {
+    match key {
+        "contract" => "kind".into(),
+        "answered_by_mod" => "output names the mod that answered".into(),
+        "impl_generics" => "impl generics".into(),
+        "wire_form" => "wire form".into(),
+        "trait" => "Part trait".into(),
+        _ => key.replace('_', " "),
+    }
+}
+
+/// A value as text: `none` for nothing, `name: type` for a named value.
+fn show(value: &Value) -> String {
+    match value {
+        Value::Null => "none".into(),
+        Value::String(s) if s.is_empty() => "none".into(),
+        Value::String(s) => s.clone(),
+        Value::Object(o) => match (o.get("name"), o.get("type"), o.get("key")) {
+            (Some(Value::String(n)), Some(Value::String(t)), _) => format!("{n}: {t}"),
+            (_, _, Some(Value::String(k))) => format!(
+                "{} `{k}`",
+                o.get("kind").and_then(Value::as_str).unwrap_or("")
+            ),
+            _ => Value::Object(o.clone()).to_string(),
+        },
+        other => other.to_string(),
+    }
+}
+
+fn quoted(key: &str, value: &Value) -> String {
+    let text = show(value);
+    if PLAIN.contains(&key)
+        || matches!(value, Value::Null | Value::Bool(_) | Value::Number(_))
+        || text == "none"
+    {
+        text
+    } else {
+        format!("`{text}`")
+    }
+}
+
+/// A missing key means the type's empty value: `false`, `[]`, or nothing.
+fn get(object: &Map<String, Value>, other: &Map<String, Value>, key: &str) -> Value {
+    match (object.get(key), other.get(key)) {
+        (Some(v), _) => v.clone(),
+        (None, Some(Value::Bool(_))) => Value::Bool(false),
+        (None, Some(Value::Array(_))) => Value::Array(Vec::new()),
+        _ => Value::Null,
+    }
+}
+
+/// The leading identifier of a member (`name: Type`, `Name(A)`, `Name { a: A }`).
+fn member_name(text: &str) -> &str {
+    let end = text
+        .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .unwrap_or(text.len());
+    &text[..end]
+}
+
+/// What changed in a record's contract, one line per fact with its class.
+fn describe(id: &str, old: &Value, new: &Value) -> Vec<(String, Class)> {
+    use Class::{Additive, Breaking};
+    let (Value::Object(a), Value::Object(b)) = (old, new) else {
+        return vec![(format!("{} → {}", show(old), show(new)), Breaking)];
+    };
+    let name = crate::leaf(id);
+    let keys: BTreeSet<&String> = a.keys().chain(b.keys()).collect();
+    let mut lines = Vec::new();
+    let mut refs_changed = false;
+    for key in keys {
+        let (x, y) = (get(a, b, key), get(b, a, key));
+        if x == y {
+            continue;
+        }
+        let key = key.as_str();
+        match (key, &x, &y) {
+            ("refs", ..) => refs_changed = true,
+            ("members", Value::Array(x), Value::Array(y)) => {
+                let breaking = a.get("constructible") == Some(&Value::Bool(true));
+                let enumeration = a.get("kind").and_then(Value::as_str) == Some("enum");
+                let (word, consequence) = if enumeration {
+                    (
+                        "variant",
+                        format!("an exhaustive `match` on `{name}` in a mod no longer compiles"),
+                    )
+                } else {
+                    (
+                        "field",
+                        format!("a `{name} {{ .. }}` literal in a mod no longer compiles"),
+                    )
+                };
+                let class = if breaking { Breaking } else { Additive };
+                let x: Vec<&str> = x.iter().filter_map(Value::as_str).collect();
+                let y: Vec<&str> = y.iter().filter_map(Value::as_str).collect();
+                for line in pair(
+                    &x,
+                    &y,
+                    word,
+                    |s| member_name(s).to_owned(),
+                    |s| (*s).to_owned(),
+                ) {
+                    let added = line.ends_with(" added");
+                    let line = if breaking && added {
+                        format!("{line}: {consequence}")
+                    } else {
+                        line
+                    };
+                    lines.push((line, class));
+                }
+            }
+            ("required", Value::Array(x), Value::Array(y)) => {
+                let names = |v: &Vec<Value>| -> Vec<(String, String)> {
+                    v.iter()
+                        .map(|r| (show(&r["name"]), show(&r["signature"])))
+                        .collect()
+                };
+                let (x, y) = (names(x), names(y));
+                let old: BTreeMap<&str, &str> =
+                    x.iter().map(|(n, s)| (n.as_str(), s.as_str())).collect();
+                let new: BTreeMap<&str, &str> =
+                    y.iter().map(|(n, s)| (n.as_str(), s.as_str())).collect();
+                for (n, s) in &y {
+                    match old.get(n.as_str()) {
+                        None => lines.push((
+                            format!("required `{s}` added: every implementation of `{name}` must write it"),
+                            Breaking,
+                        )),
+                        Some(o) if o != s => lines.push((
+                            format!("required `{n}`: `{o}` → `{s}`"),
+                            Breaking,
+                        )),
+                        _ => {}
+                    }
+                }
+                for (n, _) in &x {
+                    if !new.contains_key(n.as_str()) {
+                        lines.push((format!("`{n}` is no longer required"), Additive));
+                    }
+                }
+            }
+            ("arguments" | "fields", Value::Array(x), Value::Array(y)) => {
+                let word = if key == "fields" { "field" } else { "argument" };
+                for line in pair(x, y, word, |v| show(&v["name"]), show) {
+                    lines.push((line, Breaking));
+                }
+            }
+            (_, Value::Array(x), Value::Array(y)) => {
+                let word = match key {
+                    "derives" => "derive",
+                    "impls" => "impl",
+                    "bounds" => "supertrait",
+                    "attributes" => "helper attribute",
+                    _ => key,
+                };
+                let x: Vec<String> = x.iter().map(show).collect();
+                let y: Vec<String> = y.iter().map(show).collect();
+                let added: Vec<&String> = y.iter().filter(|v| !x.contains(v)).collect();
+                let removed: Vec<&String> = x.iter().filter(|v| !y.contains(v)).collect();
+                for v in &added {
+                    let class = if key == "bounds" { Breaking } else { Additive };
+                    lines.push((format!("{word} `{v}` added"), class));
+                }
+                for v in &removed {
+                    lines.push((format!("{word} `{v}` removed"), Breaking));
+                }
+                if added.is_empty() && removed.is_empty() {
+                    lines.push((format!("{word}s reordered"), Breaking));
+                }
+            }
+            ("wasm", _, Value::Bool(true)) => lines.push(("now on wasm".into(), Additive)),
+            ("wasm", _, Value::Bool(false)) => lines.push(("no longer on wasm".into(), Breaking)),
+            ("required", _, Value::Bool(false)) => {
+                lines.push(("now has a default".into(), Additive))
+            }
+            ("required", _, Value::Bool(true)) => lines.push((
+                "no longer has a default: every implementation must write it".into(),
+                Breaking,
+            )),
+            ("constructible", _, Value::Bool(true)) => {
+                lines.push(("now constructible with a literal".into(), Additive))
+            }
+            ("constructible", _, Value::Bool(false)) => lines.push((
+                "no longer constructible: a mod can't build it with a literal".into(),
+                Breaking,
+            )),
+            ("non_exhaustive", _, Value::Bool(true)) => {
+                lines.push(("now `#[non_exhaustive]`".into(), Breaking))
+            }
+            ("wire", _, Value::Bool(true)) => {
+                lines.push(("now crosses the wasm boundary".into(), Additive))
+            }
+            ("wire_form", Value::Null, _) => {
+                lines.push((format!("wire form: none → {}", quoted(key, &y)), Additive))
+            }
+            _ => lines.push((
+                format!("{}: {} → {}", label(key), quoted(key, &x), quoted(key, &y)),
+                Breaking,
+            )),
+        }
+    }
+    if refs_changed && lines.is_empty() {
+        lines.push(("the API types it names changed".into(), Breaking));
+    }
+    lines
+}
+
+/// Lines for two lists of named things, paired by name: added, removed, changed, reordered.
+fn pair<T>(
+    old: &[T],
+    new: &[T],
+    word: &str,
+    name: impl Fn(&T) -> String,
+    text: impl Fn(&T) -> String,
+) -> Vec<String> {
+    let strip = |n: &str, t: String| match t.strip_prefix(&format!("{n}: ")) {
+        Some(rest) => rest.to_owned(),
+        None => t,
+    };
+    let before: BTreeMap<String, String> = old.iter().map(|v| (name(v), text(v))).collect();
+    let after: BTreeMap<String, String> = new.iter().map(|v| (name(v), text(v))).collect();
+    let mut lines = Vec::new();
+    for v in new {
+        let n = name(v);
+        let t = text(v);
+        match before.get(&n) {
+            None => lines.push(format!("{word} `{t}` added")),
+            Some(o) if *o != t => lines.push(format!(
+                "{word} `{n}`: `{}` → `{}`",
+                strip(&n, o.clone()),
+                strip(&n, t)
+            )),
+            _ => {}
+        }
+    }
+    for v in old {
+        if !after.contains_key(&name(v)) {
+            lines.push(format!("{word} `{}` removed", name(v)));
+        }
+    }
+    let order = |list: &[T], other: &BTreeMap<String, String>| -> Vec<String> {
+        list.iter()
+            .map(&name)
+            .filter(|n| other.contains_key(n))
+            .collect()
+    };
+    if lines.is_empty() && order(old, &after) != order(new, &before) {
+        lines.push(format!("{word}s reordered"));
+    }
+    lines
+}
+
+impl Diff {
+    /// Every id whose record differs, folded members included.
+    pub fn ids(&self) -> impl Iterator<Item = &str> {
+        self.changes.iter().flat_map(|c| {
+            std::iter::once(c.id.as_str()).chain(c.members.iter().map(String::as_str))
+        })
+    }
+
+    /// Attaches a note to the changes it names; returns the ids it names that did not change.
+    pub fn attach(&mut self, note: &Note, ids: &[String]) -> Vec<String> {
+        let mut stale = Vec::new();
+        for id in ids {
+            let change = self
+                .changes
+                .iter_mut()
+                .find(|c| c.id == *id || c.members.contains(id));
+            match change {
+                Some(change) if !change.notes.contains(note) => change.notes.push(note.clone()),
+                Some(_) => {}
+                None => stale.push(id.clone()),
+            }
+        }
+        stale
+    }
+
+    /// The breaking changes no note declares.
+    pub fn undeclared(&self) -> impl Iterator<Item = &Change> {
+        self.changes
+            .iter()
+            .filter(|c| c.class == Class::Breaking && c.notes.is_empty())
+    }
+
+    /// The report as text: the verdict and counts, then breaking changes, then additive ones.
+    pub fn to_text(&self) -> String {
+        let count = |class| self.changes.iter().filter(|c| c.class == class).count();
+        let (breaking, additive) = (count(Class::Breaking), count(Class::Additive));
+        let verdict = match self.verdict {
+            Verdict::Identical => "identical",
+            Verdict::Additive => "additive",
+            Verdict::Breaking => "breaking",
+        };
+        let mut text = format!(
+            "Surface: {verdict} ({breaking} breaking, {additive} additive; {} without a note)\nOld {}, new {}\n",
+            self.undeclared().count(),
+            self.old,
+            self.new
+        );
+        for (class, title, n) in [
+            (Class::Breaking, "Breaking", breaking),
+            (Class::Additive, "Additive", additive),
+        ] {
+            if n == 0 {
+                continue;
+            }
+            text.push_str(&format!("\n{title} ({n})\n"));
+            for change in self.changes.iter().filter(|c| c.class == class) {
+                let kind = match change.kind {
+                    ChangeKind::Added => "added",
+                    ChangeKind::Removed => "removed",
+                    ChangeKind::Changed => "changed",
+                };
+                text.push_str(&format!("- {} ({kind})\n", change.id));
+                for line in &change.what {
+                    if line != kind {
+                        text.push_str(&format!("    {line}\n"));
+                    }
+                }
+                if !change.members.is_empty() {
+                    text.push_str(&format!("    members: {}\n", change.members.join(", ")));
+                }
+                for note in &change.notes {
+                    text.push_str(&format!("    why ({}): {}\n", note.file, note.why));
+                    if let Some(migrate) = &note.migrate {
+                        text.push_str(&format!("    migrate: {migrate}\n"));
+                    }
+                }
+            }
+        }
+        text
+    }
+}
+
+#[cfg(test)]
+#[path = "diff_tests.rs"]
+mod tests;

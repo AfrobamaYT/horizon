@@ -56,9 +56,11 @@
 //! typed [`ReadError`], and ignores fields it does not know. It does not recompute record
 //! hashes: a newer writer may hash contract fields this reader does not know, and the file's
 //! integrity is the signature's job.
+pub mod diff;
 pub mod records;
 pub mod shape;
 
+pub use diff::{Change, ChangeKind, Class, Diff, Note, Verdict, diff};
 pub use records::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
