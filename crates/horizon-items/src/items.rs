@@ -454,8 +454,8 @@ thread_local! {
 #[derive(Clone)]
 pub struct Items {
     pub items: HashMap<Arc<str>, ItemInfo>,
-    /// Block.getItem, including blocks sharing another block's item.
-    pub block_items: HashMap<String, String>,
+    /// Shared Block.getItem snapshot, including blocks sharing another block's item.
+    pub block_items: Arc<HashMap<String, String>>,
     /// Loaded component prototypes for concrete ingredient predicates.
     pub component_defaults: Arc<HashMap<String, horizon_core::nbt::Compound>>,
     /// Default `minecraft:mob_visibility` by item id, with the `equippable`
@@ -863,11 +863,13 @@ impl Items {
             }
         }
         let mut items = Self::load_with(root, &block_for_item, overlay, defaults)?;
-        items.block_items = facts
-            .states
-            .iter()
-            .map(|state| (state.name.to_string(), state.item.to_string()))
-            .collect();
+        items.block_items = Arc::new(
+            facts
+                .states
+                .iter()
+                .map(|state| (state.name.to_string(), state.item.to_string()))
+                .collect(),
+        );
         set_villager_food(&items.items);
         let path = root.join(MOD_ITEM_BLOCKS);
         match fs::read(&path) {
@@ -894,7 +896,7 @@ impl Items {
     /// placement state ids (for headless tools that never place blocks).
     pub fn catalog(root: &Path, overlay: &PackOverlay, defaults: &ItemDefaults) -> Result<Self> {
         let mut items = Self::load_with(root, &HashMap::new(), overlay, defaults)?;
-        items.block_items = ingredient_defaults::block_items(root)?;
+        items.block_items = Arc::new(ingredient_defaults::block_items(root)?);
         Ok(items)
     }
     fn load_with(
