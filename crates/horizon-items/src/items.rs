@@ -1,6 +1,8 @@
 //! Items from vanilla's default-component reports, block<->item mapping,
 //! tool mining rules and block loot tables (`LootTable`/`LootPool` semantics
 //! for the condition, entry and modifier types used by block drops).
+#[path = "ingredient_defaults.rs"]
+mod ingredient_defaults;
 use crate::{Result, blocks::BlockFacts};
 use horizon_core::random::RandomSource;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
@@ -452,6 +454,12 @@ thread_local! {
 #[derive(Clone)]
 pub struct Items {
     pub items: HashMap<Arc<str>, ItemInfo>,
+    /// Shared Block.getItem snapshot, including blocks sharing another block's item.
+    pub block_items: Arc<HashMap<String, String>>,
+    /// Registry snapshot used to validate ingredient component payloads.
+    pub component_registry: Arc<horizon_client_core::registries::Registries>,
+    /// Loaded component prototypes for concrete ingredient predicates.
+    pub component_defaults: Arc<HashMap<String, horizon_core::nbt::Compound>>,
     /// Default `minecraft:mob_visibility` by item id, with the `equippable`
     /// slot it applies in (`LivingEntity.getVisibilityPercent`).
     mob_visibility: HashMap<Arc<str>, (String, MobVisibility)>,
@@ -493,6 +501,7 @@ impl Items {
     ) -> Self {
         let mut items = self.clone();
         if let Some(tags) = block_tags {
+            items.block_tag_order = tags.clone();
             items.block_tags = tags
                 .into_iter()
                 .map(|(name, members)| (name, members.into_iter().collect()))
@@ -830,6 +839,13 @@ impl Items {
             }
         }
         let mut items = Self::load_with(root, &block_for_item, overlay, defaults)?;
+        items.block_items = Arc::new(
+            facts
+                .states
+                .iter()
+                .map(|state| (state.name.to_string(), state.item.to_string()))
+                .collect(),
+        );
         let path = root.join(MOD_ITEM_BLOCKS);
         match fs::read(&path) {
             Ok(bytes) => {
@@ -851,10 +867,12 @@ impl Items {
         }
         Ok(items)
     }
-    /// Every item's default components and the tags, without the block <->
-    /// item mapping (for headless tools that never place blocks).
+    /// Every item's defaults, tags and block-to-item identities, without
+    /// placement state ids (for headless tools that never place blocks).
     pub fn catalog(root: &Path, overlay: &PackOverlay, defaults: &ItemDefaults) -> Result<Self> {
-        Self::load_with(root, &HashMap::new(), overlay, defaults)
+        let mut items = Self::load_with(root, &HashMap::new(), overlay, defaults)?;
+        items.block_items = Arc::new(ingredient_defaults::block_items(root)?);
+        Ok(items)
     }
     fn load_with(
         root: &Path,
@@ -1094,8 +1112,14 @@ impl Items {
         // game's own: one map with the loot data of the same root and packs.
         let loot = horizon_world::loot::shared_tables(root, overlay)?;
         let registry_order = registry_order(root, &order);
+        let enchantments = Arc::new(crate::enchant::Enchantments::load_with(
+            root, overlay, defaults,
+        )?);
         Ok(Self {
             items,
+            block_items: Default::default(),
+            component_registry: ingredient_defaults::component_registry(root, &enchantments)?,
+            component_defaults: ingredient_defaults::component_defaults(defaults)?,
             mob_visibility,
             order,
             registry_order,
@@ -1108,9 +1132,7 @@ impl Items {
             loot,
             songs: load_songs(root, overlay),
             instruments: load_instruments(root, overlay),
-            enchantments: Arc::new(crate::enchant::Enchantments::load_with(
-                root, overlay, defaults,
-            )?),
+            enchantments,
         })
     }
     /// Use the server's loaded loot-table snapshot for item and block drops.
@@ -1156,33 +1178,13 @@ impl Items {
         }
         self.instruments.get(&instrument_id(stack)?).cloned()
     }
-    /// Only the block and item tags (and the enchantment registry, which the
-    /// station rules and loot functions are built from), for tools that need
-    /// tag membership.
-    pub fn tags_only(root: &Path, overlay: &PackOverlay, defaults: &ItemDefaults) -> Result<Self> {
-        Ok(Self {
-            items: HashMap::new(),
-            mob_visibility: HashMap::new(),
-            order: Vec::new(),
-            registry_order: Vec::new(),
-            block_tags: load_tags(root, "block", overlay)?,
-            item_tags: load_tags(root, "item", overlay)?,
-            fluid_tags: load_tags(root, "fluid", overlay)?,
-            item_tag_order: load_tag_lists(root, "item", overlay)?,
-            block_tag_order: load_tag_lists(root, "block", overlay)?,
-            fluid_tag_order: load_tag_lists(root, "fluid", overlay)?,
-            loot: Default::default(),
-            songs: HashMap::new(),
-            instruments: HashMap::new(),
-            enchantments: Arc::new(crate::enchant::Enchantments::load_with(
-                root, overlay, defaults,
-            )?),
-        })
-    }
     /// A table with nothing in it: the tags a client was sent go in with `set_tags`.
     pub fn empty() -> Self {
         Self {
             items: HashMap::new(),
+            block_items: Default::default(),
+            component_registry: Default::default(),
+            component_defaults: Default::default(),
             mob_visibility: HashMap::new(),
             order: Vec::new(),
             registry_order: Vec::new(),
