@@ -67,7 +67,6 @@ fn server<'a>(
             latency: Arc::new(AtomicI32::new(0)),
             address: "127.0.0.1:7".parse().unwrap(),
             expected: false,
-            configured: Default::default(),
         },
         CONN as i32,
         [0.5, 100.0, 0.5],

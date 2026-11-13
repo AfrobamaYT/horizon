@@ -34,6 +34,7 @@ use horizon_core::{
 };
 use horizon_world::registry::BlockStateId;
 use std::{collections::HashMap, sync::Arc};
+#[path = "minecarts/cells.rs"]
 mod cells;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum CartKind {
