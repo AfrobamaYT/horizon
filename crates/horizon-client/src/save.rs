@@ -7661,6 +7661,9 @@ mod tests {
 
     #[test]
     fn only_server_disk_records_intern_saved_fluid_names() {
+        // The game initializes the platform at startup; the unresolved-fluid table lives there,
+        // and without it nothing is interned. Alone, nothing else in this process has done it.
+        mod_platform::__private::initialize().unwrap();
         let root =
             std::env::temp_dir().join(format!("horizon-fluid-source-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
