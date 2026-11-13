@@ -205,7 +205,7 @@ pub(super) fn compile(
             }
             fs::write(path, manifest.to_string()).map_err(|e| e.to_string())?;
         }
-        let mut externs = BTreeMap::from([
+        let mut externs: BTreeMap<String, PathBuf> = BTreeMap::from([
             ("mod_api".into(), prebuilt::library(&deps, "mod_api")?),
             ("mod_vocab".into(), prebuilt::library(&deps, "mod_vocab")?),
         ]);
@@ -589,6 +589,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "daily: compiles fixture crates in child processes"]
     fn registry_adapter_compiles_facade_with_transitive_host_macro_metadata() {
         use std::{ffi::OsString, process::Command};
         let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/registry-facade-tests");
@@ -715,6 +716,7 @@ mod tests {
         // the SDK-owned template calls after the layer split.
         for name in [
             "mod_api",
+            "mod_vocab",
             "mod_points",
             "horizon_mod_package",
             "horizon_mod_host",

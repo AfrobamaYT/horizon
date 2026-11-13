@@ -15,6 +15,7 @@ const IDENTITY: &str = "horizon-prebuilt.json";
 /// Names the folder of a prebuilt game built from a developer install's checkout
 /// (`tools/prebuilt_game.py build`). Read for developer installs only: their commit has no release.
 pub(super) const DEVELOPER_SDK: &str = "HORIZON_LAUNCHER_DEVELOPER_SDK";
+#[cfg(test)]
 pub(super) const TEMPLATE: &str = "native_main.rs.template";
 const SUMS: &str = "SHA256SUMS";
 /// The optimization level of the `release` profile the prebuilt game is built with: the mods' code
@@ -966,7 +967,9 @@ pub(super) fn compile(
 }
 
 pub(super) fn refuse_closure_rlib(id: &str, name: &str, path: &Path) -> Result<(), String> {
-    if path.extension().is_some_and(|ext| ext == "rlib") {
+    if matches!(name, "mod_api" | "mod_vocab" | "mod_points")
+        && path.extension().is_some_and(|ext| ext == "rlib")
+    {
         return Err(trf("Native mod {mod} links API closure crate {crate} as an rlib. Rebuild the SDK with a shared API closure.", &[("mod", id), ("crate", name)]));
     }
     Ok(())
