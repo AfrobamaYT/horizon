@@ -81,11 +81,15 @@ fn main() -> ExitCode {
             .and_then(|()| build())
             .map(|p| println!("Built {}", p.display())),
         Some("wasm-std") => wasm::wasm_std(&args[1..]),
-        Some("build") => code_project(Path::new("."))
-            .then(|| fetched(Path::new(".")))
-            .unwrap_or(Ok(()))
-            .and_then(|()| build())
-            .map(|p| println!("Built {}", p.display())),
+        Some("build") => {
+            let sdk = if code_project(Path::new(".")) {
+                fetched(Path::new("."))
+            } else {
+                Ok(())
+            };
+            sdk.and_then(|()| build())
+                .map(|p| println!("Built {}", p.display()))
+        }
         Some("run") => run(&args[1..]).map_err(|e| e.to_string()),
         Some("check") => check(&args[1..]),
         Some("registry") => registry::main(&args[1..]),

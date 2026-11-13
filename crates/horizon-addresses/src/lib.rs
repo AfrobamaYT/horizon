@@ -73,3 +73,10 @@ pub const HORIZON_MIXINS_SOURCE: &str =
 
 /// Where the fork releases the prebuilt horizon-mixins tool; a release's tag and file follow.
 pub const MIXINS_TOOL_RELEASES: &str = "https://github.com/arismoko/horizon/releases/download";
+
+/// Where the fork releases each build's mod SDK (`sdk-<build id>`); a release's tag and file follow.
+pub const SDK_RELEASES: &str = "https://github.com/arismoko/horizon/releases/download";
+
+/// The fork's newest releases, which `cargo horizon-mod` reads to find the one SDK a short sha names.
+pub const SDK_RELEASE_LIST: &str =
+    "https://api.github.com/repos/arismoko/horizon/releases?per_page=100";
