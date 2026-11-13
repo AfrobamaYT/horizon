@@ -2041,6 +2041,7 @@ version = "0.1.0"
 dependencies = [
  "horizon-client-core",
  "horizon-core",
+ "horizon-items",
  "horizon-protocol",
  "horizon-world",
 ]
@@ -2318,6 +2319,7 @@ dependencies = [
  "horizon-mod-api",
  "horizon-mod-api-macros",
  "horizon-mod-point-shape",
+ "horizon-mod-surface",
  "horizon-mod-vocab",
  "horizon-shader-api",
  "libc",
