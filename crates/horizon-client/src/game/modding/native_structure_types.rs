@@ -266,6 +266,7 @@ impl ModStructureType for Adapter {
             .into_iter()
             .map(|piece| {
                 Box::new(ModPiece {
+                    beardifier: piece.beardifier().map(engine_beardifier),
                     piece,
                     ty: ty.clone(),
                     id,
@@ -284,6 +285,7 @@ impl ModStructureType for Adapter {
         // Preserve the engine's existing bad-piece refusal. The API loader's diagnostic is typed.
         let piece = self.inner.load_piece(metadata, tag).ok()?;
         Some(Box::new(ModPiece {
+            beardifier: piece.beardifier().map(engine_beardifier),
             piece,
             ty: self.inner.clone(),
             id: self.id,
@@ -291,15 +293,37 @@ impl ModStructureType for Adapter {
     }
 }
 
+fn engine_beardifier(piece: mod_api::PieceBeardifier) -> horizon_core::density::RigidPiece {
+    use horizon_core::density::{StructureBounds, TerrainAdjustment as Engine};
+    use mod_api::TerrainAdjustment as Api;
+    let adjustment = match piece.adjustment {
+        Api::None => Engine::None,
+        Api::Bury => Engine::Bury,
+        Api::BeardThin => Engine::BeardThin,
+        Api::BeardBox => Engine::BeardBox,
+        Api::Encapsulate => Engine::Encapsulate,
+    };
+    horizon_core::density::RigidPiece {
+        bounds: StructureBounds::new(piece.bounds.min, piece.bounds.max)
+            .expect("BoundingBox has ordered bounds"),
+        adjustment,
+        ground_level_delta: piece.ground_level_delta,
+    }
+}
+
 /// The engine's legacy piece around a mod's piece: `createTag` of the type id
 /// and the piece's box around the piece's own save data.
 struct ModPiece {
     piece: Arc<dyn StructurePiece>,
+    beardifier: Option<horizon_core::density::RigidPiece>,
     /// The type the piece belongs to, whose `after_place` runs for the start.
     ty: Arc<dyn StructureType>,
     id: &'static str,
 }
 impl horizon_world::worldgen::structure::legacy::LegacyPiece for ModPiece {
+    fn beardifier(&self) -> Option<horizon_core::density::RigidPiece> {
+        self.beardifier
+    }
     fn bounding_box(&self) -> BoundingBox {
         self.piece.bounding_box()
     }

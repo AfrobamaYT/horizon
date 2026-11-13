@@ -480,6 +480,13 @@ impl StructurePiece for Piece {
     fn bounding_box(&self) -> mod_api::BoundingBox {
         mod_api::BoundingBox::new([1, 2, 3], [4, 5, 6])
     }
+    fn beardifier(&self) -> Option<mod_api::PieceBeardifier> {
+        Some(mod_api::PieceBeardifier::new(
+            mod_api::BoundingBox::new([1, 2, 3], [4, 5, 6]),
+            mod_api::TerrainAdjustment::BeardThin,
+            2,
+        ))
+    }
     fn post_process(
         &self,
         _: &mut dyn mod_api::PieceContext,
@@ -2034,6 +2041,15 @@ fn wire_loopback_roundtrip_and_atomic_writeback() {
         proxy.bounding_box(),
         mod_api::BoundingBox::new([1, 2, 3], [4, 5, 6])
     );
+    let terrain = proxy
+        .beardifier()
+        .expect("piece terrain crosses the worker boundary");
+    assert_eq!(
+        terrain.bounds,
+        mod_api::BoundingBox::new([1, 2, 3], [4, 5, 6])
+    );
+    assert_eq!(terrain.adjustment, mod_api::TerrainAdjustment::BeardThin);
+    assert_eq!(terrain.ground_level_delta, 2);
     let mut release = Writer::new();
     release.put(&vec![id]);
     assert_eq!(
