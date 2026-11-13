@@ -386,14 +386,14 @@ fn a_killing_blows_post_fires_once_before_the_death_hooks() {
     );
 }
 
-/// A death a mod cancels: the same order, Post still once, and the pig stays at 1 health
+/// A death a mod cancels: the pig remains cancelled at 0 health with `death_canceled`,
 /// without a second Post or death on the next tick.
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_cancelled_deaths_post_fires_once_before_the_death_hooks() {
     assert_eq!(
         killing_blow(true),
-        (vec![("post", 225017), ("death", 225017)], 1.0)
+        (vec![("post", 225017), ("death", 225017)], 0.0)
     );
 }
 
