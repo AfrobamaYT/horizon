@@ -539,6 +539,17 @@ jobs:
           with open(os.environ["GITHUB_ENV"], "a") as environment:
               environment.write(f"HORIZON_STAGE_TOOL={executable}\n")
           PY
+      - name: Report the mod API surface change
+        # What this pull request changes in what mods can name, in the job summary: the head's horizon-stage exports
+        # the merge base and this tree, then classifies the diff (tools/ci/surface_report.py). A report, not a gate:
+        # it fails only for a stale or unreadable change note, or, with tools/ci/surface.toml's gate on, for a
+        # breaking change no note declares.
+        if: needs.changes.outputs.rust_required != 'false' && (github.event_name == 'pull_request' || inputs.pr != '')
+        env:
+          EVENT: ${{ github.event_name }}
+          PR: ${{ inputs.pr }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/ci/surface_report.py
       - name: Validate prebuilt source stage and listed slots
         if: needs.changes.outputs.rust_required != 'false'
         run: python3 tools/ci/test_stage_catalog.py -v
