@@ -152,7 +152,8 @@ jobs:
             game::payload_transport::wasm_config_tests::compiled_guest_runs_on_configuration_connection_thread \
             game::block_entity_tick_reply_tests::native_and_compiled_wasm_tick_reply_matrix \
             game::remote::interaction_event_tests::interaction_event_wasm_tests::wasm_interaction_shared_matrix \
-            game::remote::movement_input_tests::wasm_movement_input_keys_axes_and_sprint; do
+            game::remote::movement_input_tests::wasm_movement_input_keys_axes_and_sprint \
+            game::native_hooks::runtime_environment::tests::native_and_wasm_process_environment_in_registration_and_game_hosts; do
             run_exact 1 -p horizon-client --lib -- --ignored --exact "$test"
           done
       - name: Build independent library members

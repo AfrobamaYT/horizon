@@ -1452,3 +1452,11 @@ impl StructureSearchResult {
         }
     }
 }
+
+/// Why a server-wide game rule read was refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+#[non_exhaustive]
+pub enum GameRuleReadError {
+    /// No rule has this identifier.
+    UnknownRule,
+}
