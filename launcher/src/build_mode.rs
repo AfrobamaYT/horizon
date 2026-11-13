@@ -238,6 +238,13 @@ impl Launcher {
                     ),
             );
         }
+        if let Some(stake) = self
+            .native_worlds
+            .as_ref()
+            .filter(|_| mine && error.is_some())
+        {
+            card = card.child(self.worlds_choice(stake, pal, cx));
+        }
         if let Some(done) = self.native_done.as_ref().filter(|_| mine) {
             card = card.child(text_in(13., pal.muted).child(done.clone()));
         }
@@ -253,6 +260,55 @@ impl Launcher {
             )));
         }
         card
+    }
+
+    /// The choice when the build would switch off mods that worlds were saved with (the error
+    /// above names them): staying is the default and changes nothing; the other choice backs
+    /// those worlds up, where it says, then builds without the mods.
+    fn worlds_choice(&self, stake: &native_mods::AtStake, pal: Pal, cx: &mut Context<Self>) -> Div {
+        let t = self.theme;
+        let stay = if stake.stay.is_empty() {
+            tr("Stay on this game build").to_string()
+        } else {
+            native_mods::fit::stay(&stake.stay)
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(text_in(13., pal.muted).child(trf(
+                "Backups go to {path}, one zip per world.",
+                &[("path", &stake.backups.display().to_string())],
+            )))
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(8.))
+                    .child(
+                        button("native-worlds-stay", stay, Kind::Primary, &t).on_click(
+                            cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.native_worlds = None;
+                                this.native_error = None;
+                                cx.notify();
+                            }),
+                        ),
+                    )
+                    .child(
+                        button(
+                            "native-worlds-back-up",
+                            native_mods::fit::back_up_and_update(),
+                            Kind::Secondary,
+                            &t,
+                        )
+                        .on_click(cx.listener(
+                            |this, _: &ClickEvent, _, cx| {
+                                this.build_native_with(true);
+                                cx.notify();
+                            },
+                        )),
+                    ),
+            )
     }
 
     /// The card while a build runs: a large percentage, a bar, a pill per stage, and the log and
@@ -409,37 +465,49 @@ impl Launcher {
             .iter()
             .find(|(id, _)| id == mod_id)
             .map(|(_, r)| r)?;
-        let (glyph, color, headline, reason) = if building {
+        let (glyph, color, headline, reason): (&str, Hsla, SharedString, String) = if building {
             (
                 "refresh",
                 pal.accent,
-                tr("Building"),
+                tr("Building").into(),
                 tr("The build is running. Cancel it from the card above.").to_string(),
             )
         } else if busy {
             (
                 "refresh",
                 pal.muted,
-                tr("Another build is running"),
+                tr("Another build is running").into(),
                 tr("This instance's build waits until it finishes.").to_string(),
             )
         } else if state == State::UpToDate {
             (
                 "tick-02",
                 pal.success,
-                tr("Nothing to build"),
+                tr("Nothing to build").into(),
                 tr("Your game already has this mod.").to_string(),
             )
         } else {
             match route {
-                Route::Invalid { reason } => ("alert-circle", pal.warn, tr("Needs attention"), reason.clone()),
+                Route::Invalid { reason } => ("alert-circle", pal.warn, tr("Needs attention").into(), reason.clone()),
                 Route::Prebuilt => (
                     "flash",
                     pal.accent,
-                    tr("Can use the prebuilt game"),
+                    tr("Can use the prebuilt game").into(),
                     tr("Can use the prebuilt game if one exists for your Horizon and it serves every enabled mod.").to_string(),
                 ),
-
+                // Made for another build: it fits this one, and the build compiles it as usual.
+                Route::Fits { line } => ("tick-02", pal.success, tr("Fits this game").into(), line.clone()),
+                // It stays installed; the build leaves it out and says so.
+                Route::Unfit {
+                    headline,
+                    line,
+                    actions,
+                } => (
+                    "alert-circle",
+                    pal.warn,
+                    headline.clone().into(),
+                    format!("{line}\n{actions}"),
+                ),
             }
         };
         let open = self.mods.route_open.as_deref() == Some(mod_id);

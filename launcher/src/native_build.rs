@@ -5,11 +5,18 @@ impl Launcher {
     /// build stays on the Horizon the instance plays (`native_mods::base_for`), unless the
     /// warning was Update's: then it moves to that newer Horizon.
     pub(super) fn build_native(&mut self) {
+        self.build_native_with(false)
+    }
+
+    /// [`Self::build_native`]; with `back_up`, the player chose to back up the worlds saved
+    /// with mods the build switches off, then build without those mods.
+    pub(super) fn build_native_with(&mut self, back_up: bool) {
         if self.native_step.is_some() {
             return;
         }
         self.pending_consent = None;
         self.native_error = None;
+        self.native_worlds = None;
         // This attempt's own log, starting empty: an open panel shows it rather than the last
         // attempt's (`native_log_page`).
         self.native_log_reset();
@@ -41,6 +48,7 @@ impl Launcher {
                 &folder,
                 &instance,
                 None,
+                back_up,
                 |step| {
                     let _ = tx.send(Msg::NativeProgress(step.label(), step.progress()));
                 },

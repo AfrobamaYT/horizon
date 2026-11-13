@@ -15,7 +15,8 @@ pub fn routes(home: &Path, base: Option<&str>) -> Result<Routes, Failed> {
 pub(super) fn classify(
     folder: &Path,
     base: Option<&str>,
-    lease: &crate::native_cache::Cache,
+    // Held while the SDK's index, surface and build data are read and kept.
+    _lease: &crate::native_cache::Cache,
 ) -> Result<Routes, Failed> {
     let found = scan_bundles(folder)?;
     let mut result = Routes::default();
@@ -41,31 +42,73 @@ pub(super) fn classify(
         return Ok(result);
     }
     let base = base.ok_or_else(|| tr("Install Horizon first.").to_string())?;
-    let revision = build_revision(base, checked_about(base)?.as_ref())?;
-    if let Some(list) = mismatch(&found, &revision) {
-        return Err(mismatch_error(&list).into());
+    let built_on = checked_about(base)?;
+    let origin = built_on.as_ref().map_or(base, |about| about.base.as_str());
+    let revision = build_revision(base, built_on.as_ref())?;
+    // A developer install's checkout has no published surface: its mods are made for it exactly.
+    if crate::developer_install::is_developer(origin) {
+        if let Some(list) = mismatch(&found, &revision) {
+            return Err(mismatch_error(&list).into());
+        }
+        return Ok(result);
     }
-    result.unavailable = prebuilt::prebuilt_availability(&revision, Target::Client);
-    if projects
-        .iter()
-        .any(|p| !p.bundle.manifest.inject.is_empty())
-    {
-        match prebuilt::planning_catalog(lease, &revision) {
-            Ok(catalog) => {
-                for project in &projects {
-                    if let Err(error) = catalog.check(&project.bundle.manifest) {
-                        let (_, route) = result
-                            .mods
-                            .iter_mut()
-                            .find(|(id, _)| id == &project.bundle.manifest.id)
-                            .expect("parsed project has a route");
-                        *route = Route::Invalid {
-                            reason: error.to_string(),
-                        };
-                    }
+    let sdk_base = sdk_cache::Base::from_env();
+    let keys = horizon_release_sign::trusted_keys_for(backend::REPO);
+    let sdk = match sdk_cache::index(&sdk_base, &revision, &keys) {
+        Ok(sdk) => sdk,
+        Err(refusal) => {
+            result.unavailable = Some(Refusal::Sdk(refusal));
+            return Ok(result);
+        }
+    };
+    let shown = sdk.shown();
+    let mut said = |id: &str, route: Route| {
+        let (_, slot) = result
+            .mods
+            .iter_mut()
+            .find(|(mod_id, _)| mod_id == id)
+            .expect("parsed project has a route");
+        if matches!(slot, Route::Prebuilt) {
+            *slot = route;
+        }
+    };
+    match judge_all(&projects, &sdk, &sdk_base) {
+        Ok(verdicts) => {
+            for (id, verdict) in verdicts {
+                let route = match &verdict {
+                    fit::Verdict::MadeFor => continue,
+                    fit::Verdict::Fits { .. } => Route::Fits {
+                        line: fit::line(&id, &verdict, &shown),
+                    },
+                    _ => Route::Unfit {
+                        headline: fit::headline(&id, &verdict),
+                        line: fit::line(&id, &verdict, &shown),
+                        actions: fit::actions(&id),
+                    },
+                };
+                said(id.as_str(), route);
+            }
+        }
+        // Nothing is guessed: without the build's files, no mod made for another build "fits".
+        Err(refusal) => {
+            for project in &projects {
+                let id = &project.bundle.manifest.id;
+                if project.bundle.native().horizon != revision {
+                    said(
+                        id.as_str(),
+                        Route::Invalid {
+                            reason: trf(
+                                "Can't check {mod} against {build}. {why}",
+                                &[
+                                    ("mod", id),
+                                    ("build", &shown),
+                                    ("why", &refusal.to_string()),
+                                ],
+                            ),
+                        },
+                    );
                 }
             }
-            Err(reason) => result.unavailable = Some(reason),
         }
     }
     Ok(result)
