@@ -3749,11 +3749,11 @@ mod tests {
     }
 }
 
+#[path = "living/fluid_heights.rs"]
+mod fluid_heights;
 #[cfg(test)]
 #[path = "living/size_answer_tests.rs"]
 mod size_answer_tests;
-#[path = "living/fluid_heights.rs"]
-mod fluid_heights;
 pub mod teleports;
 
 #[cfg(test)]
