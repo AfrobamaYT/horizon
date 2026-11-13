@@ -49,6 +49,7 @@ pub struct TagFile {
     pub replace: bool,
     /// NeoForge's `TagFile.remove`: entries taken out after this file's `entries`.
     pub remove: Vec<TagEntry>,
+    entry_removals: Vec<bool>,
 }
 impl TagFile {
     pub fn from_json(json: &str) -> Result<Self, DecodeError> {
@@ -60,6 +61,12 @@ impl TagFile {
                 .map(|v| TagEntry::from_json(v.get()))
                 .collect()
         };
+        let raw_entries: Vec<serde_json::Value> =
+            serde_json::from_str(required(&object, "values")?.get())?;
+        let entry_removals = raw_entries
+            .iter()
+            .map(|entry| entry.get("remove").and_then(serde_json::Value::as_bool) == Some(true))
+            .collect();
         let entries = list(required(&object, "values")?)?;
         let replace = optional(&object, "replace")
             .map(|v| serde_json::from_str(v.get()))
@@ -70,6 +77,7 @@ impl TagFile {
             entries,
             replace,
             remove: remove.unwrap_or_default(),
+            entry_removals,
         })
     }
 }
@@ -136,11 +144,18 @@ impl TagDefinitions {
         if file.replace {
             entries.clear();
         }
-        entries.extend(file.entries.into_iter().map(|entry| TagEntryWithSource {
-            entry,
-            source: source.into(),
-            remove: false,
-        }));
+        entries.extend(file.entries.into_iter().zip(file.entry_removals).map(
+            |(mut entry, remove)| {
+                if remove {
+                    entry.required = false;
+                }
+                TagEntryWithSource {
+                    entry,
+                    source: source.into(),
+                    remove,
+                }
+            },
+        ));
         // Removals are optional: a missing id or tag removes nothing.
         entries.extend(file.remove.into_iter().map(|entry| TagEntryWithSource {
             entry: TagEntry {

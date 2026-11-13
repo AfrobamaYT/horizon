@@ -221,43 +221,30 @@ impl GameplayAttributes {
             list("timeline").into_iter().collect();
         // Tag values with nested tags and removals resolved.
         fn tag(data: &std::path::Path, name: &str, out: &mut Vec<String>) {
-            let file = data.join(format!(
-                "tags/timeline/{}.json",
-                name.trim_start_matches('#')
-                    .trim_start_matches("minecraft:")
-            ));
-            let Some(v) = std::fs::read(file)
-                .ok()
-                .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-            else {
-                return;
-            };
-            let mut items = Vec::new();
-            for item in v["values"].as_array().into_iter().flatten() {
-                let s = item.as_str().or_else(|| item["id"].as_str()).unwrap_or("");
-                let removes = item["remove"].as_bool() == Some(true);
-                if s.is_empty() {
-                    continue;
+            fn resolve(
+                data: &std::path::Path,
+                name: &str,
+                active: &mut std::collections::HashSet<String>,
+            ) -> Vec<String> {
+                let name = name
+                    .trim_start_matches('#')
+                    .trim_start_matches("minecraft:");
+                if !active.insert(name.to_owned()) {
+                    return Vec::new();
                 }
-                if s.starts_with('#') {
-                    let mut members = Vec::new();
-                    tag(data, s, &mut members);
-                    if removes {
-                        out.retain(|kept| !members.contains(kept));
-                    } else {
-                        for id in members {
-                            if !out.contains(&id) {
-                                out.push(id);
-                            }
-                        }
-                    }
-                } else if removes {
-                    out.retain(|kept| kept != s);
-                } else {
-                    items.push(s.to_owned());
-                }
+                let file = data.join(format!("tags/timeline/{name}.json"));
+                let members = std::fs::read(file)
+                    .ok()
+                    .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+                    .map(|v| {
+                        horizon_world::tag_layers::TagLayers::from_file(&v)
+                            .build(|child| resolve(data, child, active))
+                    })
+                    .unwrap_or_default();
+                active.remove(name);
+                members
             }
-            for id in items {
+            for id in resolve(data, name, &mut Default::default()) {
                 if !out.contains(&id) {
                     out.push(id);
                 }

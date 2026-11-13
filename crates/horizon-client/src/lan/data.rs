@@ -927,6 +927,7 @@ impl SyncData {
                 }
             }
         }
+        seen.remove(tag);
     }
 
     fn registry_names<'a>(
@@ -1009,23 +1010,35 @@ impl SyncData {
         if !seen.insert(tag.to_owned()) {
             return;
         }
-        let Some(values) = files.get(tag).and_then(|v| v["values"].as_array()) else {
-            return;
-        };
-        for value in values {
-            let id = value
-                .as_str()
-                .or_else(|| value["id"].as_str())
-                .unwrap_or_default();
-            if let Some(reference) = id.strip_prefix('#') {
-                let reference = reference.trim_start_matches("minecraft:");
-                Self::expand(files, reference, names, out, seen);
-            } else if let Some(&n) = names.get(id)
-                && !out.contains(&n)
-            {
-                out.push(n);
+        if let Some(file) = files.get(tag) {
+            let members =
+                horizon_world::tag_layers::TagLayers::from_file(file).build(|reference| {
+                    let mut ids = Vec::new();
+                    Self::expand(
+                        files,
+                        reference.trim_start_matches("minecraft:"),
+                        names,
+                        &mut ids,
+                        seen,
+                    );
+                    ids.into_iter()
+                        .filter_map(|id| {
+                            names
+                                .iter()
+                                .find(|(_, n)| **n == id)
+                                .map(|(name, _)| (*name).to_owned())
+                        })
+                        .collect()
+                });
+            for member in members {
+                if let Some(&id) = names.get(qualified(&member).as_str()) {
+                    if !out.contains(&id) {
+                        out.push(id);
+                    }
+                }
             }
         }
+        seen.remove(tag);
     }
 }
 

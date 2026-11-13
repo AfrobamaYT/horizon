@@ -78,20 +78,13 @@ impl Tags {
         else {
             return;
         };
-        for value in json["values"].as_array().into_iter().flatten() {
-            // An entry is an id or `{"id": ..., "required": false}`.
-            let id = value
-                .as_str()
-                .or_else(|| value["id"].as_str())
-                .unwrap_or_default();
-            match id.strip_prefix('#') {
-                Some(inner) => self.collect(registry, &full_id(inner), out, seen),
-                None if !id.is_empty() => {
-                    out.insert(full_id(id));
-                }
-                None => {}
-            }
-        }
+        let members = horizon_world::tag_layers::TagLayers::from_file(&json).build(|inner| {
+            let mut child = HashSet::new();
+            self.collect(registry, &full_id(inner), &mut child, seen);
+            child.into_iter().collect()
+        });
+        out.extend(members.into_iter().map(|id| full_id(&id)));
+        seen.remove(tag);
     }
 }
 

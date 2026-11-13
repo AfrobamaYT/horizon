@@ -32,12 +32,18 @@ impl TagLayers {
         if file.get("replace").and_then(Value::as_bool) == Some(true) {
             self.0.clear();
         }
-        let mut push_entry = |entry: &Value, remove: bool, out: &mut Vec<(String, bool)>| {
+        let push_entry = |entry: &Value, remove: bool, out: &mut Vec<(String, bool)>| {
             let Some(id) = entry_id(entry) else {
                 return;
             };
             let removes = remove || (entry.get("remove").and_then(Value::as_bool) == Some(true));
-            out.push((id.to_owned(), removes));
+            let (prefix, name) = id.strip_prefix('#').map_or(("", id), |name| ("#", name));
+            let id = if name.contains(':') {
+                format!("{prefix}{name}")
+            } else {
+                format!("{prefix}minecraft:{name}")
+            };
+            out.push((id, removes));
         };
         let mut next = Vec::new();
         if let Some(values) = file.get("values").and_then(Value::as_array) {
@@ -94,7 +100,7 @@ mod tests {
 
     #[test]
     fn one_file_adds_and_removes_the_same_entry_and_remove_objects_apply_in_order() {
-        let mut things = TagLayers::from_file(&json!({
+        let things = TagLayers::from_file(&json!({
             "values": [
                 "minecraft:stone",
                 {"id": "minecraft:stone", "remove": true},

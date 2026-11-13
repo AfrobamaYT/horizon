@@ -814,23 +814,18 @@ fn biome_tag(
         .map_err(|e| e.to_string())
         .and_then(|bytes| serde_json::from_slice::<Json>(&bytes).map_err(|e| e.to_string()))
     {
-        for value in json["values"].as_array().into_iter().flatten() {
-            let id = value
-                .as_str()
-                .or_else(|| value["id"].as_str())
-                .unwrap_or_default();
-            match id.strip_prefix('#') {
-                Some(inner) => out.extend(biome_tag(root, inner, cache)),
-                None if !id.is_empty() => {
-                    out.insert(if id.contains(':') {
-                        id.to_owned()
+        out.extend(
+            horizon_world::tag_layers::TagLayers::from_file(&json)
+                .build(|inner| biome_tag(root, inner, cache).into_iter().collect())
+                .into_iter()
+                .map(|id| {
+                    if id.contains(':') {
+                        id
                     } else {
                         format!("minecraft:{id}")
-                    });
-                }
-                None => {}
-            }
-        }
+                    }
+                }),
+        );
     }
     cache.insert(tag.to_owned(), out.clone());
     out
@@ -867,7 +862,18 @@ fn timeline_ids(root: &ResourceSource, json: &Json, out: &mut Vec<String>, depth
                     })
             {
                 let mut members = Vec::new();
-                timeline_ids(root, &tag["values"], &mut members, depth + 1);
+                members.extend(horizon_world::tag_layers::TagLayers::from_file(&tag).build(
+                    |inner| {
+                        let mut child = Vec::new();
+                        timeline_ids(
+                            root,
+                            &Json::String(format!("#{inner}")),
+                            &mut child,
+                            depth + 1,
+                        );
+                        child
+                    },
+                ));
                 if removes {
                     out.retain(|kept| !members.contains(kept));
                 } else {
