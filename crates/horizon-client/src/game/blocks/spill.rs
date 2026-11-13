@@ -1158,7 +1158,6 @@ impl Game<'_> {
             velocity,
             drop.pickup_delay,
             random,
-            drop.state.age,
         );
     }
     /// Add the item entities the block behaviour spawned and follow up on the
@@ -1186,7 +1185,7 @@ impl Game<'_> {
             );
         });
         for s in spill.spawns {
-            self.add_item_entity_prepared(s.stack, s.pos, s.motion, s.delay, s.random, 0);
+            self.add_item_entity_prepared(s.stack, s.pos, s.motion, s.delay, s.random);
         }
         for (at, value, merge_id) in spill.orbs {
             self.award_orb(at, value, merge_id);

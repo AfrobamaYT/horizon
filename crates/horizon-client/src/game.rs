@@ -3681,7 +3681,7 @@ impl Game<'_> {
         velocity: [f64; 3],
     ) {
         let random = spill::prepare_item_random(None);
-        self.add_item_entity_prepared(stack, position, Some(velocity), 0, Some(random), 0);
+        self.add_item_entity_prepared(stack, position, Some(velocity), 0, Some(random));
     }
     fn add_item_entity(
         &mut self,
@@ -3690,7 +3690,7 @@ impl Game<'_> {
         velocity: Option<[f64; 3]>,
         pickup_delay: u32,
     ) -> [f64; 3] {
-        self.add_item_entity_prepared(stack, position, velocity, pickup_delay, None, 0)
+        self.add_item_entity_prepared(stack, position, velocity, pickup_delay, None)
     }
     /// Joins an item only after drop hooks have seen its constructor's motion.
     fn add_item_entity_prepared(
@@ -3700,11 +3700,8 @@ impl Game<'_> {
         velocity: Option<[f64; 3]>,
         pickup_delay: u32,
         random: Option<spill::ItemRandom>,
-        age: i32,
     ) -> [f64; 3] {
-        let mut random = random.unwrap_or_else(|| spill::prepare_item_random(velocity));
-        random.state.age = age;
-        let velocity = self.push_item_entity(stack, position, velocity, pickup_delay, Some(random));
+        let velocity = self.push_item_entity(stack, position, velocity, pickup_delay, random);
         self.join_item_entity(self.next_entity, position);
         velocity
     }

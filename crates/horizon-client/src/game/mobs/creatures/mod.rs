@@ -1863,7 +1863,8 @@ impl Game<'_> {
     ) {
         let Some(source) = &dying.source else {
             for (stack, position, age) in stacks {
-                let random = super::spill::prepare_item_random(None);
+                let mut random = super::spill::prepare_item_random(None);
+                random.state.age = age;
                 let motion = velocity(self).unwrap_or(random.velocity);
                 self.add_item_entity_prepared(
                     stack,
@@ -1871,7 +1872,6 @@ impl Game<'_> {
                     Some(motion),
                     pickup_delay,
                     Some(random),
-                    age,
                 );
             }
             return;
