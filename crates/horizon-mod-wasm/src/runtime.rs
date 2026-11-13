@@ -181,7 +181,8 @@ impl<T> Releases<T> {
         self.pending.store(true, Ordering::Release);
     }
     fn take(&self) -> Vec<T> {
-        if !self.pending.swap(false, Ordering::AcqRel) {
+        // A plain load first: the uncontended call path stays read-only.
+        if !self.pending.load(Ordering::Acquire) || !self.pending.swap(false, Ordering::AcqRel) {
             return Vec::new();
         }
         // A racing push either joins this drain or leaves pending set for the next
@@ -940,6 +941,9 @@ impl WasmMod {
                 }
             }
         }
+        // Deferred releases run only on a top-level call: a resumed nested call is still
+        // inside another export of the guest.
+        let top = resumed.is_none();
         let mut store = match resumed.as_mut() {
             Some(resumed) => resumed.context(),
             None => {
@@ -1001,16 +1005,25 @@ impl WasmMod {
         // must already see the group stopped.
         let panic_stop = PoisonOnPanic(&self.running.poisoned);
         let result = (|| -> Result<R, CallError> {
-            for (slot, generation) in self.prepared_releases.take() {
-                w.clear();
-                w.put(&slot);
-                w.put(&generation);
-                self.invoke(&mut store, crate::prepared::RELEASE, &w, &mut output)
-                    .map_err(|error| CallError::Fault(error.into_error()))?;
-                if !output.is_empty() {
-                    return Err(CallError::Fault(WireError::Trailing.into()));
+            if top {
+                for (slot, generation) in self.prepared_releases.take() {
+                    w.clear();
+                    w.put(&slot);
+                    w.put(&generation);
+                    self.invoke(&mut store, crate::prepared::RELEASE, &w, &mut output)
+                        .map_err(|error| {
+                            CallError::Fault(
+                                error.into_error().context("deferred prepared release"),
+                            )
+                        })?;
+                    if !output.is_empty() {
+                        return Err(CallError::Fault(
+                            wasmtime::Error::from(WireError::Trailing)
+                                .context("deferred prepared release"),
+                        ));
+                    }
+                    self.finish_prepared_release(slot);
                 }
-                self.finish_prepared_release(slot);
             }
             // Deferred releases have the same empty frame as a direct release.
             *store.data_mut().cx.frames.last_mut().unwrap() = frame;

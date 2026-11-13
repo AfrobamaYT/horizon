@@ -1538,7 +1538,11 @@ fn nested_busy_refusal_survives() {
             previous: LENT.get(),
         };
         LENT.set(&loan);
+        // The early nested refusal returns at once; without it the call would wait the full
+        // five seconds for the lock and then give the same refusal.
+        let started = Instant::now();
         assert_eq!(call(&module), None);
+        assert!(started.elapsed() < Duration::from_secs(2));
         assert_eq!(take_refusal(), Refusal::Busy.to_string());
         assert!(!module.is_stopped());
         drop(loan);
