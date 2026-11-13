@@ -8,6 +8,7 @@ on:
     paths:
       - 'launcher/**'
       - 'crates/horizon-server-files/**'
+      - 'crates/horizon-java-properties/**'
       - 'crates/horizon-client/src/carrier_store.rs'
       - 'crates/horizon-client/src/carrier_store_tests.rs'
       - '.github/workflows/launcher-windows-check.yml'
@@ -16,6 +17,7 @@ on:
       - 'launcher/**'
       - 'crates/horizon-mod-package/**'
       - 'crates/horizon-server-files/**'
+      - 'crates/horizon-java-properties/**'
       - 'crates/horizon-client/src/carrier_store.rs'
       - 'crates/horizon-client/src/carrier_store_tests.rs'
       - 'Cargo.toml'
