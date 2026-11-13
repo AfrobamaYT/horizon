@@ -2341,21 +2341,8 @@ impl Game<'_> {
     ) -> Result<Dispensed> {
         let target = offset(pos, facing);
         let state = self.block_at(target);
-        let name = self.dispenser_block_name(target);
-        // HoneycombItem.WAXABLES: each copper block has a waxed twin.
-        let waxed = name.strip_prefix("minecraft:").and_then(|n| {
-            if n.starts_with("waxed_") {
-                return None;
-            }
-            let twin = format!("minecraft:waxed_{n}");
-            let mut s = self.pack.assets.registry.state(state)?.clone();
-            self.pack.assets.registry.default_state(&twin)?;
-            s.name = twin;
-            self.pack.assets.registry.resolve(&s).ok()
-        });
-        let Some(waxed) =
-            waxed.filter(|_| name.contains("copper") || name.contains("lightning_rod"))
-        else {
+        // HoneycombItem.getWaxed, as the player's honeycomb waxes.
+        let Some(waxed) = self.honeycomb_waxed(state) else {
             return Ok((
                 self.default_execute(pos, facing, stack),
                 optional_event("honeycomb"),

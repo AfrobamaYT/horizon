@@ -401,6 +401,7 @@ impl Game<'_> {
         horizon_client::living_attributes::LOAD_CLAMPS.begin_load();
         (self.world_tables, self.health_resources) =
             self.build_world_tables(stack, false, root, self.mods.data_switched)?;
+        self.install_block_maps();
         self.install_profession_save_snapshots();
         self.mods.datapack_registries = self.mods.datapack_candidate.take().map(|candidate| {
             Arc::new(mod_api::DatapackRegistrySet::first(
@@ -456,6 +457,7 @@ impl Game<'_> {
             );
         }
         self.world_tables = tables;
+        self.install_block_maps();
         self.install_profession_save_snapshots();
         self.world.pois.clear();
         for world in self.levels.parked_worlds() {
