@@ -1,5 +1,8 @@
 //! Explicit account-free Play for persisted unsigned checkout lineage.
-use crate::{developer_install, i18n::tr};
+use crate::{
+    developer_install,
+    i18n::{tr, trf},
+};
 use std::process::Command;
 
 pub const ENV: &str = "HORIZON_LAUNCHER_DEVELOPER_OFFLINE";
@@ -35,7 +38,25 @@ pub fn require_capability(tag: &str) -> Result<(), String> {
     let output = Command::new(crate::backend::client_program(tag))
         .arg("--launch-api")
         .output()
-        .map_err(|_| tr(REBUILD).to_string())?;
+        .map_err(|e| {
+            trf(
+                "The game could not start for its capability check: {reason}",
+                &[("reason", &e.to_string())],
+            )
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let reason = stderr
+            .lines()
+            .next()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| output.status.to_string());
+        return Err(trf(
+            "The game could not start for its capability check: {reason}",
+            &[("reason", &reason)],
+        ));
+    }
     if output.status.success() && supports_restriction(&output.stdout) {
         Ok(())
     } else {

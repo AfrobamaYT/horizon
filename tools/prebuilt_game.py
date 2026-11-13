@@ -408,6 +408,8 @@ def smoke(out: Path) -> None:
              *extern("horizon_client"), *extern("mod_api"), *extern("horizon_mod_package"), "--extern", f"horizon_mod_host={dylib(deps, 'horizon_mod_host')}",
              "--extern", f"mod_0={scratch / 'libmod_0.rlib'}", "-L", f"dependency={scratch}",
              "-o", str(installed / EXECUTABLE), str(scratch / "main.rs")])
+    if b"horizon-private-holder-v2;" not in (installed / EXECUTABLE).read_bytes():
+        sys.exit("smoke: holder capability missing from the executable")
     for library in runtime_libraries(deps):
         shutil.copy2(library, installed / library.name)
     install_package(installed / "horizon-native-mods" / "smoke", starter.replace("{id}", "smoke"))
@@ -467,6 +469,24 @@ def start(out: Path) -> None:
         game.mkdir()
         # A dedicated server stops at an unaccepted EULA before it reaches the prepared files (the EULA is accepted).
         (game / "eula.txt").write_text("eula=true\n")
+        if sys.platform == "darwin":
+            # Use the launcher's actual bundle preparation, not a second list of libraries.
+            bundle_source = scratch / "bundle.rs"
+            module = json.dumps(str(ROOT / "launcher/src/game_app.rs"))
+            bundle_source.write_text(
+                'mod i18n { pub fn tr(s: &str) -> &str { s } }\n'
+                'mod shortcut { pub fn xml(s: &str) -> String { s.to_owned() } }\n'
+                f'#[path = {module}] mod game_app;\n'
+                'fn main() { game_app::ensure(std::path::Path::new(&std::env::args().nth(1).unwrap())).unwrap(); }')
+            bundle_tool = scratch / "bundle"
+            run(["rustc", "--edition=2021", str(bundle_source), "-o", str(bundle_tool)])
+            run([str(bundle_tool), str(installed)])
+            bundled = installed / "Horizon.app/Contents/MacOS/horizon-client"
+            probe = subprocess.run([str(bundled), "--launch-api"], cwd=game, env=environment,
+                                   capture_output=True, text=True, timeout=60)
+            if probe.returncode != 0:
+                sys.exit(f"bundled launch API failed: {probe.stderr}")
+            json.loads(probe.stdout)
         command = [str(installed / EXECUTABLE), "--resources", str(scratch / "no-resources"), "--dedicated", "--nogui"]
         print("+", " ".join(command), flush=True)
         result = subprocess.run(command, cwd=game, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
