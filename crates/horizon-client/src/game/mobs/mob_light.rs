@@ -17,7 +17,11 @@ impl Game<'_> {
         if mob.fire_ticks > 0
             || matches!(
                 mob.species(),
-                Species::Allay | Species::Blaze | Species::MagmaCube | Species::Vex | Species::Wither
+                Species::Allay
+                    | Species::Blaze
+                    | Species::MagmaCube
+                    | Species::Vex
+                    | Species::Wither
             )
         {
             packed = (packed & 0xFF) | ((15 * 16) << 8);
