@@ -1897,10 +1897,43 @@ fn only_a_type(file: &FileFacts<'_>, start: usize) -> bool {
             })
 }
 
+/// Whether the parenthesis at `open` opens a function's parameters: it follows `fn name`, with
+/// generics or not (looked back over at most 64 tokens). Any other parenthesis, a macro call's
+/// (`maker!(make: Pos)`) for one, may hold values.
+fn opens_parameters(tokens: &Tokens<'_>, open: usize) -> bool {
+    let named =
+        |at: usize| at >= 1 && ident(tokens, at).is_some() && ident(tokens, at - 1) == Some("fn");
+    if !punct(tokens, open, b'(') {
+        return false;
+    }
+    let Some(before) = open.checked_sub(1) else {
+        return false;
+    };
+    if named(before) {
+        return true;
+    }
+    if !punct(tokens, before, b'>') {
+        return false;
+    }
+    // Back to the `<` that opens the generics; a `->` inside them closes nothing.
+    let mut depth = 0usize;
+    for at in (before.saturating_sub(64)..=before).rev() {
+        if punct(tokens, at, b'>') && !(at >= 1 && punct(tokens, at - 1, b'-')) {
+            depth += 1;
+        } else if punct(tokens, at, b'<') {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                return at >= 1 && named(at - 1);
+            }
+        }
+    }
+    false
+}
+
 /// Whether the path starting at `start` in a macro body is a type written after `name:` (`&`,
-/// `mut` and lifetimes between them): in a function's parameters (inside parentheses), a
+/// `mut` and lifetimes between them): in a function's parameters ([`opens_parameters`]), a
 /// closure's first parameter, a `let`, or a struct's or union's field list. Anything else after
-/// `:` (a struct literal's field, for one) may be a value.
+/// `:` (a struct literal's field, or a key in a macro call) may be a value.
 fn annotation(file: &FileFacts<'_>, start: usize) -> bool {
     let tokens = &file.tokens;
     let mut before = start;
@@ -1926,7 +1959,7 @@ fn annotation(file: &FileFacts<'_>, start: usize) -> bool {
         || (word(name.checked_sub(1)) == Some("mut") && word(name.checked_sub(2)) == Some("let"));
     let closure_parameter = name >= 1 && punct(tokens, name - 1, b'|');
     let enclosing = file.enclosing[colon];
-    let parameter = enclosing.is_some_and(|open| punct(tokens, open, b'('));
+    let parameter = enclosing.is_some_and(|open| opens_parameters(tokens, open));
     let field = enclosing.is_some_and(|open| {
         punct(tokens, open, b'{')
             && open >= 2

@@ -1189,8 +1189,8 @@ fn rows() -> Vec<Row> {
             Refused,
         ),
         row(
-            "6db10aa B2: `.map(Self)` in an impl a macro writes",
-            one("macro_rules! make { () => { impl mod_api::Pos { fn all(v: Vec<(i32, i32)>) -> Vec<Self> { v.into_iter().map(|(a, b)| (a, b)).map(Self::from).collect() } fn one(v: Option<i32>) -> Option<Self> { v.map(Self) } } }; }\nmake!();"),
+            "6db10aa B2: `Self` passed as a constructor in an impl a macro writes",
+            one("trait Make { fn make() -> mod_api::Pos; }\nfn build<T>(f: fn(i32, i32) -> T) -> T { f(1, 2) }\nmacro_rules! make { () => { impl Make for mod_api::Pos { fn make() -> mod_api::Pos { build(Self) } } }; }\nmake!();"),
             PosField,
             Refused,
         ),
@@ -1224,6 +1224,25 @@ fn rows() -> Vec<Row> {
         row(
             "6db10aa S2: a field's type in a macro",
             one(in_macro("struct Row { id: mod_api::Pos, other: &'static mod_api::Pos }")),
+            PosField,
+            Fits,
+        ),
+        // f4e12ec (round 9).
+        row(
+            "f4e12ec B1: a constructor passed by key to a macro",
+            one("use mod_api::Pos;\npub struct Maker { pub make: fn(i32, i32) -> Pos }\nmacro_rules! maker { (make: $e:expr) => { Maker { make: $e } }; }\npub fn m() -> Maker { maker!(make: Pos) }"),
+            PosField,
+            Refused,
+        ),
+        row(
+            "f4e12ec B1: `Self` passed by key to a macro in a parsed impl",
+            one("use mod_api::Pos;\npub struct Maker { pub make: fn(i32, i32) -> Pos }\nmacro_rules! maker { (make: $e:expr) => { Maker { make: $e } }; }\ntrait Make { fn m() -> Maker; }\nimpl Make for mod_api::Pos { fn m() -> Maker { maker!(make: Self) } }"),
+            PosField,
+            Refused,
+        ),
+        row(
+            "f4e12ec: a generic function's parameter type in a macro",
+            one(in_macro("fn on<T: Into<i32>>(p: mod_api::Pos, t: T) -> i32 { p.0 + t.into() }")),
             PosField,
             Fits,
         ),
