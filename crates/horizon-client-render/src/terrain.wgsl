@@ -48,7 +48,7 @@ struct Globals {
     view_origin: vec4<f32>,
     // A mod's world view's own, zero outside one (gfx/world_views.rs's `ViewCamera`): x -1 when
     // mirrored (its screen runs right to left), else 1; y the clip-space depth its clip plane's
-    // entities move forward, 0 without one.
+    // entities come forward (`fs_entity_clipped`), 0 without one; z 1 with a clip plane.
     world_view: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -330,7 +330,7 @@ fn fade_depth(clip: vec4<f32>, w: f32) -> vec4<f32> {
     // A world view's clip plane is its near plane, `z = w` (gfx/world_views.rs's `near_plane_on`):
     // there the offset scales the depth in front of the plane, `w - z`, which keeps the plane
     // where it is.
-    if globals.world_view.y > 0.0 {
+    if globals.world_view.z != 0.0 {
         return vec4(clip.xy, clip.w - (clip.w - clip.z) / scale, clip.w);
     }
     return vec4(clip.xy, clip.z * scale, clip.w);

@@ -15,6 +15,8 @@ direction) for each one wanted this frame. For a view through a portal or a mirr
 - `with_clip_plane([x, y, z, d])` draws only what lies in front of that world-space plane (`x * p.x + y * p.y +
   z * p.z + d >= 0`): terrain, entities and block entities behind it are left out, as a wall behind a portal's far
   side is. It becomes the view's near plane, so it needs no device feature, and the camera must be behind it.
+  Entities and terrain are cut at the same plane; past it, an entity wins the depth test against terrain up to
+  1/1024 of its distance in front of it (about 1 block at 1024 blocks).
 - `with_mirror()` mirrors the picture left to right, as a mirror shows it: give the camera reflected through the
   mirror. A mirrored picture turns every triangle's winding round, so the view draws with face culling flipped to
   make up for it: the faces culled are the ones the unmirrored view culls, and back faces stay hidden.

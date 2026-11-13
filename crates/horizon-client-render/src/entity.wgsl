@@ -41,7 +41,7 @@ struct Globals {
     view_origin: vec4<f32>,
     // A mod's world view's own, zero outside one (gfx/world_views.rs's `ViewCamera`): x -1 when
     // mirrored (its screen runs right to left), else 1; y the clip-space depth its clip plane's
-    // entities move forward, 0 without one.
+    // entities come forward (`fs_entity_clipped`), 0 without one; z 1 with a clip plane.
     world_view: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -186,9 +186,6 @@ fn entity_vertex(position: vec3<f32>, uv: vec2<f32>,
     var out = entity_vertex(position, uv, overlay & 0xffffu, color, light, normal);
     out.glint_uv = glint_uv;
     out.tier = (overlay >> 16u) & 0xffu;
-    // A clipped world view draws entities without the pipeline's constant bias, which its depth
-    // near the plane would make blocks deep: they move forward by a share of its distance.
-    out.clip.z += globals.world_view.y;
     return out;
 }
 // Retained bolt-local geometry, translated using the same f64 camera
@@ -306,6 +303,17 @@ fn entity_written_color(in: Out, color: vec4<f32>) -> vec4<f32> {
         return vec4(pow(2.0 * max(color.rgb, vec3(0.0)), vec3(2.2)) * 0.5, color.a);
     }
     return frame_stored(color);
+}
+// `fs_entity` in a clipped world view (gfx/world_views.rs's `ENTITY_MARGIN`), whose pipeline has
+// no constant bias: after clipping, so the plane cuts entities where it cuts terrain, each pixel
+// comes forward by `world_view.y` over its w (`proj.w`), a share of its distance.
+struct ClippedEntity {
+    @location(0) color: vec4<f32>,
+    @builtin(frag_depth) depth: f32,
+}
+@fragment fn fs_entity_clipped(in: Out, @builtin(front_facing) front: bool) -> ClippedEntity {
+    let color = entity_written_color(in, entity_color(in, front));
+    return ClippedEntity(color, min(in.clip.z + globals.world_view.y / in.proj.w, 1.0));
 }
 @fragment fn fs_entity_unmarked(in: Out, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     return frame_stored(entity_color(in, front));

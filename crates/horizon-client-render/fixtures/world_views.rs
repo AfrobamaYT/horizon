@@ -174,6 +174,19 @@ fn wall(color: u32, windings: &[[usize; 4]]) -> SectionMesh {
     mesh
 }
 
+/// `mesh` with a quad through `corners` (section-relative), both windings, in `color`.
+fn with_quad(mut mesh: SectionMesh, corners: [[f32; 3]; 4], color: u32) -> SectionMesh {
+    let uvs = [[0., 1.], [0., 0.], [1., 0.], [1., 1.]];
+    for order in [[0, 1, 2, 3], [3, 2, 1, 0]] {
+        for i in order {
+            mesh.solid
+                .push(TerrainVertex::new(corners[i], uvs[i], 0, color, 0xf0f0));
+        }
+    }
+    mesh.sort_solid();
+    mesh
+}
+
 fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     let out = std::env::args().nth(1).ok_or("output directory required")?;
     let out = Path::new(&out);
@@ -213,16 +226,36 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     // white at z 12, which the player's camera at z 0.5 faces; green at z 28 behind it
     let both = [[0, 1, 2, 3], [3, 2, 1, 0]];
     renderer.upload((0, 10, 0), &wall(u32::MAX, &both));
-    renderer.upload((0, 10, 1), &wall(0xff00_ff00, &both));
+    // In front of the green wall, magenta terrain at x 9..11 a clipped view's plane at z 30 cuts:
+    // a floor quad across it (z 28..32) and a wall quad just in front of it (z 29.995). Their
+    // entity twins stand mirrored about x 8.
+    let magenta = 0xffff_40ff;
+    let green = wall(0xff00_ff00, &both);
+    let green = with_quad(
+        green,
+        [[9., 6., 12.], [9., 6., 16.], [10., 6., 16.], [10., 6., 12.]],
+        magenta,
+    );
+    let green = with_quad(
+        green,
+        [
+            [9., 3., 13.995],
+            [9., 5., 13.995],
+            [11., 5., 13.995],
+            [11., 3., 13.995],
+        ],
+        magenta,
+    );
+    renderer.upload((0, 10, 1), &green);
     // blue at z -4 behind the player's camera, facing south (toward it) only
     renderer.upload((0, 10, -1), &wall(0xffff_0000, &[[3, 2, 1, 0]]));
     // entity quads: red between the player's camera and the white wall, at z 6; yellow 0.1
     // behind the green wall (z 27.9) and cyan on its plane (z 28), seen from past it
-    let quad = |[x0, y0, x1, y1]: [f32; 4], z: f32, color: u32| {
-        [[x0, y0], [x0, y1], [x1, y1], [x1, y0]]
+    let quad = |corners: [[f32; 3]; 4], color: u32| {
+        corners
             .into_iter()
             .zip([[0., 1.], [0., 0.], [1., 0.], [1., 1.]])
-            .map(move |([x, y], uv)| Vertex {
+            .map(move |([x, y, z], uv)| Vertex {
                 pos: [x - 8.0, y - 104.0, z - 0.5],
                 uv,
                 layer: 0,
@@ -232,9 +265,21 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
                 glint_uv: [0.0; 2],
             })
     };
-    let entity: Vec<Vertex> = quad([7.5, 103.5, 8.5, 104.5], 6.0, 0xff40_40ff)
-        .chain(quad([4.0, 100.0, 8.0, 104.0], 27.9, 0xff40_ffff))
-        .chain(quad([9.0, 105.0, 13.0, 109.0], 28.0, 0xffff_ff40))
+    let upright =
+        |[x0, y0, x1, y1]: [f32; 4], z: f32| [[x0, y0, z], [x0, y1, z], [x1, y1, z], [x1, y0, z]];
+    let entity: Vec<Vertex> = quad(upright([7.5, 103.5, 8.5, 104.5], 6.0), 0xff40_40ff)
+        .chain(quad(upright([4.0, 100.0, 8.0, 104.0], 27.9), 0xff40_ffff))
+        .chain(quad(upright([9.0, 105.0, 13.0, 109.0], 28.0), 0xffff_ff40))
+        .chain(quad(
+            [
+                [6., 102., 28.],
+                [6., 102., 32.],
+                [7., 102., 32.],
+                [7., 102., 28.],
+            ],
+            magenta,
+        ))
+        .chain(quad(upright([5.0, 99.0, 7.0, 101.0], 29.995), magenta))
         .collect();
     let hud = HudBatch::new([320, 180], GUI);
     let shot = |renderer: &mut Renderer, name: &str, views: Vec<WorldView>| {
@@ -446,6 +491,31 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         "clipped and mirrored is the clipped picture left to right: {clip_mirror_unlike}"
     );
 
+    // A clipped view 10 behind its plane (z 30) cuts the magenta entities where it cuts their
+    // terrain twins: the floor across the plane, and the wall 0.005 in front of it kept whole.
+    // The unclipped view sees more of the floor.
+    let edge = vec![
+        north(26, 40.0, [128, 128]).with_clip_plane([0.0, 0.0, -1.0, 30.0]),
+        north(27, 40.0, [128, 128]),
+    ];
+    let (_, drawn) = shot(&mut renderer, "plane_edge", edge);
+    for (id, size, pixels) in &drawn {
+        write_png(&out.join(format!("edge_view_{id}.png")), *size, pixels)?;
+    }
+    let halves = |pixels: &[[u8; 4]]| {
+        let left = (0..128 * 128)
+            .filter(|i| i % 128 < 64 && count(&pixels[*i..*i + 1], [255, 64, 255]) == 1)
+            .count();
+        (left, count(pixels, [255, 64, 255]) - left)
+    };
+    let (edge_entity, edge_terrain) = halves(&drawn[0].2);
+    let (whole_entity, _) = halves(&drawn[1].2);
+    assert!(
+        edge_terrain > 200 && edge_entity.abs_diff(edge_terrain) <= 4 + edge_terrain / 50,
+        "the plane cuts entities as it cuts terrain: {edge_entity} vs {edge_terrain}"
+    );
+    assert!(whole_entity > edge_entity, "{whole_entity} unclipped");
+
     // a view asked for again at another size and roll comes back at that size
     let turned = behind.with_roll(30.0);
     let mut resized = turned;
@@ -468,6 +538,7 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
             "mirrored_unlike_pixels": unlike, "clipped_white_pixels": clip_white,
             "clipped_behind_wall_pixels": behind_wall, "coplanar_pixels": coplanar,
             "clipped_mirrored_unlike_pixels": clip_mirror_unlike,
+            "plane_edge_pixels": [edge_entity, edge_terrain, whole_entity],
             "graphics_adapter": client::crash::system_details("fixture").into_iter()
                 .find(|(name, _)| name == "Graphics Adapter").map(|(_, detail)| detail),
         }))?,

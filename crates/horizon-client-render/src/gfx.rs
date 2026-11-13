@@ -566,7 +566,7 @@ struct Globals {
     /// The camera-relative eye fog is measured from: zero but in a mod's world view.
     view_origin: [f32; 4],
     /// A mod's world view's own (`world_views::ViewCamera`), zero outside one: x -1 when it is
-    /// mirrored, else 1; y the clip-space depth its clip plane's entities move forward.
+    /// mirrored, else 1; y the clip-space depth its entities come forward; z 1 with a clip plane.
     world_view: [f32; 4],
 }
 #[repr(C)]
@@ -5129,6 +5129,7 @@ impl Renderer {
             world_primitives::DEFAULT_CAPACITY,
             world_primitives::DEFAULT_CAPACITY,
         );
+        let views = world_views::Kept::new(flipped, translucent_flipped, entity_pipeline_with);
         Ok(Self {
             display: None,
             reading: display,
@@ -5201,7 +5202,7 @@ impl Renderer {
             mirror_globals,
             mirror_group,
             mirror: None,
-            world_views: world_views::Kept::new(flipped, translucent_flipped),
+            world_views: views,
             world_view_side: max_side,
             entity_pipeline,
             static_entity_pipeline,

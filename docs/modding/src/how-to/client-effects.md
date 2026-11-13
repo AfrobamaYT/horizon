@@ -30,7 +30,9 @@ requests whenever the frame asks; at most four valid, distinct IDs draw, with
 sides limited to 4096 pixels and the device limit.
 
 For a view through a portal, add `with_clip_plane([x, y, z, d])`: nothing behind
-that world-space plane is drawn, and the camera must be behind it. For a mirror,
+that world-space plane is drawn, and the camera must be behind it. In such a view
+an entity wins the depth test against terrain up to 1/1024 of its distance in
+front of it (about 1 block at 1024 blocks). For a mirror,
 give the camera reflected through it and add `with_mirror()`: the picture is
 flipped left to right, with face culling flipped to match, so the same faces are
 culled as in an unmirrored view. A clip plane with a zero normal, a value that is

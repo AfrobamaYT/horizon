@@ -5,7 +5,10 @@
 //! its projection's near plane; a mirrored view's projection flips x, and it draws through
 //! pipelines that cull the front faces instead (`Flipped`).
 
-use super::{Cull, Frame, Frustum, Globals, Renderer, SolidPipeline, frustum, native_render};
+use super::{
+    Cull, EntityPipelineOptions, Frame, Frustum, Globals, Renderer, SolidPipeline, frustum,
+    native_render,
+};
 use glam::{DVec3, Mat4, Vec3, Vec4};
 use std::collections::HashMap;
 
@@ -87,20 +90,24 @@ pub(super) struct ViewCamera {
     pub own_view_proj: Mat4,
     /// The view's eye, relative to the frame's camera.
     pub offset: Vec3,
-    /// The clip-space depth entities move forward (`ENTITY_MARGIN`), 0 without a clip plane.
-    pub entity_shift: f32,
+    /// Its globals' `world_view`: x -1 mirrored, else 1; y the clip-space depth entities come
+    /// forward (`ENTITY_MARGIN`); z 1 with a clip plane, which the shaders take from there
+    /// rather than from y (that can round to 0 for a camera very near the plane).
+    pub world_view: [f32; 4],
     view: Mat4,
     aspect: f32,
 }
 
-/// How far forward a clipped view's entities move, as a share of their distance. A clip plane
-/// leaves depth changing little with distance (`near_plane_on`), so the entities' constant bias
-/// (gfx.rs `entity_bias`, 128 steps of the depth's float) would bring one blocks forward through
-/// the wall it stands behind; a clipped view draws them without it and moves them this share
-/// instead: one more than 1/1024 of its distance behind terrain stays hidden, and a surface on
-/// terrain's plane (a boat's floor on a trapdoor) still wins wherever that share is more than
-/// the depth's rounding (roughly, while the camera is more than 1/300 of the surface's
-/// distance behind the plane).
+/// How far forward a clipped view's entities come in depth, as a share of their distance. A
+/// clip plane leaves depth changing little with distance (`near_plane_on`), so the entities'
+/// constant bias (gfx.rs `entity_bias`, 128 steps of the depth's float) would bring one blocks
+/// forward through the wall it stands behind; a clipped view draws them without it and brings
+/// each pixel forward by this share after clipping (`fs_entity_clipped`), so the plane cuts
+/// entities where it cuts terrain. The tolerance is this share of the distance: an entity wins
+/// against terrain up to 1/1024 of its distance in front of it (about 1 block at 1024 blocks,
+/// 1/16 at 64), and one farther behind stays hidden. A surface on terrain's plane (a boat's
+/// floor on a trapdoor) wins wherever that share is more than the depth's rounding (roughly,
+/// while the camera is more than 1/300 of the surface's distance behind the plane).
 const ENTITY_MARGIN: f32 = 1.0 / 1024.0;
 
 impl ViewCamera {
@@ -113,19 +120,20 @@ impl ViewCamera {
         let projection = super::world_projection(view.fov_degrees, aspect, far);
         let offset = (view.camera - camera).as_vec3();
         let mut own_view_proj = projection * rotation;
-        let mut entity_shift = 0.0;
+        let mut world_view = [if view.mirror { -1.0 } else { 1.0 }, 0.0, 0.0, 0.0];
         if let Some(plane) = view.camera_clip_plane() {
             let k = corner_cosine((view.fov_degrees.to_radians() / 2.0).tan(), aspect);
             own_view_proj = near_plane_on(own_view_proj, plane, k);
             // Depth at `w` is a constant plus `k * -plane.w / w`: a shift of that term's share
             // moves a point the same share of its distance.
-            entity_shift = ENTITY_MARGIN * k * -plane.w;
+            world_view[1] = ENTITY_MARGIN * k * -plane.w;
+            world_view[2] = 1.0;
         }
         Self {
             view_proj: own_view_proj * Mat4::from_translation(-offset),
             own_view_proj,
             offset,
-            entity_shift,
+            world_view,
             view: rotation * Mat4::from_translation(-offset),
             aspect,
         }
@@ -172,17 +180,38 @@ pub(super) struct Target {
     depth: wgpu::TextureView,
 }
 
-/// The views' targets by id, and the pipelines mirrored views draw with.
+/// The views' targets by id, the pipelines mirrored views draw with, and the entities' one
+/// clipped views draw with (`ENTITY_MARGIN`).
 pub(super) struct Kept {
     targets: HashMap<u64, Target>,
     flipped: Flipped,
+    clipped_entities: wgpu::RenderPipeline,
 }
 
 impl Kept {
-    pub fn new(solid: SolidPipeline, translucent: wgpu::RenderPipeline) -> Self {
+    /// `entity` is gfx.rs's `entity_pipeline_with`.
+    pub fn new(
+        solid: SolidPipeline,
+        translucent: wgpu::RenderPipeline,
+        entity: impl Fn(EntityPipelineOptions<'_>) -> wgpu::RenderPipeline,
+    ) -> Self {
+        // gfx.rs's `entity_pipeline` without its constant bias, through `fs_entity_clipped`
+        let clipped_entities = entity(EntityPipelineOptions {
+            label: "Entities (clipped world view)",
+            cull_mode: None,
+            depth_write: true,
+            compare: wgpu::CompareFunction::GreaterEqual,
+            bias: Default::default(),
+            blend: wgpu::BlendState::ALPHA_BLENDING,
+            clouds: false,
+            vertex: "vs_entity",
+            fragment: "fs_entity_clipped",
+            write_mask: wgpu::ColorWrites::ALL,
+        });
         Self {
             targets: HashMap::new(),
             flipped: Flipped { solid, translucent },
+            clipped_entities,
         }
     }
 }
@@ -254,12 +283,7 @@ impl Renderer {
                 ],
                 outline_params: super::outline_params(view.size[0], view.size[1]),
                 view_origin: [camera.offset.x, camera.offset.y, camera.offset.z, 0.0],
-                world_view: [
-                    if view.mirror { -1.0 } else { 1.0 },
-                    camera.entity_shift,
-                    0.0,
-                    0.0,
-                ],
+                world_view: camera.world_view,
                 ..lists.globals
             };
             self.uploads
@@ -375,9 +399,8 @@ impl Renderer {
         }
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
         if lists.entity_quads > 0 {
-            // the entities' pipeline without its constant bias, as translucent items draw
             pass.set_pipeline(match view.clip_plane {
-                Some(_) => &self.translucent_item_pipeline,
+                Some(_) => &self.world_views.clipped_entities,
                 None => &self.entity_pipeline,
             });
             pass.set_bind_group(0, &self.entity_group, &[]);
@@ -535,5 +558,10 @@ mod tests {
         let clipped = near_plane_on(lens, corner.extend(-1.0), corner_cosine(tan_half, 2.0));
         let far = clipped * (corner * 1000.0).extend(1.0);
         assert!((far.z / far.w - 0.001).abs() < 1e-5, "{far}");
+        // A camera 1e-43 behind the plane: the entities' shift rounds to 0, the clip flag stays.
+        let near = native_render::WorldView::new(1, DVec3::ZERO, 0.0, 0.0, 70.0, [64, 64])
+            .with_clip_plane([0.0, 0.0, 1.0, -1e-43]);
+        let camera = ViewCamera::new(&near, DVec3::ZERO, 1000.0);
+        assert_eq!(camera.world_view, [1.0, 0.0, 1.0, 0.0]);
     }
 }
