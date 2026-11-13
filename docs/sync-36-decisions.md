@@ -27,9 +27,9 @@ The integration is prepared in separate commits. The restoration script and the 
 
 ## Remaining move metric in sync 36
 
-`measure/game_rs.py` reports **104 name matches**, not zero. This approximate, name-based count includes true extraction remnants and unrelated methods with the same name; it is not a qualified Rust-method count. The full destination series is explicitly deferred to stacked sync 37 under the parallel-sync order, while the three missing post-move behavior fixes are already restored separately.
+`measure/game_rs.py` reports **103 name matches**, not zero (down from 104 after deleting the duplicate, unused leather-boots helper during independent review). This approximate, name-based count includes true extraction remnants and unrelated methods with the same name; it is not a qualified Rust-method count. The full destination series is explicitly deferred to stacked sync 37 under the parallel-sync order, while the three missing post-move behavior fixes are already restored separately.
 
-After qualifying the matches, the raw count consists of 94 extraction names, three unrelated `Dim` method names with `game/` matches, and seven names matched only outside `game/`. The seven names whose upstream matches are entirely outside `game/` are `stage`, `native`, `exists`, `all`, `hurt_helmet`, `render_with` and `in_own_process`. `Dim::key`, `Dim::level` and `Dim::sea_level` also collide with unrelated upstream methods. `Options::parse` is handled by the planned whole-Options extraction; its name also occurs in unrelated helpers. None of those facts is used to silently turn the raw count into zero.
+After qualifying the matches, the raw count consists of 93 extraction names, three unrelated `Dim` method names with `game/` matches, and seven names matched only outside `game/`. The seven names whose upstream matches are entirely outside `game/` are `stage`, `native`, `exists`, `all`, `hurt_helmet`, `render_with` and `in_own_process`. `Dim::key`, `Dim::level` and `Dim::sea_level` also collide with unrelated upstream methods. `Options::parse` is handled by the planned whole-Options extraction; its name also occurs in unrelated helpers. None of those facts is used to silently turn the raw count into zero.
 
 All names remaining in the raw metric:
 
@@ -45,4 +45,4 @@ All names remaining in the raw metric:
 - `sea_level`, `slot_count`, `slots`, `spawn_destroyed_contents`, `spawn_item`, `spawn_item_own`, `spawn_item_thrown`, `spawn_orbs`.
 - `spawn_orbs_toward`, `spilled_motions`, `spilled_stacks_rise_from_their_own_randoms`, `stage`, `sync_tick_chunks`, `the_crack_takes_the_size_of_the_set_it_draws`, `throw_from_eyes`, `tick_blocks`.
 - `tick_blocks_with_scratch`, `tick_items`, `tick_moving_pistons`, `tick_scheduled`, `tick_weather_effects`, `transform_particle`, `try_light_portal`, `unstuck_orb`.
-- `update_world`, `used_hand`, `wear_armor`, `wears_freeze_immune`, `wears_leather_boots`, `weather_geometry`, `with_hand`, `write_report`.
+- `update_world`, `used_hand`, `wear_armor`, `wears_freeze_immune`, `weather_geometry`, `with_hand`, `write_report`.
