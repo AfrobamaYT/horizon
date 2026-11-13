@@ -582,7 +582,8 @@ impl SyncData {
                 None => {
                     let (recipes, groups) = startup::time("sync.network_recipes", || {
                         super::recipes::network_recipes(resources, overlay, defaults, sources)
-                    });
+                    })
+                    .map_err(|error| error.to_string())?;
                     startup::time("sync.advancements", || {
                         super::advancements::ServerAdvancements::load(
                             resources, overlay, recipes, groups,

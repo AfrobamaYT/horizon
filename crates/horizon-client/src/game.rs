@@ -14444,7 +14444,7 @@ fn load_world_rest(
                 &items,
                 overlay,
                 resources.item_defaults(),
-                &sources,
+                (&sources, &recipes),
             )
         });
         Ok((items, recipes, stations))

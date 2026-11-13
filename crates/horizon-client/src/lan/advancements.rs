@@ -56,12 +56,13 @@ impl ServerAdvancements {
         let tree = Tree::shared(&resources.join("data"), overlay);
         let kids = tree.children();
         let layout = tree.layout();
+        let displays = RecipeIndex::from_serialized(&recipes);
         Self {
             tree,
             kids,
             layout,
             recipes,
-            displays: RecipeIndex::load(resources, overlay),
+            displays,
             groups,
         }
     }
