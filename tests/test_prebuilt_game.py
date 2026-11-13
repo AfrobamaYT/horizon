@@ -30,7 +30,7 @@ def write_build_data(root: Path, identity: dict | None = None, commit: str = COM
     for name in members["runtime"] + members["api"]:
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_bytes(b"")
-    (root / prebuilt_game.RUNTIME / prebuilt_game.EXECUTABLE).write_bytes(b"\0" + prebuilt_game.HOLDER_MARK + b"\0")
+    (root / prebuilt_game.RUNTIME / prebuilt_game.EXECUTABLE).write_bytes(b"\0" + prebuilt_game.holder_mark() + b"\0")
     slices = {"runtime": [prebuilt_game.IDENTITY, *members["runtime"]],
               "api": [*prebuilt_game.BUILD_DATA, *members["api"]]}
     (root / prebuilt_game.IDENTITY).write_text(json.dumps({"slices": slices, **(identity or {}), "commit": commit}))
