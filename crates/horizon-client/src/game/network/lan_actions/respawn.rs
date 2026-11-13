@@ -190,19 +190,15 @@ impl Game<'_> {
                     crate::game::game_mode::mode_from_id(g.game_mode),
                 )
             };
-            let mut cancel = false;
+            let (mut cancel, mut to) = (false, GameMode::Spectator);
             if from != GameMode::Spectator {
-                self.native_player_game_mode_changed(
-                    uuid,
-                    &name,
-                    from,
-                    GameMode::Spectator,
-                    &mut cancel,
-                );
+                self.native_player_game_mode_changed(uuid, &name, from, &mut to, &mut cancel);
+                // A redirect to the mode the player has is no change: nothing is sent.
+                cancel |= to == from;
             }
             if !cancel && let Some(host) = self.lan.as_mut() {
                 host.hub
-                    .set_game_mode(conn, SPECTATOR, &self.world, Some(self.collision));
+                    .set_game_mode(conn, to.id(), &self.world, Some(self.collision));
             }
         }
         // PlayerList.respawn: `copyRespawnPosition` hands the new player the

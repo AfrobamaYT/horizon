@@ -230,7 +230,15 @@ pub(super) fn emit<'a>(
         } else {
             None
         };
-        let result = if let Some((_, ty)) = &output {
+        let collect_cancel = contract == Contract::Collect
+            && hook.cancellable == Some(true)
+            && args.iter().any(|(name, ty)| {
+                name == "cancel" && ty.to_token_stream().to_string() == "& mut bool"
+            });
+        let cancel_out = if collect_cancel { Some("cancel") } else { out };
+        let result = if collect_cancel {
+            " -> Flow".to_owned()
+        } else if let Some((_, ty)) = &output {
             let Type::Reference(reference) = ty else {
                 return Err(format!("output must be a mutable reference in {name}"));
             };
@@ -335,7 +343,7 @@ pub(super) fn emit<'a>(
         }
         // A mod listener may still be told of a cancelled event, and see and clear its cancel; a
         // part never is.
-        let mod_cancel = contract == Contract::Cancel && scoped.is_none();
+        let mod_cancel = (contract == Contract::Cancel || collect_cancel) && scoped.is_none();
         if mod_cancel && !is_render {
             cancel_hooks.push_str(&format!("pub const {name}: () = ();\n"));
         }
@@ -403,6 +411,9 @@ pub(super) fn emit<'a>(
             syn::visit_mut::VisitMut::visit_type_mut(&mut OwnedLootContext, &mut owned_ty);
             let ty = &owned_ty;
             dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
+            if collect_cancel && name == "cancel" {
+                continue;
+            }
             let mutable_entity = ty.to_token_stream().to_string() == "& mut ModBlockEntity";
             // An answered collect hook's mods each push plain entries into their own batch;
             // dispatch, not the mod, names the mod on each.
@@ -448,7 +459,7 @@ pub(super) fn emit<'a>(
                 ));
             }
             fields.push_str("/// Whether the event is cancelled: by the game or an earlier listener, or by this one\n/// setting it. Only a listener that receives cancelled events (`#[listener(receive_cancelled)]`)\n/// sees `true`, and setting it back to `false` lets the game's behaviour run.\npub cancelled: bool,\n");
-            inits.push(format!("cancelled: *{}", out.unwrap()));
+            inits.push(format!("cancelled: *{}", cancel_out.unwrap()));
         }
         if let Some((name, ty)) = output.as_ref().filter(|_| contract != Contract::Collect) {
             dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
@@ -487,6 +498,7 @@ pub(super) fn emit<'a>(
             .map(|param| format!("let _ = {};", param.split(':').next().unwrap()))
             .collect::<String>();
         let default = match contract {
+            _ if collect_cancel => "Flow::Continue",
             Contract::Cancel => "Flow::Continue",
             Contract::Replace => "None",
             _ => "",
@@ -801,7 +813,7 @@ pub(super) fn emit<'a>(
                 String::new(),
                 format!(
                     "{{ let mut {entered} = super::runtime::ListenerScope::new(); for ({receives}, {mod_entry}) in super::listening(HookId::{hook_id}) {{ if {event}.cancelled && !{receives} {{ continue; }} let {mod_item} = {entered}.enter({mod_entry}, \"{name}\"); if matches!({mod_item}.{name}({invoke}), Flow::Cancel) {{ {event}.cancelled = true; }} }} }} *{o} = {event}.cancelled;",
-                    o = out.unwrap()
+                    o = cancel_out.unwrap()
                 ),
             ),
             None => (
@@ -809,9 +821,15 @@ pub(super) fn emit<'a>(
                 format!("for {binding} in {each} {{ {} }}", call(&mod_item, "break")),
             ),
             Some((_, lookup)) => (
-                // The parts are looked up first: the key may be moved into the event.
+                // The parts are looked up first: the key may be moved into the event. A worldgen
+                // Part method runs on the worker threads too: it reads the server's published table.
                 format!(
-                    "\nif !super::has_part_hook(HookId::{hook_id}) {{ return; }} let {part_table} = super::parts(HookId::{hook_id}, \"{name}\"); let {part_list} = {part_table}.for_hook(HookId::{hook_id}).map_or(&[][..], |table| table.{lookup}); if {part_list}.is_empty() {{ return; }}"
+                    "\nif !super::has_part_hook(HookId::{hook_id}) {{ return; }} let {part_table} = {}; let {part_list} = {part_table}.for_hook(HookId::{hook_id}).map_or(&[][..], |table| table.{lookup}); if {part_list}.is_empty() {{ return; }}",
+                    if hook.context == Some(PhaseContext::Worldgen) {
+                        "super::worldgen_parts()".to_owned()
+                    } else {
+                        format!("super::parts(HookId::{hook_id}, \"{name}\")")
+                    }
                 ),
                 format!(
                     "for {part_item} in super::entered_parts({part_list}, \"{name}\") {{ {} }}",
@@ -820,9 +838,9 @@ pub(super) fn emit<'a>(
             ),
         };
         let body = match contract {
-            Contract::Cancel if mod_cancel => format!(
+            _ if mod_cancel => format!(
                 "if *{o} && !super::receives_cancelled(HookId::{hook_id}) {{ return; }} {build} {calls} {write_back}",
-                o = out.unwrap()
+                o = cancel_out.unwrap()
             ),
             Contract::Cancel => format!(
                 "if *{o} {{ return; }} {lookup} {build} {calls} {write_back}",
@@ -1022,7 +1040,10 @@ fn stack_crossing_routed(
                 } else {
                     validations.push_str(&format!("let {result}: Result<_, mod_api::StackWriteError> = self.boundary_items().ok_or(mod_api::StackWriteError::Unavailable).and_then(|items| {local}.try_into_engine(items)); "));
                 }
-                format!("match {result} {{ Ok(value) => value, Err(_) => return }}")
+                format!(
+                    "match {result} {{ Ok(value) => value, Err(error) => {{ log::warn!(\"mod {} write refused: {{error:?}}\"); return; }} }}",
+                    hook_id.to_snake_case()
+                )
             } else {
                 local
             };
@@ -2172,6 +2193,32 @@ fn main() {{
         assert!(compact.contains("mod_api::dispatch_living_change_target(self.host,call)"));
         assert!(
             compact.contains("mod_api::dispatch_living_visibility(self,entity,looking,visibility)")
+        );
+    }
+
+    #[test]
+    fn a_worldgen_part_method_takes_the_worldgen_context_and_reads_the_published_table() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let hooks = super::super::sources(&root, super::super::FillMode::Require)
+            .unwrap()
+            .hooks;
+        let compact: String = hooks.chars().filter(|c| !c.is_whitespace()).collect();
+        fn dispatch<'a>(compact: &'a str, name: &str) -> &'a str {
+            let start = compact
+                .find(&format!("fndispatch_{name}("))
+                .unwrap_or_else(|| panic!("no dispatch for {name}"));
+            let body = &compact[start..];
+            &body[..body.find("#[doc(hidden)]").unwrap_or(body.len())]
+        }
+        let method = &compact[compact.find("fnon_tree_grow(").unwrap()..];
+        assert!(method.starts_with("fnon_tree_grow(&self,context:&dynWorldgenHost,"));
+        let worldgen = dispatch(&compact, "on_tree_grow");
+        assert!(worldgen.contains("=super::worldgen_parts();"));
+        assert!(!worldgen.contains("super::parts("));
+        // Every other scoped hook keeps this thread's table, `is_ladder`'s loop context included.
+        assert!(
+            dispatch(&compact, "is_ladder")
+                .contains("=super::parts(HookId::IsLadder,\"is_ladder\");")
         );
     }
 }

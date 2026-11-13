@@ -27,13 +27,46 @@
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
 use horizon_client::{items::ItemStack, world::BlockEntityExtras};
 use horizon_mod_runtime::attachments::{Attachments, Holder};
-use mod_api::{Transaction, TransactionSeal};
+use mod_api::{Transaction, TransactionLifecycle, TransactionSeal};
 use std::collections::HashMap;
 
 #[path = "transactions/decision.rs"]
 pub(in crate::game) mod decision;
 
 type Pos = (i32, i32, i32);
+
+/// The open transactions, innermost last, and which close is running, if any: what
+/// `transaction_lifecycle` reads.
+#[derive(Default)]
+pub(super) struct OpenTransactions {
+    levels: Vec<Level>,
+    closing: Option<TransactionLifecycle>,
+}
+
+impl std::ops::Deref for OpenTransactions {
+    type Target = Vec<Level>;
+    fn deref(&self) -> &Vec<Level> {
+        &self.levels
+    }
+}
+
+impl std::ops::DerefMut for OpenTransactions {
+    fn deref_mut(&mut self) -> &mut Vec<Level> {
+        &mut self.levels
+    }
+}
+
+/// Puts the closing phase back when a close ends, however it ends.
+struct ClosingPhase<'a, 'g> {
+    game: &'a mut Game<'g>,
+    outer: Option<TransactionLifecycle>,
+}
+
+impl Drop for ClosingPhase<'_, '_> {
+    fn drop(&mut self) {
+        self.game.transactions.closing = self.outer;
+    }
+}
 
 /// One open transaction.
 #[derive(Default)]
@@ -165,6 +198,9 @@ pub(super) enum After {
     Updated(Pos),
     /// `Level.sendBlockUpdated` alone, without marking the save dirty.
     NotifyClients(Pos),
+    /// A provider's answer changed here (`level_invalidate_capabilities`): the capability
+    /// generation moves on.
+    Capabilities(Pos),
     /// The block's new state, set with its updates (`Level.setBlock`, `UPDATE_ALL`).
     Block(Pos),
     /// Deferred interaction effects, replayed in the same root-commit order.
@@ -274,6 +310,28 @@ impl Game<'_> {
         let named = mod_api::__private::transaction_token(tx);
         self.transactions.iter().any(|level| level.token == named)
     }
+    /// `transaction_lifecycle`: the close running, else whether one is open.
+    pub(in crate::game) fn transaction_lifecycle(&self) -> TransactionLifecycle {
+        match self.transactions.closing {
+            Some(closing) => closing,
+            None if self.transactions.is_empty() => TransactionLifecycle::None,
+            None => TransactionLifecycle::Open,
+        }
+    }
+    /// `transaction_current`: the innermost open transaction's write token, never its seal.
+    pub(in crate::game) fn transaction_current(&self) -> Option<Transaction> {
+        let level = self.transactions.last()?;
+        Some(mod_api::__private::transaction_of(level.token))
+    }
+    /// `transaction_depth`: how deeply `tx` is nested, 0 for the outermost.
+    pub(in crate::game) fn transaction_depth(&self, tx: &Transaction) -> Option<u32> {
+        let named = mod_api::__private::transaction_token(tx);
+        let at = self
+            .transactions
+            .iter()
+            .position(|level| level.token == named)?;
+        u32::try_from(at).ok()
+    }
     /// Closes the innermost transaction: `commit` hands its changes to the one around it, or
     /// at the root makes them final and tells the world; otherwise every storage it wrote goes
     /// back to how it was. Nothing happens with none open.
@@ -281,6 +339,20 @@ impl Game<'_> {
         let Some(level) = self.transactions.pop() else {
             return;
         };
+        let closing = if self.transactions.is_empty() {
+            TransactionLifecycle::RootClosing
+        } else {
+            TransactionLifecycle::Closing
+        };
+        // Kept and put back, so a transaction a root-commit listener opens and closes doesn't
+        // end the root's phase early. The guard puts it back on a panic too, so a listener
+        // that panics leaves the phase as it was.
+        let outer = self.transactions.closing.replace(closing);
+        let guard = ClosingPhase { game: self, outer };
+        guard.game.close_level(level, commit);
+    }
+    /// What closing `level` does, with the closing phase already set.
+    fn close_level(&mut self, level: Level, commit: bool) {
         if let Some(scope) = &mut self.block_entity_tick_items {
             scope.close_transaction(commit);
         }
@@ -575,6 +647,7 @@ impl Game<'_> {
             After::Changed(pos) => self.container_changed(pos),
             After::Updated(pos) => self.block_entity_updated(pos),
             After::NotifyClients(pos) => self.notify_block_clients(pos),
+            After::Capabilities(pos) => self.world.capability_generations.invalidate(pos),
             After::Effect(effect) => match effect {
                 DeferredEffect::CustomStat {
                     player,

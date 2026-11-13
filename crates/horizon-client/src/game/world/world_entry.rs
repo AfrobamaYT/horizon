@@ -478,6 +478,7 @@ impl Game<'_> {
         self.structure_spawns = structure_spawns;
         self.health_resources = health;
         self.server_items = None;
+        self.refresh_infiniburn();
         self.install_parts(parts);
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         self.forget_book();
@@ -689,9 +690,13 @@ impl Game<'_> {
         Ok(())
     }
     /// Ask the parts of each block `isPathfindable` once per state and type: the answer depends
-    /// on nothing else, so path finding and spawning read it with no dispatch.
+    /// on nothing else, so path finding and spawning read it with no dispatch. A server also
+    /// publishes its parts for its world generation.
     pub(super) fn install_parts(&self, prepared: PreparedParts) {
         cauldron_interactions::install(prepared.cauldrons);
+        if self.is_logical_server() {
+            native_worldgen_parts::publish(prepared.parts.as_ref(), &prepared.block_states);
+        }
         api_values::install_block_states(prepared.block_states);
         native_world_read::install_block_tags(prepared.tags);
         mod_api::__private::install_resolved_parts(prepared.parts);

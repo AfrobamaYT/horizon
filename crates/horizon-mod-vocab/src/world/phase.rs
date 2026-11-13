@@ -311,8 +311,9 @@ pub struct PackageInfo {
     pub(crate) side: crate::Side,
     /// Its own namespace, then the others it declares.
     pub(crate) namespaces: Vec<String>,
-    /// The ids it declares dependencies on.
-    pub(crate) dependencies: Vec<String>,
+    /// Its `[dependencies]` rows, sorted by id.
+    pub(crate) dependencies: Vec<crate::PackageDependency>,
+    pub(crate) details: crate::PackageDetails,
 }
 
 impl PackageInfo {
@@ -323,7 +324,7 @@ impl PackageInfo {
         kind: PackageKind,
         side: crate::Side,
         namespaces: Vec<String>,
-        dependencies: Vec<String>,
+        dependencies: Vec<crate::PackageDependency>,
     ) -> Self {
         Self {
             id,
@@ -332,7 +333,13 @@ impl PackageInfo {
             side,
             namespaces,
             dependencies,
+            details: crate::PackageDetails::default(),
         }
+    }
+    /// The same snapshot with the manifest's descriptive fields.
+    pub fn with_details(mut self, details: crate::PackageDetails) -> Self {
+        self.details = details;
+        self
     }
     /// Package identifier.
     pub fn id(&self) -> &str {
@@ -356,7 +363,47 @@ impl PackageInfo {
     }
     /// Whether this package declares a dependency on `id`.
     pub fn depends_on(&self, id: &str) -> bool {
-        self.dependencies.iter().any(|d| d == id)
+        self.dependencies.iter().any(|d| d.id() == id)
+    }
+    /// Its declared dependencies, sorted by id.
+    pub fn dependencies(&self) -> &[crate::PackageDependency] {
+        &self.dependencies
+    }
+    /// The display name; empty when the snapshot carries no manifest details.
+    pub fn name(&self) -> &str {
+        &self.details.name
+    }
+    /// The description, or empty.
+    pub fn description(&self) -> &str {
+        &self.details.description
+    }
+    /// The authors, in manifest order.
+    pub fn authors(&self) -> &[String] {
+        &self.details.authors
+    }
+    /// The license name, or empty.
+    pub fn license(&self) -> &str {
+        &self.details.license
+    }
+    /// The home page link.
+    pub fn homepage(&self) -> Option<&str> {
+        self.details.homepage.as_deref()
+    }
+    /// Where to report problems.
+    pub fn issues(&self) -> Option<&str> {
+        self.details.issues.as_deref()
+    }
+    /// The icon's path inside the package, such as `icon.png`.
+    pub fn icon_path(&self) -> Option<&str> {
+        self.details.icon_path.as_deref()
+    }
+    /// How its code runs; `None` for a content package.
+    pub fn runtime(&self) -> Option<crate::PackageRuntime> {
+        self.details.runtime
+    }
+    /// One value of its manifest's `[properties]` table.
+    pub fn property(&self, key: &str) -> Option<&crate::PropertyValue> {
+        self.details.properties.get(key)
     }
 }
 
@@ -368,6 +415,7 @@ impl PackageInfo {
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct RegistrationData {
     instance_dir: crate::InstanceDirectory,
+    runtime: crate::RuntimeEnvironment,
     /// Built-in registry names in ID order, by registry name.
     pub(crate) registries: Arc<[(String, Arc<[String]>)]>,
     /// Each loaded mod's settings, by mod ID then key.
@@ -381,9 +429,11 @@ impl RegistrationData {
         registries: BTreeMap<String, Vec<String>>,
         settings: BTreeMap<String, BTreeMap<String, String>>,
         instance_dir: crate::InstanceDirectory,
+        runtime: crate::RuntimeEnvironment,
     ) -> Self {
         Self {
             instance_dir,
+            runtime,
             registries: registries
                 .into_iter()
                 .map(|(name, ids)| (name, ids.into()))
@@ -515,19 +565,44 @@ pub struct RegistrationContext {
     pub(crate) declaration_refusals: std::sync::Mutex<Vec<String>>,
     pub(crate) self_refusal: std::sync::Mutex<Option<String>>,
     pub(crate) instance_dir: Option<crate::InstanceDirectory>,
+    pub(crate) runtime: Option<crate::RuntimeEnvironment>,
 }
 
 impl RegistrationContext {
     pub(crate) fn new() -> Self {
         let data = registration_data();
         let instance_dir = data.as_ref().map(|data| data.instance_dir.clone());
+        let runtime = data.as_ref().map(|data| data.runtime.clone());
         Self {
             mods: LoadedMods::new(),
             data,
             declaration_refusals: Default::default(),
             self_refusal: Default::default(),
             instance_dir,
+            runtime,
         }
+    }
+
+    /// Physical process, independent of the logical side of a hook.
+    pub fn dist(&self) -> crate::Dist {
+        self.runtime().dist()
+    }
+    /// Exact Minecraft version captured before registration.
+    pub fn game_version(&self) -> &str {
+        self.runtime().game_version()
+    }
+    /// Horizon version, identical to the crash report's version.
+    pub fn horizon_version(&self) -> &str {
+        self.runtime().horizon_version()
+    }
+    /// Startup opt-in for test-only content; does not gate test registration.
+    pub fn game_tests_enabled(&self) -> bool {
+        self.runtime().game_tests_enabled()
+    }
+    fn runtime(&self) -> &crate::RuntimeEnvironment {
+        self.runtime
+            .as_ref()
+            .expect("registration runtime environment is installed")
     }
 
     /// The instance directory captured before registration, identically on native
@@ -897,4 +972,50 @@ fn phase_authority_advances_without_a_platform_backend() {
             to: ModPhase::Setup
         })
     );
+}
+
+#[test]
+fn the_registration_context_lists_installed_packages_with_their_details() {
+    let details = crate::PackageDetails {
+        name: "Machines".to_owned(),
+        runtime: Some(crate::PackageRuntime::Native),
+        ..Default::default()
+    };
+    let packages = vec![
+        PackageInfo::new(
+            "machines".to_owned(),
+            "2".to_owned(),
+            PackageKind::Code,
+            crate::Side::Both,
+            vec!["machines".to_owned()],
+            vec![crate::PackageDependency::new(
+                "base".to_owned(),
+                "^1".to_owned(),
+                false,
+            )],
+        )
+        .with_details(details),
+        PackageInfo::new(
+            "base".to_owned(),
+            "1".to_owned(),
+            PackageKind::Content,
+            crate::Side::Client,
+            vec!["base".to_owned()],
+            vec![],
+        ),
+    ];
+    with_test_package_inventory(packages, || {
+        let context = RegistrationContext::new();
+        assert_eq!(
+            context.mods().ids().collect::<Vec<_>>(),
+            ["machines", "base"]
+        );
+        let machines = context.mods().get("machines").unwrap();
+        assert_eq!(machines.name(), "Machines");
+        assert_eq!(machines.runtime(), Some(crate::PackageRuntime::Native));
+        assert!(machines.depends_on("base"));
+        let base = context.mods().get("base").unwrap();
+        assert_eq!(base.runtime(), None);
+        assert!(context.mods().get("missing").is_none());
+    });
 }

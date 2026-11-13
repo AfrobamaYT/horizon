@@ -7137,13 +7137,13 @@ mod sheep_nbt_tests {
         let raw = hoglin(Some(1));
         let protected = mob_from_nbt(&raw, &types, 1, None).unwrap();
         assert!(protected.extra.cannot_be_hunted);
-        assert!(!protected.seen(None).huntable);
+        assert!(!protected.seen(None, &crate::items::Items::empty()).huntable);
         let saved = mob_to_nbt(&protected, [0; 4], Some(&raw), None, |_| None);
         assert_eq!(saved.get("CannotBeHunted"), Some(&Tag::Byte(1)));
         for raw in [hoglin(None), hoglin(Some(0))] {
             let prey = mob_from_nbt(&raw, &types, 2, None).unwrap();
             assert!(!prey.extra.cannot_be_hunted);
-            assert!(prey.seen(None).huntable);
+            assert!(prey.seen(None, &crate::items::Items::empty()).huntable);
             let saved = mob_to_nbt(&prey, [0; 4], Some(&raw), None, |_| None);
             assert_eq!(saved.get("CannotBeHunted"), Some(&Tag::Byte(0)));
         }
@@ -7322,6 +7322,7 @@ mod sheep_nbt_tests {
             "testfx:glow".to_owned(),
             1,
             crate::brewing::Category::Harmful,
+            None,
         )]);
         let mut m = Mob::new(1, types["minecraft:pig"].clone(), Vec3::ZERO, 0.0);
         m.add_effect(crate::brewing::effect("testfx:glow").unwrap().id, 200, 2);

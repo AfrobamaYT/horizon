@@ -7,6 +7,7 @@ mod borrowed_panic_tests;
 mod borrowed_tick;
 mod breeding;
 mod combat_adaptations;
+mod conversion_identity;
 mod death_tail;
 mod hoglin_target;
 #[cfg(test)]
@@ -22,8 +23,8 @@ use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::level_sounds::LevelSound;
 use super::piston_push::Lid;
 use super::{
-    Dim, Game, Hand, InteractTarget, entity_culling::EntityCullDecision,
-    native_mob_draw::PlayerRender, native_projectiles::Impact, view_vector,
+    Dim, Game, InteractTarget, entity_culling::EntityCullDecision, native_mob_draw::PlayerRender,
+    native_projectiles::Impact, view_vector,
 };
 use horizon_assets::item_model::DisplayContext;
 use horizon_client::actions::Action;
@@ -35,7 +36,7 @@ use horizon_client::{
     crafting::Recipes,
     graphics::EntityCullingMode,
     health::{Attack, HealthEvent, HurtSource, Hurting, Knock},
-    items::ItemStack,
+    items::{ItemStack, Items},
     mesher::Vertex,
     mobs::{
         Damage, DamageKind, Mob, MobEvent, MobWorld, PlayerView, Seen, SpawnSetup, Species, Who,
@@ -355,8 +356,8 @@ fn flame_geometry(
         ss += 1;
     }
 }
-pub(super) fn seen(m: &Mob, player: Option<[i32; 4]>) -> Seen {
-    m.seen(player)
+pub(super) fn seen(m: &Mob, player: Option<[i32; 4]>, items: &Items) -> Seen {
+    m.seen(player, items)
 }
 /// Whether a mob a packet named may take the click: `mob_hit` skips a mob in
 /// its death animation, the one the player rides (it shares the player's root
@@ -693,7 +694,7 @@ impl Game<'_> {
         if amount == 0 {
             return;
         }
-        let (updated, broken) = self.damage_stack(&stack, amount as i32, false);
+        let (updated, broken) = self.damage_living_stack(&stack, amount, id);
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
             return;
         };
@@ -709,35 +710,33 @@ impl Game<'_> {
     /// `LivingEntity.updateFallFlying`'s wear, `ItemStack.hurtAndBreak(1, this,
     /// slot)` on the glider `MobEvent::GliderWear` picked: Unbreaking (from the
     /// level's random, `Enchantment.modifyItemFilteredCount`) may save it, and
-    /// the rest goes on the stack where it is worn. A glider is only picked
-    /// while its next point of wear will not break it (`canGlideUsing`), so
-    /// this wear never breaks one.
-    fn wear_mob_glider(&mut self, id: u32, slot: horizon_core::equipment_slot::EquipmentSlot) {
-        use horizon_client::mobs::finalize;
-        use horizon_core::equipment_slot::EquipmentSlot as S;
+    /// the rest goes on the stack where it is worn. Only a part's `break_now`
+    /// breaks one (`canGlideUsing` picks none a point would break): emptied, with its event.
+    pub(in crate::game) fn wear_mob_glider(
+        &mut self,
+        id: u32,
+        slot: horizon_core::equipment_slot::EquipmentSlot,
+    ) {
         let Some(stack) = self
             .mobs
             .iter()
             .find(|m| m.id == id)
-            .and_then(|m| finalize::equipment_stack(m, slot))
+            .and_then(|m| horizon_client::mobs::finalize::equipment_stack(m, slot))
         else {
             return;
         };
         if !horizon_client::stations::is_damageable(self.res.items(), &stack) {
             return;
         }
-        let loss = self.durability_loss(&stack, 1);
-        if loss == 0 {
-            return;
-        }
+        let (updated, broken) = self.damage_living_stack(&stack, 1, id);
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
             return;
         };
-        let damage = stack.damage + loss;
-        match slot {
-            S::Body => m.extra.set_body_damage(damage as i32),
-            S::Saddle => m.set_saddle(Some(ItemStack { damage, ..stack })),
-            _ => finalize::set_slot_damage(m, slot as usize, damage),
+        let at = [m.position.x, m.position.y, m.position.z];
+        m.set_equipment_stack(slot as usize, updated);
+        if broken.is_some() {
+            let event = horizon_client::mobs::item_break::equipment_break_event(slot);
+            self.lan_entity_event(id as i32, event, at);
         }
     }
     /// `LivingEntity.hurtArmor` -> `LivingEntity.doHurtEquipment`, from the hit
@@ -832,7 +831,7 @@ impl Game<'_> {
                 return;
             }
         }
-        let (updated, broken) = self.damage_stack(&body, amount.min(i32::MAX as u32) as i32, false);
+        let (updated, broken) = self.damage_living_stack(&body, amount, id);
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
             return;
         };
@@ -845,28 +844,6 @@ impl Game<'_> {
             let event =
                 horizon_client::mobs::item_break::equipment_break_event(EquipmentSlot::Body);
             self.lan_entity_event(id as i32, event, at);
-        }
-    }
-    /// Transfer the entity-owned state that is stored outside `Mob`.
-    fn transfer_conversion_identity(&mut self, from: u32, to: u32) {
-        use super::commands::Target;
-        use horizon_client::save::uuid_text;
-
-        let tags = self.tags_of(Target::Mob(from));
-        if !tags.is_empty() {
-            self.set_entity_tags(Target::Mob(to), &tags);
-        }
-        self.load_scoreboard();
-        let old_name = uuid_text(self.uuid_for(from));
-        let team = self
-            .score
-            .board
-            .players_team(&old_name)
-            .map(|t| t.name.clone());
-        if let Some(team) = team {
-            let new_name = uuid_text(self.uuid_for(to));
-            self.score.board.add_to_team(&new_name, &team);
-            self.score.board.remove_from_team(&old_name);
         }
     }
     /// Finalize a converted frog or witch before it joins the level.
@@ -942,6 +919,7 @@ impl Game<'_> {
         self.mobs.push(mob);
         // ConversionType.SINGLE: `to.startRiding(vehicle, false, false)`.
         self.seat_mob(id);
+        self.copy_conversion_attachments(from.id, id, kind);
         self.native_mobs_joined(self.mobs.len() - 1, false);
         let transformed = self.mobs.iter().find(|m| m.id == id)?;
         let transformed_kind = from_kind.as_ref().map(|_| transformed.kind.id.clone());
@@ -1341,7 +1319,7 @@ impl Game<'_> {
             m.on_climbable = climbing;
         }
         let mut snapshot = std::mem::take(&mut self.creatures.seen_buf);
-        snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid)));
+        snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid, self.items())));
         let mut events = std::mem::take(&mut self.creatures.event_buf);
         events.clear();
         let passenger_objects = self.retained_passenger_snapshot(uuid);
@@ -1937,6 +1915,7 @@ impl Game<'_> {
                     position,
                     velocity: velocity(self).unwrap_or(random.velocity),
                     pickup_delay,
+                    state: Default::default(),
                 }
             })
             .filter(|drop| drop.stack.count > 0 && &*drop.stack.item != "minecraft:air")
@@ -1968,13 +1947,7 @@ impl Game<'_> {
         }
         for drop in drops {
             if drop.stack.count > 0 && &*drop.stack.item != "minecraft:air" {
-                self.add_item_entity_prepared(
-                    drop.stack,
-                    drop.position,
-                    Some(drop.velocity),
-                    drop.pickup_delay,
-                    drop.random,
-                );
+                self.add_item_drop(drop);
             }
         }
     }
@@ -2369,8 +2342,8 @@ impl Game<'_> {
                 MobEvent::ArmorHurt { mob, amount, kind } => self.hurt_mob_armor(mob, amount, kind),
                 MobEvent::GliderWear { mob, slot } => self.wear_mob_glider(mob, slot),
                 MobEvent::EntityEvent { mob, event, at } => {
-                    // Ravager.roar (event 69 ends it): with mob_griefing on,
-                    // ROAR_TARGET_WITH_GRIEFING also takes the armor stands.
+                    // Ravager.roar (event 69 ends it): with the raw mob_griefing rule (not
+                    // canEntityGrief), ROAR_TARGET_WITH_GRIEFING also takes the armor stands.
                     if event == 69
                         && self
                             .ui
@@ -5294,7 +5267,7 @@ impl Game<'_> {
     }
     /// `ThrownEnderpearl.onHit` for a living non-player owner: the same hook,
     /// then the normal entity teleport, without a player's endermite roll or damage.
-    fn mob_pearl_teleport(&mut self, pearl: &Projectile, id: u32) {
+    fn mob_pearl_teleport(&mut self, pearl: &Projectile, id: u32, hit: Hit) {
         let Some(owner) = self.entity(id) else { return };
         let Some(from) = self
             .mobs
@@ -5311,17 +5284,8 @@ impl Game<'_> {
         };
         let dimension = self.dim;
         let _: std::result::Result<(), ()> = mod_api::run_transaction(self, |game, _| {
-            let mut target = [pearl.previous.x, pearl.previous.y, pearl.previous.z];
-            let mut damage = 0.0;
-            let mut cancel = false;
-            game.native_ender_pearl_teleport(mod_api::__private::EnderPearlTeleportCall {
-                owner,
-                pearl: pearl.id,
-                from: [from.x, from.y, from.z],
-                target: &mut target,
-                damage: &mut damage,
-                cancel: &mut cancel,
-            });
+            let (mut target, _, cancel) =
+                game.native_pearl_teleport(owner, pearl.id, from, pearl.previous, 0.0, hit);
             // Listener writes stay in the transaction; never overwrite a changed,
             // dead, sleeping or removed owner using the old decision.
             if cancel
@@ -6001,15 +5965,9 @@ impl Game<'_> {
                     && let Some(owner) = self.native_acting_player().map(|player| player.entity())
                 {
                     let dimension = self.dim;
-                    let mut target = [to.x, to.y, to.z];
-                    self.native_ender_pearl_teleport(mod_api::__private::EnderPearlTeleportCall {
-                        owner,
-                        pearl: p.id,
-                        from: [from.x, from.y, from.z],
-                        target: &mut target,
-                        damage: &mut damage,
-                        cancel: &mut cancel,
-                    });
+                    let target;
+                    (target, damage, cancel) =
+                        self.native_pearl_teleport(owner, p.id, from, to, damage, hit);
                     cancel |= self.dim != dimension
                         || self.player.as_ref().is_none_or(|pl| pl.position != from)
                         || self.native_acting_player().map(|player| player.entity()) != Some(owner);
@@ -6061,7 +6019,7 @@ impl Game<'_> {
                     );
                 }
                 if let Some(Who::Mob(id)) = p.owner {
-                    self.mob_pearl_teleport(p, id);
+                    self.mob_pearl_teleport(p, id, hit);
                 }
             }
             (ProjectileKind::SmallFireball, hit) => match hit {
@@ -6493,30 +6451,11 @@ impl Game<'_> {
             }
             return Ok(true);
         }
-        if self.held_shears() {
-            let mob = &self.mobs[index];
-            let shearable = match mob.species() {
-                Species::Sheep => !mob.extra.sheared && !mob.is_baby(),
-                Species::Mooshroom => !mob.is_baby(),
-                Species::SnowGolem | Species::Bogged => mob.alive() && !mob.extra.sheared,
-                _ => false,
-            };
-            if shearable
-                && let (Some(player), Some(name)) =
-                    (self.lan_acting_uuid, self.lan_acting_name.clone())
-            {
-                let mut cancel = false;
-                self.native_player_shear_entity(
-                    player,
-                    &name,
-                    mob.id as i32,
-                    self.hand == Hand::Off,
-                    &mut cancel,
-                );
-                if cancel {
-                    return Ok(true);
-                }
-            }
+        // Shears ask the mob's entity parts first, then fire `player_shear_entity`.
+        if self.held_shears()
+            && let Some(consumed) = self.player_shear(index)
+        {
+            return Ok(consumed);
         }
         if self.spawn_egg_offspring(index) {
             self.swing_arm();
@@ -8494,12 +8433,7 @@ impl Game<'_> {
                 }
                 continue;
             }
-            if let Some(stack) = a.drawn_item() {
-                let owner = super::item_draw::owner_at(at, 0.0, a.kind.id());
-                let state = self.resolve_item(&stack, DisplayContext::Ground, Some(&owner), 0);
-                let pose = glam::Mat4::from_translation(c)
-                    * glam::Mat4::from_quat(self.camera_orientation());
-                self.submit_item_world(&state, pose, packed, out);
+            if self.thrown_item_geometry(a, alpha, at, c, packed, out) {
                 continue;
             }
             // `Entity.displayFireAnimation`: a thrown item that flew through a
@@ -8794,24 +8728,18 @@ impl horizon_client::mobs::MobHooks for Game<'_> {
         Game::grief_hooked(self)
     }
     fn living_visibility(&self, player: &PlayerView, looking: u32, visibility: f64) -> f64 {
-        if !mod_api::__private::listened(mod_api::HookId::LivingVisibility) {
-            return visibility;
-        }
-        let Some(epoch) = self.native_lifecycle.epoch() else {
-            return visibility;
-        };
         let uuid = horizon_client::lan::playerdata::ints_uuid(player.uuid);
-        let Some(player) = self.player(uuid) else {
-            return visibility;
-        };
-        let mut visibility = visibility;
-        self.native_living_visibility(
-            mod_api::LivingRef::new(player.entity()),
-            Some(mod_api::EntityRef::new(epoch, looking)),
-            &mut visibility,
-        );
-        // CommonHooks.getEntityVisibilityMultiplier: never below 0.
-        visibility.max(0.0)
+        match self.player(uuid) {
+            Some(player) => self.scaled_visibility(|_| player.entity(), looking, visibility),
+            None => visibility,
+        }
+    }
+    fn living_visibility_mob(&self, target: u32, looking: u32, visibility: f64) -> f64 {
+        self.scaled_visibility(
+            |epoch| mod_api::EntityRef::new(epoch, target),
+            looking,
+            visibility,
+        )
     }
 }
 
@@ -10082,7 +10010,7 @@ mod breeding_tests {
                 seed,
             },
         );
-        let others = [partner.seen(None)];
+        let others = [partner.seen(None, game.items())];
         let mut events = Vec::new();
         let mut test_level = horizon_client::health::TestLevel::new(321);
         let mut experience = None;
@@ -10450,7 +10378,7 @@ mod breeding_tests {
                 .clone();
             let mut mate = Mob::new(2, kind.clone(), Vec3::new(0.5, 64.0, 0.0), 0.0);
             mate.extra.in_love = 600;
-            let others = [mate.seen(None)];
+            let others = [mate.seen(None, game.items())];
             let run = || {
                 let world = MobWorld {
                     others: &others,
@@ -12002,6 +11930,12 @@ mod mob_pearl_hook_tests {
                 event.owner
             );
             assert_eq!(event.damage, 5.0);
+            // What the pearl hit: the block and its face, no entity.
+            assert_eq!(event.hit_entity, None);
+            assert_eq!(
+                (event.hit_block, event.hit_face, event.hit_at),
+                ([6, 75, 6], [0, 1, 0], [6.0, 75.0, 6.0])
+            );
             match self.0.load(Ordering::SeqCst) {
                 0 => return Flow::Cancel,
                 2 => assert!(event.owner.teleport_to(host, [3.0, 70.0, 3.0], None)),
@@ -12043,7 +11977,7 @@ mod mob_pearl_hook_tests {
                 let hit = || Hit::Block {
                     pos: [6, 75, 6],
                     at: pearl.position,
-                    face: [0; 3],
+                    face: [0, 1, 0],
                 };
                 let mut expected_random = game.world.random.clone();
                 let health = game.player.as_ref().unwrap().health.health();
