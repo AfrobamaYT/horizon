@@ -80,7 +80,6 @@ pub fn condition(
     }
 }
 
-
 /// Run a named root with one shared query, completing it after every nested table.
 pub fn root<T>(id: &str, roll: impl FnOnce() -> T) -> T {
     let query = current_query();
