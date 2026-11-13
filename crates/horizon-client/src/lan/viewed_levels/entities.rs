@@ -13,7 +13,11 @@ use super::{
     super::{guest::Guest, hub::Hub},
     send::Runs,
 };
-use horizon_protocol::{buf::Reader, packets::play::Clientbound as C, viewed_levels};
+use horizon_protocol::{
+    buf::Reader,
+    packets::play::{self, Clientbound as C},
+    viewed_levels,
+};
 
 /// Whether an entity in chunk `at`, tracked `range` blocks (scaled), is within reach of one of a
 /// view's areas, `(centre, radius)` in chunks.
@@ -28,6 +32,26 @@ pub(in crate::lan) fn in_reach(sources: &[((i32, i32), i32)], at: (i32, i32), ra
 /// entities through its view.
 pub(in crate::lan) fn tracks_view(g: &Guest, dimension: &str) -> bool {
     g.views_level(dimension) && g.viewed.view(dimension).is_some()
+}
+
+/// `g`'s client loses entity `id`, unless it is its own player (`ServerEntity.removePairing`, a
+/// player respawned as a new entity): its level's tracker and each of its views' trackers forget
+/// it, and each that tracked it sends `RemoveEntities`, a view's wrapped in a run of its level.
+pub(in crate::lan) fn forget_entity(g: &mut Guest, id: i32) {
+    if g.entity_id == id {
+        return;
+    }
+    let gone = C::RemoveEntities(play::RemoveEntities { ids: vec![id] });
+    if g.tracker.forget(id) {
+        g.send(&gone);
+    }
+    for view in g.viewed.views.values_mut() {
+        if view.tracker.forget(id) {
+            let mut runs = Runs::new(view.level);
+            runs.push(&gone.encode());
+            g.sender.send_many(runs.finish());
+        }
+    }
 }
 
 /// Whether a packet as `Clientbound::encode` writes it may be wrapped: the tracker's bundle

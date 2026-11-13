@@ -1,6 +1,7 @@
 """The ignored-test policy rows live in one file per topic, and a `needs` variable's tests run one per process."""
 import contextlib
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -60,6 +61,20 @@ class PolicyFiles(unittest.TestCase):
         self.write("issue-3000.text", "pkg b::test #3000\n")
         self.assertIn("not read: issue-3000.text", self.exit_message(ignored_tests.listed_entries))
 
+    def test_daily_rows_name_a_target_and_a_reason_and_are_not_known_failures(self):
+        self.write("daily-pkg.txt", "# moved\npkg a::slow lib daily slow\npkg b::boot test:integration daily game-boot\n")
+        self.assertEqual(ignored_tests.daily_rows(), [
+            ignored_tests.Row("pkg", "a::slow", "lib", "daily", "tools/ci/ignored-tests/daily-pkg.txt", "slow"),
+            ignored_tests.Row("pkg", "b::boot", "test:integration", "daily", "tools/ci/ignored-tests/daily-pkg.txt",
+                              "game-boot"),
+        ])
+        self.assertEqual(ignored_tests.known_failures(), {})
+        self.assertEqual(ignored_tests.harness_inputs(), {})
+        for row in ("pkg a::slow lib daily", "pkg a::slow lib daily fast", "pkg a::slow tests/x.rs daily slow",
+                    "pkg a::slow lib daily slow extra"):
+            self.write("daily-pkg.txt", row + "\n")
+            self.assertIn("PACKAGE TEST TARGET daily REASON", self.exit_message(ignored_tests.listed_entries))
+
     def test_plain_fixture_rows_are_inputs_not_known_failures(self):
         self.write("fixture.txt", "pkg a::ignored VAR needs\npkg b::plain VAR needs-plain\n")
         self.assertEqual(ignored_tests.known_failures(), {})
@@ -96,7 +111,12 @@ class PolicyFiles(unittest.TestCase):
 
         with patch.dict(os.environ, {"VAR": "fixture"}), patch.object(ignored_tests.subprocess, "Popen", Process), \
                 contextlib.redirect_stdout(io.StringIO()) as log:
-            self.assertEqual(ignored_tests.run_one_process_each("VAR", jobs=3), 1)
+            report = Path(self.folder.parent) / "report.json"
+            self.assertEqual(ignored_tests.run_one_process_each("VAR", jobs=3, report=str(report)), 1)
+        verdict = json.loads(report.read_text())
+        self.assertEqual([(item["package"], item["test"]) for item in verdict["problems"]],
+                         [("pkg-lib", "b::two"), ("pkg", "c::three")])
+        self.assertEqual(verdict["passed"], [{"package": "pkg", "test": "a::one"}])
         self.assertEqual(commands, [
             ["cargo", "test", "-j3", "-p", "pkg", "--lib", "--", "--ignored", "--exact", "a::one"],
             ["cargo", "test", "-j3", "-p", "pkg-lib", "--lib", "--", "--exact", "b::two"],

@@ -1199,7 +1199,7 @@ impl Game<'_> {
     /// the client's level. None for a stale or unavailable player.
     pub(super) fn player_level(&self, player: PlayerRef) -> Option<LevelRef> {
         let dim = self.player_dimension_key(player)?;
-        Some(LevelRef::new(player.fields().entity.epoch(), dim))
+        Some(self.level_ref(player.fields().entity.epoch(), dim))
     }
 
     /// The dimension the online player is in (`ServerPlayer.level().dimension()`):
@@ -5692,6 +5692,7 @@ fn proxy_forwarding_of(config: &horizon_client::lan::NetConfig) -> &'static str 
 mod network_settings_tests {
     use super::*;
     #[test]
+    #[ignore = "daily"]
     fn server_settings_follow_the_network_config() {
         use horizon_client::lan::{NetConfig, OnlineMode};
         let mut config = NetConfig::loopback(25565, String::new(), 20);

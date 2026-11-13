@@ -4792,11 +4792,8 @@ impl Hub {
     /// respawned one as a new entity at the next tick. Their clients would otherwise keep
     /// the dead body, lying down, wherever the player goes.
     pub fn respawned(&mut self, id: i32) {
-        self.guests.update_all(|g| {
-            if g.entity_id != id && g.tracker.forget(id) {
-                g.send(&C::RemoveEntities(play::RemoveEntities { ids: vec![id] }));
-            }
-        });
+        self.guests
+            .update_all(|g| super::viewed_levels::entities::forget_entity(g, id));
     }
 
     /// A respawn point whose block is gone or blocked: the respawning player
@@ -4976,6 +4973,7 @@ impl Hub {
     ) {
         let info = self.spawn_info(i, portal_cooldown, ctx.sea_level);
         self.close_container_for(i);
+        let left = self.guests[i].dimension.clone();
         self.guests.update(i, |g| {
             // Out of the old level with its chunks (ChunkMap.removeEntity).
             super::chunk_watch::unwatch_all(&mut self.chunk_watches, g);
@@ -4984,12 +4982,6 @@ impl Hub {
             g.collision_exclusions.clear();
             // The load timer is not restarted: vanilla resets the client's loaded state on death and
             // respawn only, and covers a level change with its separate `isChangingDimension` term.
-            g.tracker.clear();
-            g.sent_chunks.clear();
-            g.far_sent_chunks.clear();
-            g.chunk_queue.clear();
-            g.far_queue.clear();
-            g.viewed.forget_views();
             g.center = None;
             g.yaw = yaw;
             if let Some(pitch) = pitch {
@@ -5007,6 +4999,8 @@ impl Hub {
                 locked: ctx.difficulty_locked,
             }));
         });
+        // Its chunks, queues and entities left behind, or kept as a viewed level (#3716).
+        self.leave_level(i, &left);
         self.send_permission_level(i);
         if portal {
             // A teleport still pending from the old level is void: its late
@@ -7325,6 +7319,7 @@ mod tests {
     /// A player walking a loop, sending a few chunks a tick: the queue
     /// after every move is the one the scan built.
     #[test]
+    #[ignore = "daily"]
     fn requeue_matches_the_scan() {
         for r in [2, 5, 10, 12, 32] {
             let (mut a, mut b) = (Vec::new(), Vec::new());
