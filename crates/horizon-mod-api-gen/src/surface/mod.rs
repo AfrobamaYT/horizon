@@ -2,6 +2,7 @@
 //! come from the catalog, with their arguments from the generated event types; trait roles,
 //! sides and "Not on wasm" from the wire index; everything else from a walk of the public items
 //! of `horizon-mod-api` and the vocabulary it re-exports.
+mod expand;
 mod rust;
 #[cfg(test)]
 mod tests;
@@ -20,6 +21,15 @@ use syn::visit_mut::VisitMut;
 use syn::{Item, Visibility};
 use walk::{attrs, compiled, hidden};
 use wire_forms::WireForm;
+
+/// The crates whose own `macro_rules!` calls the export expands: the API and the crates its
+/// public items come from.
+const API_CRATES: &[&str] = &[
+    "mod_api",
+    "horizon_mod_api",
+    "horizon_core",
+    "horizon_mod_runtime",
+];
 
 /// What the wire index says about the traits that cross the boundary, by trait path as the
 /// index writes it below `mod_api` (`Hooks`, `item::menu::SlotView`,
@@ -427,6 +437,16 @@ struct Impls {
     traits: HashMap<ItemId, Vec<(usize, Vec<String>, syn::Path)>>,
     /// Impl blocks whose self type the export does not record, by kind.
     skipped: BTreeMap<&'static str, usize>,
+    /// Impl blocks and inherent members compiled out of a default native build.
+    gated: Vec<String>,
+}
+
+fn module_name(index: &Index<'_>, module: usize) -> String {
+    let m = &index.modules[module];
+    std::iter::once(m.krate)
+        .chain(m.path.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join("::")
 }
 
 fn impls(
@@ -438,15 +458,22 @@ fn impls(
         inherent: HashMap::new(),
         traits: HashMap::new(),
         skipped: BTreeMap::new(),
+        gated: Vec::new(),
     };
     for &module in modules {
         let module_items = index.modules[module].items.clone();
         for item in module_items {
             let Item::Impl(block) = item else { continue };
             if !compiled(&block.attrs) {
+                out.gated.push(format!(
+                    "impl {} in {}: compiled out of a default native build ({}), not recorded",
+                    print(block.self_ty.to_token_stream()),
+                    module_name(index, module),
+                    walk::cfg_text(&block.attrs)
+                ));
                 continue;
             }
-            let path = match &*block.self_ty {
+            let path = match wire_forms::ungroup(&block.self_ty) {
                 syn::Type::Path(self_ty) if self_ty.qself.is_none() => self_ty.path.clone(),
                 // `impl dyn Trait + '_`: inherent items of the trait object.
                 syn::Type::TraitObject(object) if block.trait_.is_none() => {
@@ -493,6 +520,19 @@ fn impls(
                     syn::ImplItem::Const(c) => (&c.vis, &c.attrs),
                     _ => continue,
                 };
+                if matches!(vis, Visibility::Public(_)) && !compiled(attrs) && !hidden(attrs) {
+                    let name = match impl_item {
+                        syn::ImplItem::Fn(f) => f.sig.ident.to_string(),
+                        syn::ImplItem::Const(c) => c.ident.to_string(),
+                        _ => String::new(),
+                    };
+                    out.gated.push(format!(
+                        "{}::{name}: compiled out of a default native build ({}), not recorded",
+                        print(block.self_ty.to_token_stream()),
+                        walk::cfg_text(attrs)
+                    ));
+                    continue;
+                }
                 if matches!(vis, Visibility::Public(_)) && compiled(attrs) && !hidden(attrs) {
                     out.inherent.entry(owner).or_default().push(Inherent {
                         module,
@@ -527,9 +567,21 @@ pub(crate) fn build(
 ) -> Result<Export, String> {
     // The facade crate is indexed for this walk only.
     index.add_crate("horizon_mod_api", "crates/horizon-mod-api/src");
+    // The API crates' own macro calls, expanded before anything reads their modules.
+    let mut notes = Vec::new();
+    let mut expanded = Vec::new();
+    {
+        let mut walker = walk::Walker::new(index);
+        for krate in API_CRATES {
+            if let Ok(found) = walker.all_modules(krate) {
+                expanded.extend(found);
+            }
+        }
+    }
+    notes.extend(expand::expand_modules(index, &expanded));
     let mut walker = walk::Walker::new(index);
     let public = walker.public()?;
-    let mut notes = public.notes.clone();
+    notes.extend(public.notes.iter().cloned());
     // Inherent items and impls live in any module of the crate that defines the type.
     let mut crates: BTreeSet<&'static str> = BTreeSet::from(["mod_api", "horizon_mod_api"]);
     for id in public.items.keys() {
@@ -551,6 +603,7 @@ pub(crate) fn build(
         .collect();
     let forms = wire_forms::wire_forms(index, &modules);
     let found = impls(index, &modules, &nameable);
+    notes.extend(found.gated.iter().cloned());
     for (kind, count) in &found.skipped {
         notes.push(format!(
             "{count} impl blocks on {kind}: no record kind for their items"
@@ -611,7 +664,7 @@ pub(crate) fn build(
                 pending.push(record);
             }
             Item::Trait(item) => {
-                let mut record = trait_record(&mut writer, &roles, id, &path, item);
+                let mut record = trait_record(&mut writer, &mut notes, &roles, id, &path, item);
                 record.paths = paths;
                 named.extend(record.contract.refs.iter().cloned());
                 for method in &record.methods {
@@ -770,6 +823,7 @@ pub(crate) fn build(
 
 fn trait_record(
     writer: &mut Writer<'_, '_>,
+    notes: &mut Vec<String>,
     roles: &Roles,
     id: ItemId,
     path: &str,
@@ -800,7 +854,20 @@ fn trait_record(
             syn::TraitItem::Const(c) => &c.attrs,
             _ => continue,
         };
-        if hidden(attrs) || !compiled(attrs) {
+        if hidden(attrs) {
+            continue;
+        }
+        if !compiled(attrs) {
+            let name = match member {
+                syn::TraitItem::Fn(f) => f.sig.ident.to_string(),
+                syn::TraitItem::Type(t) => t.ident.to_string(),
+                syn::TraitItem::Const(c) => c.ident.to_string(),
+                _ => String::new(),
+            };
+            notes.push(format!(
+                "{owner} member {name}: compiled out of a default native build ({}), not recorded",
+                walk::cfg_text(attrs)
+            ));
             continue;
         }
         if let Some((signature, kind, is_required, mut member_refs)) =
@@ -1022,6 +1089,14 @@ fn type_record(
     };
     let mut impls = BTreeSet::new();
     for (impl_module, impl_params, trait_path) in trait_impls {
+        // How a type crosses is `wire_form`'s.
+        if trait_path
+            .segments
+            .last()
+            .is_some_and(|s| s.ident == "Wire")
+        {
+            continue;
+        }
         let (written, refs) = writer.path(*impl_module, impl_params, trait_path);
         merge(&mut contract_refs, refs);
         impls.insert(written);

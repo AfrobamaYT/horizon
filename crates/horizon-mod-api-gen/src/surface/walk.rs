@@ -148,7 +148,7 @@ pub(super) struct Walker<'i, 'a> {
 const PATHS_PER_MODULE: usize = 16;
 
 /// The `cfg` attributes of `attrs`, as written.
-fn cfg_text(attrs: &[syn::Attribute]) -> String {
+pub(super) fn cfg_text(attrs: &[syn::Attribute]) -> String {
     attrs
         .iter()
         .filter(|attr| attr.path().is_ident("cfg"))
@@ -400,9 +400,15 @@ impl<'i, 'a> Walker<'i, 'a> {
             }
         }
         let mut aliased = 0;
-        for (id, paths) in all {
-            let definition = self.definition_path(id);
-            let chosen = match definition.filter(|path| paths.contains(path)) {
+        for (id, mut paths) in all {
+            // Decided from the definition itself, not from the routes the walk took.
+            let definition = self
+                .definition_path(id)
+                .filter(|_| self.publicly_defined(id));
+            if let Some(path) = &definition {
+                paths.insert(path.clone());
+            }
+            let chosen = match definition {
                 Some(path) => path,
                 None => {
                     aliased += 1;
@@ -437,6 +443,29 @@ impl<'i, 'a> Walker<'i, 'a> {
         public.macros = macros.into_iter().collect();
         public.notes.append(&mut self.notes);
         Ok(public)
+    }
+
+    /// Whether the module that defines `id` is public all the way from its crate's root: every
+    /// module on the way a compiled, public, not hidden `mod`.
+    fn publicly_defined(&mut self, id: ItemId) -> bool {
+        let krate = self.index.modules[id.module].krate;
+        let path = self.index.modules[id.module].path.clone();
+        for depth in 0..path.len() {
+            let Ok(parent) = self.index.module(krate, &path[..depth]) else {
+                return false;
+            };
+            let public = self.index.modules[parent].items.iter().any(|item| {
+                matches!(item, Item::Mod(child)
+                    if child.ident == path[depth].as_str()
+                        && matches!(child.vis, Visibility::Public(_))
+                        && compiled(&child.attrs)
+                        && !hidden(&child.attrs))
+            });
+            if !public {
+                return false;
+            }
+        }
+        true
     }
 
     /// Where `id` is defined, as a path below `mod_api`, when it is defined in the API's crates.

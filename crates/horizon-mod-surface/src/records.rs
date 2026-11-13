@@ -158,7 +158,8 @@ pub struct Trait {
     pub hash: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub doc: String,
-    /// Every public path a mod can name it by; outside the hash.
+    /// The public paths a mod can name it by (each module through at most 16 routes of
+    /// re-exports); outside the hash.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub paths: Vec<String>,
     #[serde(flatten)]

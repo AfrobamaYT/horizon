@@ -1,7 +1,7 @@
 //! How each API type crosses the WebAssembly boundary, read from the code that makes it cross:
 //! the `Wire` derive (with `#[wire(via = T)]`), a hand-written `impl Wire` (its
-//! `layout_fields!` list, or a `layout` that returns another type's), or a macro that writes
-//! such impls for a list of types ([`MACROS`]).
+//! `layout_fields!` list, or a `layout` that returns another type's), including the impls the
+//! API's own macros write once expanded.
 use crate::index::{Found, Index, ItemId};
 use std::collections::HashMap;
 use syn::{Item, Type};
@@ -31,14 +31,13 @@ impl WireForm {
     }
 }
 
-/// The macros that write `Wire` impls for a list of types, and how to read an invocation: the
-/// impls a call `slot_keys!(u32; A, B)` writes each declare `layout_fields!("slot" => u32)`.
-const MACROS: &[(&str, Mechanism)] = &[("slot_keys", Mechanism::SlotKeys)];
-
-#[derive(Clone, Copy)]
-enum Mechanism {
-    /// `(<width>; <type>, …)`: each type's one field `slot` of type `width`.
-    SlotKeys,
+/// `ty` without the invisible groups a macro's substitution leaves around it.
+pub(super) fn ungroup(ty: &Type) -> &Type {
+    match ty {
+        Type::Group(group) => ungroup(&group.elem),
+        Type::Paren(paren) => ungroup(&paren.elem),
+        ty => ty,
+    }
 }
 
 fn is_wire(path: &syn::Path) -> bool {
@@ -140,7 +139,7 @@ pub(super) fn wire_forms(index: &mut Index<'_>, modules: &[usize]) -> HashMap<It
                         .as_ref()
                         .is_some_and(|(_, path, _)| is_wire(path)) =>
                 {
-                    let Type::Path(self_ty) = &*block.self_ty else {
+                    let Type::Path(self_ty) = ungroup(&block.self_ty) else {
                         continue;
                     };
                     let segments: Vec<String> = self_ty
@@ -151,50 +150,6 @@ pub(super) fn wire_forms(index: &mut Index<'_>, modules: &[usize]) -> HashMap<It
                         .collect();
                     if let Ok(Found::Item(id)) = index.resolve_path(module, &segments) {
                         forms.insert(id, impl_form(&block.items, module));
-                    }
-                }
-                Item::Macro(mac) => {
-                    let Some(name) = mac.mac.path.segments.last().map(|s| s.ident.to_string())
-                    else {
-                        continue;
-                    };
-                    let Some((_, mechanism)) = MACROS.iter().find(|(m, _)| *m == name) else {
-                        continue;
-                    };
-                    match mechanism {
-                        Mechanism::SlotKeys => {
-                            struct Keys(Type, Vec<Type>);
-                            impl syn::parse::Parse for Keys {
-                                fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-                                    let width = input.parse()?;
-                                    input.parse::<syn::Token![;]>()?;
-                                    let keys = syn::punctuated::Punctuated::<Type, syn::Token![,]>::parse_terminated(input)?;
-                                    Ok(Self(width, keys.into_iter().collect()))
-                                }
-                            }
-                            let Ok(Keys(width, keys)) = syn::parse2::<Keys>(mac.mac.tokens.clone())
-                            else {
-                                continue;
-                            };
-                            for key in keys {
-                                let Type::Path(path) = &key else { continue };
-                                let segments: Vec<String> = path
-                                    .path
-                                    .segments
-                                    .iter()
-                                    .map(|s| s.ident.to_string())
-                                    .collect();
-                                if let Ok(Found::Item(id)) = index.resolve_path(module, &segments) {
-                                    forms.insert(
-                                        id,
-                                        WireForm::Fields(
-                                            vec![("slot".into(), width.clone())],
-                                            module,
-                                        ),
-                                    );
-                                }
-                            }
-                        }
                     }
                 }
                 _ => {}

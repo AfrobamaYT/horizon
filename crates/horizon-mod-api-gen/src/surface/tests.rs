@@ -129,6 +129,13 @@ impl Point {
 }
 /// A key whose Wire impl a macro writes.
 pub struct SlotKey(u32);
+macro_rules! slot_keys {
+    ($width:ty; $($key:ty),+ $(,)?) => {$(
+        impl Wire for $key {
+            layout_fields!("slot" => $width);
+        }
+    )+};
+}
 slot_keys!(u32; SlotKey);
 /// An identifier, encoded by hand.
 pub struct Ident {
@@ -161,6 +168,54 @@ pub trait DataMap {
     /// Its entry.
     type Entry;
 }
+macro_rules! moves {
+    ($to:ident, $from:ident) => {
+        impl Point {
+            /// Moves to.
+            pub fn $to(&self) {}
+            /// Moves from.
+            pub fn $from(&self) {}
+        }
+    };
+}
+moves!(move_to, move_from);
+macro_rules! draws {
+    ($($host:ident),+) => { $(
+        impl dyn $host + '_ {
+            /// Draws.
+            pub fn draw(&self) {}
+        }
+    )+ };
+}
+draws!(Host, Registrar);
+unknown!(Point);
+#[cfg(feature = "extra")]
+impl Point {
+    /// Only with `extra`.
+    pub fn extra(&self) {}
+}
+/// A module reached by more routes than the walk follows.
+pub mod shared {
+    /// A thing.
+    pub struct Thing;
+}
+pub use shared as s1;
+pub use shared as s2;
+pub use shared as s3;
+pub use shared as s4;
+pub use shared as s5;
+pub use shared as s6;
+pub use shared as s7;
+pub use shared as s8;
+pub use shared as s9;
+pub use shared as s10;
+pub use shared as s11;
+pub use shared as s12;
+pub use shared as s13;
+pub use shared as s14;
+pub use shared as s15;
+pub use shared as s16;
+pub use shared as s17;
 "#,
     ),
     (
@@ -333,9 +388,39 @@ fn the_fixture_exports_the_expected_document() {
             "0 public items are not public at their definition path: their id is their shortest public path, which a shorter re-export added later would change",
             "3 items are reachable only through #[doc(hidden)] items or modules: recorded only where a recorded signature names them",
             "constant LIMIT: no record kind for constants",
+            "impl Point in mod_api: compiled out of a default native build (cfg(feature = \"extra\")), not recorded",
             "type:Context: no shape, because Context crosses by a hand-written Wire impl that declares no layout, or does not cross",
+            "unknown! called in mod_api: not expanded, the items it writes are not recorded",
         ]
     );
+}
+
+#[test]
+fn macro_calls_are_expanded_or_noted_and_ids_ignore_routes() {
+    let export = export_fixture(&[], HOOKS);
+    let handles: Vec<&str> = export
+        .surface
+        .handles
+        .iter()
+        .map(|h| h.id.as_str())
+        .collect();
+    for id in [
+        "handle:Point::move_to",
+        "handle:Point::move_from",
+        "handle:Host::draw",
+        "handle:Registrar::draw",
+    ] {
+        assert!(handles.contains(&id), "{id} in {handles:?}");
+    }
+    assert!(!handles.contains(&"handle:Point::extra"));
+    let thing = export
+        .surface
+        .types
+        .iter()
+        .find(|t| t.id.ends_with("Thing"))
+        .unwrap();
+    assert_eq!(thing.id, "type:shared::Thing");
+    assert!(thing.paths.contains(&"s1::Thing".to_owned()));
 }
 
 #[test]

@@ -237,10 +237,40 @@
   ],
   "handles": [
     {
+      "id": "handle:Host::draw",
+      "hash": "*",
+      "doc": "Draws.",
+      "signature": "fn draw(&self)",
+      "wasm": true,
+      "refs": [
+        "trait:Host"
+      ]
+    },
+    {
       "id": "handle:Point::ORIGIN",
       "hash": "*",
       "doc": "The origin.",
       "signature": "const ORIGIN: Point",
+      "wasm": true,
+      "refs": [
+        "type:Point"
+      ]
+    },
+    {
+      "id": "handle:Point::move_from",
+      "hash": "*",
+      "doc": "Moves from.",
+      "signature": "fn move_from(&self)",
+      "wasm": true,
+      "refs": [
+        "type:Point"
+      ]
+    },
+    {
+      "id": "handle:Point::move_to",
+      "hash": "*",
+      "doc": "Moves to.",
+      "signature": "fn move_to(&self)",
       "wasm": true,
       "refs": [
         "type:Point"
@@ -255,6 +285,16 @@
       "refs": [
         "trait:Registrar",
         "type:SlotKey"
+      ]
+    },
+    {
+      "id": "handle:Registrar::draw",
+      "hash": "*",
+      "doc": "Draws.",
+      "signature": "fn draw(&self)",
+      "wasm": true,
+      "refs": [
+        "trait:Registrar"
       ]
     },
     {
@@ -420,9 +460,6 @@
         "Context"
       ],
       "kind": "unit_struct",
-      "impls": [
-        "horizon_mod_api_macros::Wire"
-      ],
       "wire": true,
       "wire_form": "manual",
       "constructible": true
@@ -436,9 +473,6 @@
         "Ident"
       ],
       "kind": "struct",
-      "impls": [
-        "horizon_mod_api_macros::Wire"
-      ],
       "wire": true,
       "wire_form": "fields",
       "constructible": false,
@@ -524,9 +558,6 @@
         "Name"
       ],
       "kind": "tuple_struct",
-      "impls": [
-        "horizon_mod_api_macros::Wire"
-      ],
       "wire": true,
       "wire_form": "via:String",
       "constructible": false
@@ -716,6 +747,34 @@
       "wire": true,
       "wire_form": "derive",
       "constructible": false
+    },
+    {
+      "id": "type:shared::Thing",
+      "hash": "*",
+      "doc": "A thing.",
+      "shape": null,
+      "paths": [
+        "s1::Thing",
+        "s10::Thing",
+        "s11::Thing",
+        "s12::Thing",
+        "s13::Thing",
+        "s14::Thing",
+        "s15::Thing",
+        "s16::Thing",
+        "s17::Thing",
+        "s2::Thing",
+        "s3::Thing",
+        "s4::Thing",
+        "s5::Thing",
+        "s6::Thing",
+        "s7::Thing",
+        "s8::Thing",
+        "shared::Thing"
+      ],
+      "kind": "unit_struct",
+      "wire": false,
+      "constructible": true
     }
   ],
   "parts": [

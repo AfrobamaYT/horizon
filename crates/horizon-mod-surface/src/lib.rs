@@ -10,8 +10,10 @@
 //! Every record and every member record has one id, unique in the document. An item's path is
 //! a path a mod writes after `mod_api::`: the path of the module that defines it when that path
 //! is public (so a re-export added later never changes the id), otherwise its shortest public
-//! path (the first in byte order among equals). `paths` lists every public path; signatures and
-//! `refs` write ids.
+//! path (the first in byte order among equals). An item defined in a private module has no
+//! public definition path; its public path is the one that survives moving it between internal
+//! files, so that path is its id. `paths` lists its public paths (each module through at most 16 routes of re-exports); signatures and `refs` write
+//! ids.
 //!
 //! | Record | Id |
 //! |---|---|
