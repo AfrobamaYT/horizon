@@ -79,12 +79,10 @@ pub(super) fn merge_tag(
     }
     for layer in layers {
         for v in layer.values {
-            if !values.contains(v) {
-                values.push(v.clone());
-            }
+            values.push(v.clone());
         }
         for r in layer.remove {
-            let mut removal = match r {
+            let removal = match r {
                 J::Str(id) => J::Obj(vec![
                     ("id".into(), J::Str(id.clone())),
                     ("remove".into(), J::Bool(true)),
@@ -95,9 +93,7 @@ pub(super) fn merge_tag(
                     entry
                 }
             };
-            if !values.contains(&removal) {
-                values.push(removal);
-            }
+            values.push(removal);
         }
     }
     doc.remove("remove");

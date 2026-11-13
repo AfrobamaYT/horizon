@@ -238,9 +238,18 @@ fn a_higher_mod_adds_back_what_a_lower_one_removed() {
         remove.extend(ids(&["minecraft:sand"]));
     }
     merge.add("high", file, false, true, &ids(&["minecraft:sand", "b:y"]));
+    merge.add("last", file, false, true, &[]);
+    if let Some((_, remove)) = merge.layers.last_mut() {
+        remove.extend(ids(&["minecraft:stone"]));
+    }
+    merge.add("restore", file, false, true, &ids(&["minecraft:stone"]));
+    merge.add("remove-again", file, false, true, &[]);
+    if let Some((_, remove)) = merge.layers.last_mut() {
+        remove.extend(ids(&["minecraft:stone"]));
+    }
     let merged: serde_json::Value = serde_json::from_str(
         &merge_tag(
-            Some(r#"{"values": ["minecraft:stone"]}"#),
+            Some(r#"{"values": ["minecraft:stone", "minecraft:sand"]}"#),
             &merge.layers(),
             "t",
             &LoadConditions::vanilla(),
@@ -253,6 +262,6 @@ fn a_higher_mod_adds_back_what_a_lower_one_removed() {
     let layers = horizon_world::tag_layers::TagLayers::from_file(&merged);
     assert_eq!(
         layers.build(|_| Vec::new()),
-        ["minecraft:stone", "a:x", "minecraft:sand", "b:y"]
+        ["a:x", "minecraft:sand", "b:y"]
     );
 }
