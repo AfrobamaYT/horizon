@@ -503,6 +503,7 @@ impl Game<'_> {
         self.adv.tree = advancements;
         self.adv.reset_tree();
         self.native_tags_updated(mod_api::TagsUpdateCause::ServerDataLoad { reload: true });
+        self.resolve_enchant_particles();
         self.announce_data_maps_updated(mod_api::DataMapsUpdateCause::ServerReload);
         self.build_screen();
     }
@@ -687,6 +688,7 @@ impl Game<'_> {
     pub(super) fn resolve_parts(&self) -> Result<()> {
         let prepared = self.prepare_parts(self.items())?;
         self.install_parts(prepared);
+        self.resolve_enchant_particles();
         Ok(())
     }
     /// Ask the parts of each block `isPathfindable` once per state and type: the answer depends
