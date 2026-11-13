@@ -11,5 +11,5 @@ horizon-client game::viewed_worlds::tests::a_viewed_sound_plays_where_a_listener
 horizon-client game::viewed_worlds::tests::with_no_listener_a_viewed_sound_is_dropped_after_one_check HORIZON_TEST_RESOURCES needs
 
 # Mod pet owner credit and shoulder identity fixtures.
-horizon-client game::items::combat::pet_credit_tests::a_tame_mod_wolf_types_hit_is_its_owners HORIZON_TEST_RESOURCES needs
-horizon-client game::mobs::shoulders::mod_parrot_tests::a_mod_parrot_type_rides_a_shoulder_as_itself HORIZON_TEST_RESOURCES needs
+horizon-client game::combat::pet_credit_tests::a_tame_mod_wolf_types_hit_is_its_owners HORIZON_TEST_RESOURCES needs
+horizon-client game::shoulders::mod_parrot_tests::a_mod_parrot_type_rides_a_shoulder_as_itself HORIZON_TEST_RESOURCES needs
