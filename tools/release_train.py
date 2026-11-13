@@ -2,7 +2,7 @@
 """Decides when Horizon releases, names the release and writes its notes (.github/workflows/release.yml).
 
     python3 tools/release_train.py decide --kind game [--head SHA] [--force]
-    python3 tools/release_train.py decide --kind game --channel nightly|snapshot [--head SHA] [--force]
+    python3 tools/release_train.py decide --kind game --channel nightly|snapshot [--head SHA] [--force] [--daily]
     python3 tools/release_train.py decide --kind launcher
     python3 tools/release_train.py notes --kind game --tag v2026.10.15 --out dist/notes
     python3 tools/release_train.py gate --kind game --smoke dist/smoke-test.json [--blockers]   # before publishing
@@ -317,11 +317,12 @@ def last_release(releases, kind):
     return max(ours, key=lambda release: tag_key(release["tag_name"]), default=None)
 
 
-def decision(kind, prs, now, paused=False, force=False, new_line=None, blockers=()):
+def decision(kind, prs, now, paused=False, force=False, new_line=None, blockers=(), daily=False):
     """Whether to release now, and why. prs: the merged pull requests since the last release, each with the
     files it changed under "paths" (player-facing ones only) and when it merged ("merged_at"). new_line: the
     release line ("0.2") when it has no release of this kind yet; its first goes out at once. blockers: the open
-    release-blocker issues; they hold every release, forced ones too."""
+    release-blocker issues; they hold every release, forced ones too. daily: the daily run's call for its
+    daily-green commit, published without the batch-size and age rules (it comes once a day, with no retry)."""
     counted = [pr for pr in prs if pr["paths"] and "skip-release" not in pr["labels"]]
     urgent = [pr for pr in counted if "release-now" in pr["labels"]]
     merged = [pr["merged_at"] for pr in counted if pr.get("merged_at")]
@@ -337,6 +338,8 @@ def decision(kind, prs, now, paused=False, force=False, new_line=None, blockers=
         return False, "no merged pull request changed what players run"
     if urgent:
         return True, "release-now: " + ", ".join(f"#{pr['number']}" for pr in urgent)
+    if daily:
+        return True, f"{len(counted)} pull requests changed what players run; the daily run passed this commit whole"
     if merged and now - min(merged) >= MAX_WAIT:
         return True, f"{len(counted)} pull requests changed what players run; the oldest has waited {MAX_WAIT.seconds // 3600} hours"
     if len(counted) < BATCH:
@@ -634,6 +637,8 @@ def main():
     parser.add_argument("command", choices=["decide", "notes", "gate"])
     parser.add_argument("--kind", choices=["game", "launcher"], required=True)
     parser.add_argument("--head", help="the commit to release (default: the newest commit on main whose checks passed)")
+    parser.add_argument("--daily", action="store_true",
+                        help="decide: the daily run's nightly, without the batch-size and age rules")
     parser.add_argument("--channel", choices=["nightly", "snapshot"],
                         help="decide: the fork's kind of build, which picks and checks the commit (see above)")
     parser.add_argument("--tag", help="notes: the release's tag")
@@ -689,7 +694,7 @@ def main():
     new_line = f"{line[0]}.{line[1]}" if line and first_on_line(tags, prefix, line) and not nightly else None
     blockers = open_blockers() if args.kind == "game" else []
     release, reason = decision(args.kind, prs, now, os.environ.get("RELEASES_PAUSED") == "1", args.force, new_line,
-                               blockers)
+                               blockers, daily=args.daily)
     if release and args.head and parity and not args.channel and not (passed_on("parity-main", head) and passed_on("checks", head)):
         release, reason = False, f"waiting for checks and parity-main to pass on {head[:9]}"
     urgent = False
