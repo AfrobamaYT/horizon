@@ -1,4 +1,12 @@
-use crate::scan::{Token, identifiers};
+use crate::scan::{Token, tokens};
+
+/// Every identifier of `text` with its 1-based line, in order of appearance.
+fn identifiers(text: &str) -> impl Iterator<Item = (&str, usize)> {
+    tokens(text).filter_map(|(token, line)| match token {
+        Token::Ident(name) => Some((name, line)),
+        _ => None,
+    })
+}
 
 fn names(text: &str) -> Vec<&str> {
     identifiers(text).map(|(name, _)| name).collect()
@@ -91,7 +99,6 @@ fn unterminated_input_ends_the_scan_without_a_panic() {
 
 #[test]
 fn tokens_keep_punctuation_literals_and_lifetimes_in_order() {
-    use crate::scan::tokens;
     let found: Vec<Token<'_>> = tokens("S { a: 'x', ..f::<'b>(\"s\", 1) } // c")
         .map(|(token, _)| token)
         .collect();

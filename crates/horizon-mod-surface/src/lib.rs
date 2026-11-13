@@ -72,6 +72,8 @@ pub mod diff;
 pub mod records;
 pub mod scan;
 pub mod shape;
+// On wasm the scan answers "cannot judge" before parsing, which leaves the reader unused.
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
 mod syntax;
 pub mod uses;
 

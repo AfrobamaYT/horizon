@@ -77,15 +77,24 @@ path (`world::DimensionSettings { … }`) counts for the API's struct of that na
 the mod's own only in the file that defines it outside any `#[cfg]`, when nothing in that file (a `use`, a glob,
 an inline module, a macro or attribute that is not standard or the API's) could change what the name means and
 the mod has no `include!`. What the parser cannot see counts as doubt, which refuses rather than guesses:
-- inside a `macro_rules!` body, every API struct name followed by `{` or `(` is a build in full, and a literal
-  the scan cannot place there counts every API struct the mod names as built in full;
-- a file that uses a macro, derive or attribute from outside the mod and the API counts every API struct it
-  names as built in full, because the expansion may build it.
+- inside a macro body, an API struct name followed by `{` or `(` is a build, in full unless it ends in `..`,
+  and so is a tuple or unit struct's name where a value starts (`.map(Pos)`). A literal the scan cannot place
+  there counts every buildable API struct the mod names as built in full;
+- a `Self { … }` the scan cannot tie to an impl, and a literal of a `type` alias whose target is not a plain
+  path, count the same way;
+- a file that uses a macro, derive or attribute from outside the mod and the API counts every buildable API
+  struct it names as built in full, because the expansion may build it.
 
 So a mod that builds API structs only through a dependency's macro is refused when such a struct gains a field,
-even if the macro would cope. The real compile on the player's machine is always the final check. Some sources
-cannot be judged at all: a file that does not parse as Rust (the message gives its line), one nested deeper
-than 256 levels, a `use` statement nested deeper than 64 groups, a symbolic link, or a `#[path]` or `include!`
-that leaves the mod's folder or is computed. A mod with a `[native.*]` table or internals is made for exactly
-one build, and this check does not apply to it. A mod that fits is still compiled against the target build,
-and the binary built is exact to that build.
+even if the macro would cope. One case stays out of the scan's reach: names assembled inside a macro from
+outside the mod (`paste!`, `concat_idents!`), which never appear in the source as written. The real compile on
+the player's machine is always the final check, and it catches those. Some sources cannot be judged at all:
+- a file that does not parse as Rust (the message gives its line);
+- source nested deeper than 256 levels;
+- a `use` statement nested deeper than 64 groups;
+- a symbolic link;
+- a `#[path]` or `include!` that leaves the mod's folder or is computed, or an `include!` renamed by a `use`;
+- any source when the scan runs where it cannot give the parser a stack of its own (on wasm).
+
+A mod with a `[native.*]` table or internals is made for exactly one build, and this check does not apply to
+it. A mod that fits is still compiled against the target build, and the binary built is exact to that build.

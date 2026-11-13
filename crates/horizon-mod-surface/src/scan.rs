@@ -31,14 +31,6 @@ pub fn tokens(text: &str) -> Tokens<'_> {
     }
 }
 
-/// Every identifier of `text` with its 1-based line, in order of appearance.
-pub fn identifiers(text: &str) -> impl Iterator<Item = (&str, usize)> {
-    tokens(text).filter_map(|(token, line)| match token {
-        Token::Ident(name) => Some((name, line)),
-        _ => None,
-    })
-}
-
 /// The iterator [`tokens`] returns.
 pub struct Tokens<'a> {
     text: &'a str,

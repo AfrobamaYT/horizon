@@ -148,32 +148,43 @@ fn decode(literal: &str) -> Option<String> {
     Some(out)
 }
 
-/// Whether the token at `at` sits inside an attribute's brackets, `#[…]` or `#![…]`.
-fn in_attribute(list: &[Token<'_>], at: usize) -> bool {
-    let mut depth = 0usize;
-    for index in (0..at).rev() {
-        match list[index] {
-            Token::Punct(b')' | b']' | b'}') => depth += 1,
-            Token::Punct(b'(' | b'[' | b'{') if depth > 0 => depth -= 1,
-            Token::Punct(b'[') => {
-                return index >= 1
-                    && (list[index - 1] == Token::Punct(b'#')
-                        || (index >= 2
-                            && list[index - 1] == Token::Punct(b'!')
-                            && list[index - 2] == Token::Punct(b'#')));
+/// For each token, whether it sits inside an attribute's brackets, `#[…]` or `#![…]`, at any
+/// depth. One pass.
+fn in_attributes(list: &[Token<'_>]) -> Vec<bool> {
+    let mut inside = Vec::with_capacity(list.len());
+    // Each open bracket, and whether it is or lies inside an attribute's.
+    let mut open: Vec<bool> = Vec::new();
+    for (at, token) in list.iter().enumerate() {
+        let outer = open.last().copied().unwrap_or(false);
+        match token {
+            Token::Punct(b'(' | b'[' | b'{') => {
+                let attribute = *token == Token::Punct(b'[')
+                    && at >= 1
+                    && (list[at - 1] == Token::Punct(b'#')
+                        || (at >= 2
+                            && list[at - 1] == Token::Punct(b'!')
+                            && list[at - 2] == Token::Punct(b'#')));
+                inside.push(outer);
+                open.push(outer || attribute);
             }
-            _ => {}
+            Token::Punct(b')' | b']' | b'}') => {
+                open.pop();
+                inside.push(outer);
+            }
+            _ => inside.push(outer),
         }
     }
-    false
+    inside
 }
 
 /// Every file `text` brings in with `#[path = "…"]` or `include!(…)` (any delimiter), each as a
 /// path relative to the mod's folder, given the file's folder. `Err` names the first one that
-/// leaves the folder or that the scan cannot read: a computed or undecodable path, or a
+/// leaves the folder or that the scan cannot read: a computed or undecodable path, an `include!`
+/// renamed by a `use` (`use std::include as inc;`), or a
 /// `#[path]` inside braces (an inline module, whose files nest by its name).
 fn references(text: &str, folder: &[String]) -> Result<Vec<String>, String> {
     let list: Vec<Token<'_>> = tokens(text).map(|(t, _)| t).collect();
+    let in_attribute = in_attributes(&list);
     let mut found = Vec::new();
     let mut depth = 0usize;
     let resolve = |at: usize, found: &mut Vec<String>| match list.get(at) {
@@ -197,12 +208,16 @@ fn references(text: &str, folder: &[String]) -> Result<Vec<String>, String> {
             Token::Ident("path")
                 if list.get(at + 1) == Some(&Token::Punct(b'='))
                     && list.get(at + 2) != Some(&Token::Punct(b'='))
-                    && in_attribute(&list, at) =>
+                    && in_attribute[at] =>
             {
                 if depth > 0 {
                     return Err("a #[path] inside braces".to_owned());
                 }
                 resolve(at + 2, &mut found)?;
+            }
+            // `use std::include as inc;`: an `include!` the scan would not see by its name.
+            Token::Ident("include") if list.get(at + 1) == Some(&Token::Ident("as")) => {
+                return Err("`include!` under another name".to_owned());
             }
             Token::Ident("include") if list.get(at + 1) == Some(&Token::Punct(b'!')) => {
                 let close = match list.get(at + 2) {
@@ -493,6 +508,19 @@ mod tests {
                 }
             );
         }
+        // `include!` under another name is not seen by its name: not judged.
+        for text in [
+            "use std::include as inc;\ninc!(\"y.rs\");",
+            "use core::{include as inc};\ninc!(\"../../shared/gen.rs\");",
+        ] {
+            assert!(matches!(escapes(text), ReadError::Escapes { .. }), "{text}");
+        }
+        // Many `path = …` statements outside attributes are read in one pass.
+        let many = format!("fn f() {{ {} }}", "path = x; ".repeat(400_000));
+        let started = std::time::Instant::now();
+        write(root, "src/lib.rs", &many);
+        assert!(read(root).is_ok());
+        assert!(started.elapsed() < std::time::Duration::from_millis(1500));
         // A `#[path]` inside an inline module nests by its name: not judged.
         assert!(matches!(
             escapes("mod outer { #[path = \"y.rs\"] mod inner; }"),

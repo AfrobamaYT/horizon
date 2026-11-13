@@ -28,21 +28,27 @@
 //!
 //! The parser does not expand macros, so what it cannot see is counted as doubt, never as
 //! fitting, because a refusal is safe and a wrong "fits" is not:
-//! - a macro body's tokens are read as they stand: every API struct name in one followed by
-//!   `{` or `(` is a build, and a literal of a name the scan cannot place there (a metavariable's
-//!   `$t { … }` or `$t(…)`, a struct of an unknown name) builds every API struct the mod names in
-//!   full;
+//! - a macro body's tokens are read as they stand: an API struct name in one followed by `{` or
+//!   `(` is a build, in full unless it ends in `..`, and so is a tuple or unit struct's name
+//!   where a value starts (`.map(Pos)`); a literal of a name the scan cannot place there (a
+//!   metavariable's `$t { … }` or `$t(…)`, a struct of an unknown name) builds every buildable
+//!   API struct the mod names in full;
+//! - so does a `Self { … }` the scan cannot tie to an impl of a plain path, and a literal of a
+//!   `type` alias whose target is not a plain path;
 //! - a file holding a macro or attribute that is neither standard, the API's own nor the mod's
 //!   own `macro_rules!` (a dependency's macro, an unknown derive or attribute macro), or a `use`
-//!   with a metavariable, builds in full every API struct it names, since that expansion may
-//!   build it.
+//!   with a metavariable, builds in full every buildable API struct it names, since that
+//!   expansion may build it.
 //!
-//! A file that does not parse, or nests deeper than [`syntax::MAX_NESTING`], cannot be judged
-//! ([`ScanError`]). Even a mod judged to fit is compiled on the player's machine against the
-//! target build, and that compile stays the final check. The scan also records the public paths
-//! the mod writes each item by: imported, written out, under an API glob (`prelude::Biome`
-//! after `use mod_api::*`), or through an API module the mod re-exports (`crate::prelude::Biome`
-//! after `pub use mod_api::prelude`).
+//! Names assembled inside a macro from outside the mod (`paste!`, `concat_idents!`) never appear
+//! in the source and are out of the scan's reach; the compile catches them. A file that does not
+//! parse, or nests deeper than [`syntax::MAX_NESTING`], cannot be judged ([`ScanError`]), and
+//! neither can any file where the parser cannot have a stack of its own (on wasm). Even a mod
+//! judged to fit is compiled on the player's machine against the target build, and that compile
+//! stays the final check. The scan also records the public paths the mod writes each item by:
+//! imported, written out, under an API glob (`prelude::Biome` after `use mod_api::*`), or
+//! through an API module or glob the mod re-exports (`crate::prelude::Biome` after
+//! `pub use mod_api::prelude`, `crate::Biome` after `pub use mod_api::prelude::*`).
 //!
 //! [`fits`] compares such a list with a target build's surface. The mod fits when every entry
 //! exists there with an equal hash and under every path the mod writes, every type keeps the
@@ -225,61 +231,65 @@ fn ident<'t>(tokens: &Tokens<'t>, at: usize) -> Option<&'t str> {
     }
 }
 
-/// The first token of the path that ends at `last`: `a::b::c` from `c`'s index.
-fn path_start(tokens: &Tokens<'_>, last: usize) -> usize {
-    let mut first = last;
-    while first >= 3
-        && punct(tokens, first - 1, b':')
-        && punct(tokens, first - 2, b':')
-        && ident(tokens, first - 3).is_some()
-    {
-        first -= 3;
+/// For each token, the first token of the path it ends: `a::b::c` from `c`'s index. One pass.
+fn path_starts(tokens: &Tokens<'_>) -> Vec<usize> {
+    let mut starts: Vec<usize> = Vec::with_capacity(tokens.len());
+    for at in 0..tokens.len() {
+        let start = if at >= 3
+            && ident(tokens, at).is_some()
+            && punct(tokens, at - 1, b':')
+            && punct(tokens, at - 2, b':')
+            && ident(tokens, at - 3).is_some()
+        {
+            starts[at - 3]
+        } else {
+            at
+        };
+        starts.push(start);
     }
-    first
+    starts
 }
 
-/// The index of the token that closes the bracket opened at `open`, if it closes.
-fn closing(tokens: &Tokens<'_>, open: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    for (index, (token, _)) in tokens.iter().enumerate().skip(open) {
+/// For each token that opens a bracket, the index of the token that closes it, if it closes;
+/// and whether its contents end in `..` at their own level: a base or rest in braces, a rest
+/// in parentheses (`..` before `)` or `,`; after it anything else is a range). One pass.
+fn brackets(tokens: &Tokens<'_>) -> (Vec<Option<usize>>, Vec<bool>) {
+    let mut closers = vec![None; tokens.len()];
+    let mut rests = vec![false; tokens.len()];
+    // Each open bracket with the previous token at its own level.
+    let mut open: Vec<(usize, Token<'_>)> = Vec::new();
+    for at in 0..tokens.len() {
+        let token = tokens[at].0;
         match token {
-            Token::Punct(b'(' | b'[' | b'{') => depth += 1,
+            Token::Punct(b'(' | b'[' | b'{') => {
+                open.push((at, token));
+                continue;
+            }
             Token::Punct(b')' | b']' | b'}') => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    return Some(index);
+                if let Some((start, _)) = open.pop() {
+                    closers[start] = Some(at);
+                }
+            }
+            Token::Punct(b'.') => {
+                if let Some((start, previous)) = open.last().copied()
+                    && punct(tokens, at + 1, b'.')
+                    && matches!(previous, Token::Punct(b'{' | b'(' | b','))
+                    && (punct(tokens, start, b'{')
+                        || matches!(
+                            tokens.get(at + 2).map(|(t, _)| *t),
+                            Some(Token::Punct(b')' | b','))
+                        ))
+                {
+                    rests[start] = true;
                 }
             }
             _ => {}
         }
-    }
-    None
-}
-
-/// Whether the literal or pattern whose bracket opens at `open` and closes at `close` ends its
-/// field list with `..` (a base expression or a rest pattern).
-fn has_rest(tokens: &Tokens<'_>, open: usize, close: usize) -> bool {
-    let mut depth = 0usize;
-    let mut previous = tokens[open].0;
-    for index in open + 1..close {
-        let token = tokens[index].0;
-        match token {
-            Token::Punct(b'(' | b'[' | b'{') => depth += 1,
-            Token::Punct(b')' | b']' | b'}') => depth = depth.saturating_sub(1),
-            Token::Punct(b'.')
-                if depth == 0
-                    && punct(tokens, index + 1, b'.')
-                    && matches!(previous, Token::Punct(b'{' | b'(' | b',')) =>
-            {
-                return true;
-            }
-            _ => {}
-        }
-        if depth == 0 {
-            previous = token;
+        if let Some(last) = open.last_mut() {
+            last.1 = token;
         }
     }
-    false
+    (closers, rests)
 }
 
 /// Whether the brace at `open` holds what a struct literal or pattern holds: nothing, `..`, or a
@@ -300,14 +310,8 @@ fn looks_like_fields(tokens: &Tokens<'_>, open: usize) -> bool {
 /// Whether the name at `at` stands where a type does, not a value: after `->`, `impl`, `for`,
 /// `dyn`, `<`, a definition keyword or a keyword whose block follows it, path segments before it
 /// skipped.
-fn in_type_position(tokens: &Tokens<'_>, mut at: usize) -> bool {
-    while at >= 3
-        && punct(tokens, at - 1, b':')
-        && punct(tokens, at - 2, b':')
-        && ident(tokens, at - 3).is_some()
-    {
-        at -= 3;
-    }
+fn in_type_position(tokens: &Tokens<'_>, path_starts: &[usize], at: usize) -> bool {
+    let at = path_starts.get(at).copied().unwrap_or(at);
     match at.checked_sub(1).map(|i| tokens[i].0) {
         Some(Token::Ident(
             "impl" | "for" | "dyn" | "struct" | "enum" | "union" | "trait" | "type" | "as" | "mod"
@@ -381,6 +385,16 @@ struct FileFacts<'t> {
     tokens: Vec<(Token<'t>, usize)>,
     /// Each token's first byte.
     starts: Vec<usize>,
+    /// Each token's path start ([`path_starts`]).
+    path_starts: Vec<usize>,
+    /// Each opening bracket's closer and whether it ends in `..` ([`brackets`]).
+    closers: Vec<Option<usize>>,
+    rests: Vec<bool>,
+    /// The parser's impls ordered by where their bodies start, each with the innermost impl
+    /// whose body holds it.
+    impls: Vec<(usize, Option<usize>)>,
+    /// The names some `use` in the file binds.
+    imported: BTreeSet<&'t str>,
     /// What the parser reads of the file.
     syntax: Syntax<'t>,
     /// Tokens inside a macro call's delimiters or a `macro_rules!` body, which the parser does
@@ -421,6 +435,8 @@ pub enum ScanError {
     /// The file nests brackets, generics or expressions deeper than the scan parses
     /// ([`syntax::MAX_NESTING`]), at this line.
     TooDeep { file: String, line: usize },
+    /// The parser's own stack could not be had (always so on wasm), so the file was not parsed.
+    NoStack { file: String },
 }
 
 impl std::fmt::Display for ScanError {
@@ -434,6 +450,10 @@ impl std::fmt::Display for ScanError {
                 f,
                 "{file}:{line}: the source nests deeper than {} levels; the mod's source cannot be judged",
                 syntax::MAX_NESTING
+            ),
+            Self::NoStack { file } => write!(
+                f,
+                "{file}: the scan could not start its parser; the mod's source cannot be judged"
             ),
             Self::Parse { file, line } => write!(
                 f,
@@ -507,19 +527,62 @@ fn file_facts<'t>(file: &str, text: &'t str) -> Result<FileFacts<'t>, ScanError>
             line,
         });
     }
-    let syntax = syntax::read(text).map_err(|line| ScanError::Parse {
-        file: file.to_owned(),
-        line,
+    let syntax = syntax::read(text).map_err(|unread| match unread {
+        syntax::Unread::Parse(line) => ScanError::Parse {
+            file: file.to_owned(),
+            line,
+        },
+        syntax::Unread::NoStack => ScanError::NoStack {
+            file: file.to_owned(),
+        },
     })?;
+    // Which tokens lie inside a macro body: one sweep over the bodies by where they start.
+    let mut bodies: Vec<&std::ops::Range<usize>> = syntax.macro_bodies.iter().collect();
+    bodies.sort_by_key(|body| body.start);
+    let (mut next, mut reach) = (0, 0);
     let in_macro: Vec<bool> = starts
         .iter()
         .map(|start| {
-            syntax
-                .macro_bodies
-                .iter()
-                .any(|body| body.start < *start && *start + 1 < body.end)
+            while next < bodies.len() && bodies[next].start < *start {
+                reach = reach.max(bodies[next].end);
+                next += 1;
+            }
+            *start + 1 < reach
         })
         .collect();
+    let path_starts = path_starts(&tokens);
+    let (closers, rests) = brackets(&tokens);
+    // The impls by where their bodies start, each with its innermost enclosing impl.
+    let mut order: Vec<usize> = (0..syntax.impls.len()).collect();
+    order.sort_by_key(|i| syntax.impls[*i].body.start);
+    let mut impls: Vec<(usize, Option<usize>)> = Vec::with_capacity(order.len());
+    let mut open: Vec<usize> = Vec::new();
+    for (position, index) in order.iter().enumerate() {
+        let body = &syntax.impls[*index].body;
+        while open
+            .last()
+            .is_some_and(|outer| syntax.impls[impls[*outer].0].body.end <= body.start)
+        {
+            open.pop();
+        }
+        impls.push((*index, open.last().copied()));
+        open.push(position);
+    }
+    // The next `;` and `=` at or after each token, for reading `type` items in macro bodies.
+    let mut next_semi = vec![tokens.len(); tokens.len() + 1];
+    let mut next_eq = vec![tokens.len(); tokens.len() + 1];
+    for at in (0..tokens.len()).rev() {
+        next_semi[at] = if punct(&tokens, at, b';') {
+            at
+        } else {
+            next_semi[at + 1]
+        };
+        next_eq[at] = if punct(&tokens, at, b'=') {
+            at
+        } else {
+            next_eq[at + 1]
+        };
+    }
     // What macro bodies write, which the parser leaves as tokens: paths, type aliases and
     // definitions.
     let mut chains = Vec::new();
@@ -528,17 +591,29 @@ fn file_facts<'t>(file: &str, text: &'t str) -> Result<FileFacts<'t>, ScanError>
     for at in (0..tokens.len()).filter(|at| in_macro[*at]) {
         match tokens[at].0 {
             Token::Ident("type") => {
-                // `type X = path::Y<…>;`: X names Y.
-                if let (Some(alias), Some(end)) = (
-                    ident(&tokens, at + 1),
-                    (at..tokens.len()).find(|i| punct(&tokens, *i, b';')),
-                ) && let Some(eq) = (at..end).find(|i| punct(&tokens, *i, b'='))
-                    && let Some(target) = (eq + 1..end)
-                        .take_while(|i| !punct(&tokens, *i, b'<'))
-                        .filter_map(|i| ident(&tokens, i))
-                        .last()
+                // `type X = path::Y<…>;`: X names Y. A target that is not a plain path (a
+                // tuple, a macro's output) is not recorded, so X stays a name the scan cannot
+                // place.
+                let eq = next_eq[at];
+                if let Some(alias) = ident(&tokens, at + 1)
+                    && eq < next_semi[at]
                 {
-                    type_aliases.push((alias, target, true));
+                    let mut last = eq + 1;
+                    if punct(&tokens, last, b':') && punct(&tokens, last + 1, b':') {
+                        last += 2;
+                    }
+                    while ident(&tokens, last).is_some()
+                        && punct(&tokens, last + 1, b':')
+                        && punct(&tokens, last + 2, b':')
+                    {
+                        last += 3;
+                    }
+                    if let Some(target) = ident(&tokens, last)
+                        && !punct(&tokens, last + 1, b'!')
+                        && !punct(&tokens, last + 1, b'(')
+                    {
+                        type_aliases.push((alias, target, true));
+                    }
                 }
             }
             Token::Ident("struct" | "enum" | "union") => {
@@ -550,7 +625,7 @@ fn file_facts<'t>(file: &str, text: &'t str) -> Result<FileFacts<'t>, ScanError>
                 if !in_use[at]
                     && punct(&tokens, at + 1, b':')
                     && punct(&tokens, at + 2, b':')
-                    && path_start(&tokens, at) == at =>
+                    && path_starts[at] == at =>
             {
                 // A path written out: `a::b::C`.
                 let mut path = vec![first];
@@ -583,7 +658,7 @@ fn file_facts<'t>(file: &str, text: &'t str) -> Result<FileFacts<'t>, ScanError>
                         _ => false,
                     } =>
             {
-                let first = path_start(&tokens, at - 1);
+                let first = path_starts[at - 1];
                 if first >= 1 && punct(&tokens, first - 1, b'$') {
                     macro_calls.push(vec!["$"]);
                     continue;
@@ -606,15 +681,25 @@ fn file_facts<'t>(file: &str, text: &'t str) -> Result<FileFacts<'t>, ScanError>
                     at + 1
                 };
                 if punct(&tokens, open, b'[') {
-                    attributes.push((open, closing(&tokens, open).unwrap_or(tokens.len())));
+                    attributes.push((open, closers[open].unwrap_or(tokens.len())));
                 }
             }
             _ => {}
         }
     }
+    let imported = imports
+        .iter()
+        .filter(|(_, local)| *local != "*")
+        .map(|(_, local)| *local)
+        .collect();
     Ok(FileFacts {
         tokens,
         starts,
+        path_starts,
+        closers,
+        rests,
+        impls,
+        imported,
         syntax,
         in_macro,
         imports,
@@ -657,7 +742,9 @@ struct ModFacts<'t> {
     own_macros: BTreeSet<&'t str>,
 }
 
-fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
+fn mod_facts<'t>(files: &[FileFacts<'t>], api_prefixes: &BTreeSet<String>) -> ModFacts<'t> {
+    // Only a path the API has is bound, which keeps each name's bindings few.
+    let known = |path: &[&str]| api_prefixes.contains(&path.join("::"));
     let mut roots = BTreeSet::from(["mod_api"]);
     for file in files {
         for (path, name) in &file.imports {
@@ -708,7 +795,7 @@ fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
             if name != &last {
                 facts.aliases.entry(name).or_default().insert(last);
             }
-            if api && path.len() >= 2 {
+            if api && path.len() >= 2 && known(&path[1..]) {
                 facts
                     .bound
                     .entry(name)
@@ -740,10 +827,11 @@ fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
                 for prefix in facts.bound.get(path[0]).into_iter().flatten() {
                     let mut full = prefix.clone();
                     full.extend(&path[1..]);
-                    if !facts
-                        .bound
-                        .get(name)
-                        .is_some_and(|known| known.contains(&full))
+                    if known(&full)
+                        && !facts
+                            .bound
+                            .get(name)
+                            .is_some_and(|bound| bound.contains(&full))
                     {
                         more.push((name, full));
                     }
@@ -955,14 +1043,15 @@ impl Trusted<'_> {
 
     /// Whether the attribute written in `tokens[start..end]` is certainly a standard or API one,
     /// reading `derive(…)` and `cfg_attr(…)` arguments to `depth` levels.
-    fn attribute(&self, tokens: &Tokens<'_>, start: usize, end: usize, depth: usize) -> bool {
+    fn attribute(&self, file: &FileFacts<'_>, start: usize, end: usize, depth: usize) -> bool {
+        let tokens = &file.tokens;
         let (path, next) = path_at(tokens, start, end);
         if path.is_empty() || depth == 0 {
             return false;
         }
         let arguments = || {
             punct(tokens, next, b'(')
-                .then(|| closing(tokens, next))
+                .then(|| file.closers[next])
                 .flatten()
                 .map(|close| arguments(tokens, next, close))
         };
@@ -976,7 +1065,7 @@ impl Trusted<'_> {
             ["cfg_attr"] if self.path(&path, Named::Attribute) => arguments().is_some_and(|list| {
                 list.iter()
                     .skip(1)
-                    .all(|(from, to)| self.attribute(tokens, *from, *to, depth - 1))
+                    .all(|(from, to)| self.attribute(file, *from, *to, depth - 1))
             }),
             _ => self.path(&path, Named::Attribute),
         }
@@ -994,7 +1083,7 @@ impl Trusted<'_> {
     fn attributes(&self, file: &FileFacts<'_>) -> bool {
         file.attributes
             .iter()
-            .all(|(open, close)| self.attribute(&file.tokens, open + 1, *close, 16))
+            .all(|(open, close)| self.attribute(file, open + 1, *close, 16))
     }
 
     /// Whether the scan reads every expansion in `file`: each macro is a standard or API one
@@ -1109,7 +1198,23 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
         .iter()
         .map(|(file, text)| file_facts(file, text))
         .collect::<Result<_, _>>()?;
-    let module = mod_facts(&files);
+    // Every API module or item path and each of its prefixes, `mod_api::` left out: what a
+    // name bound to an API path can stand for.
+    let mut api_prefixes: BTreeSet<String> = BTreeSet::new();
+    for (id, paths) in &public_paths {
+        let own = id.split_once(':').map(|(_, rest)| rest.to_owned());
+        for path in paths.iter().cloned().chain(own) {
+            let mut prefix = String::new();
+            for segment in path.split("::") {
+                if !prefix.is_empty() {
+                    prefix.push_str("::");
+                }
+                prefix.push_str(segment);
+                api_prefixes.insert(prefix.clone());
+            }
+        }
+    }
+    let module = mod_facts(&files, &api_prefixes);
     let trusted = Trusted {
         roots: &module.roots,
         api_macros: surface
@@ -1145,10 +1250,16 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
     };
     // A file brought in by `include!` is part of its includer's scope: with one anywhere, no
     // file is judged on its own.
+    // `include!` under another name too (`use std::include as inc;`), which the folder reader
+    // refuses.
     let included = files.iter().any(|file| {
         file.macro_calls
             .iter()
             .any(|path| path.last() == Some(&"include"))
+            || file
+                .imports
+                .iter()
+                .any(|(path, _)| path.last() == Some(&"include"))
     });
     // Whether a file holds an expansion the scan cannot follow: a `use` with a metavariable,
     // or a macro or attribute that is neither a standard or API one nor the mod's own
@@ -1173,13 +1284,35 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
     // defines it at its top level under no `#[cfg]` (a `type` alias of an API item is no
     // definition), no `use` in it binds the name, and the file is certain. Anything else leaves
     // the API's.
-    let own_in = |file: &FileFacts<'_>, certain: bool, name: &str| {
+    // The API names each name may stand for, worked out once per name.
+    let api_names = std::cell::RefCell::new(BTreeMap::<&str, BTreeSet<&str>>::new());
+    let api_names_of = |name: &str| -> BTreeSet<&str> {
+        if let Some(known) = api_names.borrow().get(name) {
+            return known.clone();
+        }
+        let found = api_names_of(name, &module, &by_name);
+        if let Some(key) = module.aliases.get_key_value(name).map(|(key, _)| *key) {
+            api_names.borrow_mut().insert(key, found.clone());
+        }
+        found
+    };
+    // In each file, the `type` aliases of an API item, which define no type of the mod's own.
+    let api_aliases: Vec<BTreeSet<&str>> = files
+        .iter()
+        .map(|file| {
+            file.type_aliases
+                .iter()
+                .filter(|(_, target, item)| *item && !api_names_of(target).is_empty())
+                .map(|(alias, _, _)| *alias)
+                .collect()
+        })
+        .collect();
+    let own_in = |index: usize, certain: bool, name: &str| {
+        let file = &files[index];
         certain
             && file.syntax.defines.contains(name)
-            && !file.type_aliases.iter().any(|(alias, target, item)| {
-                *item && *alias == name && !api_names_of(target, &module, &by_name).is_empty()
-            })
-            && !file.imports.iter().any(|(_, local)| *local == name)
+            && !api_aliases[index].contains(name)
+            && !file.imported.contains(name)
     };
     let mod_globs: BTreeSet<Vec<&str>> = files.iter().flat_map(|f| api_globs(f, &module)).collect();
     // Each API path (`mod_api::` left out) a path written in a file may be: through an API
@@ -1199,7 +1332,8 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
             .into_iter()
             .map(|p| p.iter().map(|s| (*s).to_owned()).collect())
             .collect();
-        if rest.len() >= 2 {
+        // `crate::Biome` through the mod's own `pub use mod_api::prelude::*`.
+        if rest.len() >= 2 || (inside > 0 && !rest.is_empty()) {
             for glob in globs {
                 out.push(glob.iter().chain(rest).map(|s| (*s).to_owned()).collect());
             }
@@ -1220,10 +1354,10 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
         }
     };
     // The API structs a name in a file may be, as ids, and whether it is the mod's own there.
-    let resolve = |file: &FileFacts<'_>, certain: bool, name: &str, unqualified: bool| {
-        let api_names = api_names_of(name, &module, &by_name);
+    let resolve = |index: usize, certain: bool, name: &str, unqualified: bool| {
+        let api_names = api_names_of(name);
         let aliased = api_names.iter().any(|api| *api != name);
-        let own = unqualified && !aliased && own_in(file, certain, name);
+        let own = unqualified && !aliased && own_in(index, certain, name);
         let ids: Vec<&str> = api_names
             .iter()
             .flat_map(|api| by_name[api].iter().copied())
@@ -1240,18 +1374,24 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
             && !module.item_aliases.contains(name)
             && !module.others.contains(name)
     };
-    for (((path, _), file), (certain, opaque)) in sources
-        .iter()
-        .zip(&files)
-        .zip(certain.iter().copied().zip(opaque.iter().copied()))
-    {
+    for (index, ((path, _), file)) in sources.iter().zip(&files).enumerate() {
+        let (certain, opaque) = (certain[index], opaque[index]);
         let tokens = &file.tokens;
-        let impl_at = |byte: usize| {
-            file.syntax
+        // The innermost impl whose body holds `byte`: its target, `None` inside it when the
+        // scan cannot read the target, `None` outside any.
+        let impl_at = |byte: usize| -> Option<Option<&Vec<&str>>> {
+            let after = file
                 .impls
-                .iter()
-                .filter(|i| i.body.start < byte && byte < i.body.end)
-                .min_by_key(|i| i.body.len())
+                .partition_point(|(i, _)| file.syntax.impls[*i].body.start < byte);
+            let mut at = after.checked_sub(1);
+            while let Some(position) = at {
+                let (i, outer) = file.impls[position];
+                if byte < file.syntax.impls[i].body.end {
+                    return Some(file.syntax.impls[i].target.as_ref());
+                }
+                at = outer;
+            }
+            None
         };
         // Every name: the records it names.
         for (at, (token, line)) in tokens.iter().enumerate() {
@@ -1259,11 +1399,20 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
             let Token::Ident(written_name) = token else {
                 continue;
             };
-            let start = path_start(tokens, at);
+            let start = file.path_starts[at];
+            let open = at + 1;
+            let opens = punct(tokens, open, b'{') || punct(tokens, open, b'(');
             let (name, unqualified) = match *written_name {
                 "Self" => match impl_at(file.starts[at]) {
-                    Some(i) => (*i.target.last().unwrap_or(&"Self"), i.target.len() == 1),
-                    None => continue,
+                    Some(Some(target)) => (*target.last().unwrap_or(&"Self"), target.len() == 1),
+                    // In a macro body the parser does not read, or in an impl of a type it
+                    // cannot read, `Self { … }` builds a struct the scan cannot place.
+                    _ => {
+                        if file.in_macro[at] && opens {
+                            mark_unsure(place());
+                        }
+                        continue;
+                    }
                 },
                 name => (
                     name,
@@ -1271,20 +1420,20 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                         && !(at >= 2 && punct(tokens, at - 1, b':') && punct(tokens, at - 2, b':')),
                 ),
             };
-            let (ids, aliased, own) = resolve(file, certain, name, unqualified);
+            let (ids, aliased, own) = resolve(index, certain, name, unqualified);
             if ids.is_empty() {
                 // In a macro body, which the parser does not read: a literal of a name the
-                // scan cannot place, or a metavariable's `$name { … }`.
+                // scan cannot place, or a metavariable's `$name { … }` or `$name(…)`, which
+                // may be a struct's name.
                 let metavariable = at >= 1 && punct(tokens, at - 1, b'$');
-                // A metavariable followed by `(` may be a tuple struct's name.
                 if file.in_macro[at]
-                    && ((punct(tokens, at + 1, b'{')
-                        && !in_type_position(tokens, at)
+                    && ((punct(tokens, open, b'{')
+                        && !in_type_position(tokens, &file.path_starts, at)
                         && unknown(name)
-                        && looks_like_fields(tokens, at + 1))
+                        && looks_like_fields(tokens, open))
                         || (metavariable
-                            && (punct(tokens, at + 1, b'{') || punct(tokens, at + 1, b'('))
-                            && !in_type_position(tokens, at - 1)))
+                            && opens
+                            && !in_type_position(tokens, &file.path_starts, at - 1)))
                 {
                     mark_unsure(place());
                 }
@@ -1319,18 +1468,31 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                     // names.
                     building.entry(id).or_default().record(place(), true, false);
                 }
+                if !file.in_macro[at] {
+                    continue;
+                }
                 // In a macro body: a name followed by `{` or `(` is a build, in full unless it
-                // ends in `..`.
-                let open = at + 1;
-                if file.in_macro[at] && (punct(tokens, open, b'{') || punct(tokens, open, b'(')) {
-                    let rest =
-                        closing(tokens, open).is_some_and(|close| has_rest(tokens, open, close));
-                    let full = !rest && kind(id) != Some(TypeKind::Union);
+                // ends in `..`; a tuple or unit struct's name where a value starts is one too
+                // (`.map(Pos)`, `x = Marker`).
+                if opens {
+                    let full = !file.rests[open] && kind(id) != Some(TypeKind::Union);
                     building.entry(id).or_default().record(
                         place(),
                         full,
                         punct(tokens, open, b'{'),
                     );
+                } else if matches!(kind(id), Some(TypeKind::TupleStruct | TypeKind::UnitStruct))
+                    && !(punct(tokens, open, b':') && punct(tokens, open + 1, b':'))
+                    && !punct(tokens, open, b'!')
+                    && start >= 1
+                    && match tokens[start - 1].0 {
+                        Token::Punct(b'(' | b',' | b'=' | b'[') => true,
+                        Token::Punct(b'>') => punct(tokens, start.saturating_sub(2), b'='),
+                        Token::Ident(word) => matches!(word, "return" | "break"),
+                        _ => false,
+                    }
+                {
+                    building.entry(id).or_default().record(place(), true, false);
                 }
             }
         }
@@ -1339,15 +1501,23 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
             let place = || (path.clone(), build.line);
             let (name, unqualified) = match &build.path[..] {
                 ["Self"] => match impl_at(build.byte) {
-                    Some(i) => (*i.target.last().unwrap_or(&"Self"), i.target.len() == 1),
-                    None => continue,
+                    Some(Some(target)) => (*target.last().unwrap_or(&"Self"), target.len() == 1),
+                    // Outside any impl the parser placed, or in one of a type it cannot read:
+                    // a struct the scan cannot place.
+                    _ => {
+                        mark_unsure(place());
+                        continue;
+                    }
                 },
                 [.., last] => (*last, build.path.len() == 1 && !build.rooted),
                 [] => continue,
             };
-            let (ids, _, own) = resolve(file, certain, name, unqualified);
+            let (ids, _, own) = resolve(index, certain, name, unqualified);
             if ids.is_empty() {
-                if build.brace && unknown(name) {
+                // A literal of a name the scan cannot place may be an API struct by another
+                // name; one written from the standard library is not.
+                let standard = matches!(build.path.first(), Some(&("std" | "core" | "alloc")));
+                if build.brace && unknown(name) && !standard {
                     mark_unsure(place());
                 }
                 continue;
@@ -1374,7 +1544,13 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
         }
         // The API paths this file writes: imported, written out in code or in macro bodies,
         // or under an imported glob.
-        let globs = api_globs(file, &module);
+        // A file with a glob of the mod's own (`use super::*;`) sees the mod's API globs.
+        let mut globs = api_globs(file, &module);
+        if file.imports.iter().any(|(segments, local)| {
+            *local == "*" && matches!(segments.first(), Some(&("crate" | "self" | "super")))
+        }) {
+            globs.extend(mod_globs.iter().cloned());
+        }
         let mut paths: Vec<Vec<String>> = Vec::new();
         for (segments, local) in &file.imports {
             if *local != "*" {

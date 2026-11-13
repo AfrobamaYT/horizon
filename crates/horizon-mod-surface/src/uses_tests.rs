@@ -2096,7 +2096,7 @@ fn scan_result(source: &str) -> Result<Uses, ScanError> {
 #[test]
 fn source_nested_past_the_limit_cannot_be_judged_and_nothing_overflows() {
     // Each shape the parser reads by recursion, nested `n` deep after a literal on line 1.
-    let shapes: [(&str, fn(usize) -> String); 16] = [
+    let shapes: [(&str, fn(usize) -> String); 18] = [
         ("parens", |n| {
             format!("let x = {}1{};", "(".repeat(n), ")".repeat(n))
         }),
@@ -2111,7 +2111,7 @@ fn source_nested_past_the_limit_cannot_be_judged_and_nothing_overflows() {
         ("refs", |n| format!("let x = {}y;", "&".repeat(n))),
         ("closures", |n| format!("let x = {}1;", "|y| ".repeat(n))),
         ("empty closures", |n| {
-            format!("let x = {}1;", "move || ".repeat(n))
+            format!("let x = {}1;", "|| ".repeat(n))
         }),
         ("assignments", |n| format!("{}1;", "a = ".repeat(n))),
         ("returns", |n| format!("{}1;", "return ".repeat(n))),
@@ -2128,6 +2128,12 @@ fn source_nested_past_the_limit_cannot_be_judged_and_nothing_overflows() {
         ("mut refs", |n| format!("let {}y = z;", "&mut ".repeat(n))),
         ("mixed", |n| {
             format!("let x = {}y{};", "(!-&".repeat(n), ")".repeat(n))
+        }),
+        ("two-parameter closures", |n| {
+            format!("let x = {}0;", "|a, b| ".repeat(n))
+        }),
+        ("generics with commas", |n| {
+            format!("let x: {}u8{} = y;", "V<u8, ".repeat(n), ">".repeat(n))
         }),
     ];
     for (shape, nest) in shapes {
@@ -2152,13 +2158,13 @@ fn source_nested_past_the_limit_cannot_be_judged_and_nothing_overflows() {
             }
             Err(other) => panic!("{shape}: {other}"),
         };
-        // Real code nests well within the limit; 100 000 deep is refused, not overflowed.
+        // Real code nests well within the limit; 20 000 deep is refused, not overflowed.
         assert!(!too_deep(16), "{shape}");
-        assert!(too_deep(100_000), "{shape}");
+        assert!(too_deep(20_000), "{shape}");
         // The deepest nesting accepted parses, on the scan's own stack.
         let mut refused = 4 * crate::syntax::MAX_NESTING;
         assert!(too_deep(refused), "{shape}");
-        let mut judged = 16;
+        let mut judged = crate::syntax::MAX_NESTING / 4;
         while refused - judged > 1 {
             let middle = (judged + refused) / 2;
             if too_deep(middle) {
@@ -2169,7 +2175,33 @@ fn source_nested_past_the_limit_cannot_be_judged_and_nothing_overflows() {
         }
         assert!(judged <= crate::syntax::MAX_NESTING, "{shape}: {judged}");
     }
-    // Siblings do not add up: a long list of negative numbers is judged.
+    // 500 000 closures of two parameters are refused before the parser sees them.
+    let closures = format!("fn f() {{ let g = {}0; }}", "|a, b| ".repeat(500_000));
+    assert!(matches!(
+        scan_result(&closures),
+        Err(ScanError::TooDeep { line: 1, .. })
+    ));
+    // Siblings do not add up: a long list of negative numbers, a table of shifts and a match
+    // of many guarded arms are judged.
+    let shifts: Vec<String> = (0..1000).map(|i| format!("1 << {i}")).collect();
+    let arms: Vec<String> = (0..1000).map(|i| format!("v if v < {i} => {i},")).collect();
+    let closures = "|x: u8| x, ".repeat(1000);
+    for source in [
+        format!(
+            "const M: [u128; 1000] = [{}];\nfn f() {{ let s = Settings {{ height: 1 }}; }}",
+            shifts.join(", ")
+        ),
+        format!(
+            "fn g(v: u32) -> u32 {{ match v {{ {} _ => 0 }} }}\nfn f() {{ let s = Settings {{ height: 1 }}; }}",
+            arms.join(" ")
+        ),
+        format!("fn f() {{ let s = Settings {{ height: 1 }}; let c = [{closures}]; }}"),
+    ] {
+        assert_eq!(
+            entry(&scan_on(wider(), &source), "type:Settings").built,
+            Some(Built::Full)
+        );
+    }
     let list = format!(
         "fn f() {{ let s = Settings {{ height: 1 }}; let x = [{}]; }}",
         "-1, ".repeat(10_000)
@@ -2608,7 +2640,7 @@ fn a_macro_body_is_read_as_tokens() {
         built_in(
             &[
                 ("src/m.rs", maker),
-                ("src/lib.rs", "fn f(_: Pos) { make!(Pos); }")
+                ("src/lib.rs", "fn f(_: Pos) { make! { Pos } }")
             ],
             "type:Pos"
         ),
@@ -2732,4 +2764,154 @@ fn parser_names_are_read_as_written() {
         )],
     );
     assert_eq!(entry(&matched, "type:Marker").built, Some(Built::Full));
+}
+
+#[test]
+fn round_six_inputs_are_not_fits() {
+    // A tuple struct's constructor passed as a value inside a macro body.
+    let pos = |files: &[(&str, &str)]| built_in(files, "type:Pos");
+    for source in [
+        "use mod_api::Pos;\npub fn ids(raw: Option<(i32, i32)>) -> Vec<Option<Pos>> { vec![raw.map(|(a, b)| Pos(a, b)), None.map(Pos)] }",
+        "fn f(p: mod_api::Pos) { assert_eq!(Some(p), Some(1).map(mod_api::Pos)); }",
+        "fn f() { let v = vec![mod_api::Pos, mod_api::Pos]; }",
+    ] {
+        assert_eq!(
+            pos(&[("src/lib.rs", source)]),
+            Some(Built::Full),
+            "{source}"
+        );
+    }
+    // A `Self` the parser cannot place: an impl of a parenthesised type, or one inside the
+    // mod's own `macro_rules!` with a `where` clause.
+    let dims = format!("{{ {DIMS_LITERAL} }}").replace("DimensionSettings {", "Self {");
+    for source in [
+        format!(
+            "trait Make {{ fn make() -> Self; }}\nimpl Make for (mod_api::world::DimensionSettings) {{ fn make() -> Self {dims} }}"
+        ),
+        format!(
+            "trait Make {{ fn make() -> Self; }}\nmacro_rules! make {{ () => {{ impl Make for mod_api::world::DimensionSettings where u8: Copy {{ fn make() -> Self {dims} }} }}; }}\nmake!();"
+        ),
+        // An alias of a type the scan cannot read.
+        format!(
+            "type Dims = (mod_api::world::DimensionSettings);\npub fn d() -> Dims {{ {} }}",
+            DIMS_LITERAL.replace("DimensionSettings", "Dims")
+        ),
+        format!(
+            "macro_rules! dims_ty {{ () => {{ mod_api::world::DimensionSettings }}; }}\ntype Dims = dims_ty!();\npub fn d() -> Dims {{ {} }}",
+            DIMS_LITERAL.replace("DimensionSettings", "Dims")
+        ),
+        // An impl of a macro's type, an alias of a macro's type defining the name, and an
+        // alias of a macro's type inside a macro body.
+        format!(
+            "macro_rules! dims {{ () => {{ mod_api::world::DimensionSettings }}; }}\ntrait Make {{ fn make() -> Self; }}\nimpl Make for dims!() {{ fn make() -> Self {dims} }}"
+        ),
+        format!(
+            "macro_rules! dims {{ () => {{ mod_api::world::DimensionSettings }}; }}\ntype DimensionSettings = dims!();\nfn f() -> DimensionSettings {{ {DIMS_LITERAL} }}"
+        ),
+        format!(
+            "macro_rules! dims_ty {{ () => {{ mod_api::world::DimensionSettings }}; }}\nmacro_rules! m {{ () => {{ type Dims = dims_ty!(); pub fn d() -> Dims {{ {} }} }}; }}\nm!();",
+            DIMS_LITERAL.replace("DimensionSettings", "Dims")
+        ),
+        // An alias of a projection the scan cannot read defines nothing of the mod's own.
+        format!(
+            "trait Id {{ type This; }}\nimpl<T> Id for T {{ type This = T; }}\ntype DimensionSettings = <mod_api::world::DimensionSettings as Id>::This;\nfn f() -> DimensionSettings {{ {DIMS_LITERAL} }}"
+        ),
+        // `include!` under another name.
+        format!(
+            "use std::include as inc;\nstruct DimensionSettings {{ pub mine: u8 }}\nfn f() -> DimensionSettings {{ {DIMS_LITERAL} }}"
+        ),
+    ] {
+        refused_for_the_new_field(fits_a_new_dims_field(&[("src/lib.rs", &source)]));
+    }
+    // Through parentheses the parser reads the type: a base literal there fits.
+    let based = "trait Make { fn make() -> Self; }\nimpl Make for (mod_api::world::DimensionSettings) { fn make() -> Self { Self { min_y: 0, ..Default::default() } } }\ntype Dims = (mod_api::world::DimensionSettings);\nfn d() -> Dims { Dims { height: 1, ..Default::default() } }";
+    assert_eq!(fits_a_new_dims_field(&[("src/lib.rs", based)]), Fit::Fits);
+    // A literal from the standard library is no doubt.
+    assert_eq!(
+        built_in(
+            &[(
+                "src/lib.rs",
+                "fn f(_: Settings) { let r = std::ops::Range { start: 0, end: 5 }; }"
+            )],
+            "type:Settings"
+        ),
+        Some(Built::None)
+    );
+    // In a macro body, `..` before an expression is a range, and before `)` a rest (tokens
+    // cannot tell a pattern from a literal there, so it counts as a base).
+    let in_macro = |body: &str| format!("macro_rules! m {{ () => {{ {body} }}; }}");
+    assert_eq!(
+        pos(&[("src/lib.rs", &in_macro("vec![mod_api::Pos(0, ..10)]"))]),
+        Some(Built::Full)
+    );
+    assert_eq!(
+        pos(&[("src/lib.rs", &in_macro("let mod_api::Pos(x, ..) = p;"))]),
+        Some(Built::Base)
+    );
+}
+
+#[test]
+fn a_path_through_the_mods_own_glob_records_the_api_path() {
+    let mut biome = api_type("type:world::Biome", "", false, vec![]);
+    biome.paths = vec!["world::Biome".into(), "prelude::Biome".into()];
+    for world in [
+        "pub fn f(_: crate::Biome) {}",
+        "use super::*;\npub fn f(_: Biome) {}",
+    ] {
+        let mut made_for = wider();
+        made_for.types.push(biome.clone());
+        let uses = scan_files(
+            made_for,
+            &[
+                ("src/lib.rs", "pub use mod_api::prelude::*;\nmod world;"),
+                ("src/world.rs", world),
+            ],
+        );
+        assert_eq!(
+            entry(&uses, "type:world::Biome").paths,
+            ["prelude::Biome"],
+            "{world}"
+        );
+        let mut dropped = wider();
+        let mut moved = biome.clone();
+        moved.paths = vec!["world::Biome".into()];
+        dropped.types.push(moved);
+        assert_eq!(
+            words(fits(uses.entries(), &dropped.build())),
+            ["`mod_api::prelude::Biome` is no longer exported under that path"]
+        );
+    }
+}
+
+#[test]
+fn large_generated_files_scan_in_linear_time() {
+    // Each would take quadratic time in some walk over the file: many macro bodies, many
+    // `type` keywords in one body, a long path, and many `Self`s among many impls.
+    let n = 20_000;
+    for source in [
+        format!("fn f(_: Settings) {{ {} }}", "a!(); ".repeat(n)),
+        format!("m! {{ {} }}\nfn f(_: Settings) {{}}", "type ".repeat(n)),
+        format!("fn f(_: Settings) {{ let x = {}y; }}", "a::".repeat(n)),
+        format!(
+            "fn f(_: Settings) {{}}\n{}",
+            "impl S { fn f() -> Self { Self } }\n".repeat(n / 2)
+        ),
+    ] {
+        let started = std::time::Instant::now();
+        assert!(ids(&scan_on(wider(), &source)).contains(&"type:Settings"));
+        let took = started.elapsed();
+        assert!(
+            took < std::time::Duration::from_millis(1000),
+            "{took:?}: {}",
+            &source[..40]
+        );
+    }
+}
+
+#[test]
+fn self_after_a_nested_impl_is_the_outer_impls() {
+    // The inner impl's body ends before `Self { … }`, which is the outer impl's own struct.
+    let source = "struct Settings { mine: u8 }\nimpl Settings { fn f(_: Pos) -> Self { impl Clone for Q { fn clone(&self) -> Q { Q } } Self { mine: 1 } } }";
+    let uses = scan_on(wider(), source);
+    assert_eq!(entry(&uses, "type:Pos").built, Some(Built::None));
 }

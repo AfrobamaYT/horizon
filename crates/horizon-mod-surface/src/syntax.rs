@@ -37,8 +37,9 @@ pub(crate) struct Build<'t> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Impl<'t> {
     pub body: Range<usize>,
-    /// Its names, an empty first one for a leading `::`.
-    pub target: Vec<&'t str>,
+    /// Its names, an empty first one for a leading `::`; `None` when the type is not a plain
+    /// path the scan can read (a tuple, a macro), so what `Self` means there is unknown.
+    pub target: Option<Vec<&'t str>>,
 }
 
 /// What the parser reads of one file.
@@ -62,6 +63,16 @@ pub(crate) struct Syntax<'t> {
     pub inline_modules: bool,
     /// The bytes inside each macro call's delimiters, and each `macro_rules!` body.
     pub macro_bodies: Vec<Range<usize>>,
+}
+
+/// The path a type is, through parentheses and invisible groups; `None` for any other type.
+fn plain_path(ty: &syn::Type) -> Option<&syn::Path> {
+    match ty {
+        syn::Type::Path(t) if t.qself.is_none() => Some(&t.path),
+        syn::Type::Paren(t) => plain_path(&t.elem),
+        syn::Type::Group(t) => plain_path(&t.elem),
+        _ => None,
+    }
 }
 
 /// Whether an item carries `#[cfg(…)]` or `#[cfg_attr(…)]`.
@@ -88,15 +99,13 @@ impl<'t> Reader<'t> {
     }
 
     fn alias(&mut self, alias: &syn::Ident, ty: &syn::Type, item: bool) {
+        // An alias of a type the scan cannot read is not recorded, so a literal of its name is
+        // of a name the scan cannot place.
         let alias = self.name(alias);
-        let target = match ty {
-            syn::Type::Path(t) => t.path.segments.last().map(|last| self.name(&last.ident)),
-            _ => None,
-        };
-        // A target the scan cannot read is recorded as the alias itself: unknown, so unsure.
-        self.out
-            .type_aliases
-            .push((alias, target.unwrap_or(alias), item));
+        if let Some(last) = plain_path(ty).and_then(|path| path.segments.last()) {
+            let target = self.name(&last.ident);
+            self.out.type_aliases.push((alias, target, item));
+        }
     }
 
     fn build(&mut self, path: &syn::Path, how: How, brace: bool) {
@@ -170,16 +179,17 @@ impl<'a, 't> Visit<'a> for Reader<'t> {
     }
 
     fn visit_item_impl(&mut self, i: &'a syn::ItemImpl) {
-        if let syn::Type::Path(t) = &*i.self_ty {
-            let mut target = self.names(&t.path);
-            if t.path.leading_colon.is_some() {
+        let target = plain_path(&i.self_ty).map(|path| {
+            let mut target = self.names(path);
+            if path.leading_colon.is_some() {
                 target.insert(0, "");
             }
-            self.out.impls.push(Impl {
-                body: i.brace_token.span.join().byte_range(),
-                target,
-            });
-        }
+            target
+        });
+        self.out.impls.push(Impl {
+            body: i.brace_token.span.join().byte_range(),
+            target,
+        });
         visit::visit_item_impl(self, i);
     }
 
@@ -253,10 +263,25 @@ const RECURSIVE: &[&str] = &[
     "async", "box", "break", "dyn", "fn", "if", "impl", "let", "move", "ref", "return", "yield",
 ];
 
-/// The first line where the parser would recurse deeper than [`MAX_NESTING`], counted along the
-/// path of nesting: each open bracket or generic `<`, and within a statement (up to its `;`,
-/// `,` or a `}` that ends it) each prefix operator, closure, assignment, `@` and
-/// recursive keyword. A file within it parses well inside the parser's stack.
+/// What the nesting count is inside: a bracket, a generic `<`, or a closure's parameters.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Frame {
+    Bracket,
+    Angle,
+    Params,
+}
+
+/// The first line where the parser would recurse deeper than [`MAX_NESTING`].
+///
+/// The count is taken along the path of nesting. Each open bracket, generic `<` and closure
+/// counts until it closes, and so does each assignment, `@` and keyword the parser reads what
+/// follows by recursion. A run of prefix operators counts until its operand ends. A count is
+/// dropped only where the parser has certainly returned: at the bracket that encloses it
+/// closing, at a `;`, at a match arm's `=>`, at a `}` that ends a statement, and at a `,`
+/// directly inside a bracket (between elements, arms or fields). A `,` inside a generic or a
+/// closure's parameters drops nothing, since generic arguments and parameters are listed with
+/// commas. A `<` straight after a literal, `)`, `]` or `?` compares or shifts, so it counts as
+/// nothing.
 pub(crate) fn too_deep(tokens: &[(Token<'_>, usize)]) -> Option<usize> {
     let token = |at: usize| tokens.get(at).map(|(t, _)| *t);
     let punct = |at: usize, byte: u8| token(at) == Some(Token::Punct(byte));
@@ -266,78 +291,116 @@ pub(crate) fn too_deep(tokens: &[(Token<'_>, usize)]) -> Option<usize> {
         Some(Token::Ident(name)) => !KEYWORDS.contains(&name),
         _ => false,
     };
-    // Each open bracket (`true`) or generic `<` (`false`), with the depth before it.
-    let mut frames: Vec<(usize, bool)> = Vec::new();
-    let mut depth = 0usize;
-    // Inside a closure's parameters, whose closing `|` is no new closure.
-    let mut params = false;
+    let mut frames: Vec<(usize, Frame)> = Vec::new();
+    // The count that stays until a drop, and the prefix operators of the current operand.
+    let (mut depth, mut run) = (0usize, 0usize);
+    // The previous `<` counted as nothing (`1 << 2`).
+    let mut compared = false;
     let mut skip = false;
+    // Drops the generics and closure parameters above the innermost bracket, and the count of
+    // the statement inside it.
+    let end_statement = |frames: &mut Vec<(usize, Frame)>| {
+        while frames
+            .last()
+            .is_some_and(|(_, frame)| *frame != Frame::Bracket)
+        {
+            frames.pop();
+        }
+        frames.last().map_or(0, |(before, _)| before + 1)
+    };
     for (at, (current, line)) in tokens.iter().enumerate() {
-        let statement =
-            |frames: &[(usize, bool)]| frames.last().map_or(0, |(before, _)| before + 1);
         if skip {
             skip = false;
             continue;
         }
+        let was_compared = std::mem::take(&mut compared);
         match current {
             Token::Punct(b'(' | b'[' | b'{') => {
-                frames.push((depth, true));
-                depth += 1;
-                params = false;
+                frames.push((depth + run, Frame::Bracket));
+                depth += run + 1;
+                run = 0;
             }
             Token::Punct(b')' | b']' | b'}') => {
-                while let Some((before, bracket)) = frames.pop() {
+                while let Some((before, frame)) = frames.pop() {
                     depth = before;
-                    if bracket {
+                    if frame == Frame::Bracket {
                         break;
                     }
                 }
+                run = 0;
                 // A block that ends its statement: the next one starts afresh.
                 if punct(at, b'}')
                     && match token(at + 1) {
                         None | Some(Token::Punct(b'}' | b';' | b',' | b'#' | b')' | b']')) => true,
-                        Some(Token::Ident(next)) => !matches!(next, "else" | "as"),
+                        Some(Token::Ident(next)) => !matches!(next, "else" | "as" | "in"),
                         _ => false,
                     }
                 {
-                    while frames.last().is_some_and(|(_, bracket)| !bracket) {
-                        frames.pop();
-                    }
-                    depth = statement(&frames);
+                    depth = end_statement(&mut frames);
                 }
             }
-            Token::Punct(b';') => {
-                while frames.last().is_some_and(|(_, bracket)| !bracket) {
-                    frames.pop();
+            // A match arm's pattern and guard end at `=>`, generics and comparisons with them.
+            Token::Punct(b';') | Token::Punct(b'=') if punct(at, b';') || punct(at + 1, b'>') => {
+                depth = end_statement(&mut frames);
+                run = 0;
+            }
+            Token::Punct(b',') => {
+                if frames
+                    .last()
+                    .is_none_or(|(_, frame)| *frame == Frame::Bracket)
+                {
+                    depth = end_statement(&mut frames);
                 }
-                depth = statement(&frames);
-                params = false;
+                run = 0;
             }
-            Token::Punct(b',') => depth = statement(&frames),
-            Token::Punct(b'<') if !punct(at + 1, b'=') => {
-                frames.push((depth, false));
-                depth += 1;
+            Token::Punct(b'<') if punct(at + 1, b'=') => run = 0,
+            Token::Punct(b'<')
+                if was_compared
+                    || matches!(
+                        at.checked_sub(1).and_then(token),
+                        Some(Token::Literal(_) | Token::Punct(b')' | b']' | b'?'))
+                    ) =>
+            {
+                compared = true;
+                run = 0;
             }
-            // `->` closes no generic; what follows it recurses through what is counted.
-            Token::Punct(b'>') if at >= 1 && punct(at - 1, b'-') => {}
-            Token::Punct(b'>') if !punct(at + 1, b'=') && !(at >= 1 && punct(at - 1, b'=')) => {
-                if let Some((before, false)) = frames.last().copied() {
+            Token::Punct(b'<') => {
+                frames.push((depth + run, Frame::Angle));
+                depth += run + 1;
+                run = 0;
+            }
+            Token::Punct(b'>') => {
+                // Not `->`, `=>` or `>=`: the close of the innermost generic, if one is open.
+                if !(at >= 1 && (punct(at - 1, b'-') || punct(at - 1, b'=')))
+                    && !punct(at + 1, b'=')
+                    && let Some((before, Frame::Angle)) = frames.last().copied()
+                {
                     frames.pop();
                     depth = before;
                 }
+                run = 0;
             }
             Token::Punct(b'|') => {
-                if params {
-                    params = false;
+                if frames
+                    .last()
+                    .is_some_and(|(_, frame)| *frame == Frame::Params)
+                {
+                    // The parameters end; the closure's body follows.
+                    if let Some((before, _)) = frames.pop() {
+                        depth = before + 1;
+                    }
                 } else if operand_end(at) {
                     // A binary `|` or `||`.
                     skip = punct(at + 1, b'|');
+                } else if punct(at + 1, b'|') {
+                    // A closure with no parameters.
+                    depth += run + 1;
+                    skip = true;
                 } else {
-                    // A closure: `||` has no parameters.
-                    depth += 1;
-                    skip = punct(at + 1, b'|');
-                    params = !skip;
+                    frames.push((depth + run, Frame::Params));
+                    depth += run + 1;
                 }
+                run = 0;
             }
             Token::Punct(b'=')
                 if !punct(at + 1, b'=')
@@ -349,37 +412,67 @@ pub(crate) fn too_deep(tokens: &[(Token<'_>, usize)]) -> Option<usize> {
                         )) =>
             {
                 depth += 1;
+                run = 0;
             }
-            Token::Punct(b'@') => depth += 1,
-            Token::Punct(b'-' | b'!' | b'*' | b'&' | b'.') if !operand_end(at) => depth += 1,
+            Token::Punct(b'@') => {
+                depth += 1;
+                run = 0;
+            }
+            Token::Punct(b'-' | b'!' | b'*' | b'&' | b'.') if !operand_end(at) => run += 1,
+            // A path's `::` continues the operand.
+            Token::Punct(b':') => {}
+            Token::Punct(_) => run = 0,
             Token::Ident(name) if RECURSIVE.contains(name) => depth += 1,
             _ => {}
         }
-        if depth > MAX_NESTING {
+        if depth + run > MAX_NESTING {
             return Some(*line);
         }
     }
     None
 }
 
-/// Parses `text` and reads it; the line of the parse error when it does not parse.
-pub(crate) fn read(text: &str) -> Result<Syntax<'_>, usize> {
-    // The parser reads nesting by recursion. [`too_deep`] bounds it; a stack of its own leaves
-    // room for any file within that bound, wherever the scan is called from.
+/// The stack the parser runs on. Measured on 20 shapes nested as deep as [`too_deep`] accepts
+/// (brackets, generics with and without commas, closures with one and two parameters,
+/// references, `fn` types, assignments, `return`, `@`, `else if`, mixes of them), the deepest
+/// needs 1.6 MiB in a release build and 1.5 MiB in a test build; this leaves a tenfold margin.
+const PARSER_STACK: usize = 16 << 20;
+
+/// Why a file was not read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Unread {
+    /// It does not parse, at this line.
+    Parse(usize),
+    /// The parser's own stack could not be had, so parsing would risk the caller's: always on
+    /// wasm, which has no threads.
+    NoStack,
+}
+
+/// Parses `text` and reads it, on a thread with a stack of its own.
+pub(crate) fn read(text: &str) -> Result<Syntax<'_>, Unread> {
+    // The parser reads nesting by recursion. [`too_deep`] bounds it, and a stack of its own
+    // leaves room for any file within that bound, wherever the scan is called from. Without one
+    // the file is not parsed at all.
     #[cfg(not(target_family = "wasm"))]
     {
         std::thread::scope(|scope| {
-            std::thread::Builder::new()
-                .stack_size(256 << 20)
+            match std::thread::Builder::new()
+                .stack_size(PARSER_STACK)
                 .spawn_scoped(scope, || parse(text))
-                .map_or_else(|_| parse(text), |thread| thread.join().unwrap_or(Err(1)))
+            {
+                Ok(thread) => thread.join().unwrap_or(Err(Unread::NoStack)),
+                Err(_) => Err(Unread::NoStack),
+            }
         })
     }
     #[cfg(target_family = "wasm")]
-    parse(text)
+    {
+        let _ = text;
+        Err(Unread::NoStack)
+    }
 }
 
-fn parse(text: &str) -> Result<Syntax<'_>, usize> {
+fn parse(text: &str) -> Result<Syntax<'_>, Unread> {
     // The parser skips a byte-order mark and a shebang line itself, which would shift every
     // byte it reports; blank them in a copy of the same length instead.
     let mut copy = text.to_owned();
@@ -402,7 +495,10 @@ fn parse(text: &str) -> Result<Syntax<'_>, usize> {
                     syn::Item::Struct(i) if !conditional(&i.attrs) => Some(&i.ident),
                     syn::Item::Enum(i) if !conditional(&i.attrs) => Some(&i.ident),
                     syn::Item::Union(i) if !conditional(&i.attrs) => Some(&i.ident),
-                    syn::Item::Type(i) if !conditional(&i.attrs) => Some(&i.ident),
+                    // An alias defines its name only when the scan can read what it stands for.
+                    syn::Item::Type(i) if !conditional(&i.attrs) && plain_path(&i.ty).is_some() => {
+                        Some(&i.ident)
+                    }
                     _ => None,
                 };
                 if let Some(ident) = defined {
@@ -413,7 +509,7 @@ fn parse(text: &str) -> Result<Syntax<'_>, usize> {
             reader.visit_file(&file);
             Ok(reader.out)
         }
-        Err(error) => Err(error.span().start().line.max(1)),
+        Err(error) => Err(Unread::Parse(error.span().start().line.max(1))),
     };
     // The parser keeps every text it read for its spans until told to forget them.
     proc_macro2::extra::invalidate_current_thread_spans();
