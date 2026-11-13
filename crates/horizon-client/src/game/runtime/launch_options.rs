@@ -3,11 +3,12 @@
 use super::*;
 
 #[derive(Clone)]
-pub(super) struct Options {
+pub(crate) struct Options {
     pub(super) resources: PathBuf,
     pub(super) distance: i32,
     pub(super) distance_override: Option<i32>,
     pub(super) seed: i64,
+    pub(super) developer_single_player: bool,
     pub(super) creative: bool,
     pub(super) test_terrain: bool,
     /// `--pregen`: enable the command even when the saved Extras switch is off.
@@ -24,7 +25,6 @@ pub(super) struct Options {
     /// `--world-frames N`: exit after N frames drawn in the world (smoke runs; the world may load slowly).
     pub(super) world_frames: Option<u64>,
     pub(super) screenshot_after: Option<u64>,
-    /// `--timeout-seconds N`; see [`Options::time_limit`].
     pub(super) timeout: Option<Duration>,
     pub(super) report: Option<PathBuf>,
     pub(super) world: Option<String>,
@@ -36,14 +36,14 @@ pub(super) struct Options {
     pub(super) no_pause: bool,
     /// Control socket path (`--control`), for `horizon-ctl`.
     pub(super) control: Option<PathBuf>,
-    /// `HORIZON_SPIKES=MS`: the slow ring's threshold, and spans on for every thread; nothing is logged.
+    /// `HORIZON_SPIKES=MS`: the slow ring's threshold, with spans on every thread; nothing is logged.
     pub(super) spikes: Option<f32>,
     /// Render into a texture instead of the window (`--offscreen`), so a
     /// GPU the display cannot present from can still be benchmarked. The
     /// window stays hidden and never grabs the system pointer.
     pub(super) offscreen: bool,
     /// `--headless` (#4951): no display, no window and no renderer. The game runs its own
-    /// loop (`game/headless.rs`) instead of winit's, so it starts where no display server
+    /// loop (`game/runtime/headless.rs`) instead of winit's, so it starts where no display server
     /// is (an SSH session, a server). It counts as `offscreen` for everything else (an
     /// automated run that never shows a window or grabs the pointer).
     pub(super) headless: bool,
@@ -63,18 +63,19 @@ pub(super) struct Options {
     pub(super) transfers: Option<horizon_client::lan::arrivals::Settings>,
     /// `--benchmark SCENARIO`: run the benchmark, write its report and quit.
     pub(super) benchmark: Option<String>,
-    /// `--benchmark-set SWITCH=VALUE`: a setting for the benchmark's run, with `--benchmark travel`.
+    /// `--benchmark-set SWITCH=VALUE`: a graphics choice for the travel benchmark.
     pub(super) benchmark_set: Option<(String, String)>,
-    /// `--profile`: with `--benchmark`, record a .hzperf capture of the run that embeds the report.
+    /// `--profile`: capture the benchmark run in a .hzperf file.
     pub(super) benchmark_profile: bool,
-    /// `--dev-mod PATH` (repeatable): content mods always on.
-    pub(super) dev_mods: Vec<PathBuf>,
+    /// Content selection and the compiled native runtime shared with resource loaders.
+    pub(super) mods: mods::ModsState,
     /// What this Game executes; independent of its current server connection.
     pub(super) execution_role: execution_role::ExecutionRole,
     /// `--fullscreen` (vanilla's): the window opens fullscreen whatever options.txt says,
     /// as vanilla's DisplayData does, without saving it there.
     pub(super) fullscreen: bool,
-    /// `--game-dir DIR`: the folder `read` makes the working directory (saves, options.txt...).
+    /// `--game-dir DIR`: the folder `read` makes the working directory (saves, options.txt...);
+    /// none for a splitscreen player's game, which shares P1's working directory.
     pub(super) game_dir: Option<PathBuf>,
     /// `--quickPlaySingleplayer`, checked once the game folder is known.
     pub(super) quick_play: Option<String>,
@@ -84,6 +85,11 @@ pub(super) struct Options {
 }
 
 impl Options {
+    /// Whether this `Game` is the process's client start: not a dedicated server, and not
+    /// a splitscreen guest, whose `run` is another local player joining the same process.
+    pub(super) fn is_client_start(&self) -> bool {
+        self.execution_role.is_client() && !self.split_guest
+    }
     /// The name to join servers with: the one given, else the offline name kept
     /// next to options.txt (created on first use).
     pub(super) fn player_name(&self) -> String {
@@ -100,25 +106,15 @@ impl Options {
     }
     /// The command line, then what it asks of the process: the game folder, the account.
     /// A bad command line is a [`launch_api::UsageError`] (exit code 2, no crash report).
-    pub(super) fn read() -> Result<Option<Self>> {
-        let Some(mut o) = Self::parse(std::env::args().skip(1))
-            .map_err(|e| launch_api::UsageError(e.to_string()))?
-        else {
-            return Ok(None);
-        };
-        // Paths given on the command line stay relative to where the game was started.
-        if o.game_dir.is_some() {
-            o.control = o.control.map(std::path::absolute).transpose()?;
-        }
-        // Refused here, before the account's file is used up or anything loads.
-        if let Some(path) = &o.control {
-            horizon_client::control::check_path(path).map_err(|e| {
-                launch_api::UsageError(format!("--control-socket {}: {e}", path.display()))
-            })?;
+    pub(super) fn read(mut o: Self) -> Result<Self> {
+        if o.pregen {
+            horizon_client::command::vanilla::set_horizon_commands(true);
         }
         // The launcher's account: online-mode servers need it. A bad file
         // only leaves the game offline.
-        let session = if o.session_stdin {
+        let session = if o.developer_single_player {
+            Ok(None)
+        } else if o.session_stdin {
             let mut text = String::new();
             std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)
                 .map_err(|e| e.to_string())
@@ -141,11 +137,10 @@ impl Options {
             Ok(None) => {}
             Err(e) => eprintln!("Horizon: not signed in: {e}"),
         }
-        split::launcher::read_now();
+        if !o.developer_single_player {
+            split::launcher::read_now();
+        }
         if let Some(dir) = o.game_dir.take() {
-            // These too stay relative to where the game was started.
-            o.resources = std::path::absolute(&o.resources)?;
-            o.report = o.report.map(std::path::absolute).transpose()?;
             std::fs::create_dir_all(&dir)
                 .and_then(|()| std::env::set_current_dir(&dir))
                 .map_err(|e| format!("game folder {}: {e}", dir.display()))?;
@@ -164,18 +159,27 @@ impl Options {
                 eprintln!("Quick play: there is no world {world} in saves/");
             }
         }
-        Ok(Some(o))
+        Ok(o)
     }
-    /// How long this run may last before it stops with an error: `--timeout-seconds`, else
-    /// 120 s for a frame-limited run. A run without either (a player's, or one a harness
-    /// drives over the control socket) has no limit.
+    /// Explicit timeouts apply to every run; only frame-limited runs get a default.
     pub(super) fn time_limit(&self) -> Option<Duration> {
         self.timeout
             .or(self.frames.map(|_| Duration::from_secs(120)))
     }
     /// The command line alone: no file is read and nothing changes. `None` for `--help` and
     /// `--launch-api`, which print and end the run.
-    pub(super) fn parse(mut args: impl Iterator<Item = String>) -> Result<Option<Self>> {
+    #[cfg(test)]
+    pub(super) fn parse(args: impl Iterator<Item = String>) -> Result<Option<Self>> {
+        Self::from_launch(LaunchArguments::parse(
+            args,
+            &std::env::current_dir()?,
+            &horizon_client::logging::game_home(),
+            std::env::var_os("HORIZON_HOME").as_deref(),
+        )?)
+    }
+    pub(super) fn from_launch(
+        LaunchArguments { context, rest }: LaunchArguments,
+    ) -> Result<Option<Self>> {
         let sibling = std::env::current_exe()?
             .parent()
             .ok_or("missing executable directory")?
@@ -189,6 +193,7 @@ impl Options {
             distance: 12,
             distance_override: None,
             seed: 0,
+            developer_single_player: false,
             creative: false,
             test_terrain: false,
             pregen: false,
@@ -222,59 +227,62 @@ impl Options {
             benchmark: None,
             benchmark_set: None,
             benchmark_profile: false,
-            dev_mods: Vec::new(),
+            mods: mods::ModsState {
+                dev: context.dev_mods,
+                ..Default::default()
+            },
             execution_role: execution_role::ExecutionRole::Client,
             fullscreen: false,
-            game_dir: None,
+            game_dir: Some(context.game_dir),
             quick_play: None,
             session_file: std::env::var("HORIZON_SESSION_FILE").ok(),
             session_stdin: false,
         };
-        while let Some(arg) = args.next() {
-            match arg.as_str() {
-                "--help" | "-h" => {
-                    println!(
-                        "Horizon — Minecraft Java Edition {} in Rust\n\n  --resources PATH        Prepared resources (horizon-prepare)\n  --render-distance N     Chunks, 2..128 (default 12)\n  --world NAME            World folder under saves/ (default \"New World\")\n  --seed N                World seed for new worlds (default 0)\n  --width N, --height N   Window size (default 1280 x 720)\n  --creative              Creative mode (default survival)\n  --test-terrain          Simple test terrain instead of vanilla generation\n  --frames N              Exit after N frames (testing)\n  --world-frames N        Exit after N frames drawn in the world (testing)\n  --timeout-seconds N     Exit with an error after N seconds (testing; default 120 with --frames, else none)\n  --smoke-report PATH     Write a JSON report on exit\n  --benchmark SCENARIO    Run a benchmark (standard, village, forest, ocean, mountain, travel, ab:SWITCH), write its report to benchmarks/ and quit\n  --profile               With --benchmark: also write a performance capture (reports/*.hzperf in the game home) that embeds the report\n  --benchmark-set S=V     With --benchmark travel: set a graphics switch (gpu-culling, section-cull, section-sides, section-draws) to one of its two values first\n  --control               Accept horizon-ctl commands on a local socket\n  --control-socket PATH   Control socket path (default $XDG_RUNTIME_DIR/horizon-control.sock)\n  --transfers SETTINGS    A dedicated server takes a proxy's hand-over requests (server.toml [transfer], docs/server.md)\n  --server HOST[:PORT]    Join a multiplayer server (offline mode) at start\n  --quickPlaySingleplayer WORLD  Open this world of saves/ at start, only if it exists (vanilla's)\n  --quickPlayMultiplayer HOST[:PORT]  The same as --server (vanilla's name)\n  --name NAME             Player name for multiplayer (default: generated once, kept in horizon-player.txt)\n  --session-file PATH     Signed-in account from the launcher (read once, then deleted)\n  --session-stdin         The same account as JSON on standard input\n  --game-dir DIR          Game folder: saves, options.txt, packs, mods (default: the working directory)\n  --home DIR              Logs and crash reports (default $HORIZON_HOME, else the platform data folder)\n  --player-dir DIR        This player's own files when several play in one game folder: options.txt, logs, horizon-player.txt, servers.dat, screenshots\n  --fullscreen            Open the window fullscreen\n  --launch-api            Print the Launch API version and options as JSON (docs/api/launch.md)\n  --dev-mod PATH          A content mod (.hmod or folder) to develop: always on\n  --pregen                Add Horizon's /pregen command (docs/pregeneration.md)\n\nControls: mouse look, WASD move, Space jump, Left Shift sneak, Left Ctrl sprint,\nleft click break, right click place/use, 1-9/scroll hotbar, E inventory,\nQ drop, F3 debug, Esc pause.",
-                        horizon_core::VANILLA_VERSION
-                    );
-                    return Ok(None);
-                }
-                "--launch-api" => {
-                    println!("{}", launch_api::reply(&horizon_client::crash::version()));
-                    return Ok(None);
-                }
-                "--fullscreen" => o.fullscreen = true,
-                "--profile" => o.benchmark_profile = true,
-                "--session-stdin" => o.session_stdin = true,
-                "--dedicated" => {
+        for argument in rest {
+            match argument {
+                Argument::Switch(arg) => match arg.as_str() {
+                    "--help" | "-h" => {
+                        println!(
+                            "Horizon — Minecraft Java Edition {} in Rust\n\n  --resources PATH        Prepared resources (horizon-prepare)\n  --render-distance N     Chunks, 2..128 (default 12)\n  --world NAME            World folder under saves/ (default \"New World\")\n  --seed N                World seed for new worlds (default 0)\n  --width N, --height N   Window size (default 1280 x 720)\n  --creative              Creative mode (default survival)\n  --test-terrain          Simple test terrain instead of vanilla generation\n  --game-tests            Enable test-only mod content (or HORIZON_GAME_TESTS=1/true)\n  --frames N              Exit after N frames (testing)\n  --world-frames N        Exit after N frames drawn in the world (testing)\n  --smoke-report PATH     Write a JSON report on exit\n  --benchmark SCENARIO    Run a benchmark (standard, village, forest, ocean, mountain, travel, ab:SWITCH), write its report to benchmarks/ and quit\n  --profile               With --benchmark: also write a performance capture that embeds the report\n  --benchmark-set S=V     With --benchmark travel: set gpu-culling, section-cull, section-sides or section-draws\n  --control               Accept horizon-ctl commands on a local socket\n  --control-socket PATH   Control socket path (default $XDG_RUNTIME_DIR/horizon-control.sock)\n  --server HOST[:PORT]    Join a multiplayer server (offline mode) at start\n  --quickPlaySingleplayer WORLD  Open this world of saves/ at start, only if it exists (vanilla's)\n  --quickPlayMultiplayer HOST[:PORT]  The same as --server (vanilla's name)\n  --name NAME             Player name for multiplayer (default: generated once, kept in horizon-player.txt)\n  --session-file PATH     Signed-in account from the launcher (read once, then deleted)\n  --session-stdin         The same account as JSON on standard input\n  --game-dir DIR          Game folder: saves, options.txt, packs, mods (default: the working directory)\n  --home DIR              Logs and crash reports (default $HORIZON_HOME, else the platform data folder)\n  --player-dir DIR        This player's own files when several play in one game folder: options.txt, logs, horizon-player.txt, servers.dat, screenshots\n  --fullscreen            Open the window fullscreen\n  --launch-api            Print the Launch API version and options as JSON (docs/api/launch.md)\n  --dev-mod PATH          A content mod (.hmod or folder) to develop: always on\n  --pregen                Add Horizon's /pregen command (docs/pregeneration.md)\n\nControls: mouse look, WASD move, Space jump, Left Shift sneak, Left Ctrl sprint,\nleft click break, right click place/use, 1-9/scroll hotbar, E inventory,\nQ drop, F3 debug, Esc pause.",
+                            horizon_core::VANILLA_VERSION
+                        );
+                        return Ok(None);
+                    }
+                    "--launch-api" => {
+                        println!("{}", launch_api::reply(&horizon_client::crash::version()));
+                        return Ok(None);
+                    }
+                    "--fullscreen" => o.fullscreen = true,
+                    "--profile" => o.benchmark_profile = true,
+                    "--session-stdin" => o.session_stdin = true,
+                    "--developer-single-player" => o.developer_single_player = true,
+                    "--creative" => o.creative = true,
+                    "--test-terrain" => o.test_terrain = true,
+                    "--no-pause" => o.no_pause = true,
+                    "--offscreen" => o.offscreen = true,
+                    "--headless" => {
+                        o.headless = true;
+                        o.offscreen = true;
+                    }
+                    "--control" => o.control = Some(horizon_client::control::default_path()),
+                    // Single player always runs on its server thread: a launcher's saved arguments
+                    // may still name the old switches.
+                    "--server-thread" | "--game-tests" => {}
+                    "--in-frame" | "--no-server-thread" => eprintln!(
+                        "Horizon: {arg} was removed: single player runs on its server thread."
+                    ),
+                    // Horizon's own commands (/pregen), off by default as on vanilla.
+                    "--pregen" => {
+                        o.pregen = true;
+                    }
+                    _ => return Err(format!("{arg}: unknown option").into()),
+                },
+                Argument::Dedicated(args) => {
                     o.execution_role = execution_role::ExecutionRole::DedicatedServer;
-                    o.dedicated = Some(args.by_ref().collect());
+                    o.dedicated = Some(args);
                     break;
                 }
-                "--creative" => o.creative = true,
-                "--test-terrain" => o.test_terrain = true,
-                "--no-pause" => o.no_pause = true,
-                "--offscreen" => o.offscreen = true,
-                "--headless" => {
-                    o.headless = true;
-                    o.offscreen = true;
-                }
-                "--control" => o.control = Some(horizon_client::control::default_path()),
-                // Single player always runs on its server thread: a launcher's saved arguments
-                // may still name the old switches.
-                "--server-thread" => {}
-                "--in-frame" | "--no-server-thread" => eprintln!(
-                    "Horizon: {arg} was removed: single player runs on its server thread."
-                ),
-                // Horizon's own commands (/pregen), off by default as on vanilla.
-                "--pregen" => {
-                    o.pregen = true;
-                    horizon_client::command::vanilla::set_horizon_commands(true);
-                }
-                _ => {
-                    let value = args
-                        .next()
-                        .ok_or_else(|| format!("missing value after {arg}"))?;
+                Argument::Value(arg, value) => {
                     // A launcher shows the error to the player: it names the option.
                     let read = || -> Result<()> {
                         match arg.as_str() {
@@ -301,7 +309,6 @@ impl Options {
                             "--frames" => o.frames = Some(value.parse()?),
                             "--world-frames" => {
                                 o.world_frames = Some(value.parse()?);
-                                // A frame-limited run in every other respect; --timeout-seconds still applies.
                                 o.frames.get_or_insert(u64::MAX);
                             }
                             "--timeout-seconds" => {
@@ -324,12 +331,9 @@ impl Options {
                                 }
                                 o.quick_play = Some(value);
                             }
-                            "--game-dir" | "--gameDir" => o.game_dir = Some(value.into()),
-                            // main has made it the game home already (logging::set_game_home).
-                            "--home" => {}
-                            // ...and this player's own folder (logging::set_player_dir).
+                            // main has set this player's own folder (logging::set_player_dir).
                             "--player-dir" => {}
-                            "--dev-mod" => o.dev_mods.push(std::path::absolute(&value)?),
+
                             "--benchmark" => {
                                 horizon_client::benchmark::Scenario::parse(&value)?;
                                 o.benchmark = Some(value);
@@ -374,6 +378,7 @@ impl Options {
         if o.benchmark_profile && o.benchmark.is_none() {
             return Err("--profile needs --benchmark".into());
         }
+        o.validate_developer_single_player()?;
         Ok(Some(o))
     }
 }
@@ -383,14 +388,13 @@ mod tests {
     use super::*;
 
     fn limit(args: &[&str]) -> Option<Duration> {
-        Options::parse(args.iter().map(|a| a.to_string()))
+        Options::parse(args.iter().map(|arg| arg.to_string()))
             .unwrap()
             .unwrap()
             .time_limit()
     }
 
-    /// `--timeout-seconds` holds on every run, so a game a harness drives over the control
-    /// socket still ends when the harness is gone; frame-limited runs keep their 120 s.
+    /// Upstream's regression: a control-socket run must not outlive its explicit deadline.
     #[test]
     fn timeout_seconds_limits_every_run() {
         let secs = |n| Some(Duration::from_secs(n));
