@@ -66,8 +66,8 @@ impl ItemPart for Jar {
             let player = event.player.expect("a player's pour");
             let stone = ItemStack::new("minecraft:stone", 1).try_into_api().unwrap();
             assert_eq!(
-                host.living_set_hand_item(
-                    player.living(),
+                host.living(player.entity()).unwrap().set_hand_item(
+                    host,
                     mod_api::client::first_person::Hand::Main,
                     Some(stone),
                 ),
