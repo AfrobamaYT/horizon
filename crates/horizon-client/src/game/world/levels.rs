@@ -1473,7 +1473,11 @@ impl Game<'_> {
         self.enter_level(dim)?;
         // Vanilla saves the level's chunks before their unload hooks.
         self.native_chunks_loaded();
-        self.save_level(true)?;
+        if let Err(why) = self.save_level(true) {
+            // Not saved: the level stays parked, and the level in place is the one before.
+            self.enter_level(back)?;
+            return Err(why);
+        }
         let chunks: Vec<_> = self.world.chunks.values().cloned().collect();
         self.native_chunks_unloaded(&chunks);
         // Its entities' attachments are saved with them; they leave memory too.

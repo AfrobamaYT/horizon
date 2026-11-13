@@ -16,24 +16,28 @@ fn flat() -> RuntimeLevel {
 fn the_cap_refuses_the_open_past_it_and_a_removal_frees_a_place() {
     let mut table = RuntimeTable::default();
     table.set_cap(2);
-    assert!(table.queue_open("cap:a", flat()).is_ok());
-    assert!(table.queue_open("cap:b", flat()).is_ok());
+    assert!(table.queue_open("test", "cap:a", flat()).is_ok());
+    assert!(table.queue_open("test", "cap:b", flat()).is_ok());
     assert_eq!(
-        table.queue_open("cap:c", flat()),
+        table.queue_open("test", "cap:c", flat()),
         Err(RuntimeLevelError::CapReached)
     );
     table.remove("cap:a");
-    assert!(table.queue_open("cap:c", flat()).is_ok());
+    assert!(table.queue_open("test", "cap:c", flat()).is_ok());
 }
 
 #[test]
 fn the_default_cap_is_64() {
     let mut table = RuntimeTable::default();
     for n in 0..64 {
-        assert!(table.queue_open(&format!("cap:l{n}"), flat()).is_ok());
+        assert!(
+            table
+                .queue_open("test", &format!("cap:l{n}"), flat())
+                .is_ok()
+        );
     }
     assert_eq!(
-        table.queue_open("cap:l64", flat()),
+        table.queue_open("test", "cap:l64", flat()),
         Err(RuntimeLevelError::CapReached)
     );
 }
@@ -41,14 +45,14 @@ fn the_default_cap_is_64() {
 #[test]
 fn an_id_is_open_once_and_each_open_has_its_own_generation() {
     let mut table = RuntimeTable::default();
-    let first = table.queue_open("gen:a", flat()).unwrap();
+    let first = table.queue_open("test", "gen:a", flat()).unwrap();
     assert_eq!(
-        table.queue_open("gen:a", flat()),
+        table.queue_open("test", "gen:a", flat()),
         Err(RuntimeLevelError::AlreadyOpen)
     );
     assert_eq!(table.generation_of("gen:a"), first);
     table.remove("gen:a");
-    let second = table.queue_open("gen:a", flat()).unwrap();
+    let second = table.queue_open("test", "gen:a", flat()).unwrap();
     assert_ne!(first, second);
     assert_eq!(table.generation_of("gen:a"), second);
     assert_eq!(table.generation_of("minecraft:the_nether"), 0);
@@ -57,7 +61,7 @@ fn an_id_is_open_once_and_each_open_has_its_own_generation() {
 #[test]
 fn a_level_is_open_after_its_request_is_applied_and_until_its_close_is() {
     let mut table = RuntimeTable::default();
-    table.queue_open("state:a", flat()).unwrap();
+    table.queue_open("test", "state:a", flat()).unwrap();
     assert!(!table.is_open("state:a"));
     assert_eq!(
         table.queue_unload("state:a"),
@@ -181,6 +185,15 @@ fn a_mod_opens_only_ids_in_its_own_namespace() {
             "minecraft:overworld",
             Err(RuntimeLevelError::OutsideNamespace),
         ),
+        // Names Windows maps to a device or to another folder: refused before any folder exists.
+        ("mymod:con", Err(RuntimeLevelError::InvalidId)),
+        ("mymod:a/nul.txt", Err(RuntimeLevelError::InvalidId)),
+        ("mymod:com1", Err(RuntimeLevelError::InvalidId)),
+        ("mymod:lpt9/x", Err(RuntimeLevelError::InvalidId)),
+        ("mymod:a.", Err(RuntimeLevelError::InvalidId)),
+        ("mymod:x/b.", Err(RuntimeLevelError::InvalidId)),
+        ("mymod:console", Ok(())),
+        ("mymod:com10", Ok(())),
         ("mymod:instance/ab", Ok(())),
     ] {
         with_opener("mymod", id, flat(), |game, seen| {
@@ -259,6 +272,38 @@ fn the_idle_close_keeps_a_runtime_level_open_until_its_unload() {
         assert!(!game.runtime_level_is_open("idle:a"));
         assert!(super::Dim::extra("idle:a").is_none());
         assert_eq!(*seen.unloads.lock().unwrap(), ["idle:a", "idle:a"]);
+        let _ = std::fs::remove_dir_all(&folder);
+    });
+}
+
+/// An unload whose save fails leaves the level open and in place: the mod can unload it again,
+/// and that unload goes through once the save can be written.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_failed_unload_leaves_the_level_open_for_a_retry() {
+    with_opener("stuck", "stuck:a", flat(), |game, _| {
+        let folder = game.world_root.join("dimensions/stuck");
+        let _ = std::fs::remove_dir_all(&folder);
+        tick_post(game);
+        game.apply_runtime_levels();
+        let dim = super::Dim::extra("stuck:a").unwrap();
+        // A broken carrier transfer refuses every save of the level (`admit_level_save`).
+        game.enter_level(dim).unwrap();
+        game.world.carrier_fences.mark_broken();
+        game.enter_level(super::Dim::Overworld).unwrap();
+        assert_eq!(unload_as(game, "stuck", "stuck:a"), Ok(()));
+        game.apply_runtime_levels();
+        assert!(game.runtime_level_is_open("stuck:a"));
+        assert!(super::Dim::extra("stuck:a").is_some());
+        assert_eq!(game.dim, super::Dim::Overworld);
+        // The save can be written again: the same unload, asked again, goes through.
+        game.enter_level(dim).unwrap();
+        game.world.carrier_fences = Default::default();
+        game.enter_level(super::Dim::Overworld).unwrap();
+        assert_eq!(unload_as(game, "stuck", "stuck:a"), Ok(()));
+        game.apply_runtime_levels();
+        assert!(!game.runtime_level_is_open("stuck:a"));
+        assert!(super::Dim::extra("stuck:a").is_none());
         let _ = std::fs::remove_dir_all(&folder);
     });
 }

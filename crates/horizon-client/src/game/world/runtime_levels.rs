@@ -35,6 +35,8 @@ struct Entry {
     generation: u32,
     state: State,
     level: RuntimeLevel,
+    /// The mod that opened it, named when a request of its fails after the call.
+    owner: &'static str,
 }
 
 enum Request {
@@ -77,6 +79,7 @@ impl RuntimeTable {
     /// a repeat. Returns the generation of this open.
     pub(in crate::game) fn queue_open(
         &mut self,
+        owner: &'static str,
         id: &str,
         level: RuntimeLevel,
     ) -> Result<u32, RuntimeLevelError> {
@@ -94,6 +97,7 @@ impl RuntimeTable {
                 generation,
                 state: State::Opening,
                 level,
+                owner,
             },
         );
         self.queue.push(Request::Open(id.to_owned()));
@@ -134,12 +138,17 @@ impl RuntimeTable {
         self.entries.get(id).map(|entry| &entry.level)
     }
 
+    /// The mod that opened `id`, or "?" for a level the table no longer holds.
+    fn owner_of(&self, id: &str) -> &'static str {
+        self.entries.get(id).map_or("?", |entry| entry.owner)
+    }
+
     /// The requests waiting, in the order made. Later requests wait for the next tick.
     fn take_queue(&mut self) -> Vec<Request> {
         std::mem::take(&mut self.queue)
     }
 
-    /// Put a level that was to close back in use: a player came in before the close was applied.
+    /// Put a level that was to close back in use: a player came in, or the close failed.
     fn keep_open(&mut self, id: &str) {
         if let Some(entry) = self.entries.get_mut(id) {
             entry.state = State::Open;
@@ -179,8 +188,9 @@ fn mod_stem(dimension_type: &str, name: &str) -> serde_json::Value {
 }
 
 /// The shape and facts of the dimension type `level` names, for the level `id`: a vanilla type,
-/// or the type of a level a mod registered at startup. None for any other.
-fn resolve_type(id: &str, level: &RuntimeLevel) -> Option<(ExtraLevel, DimensionFacts)> {
+/// or the type of a level a mod registered at startup. None for any other. Nothing is kept: the
+/// level's names are leaked into the game's tables only when it opens.
+fn resolve_type(id: &str, level: &RuntimeLevel) -> Option<(LevelShape, DimensionFacts)> {
     let mut overrides = WorldgenOverrides::default();
     if let Some(registered) = mod_dimensions()
         .iter()
@@ -211,13 +221,26 @@ fn resolve_type(id: &str, level: &RuntimeLevel) -> Option<(ExtraLevel, Dimension
     )
     .ok()?;
     let facts = overrides.level_facts(id)?.ok()?;
-    let extra = ExtraLevel {
-        id: id.to_owned().leak(),
-        dimension_type: level.dimension_type.clone().leak(),
-        shape,
-        seed: Some(level.seed),
-    };
-    Some((extra, facts))
+    Some((shape, facts))
+}
+
+/// Whether every component of `id`'s namespace and path names one folder on every system: no
+/// component ends with a dot or a space, and none is a Windows device name (`con`, `nul`,
+/// `com1`, `lpt9`, with or without an extension), which Windows maps to something else.
+fn portable_level_id(id: &str) -> bool {
+    const DEVICES: [&str; 4] = ["con", "prn", "aux", "nul"];
+    id.split([':', '/']).all(|component| {
+        let stem = component
+            .split('.')
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let numbered = ["com", "lpt"].iter().any(|device| {
+            stem.strip_prefix(device)
+                .is_some_and(|n| n.len() == 1 && n.as_bytes()[0].is_ascii_digit())
+        });
+        !component.ends_with(['.', ' ']) && !DEVICES.contains(&stem.as_str()) && !numbered
+    })
 }
 
 /// What `make_streaming` generates a runtime level with.
@@ -274,10 +297,11 @@ impl Game<'_> {
         mod_api::content::crash::current_native_mod().ok_or(RuntimeLevelError::Unavailable)
     }
 
-    /// `id` as a level the calling mod `owner` may open or close: a valid id in a namespace the
-    /// mod owns. The folder of a level is only ever derived from an id that passed this.
+    /// `id` as a level the calling mod `owner` may open or close: a valid, portable id in a
+    /// namespace the mod owns. The folder of a level is only ever derived from an id that passed
+    /// this.
     fn owned_level_id(owner: &str, id: &str) -> Result<(), RuntimeLevelError> {
-        if !horizon_core::level_id::valid_level_id(id) {
+        if !horizon_core::level_id::valid_level_id(id) || !portable_level_id(id) {
             return Err(RuntimeLevelError::InvalidId);
         }
         let namespace = id.split_once(':').map_or("", |(namespace, _)| namespace);
@@ -321,7 +345,7 @@ impl Game<'_> {
             RuntimeGenerator::Flat | RuntimeGenerator::Void | RuntimeGenerator::Mod(_) => {}
             _ => return Err(RuntimeLevelError::UnknownGenerator),
         }
-        let generation = self.levels.runtime.queue_open(id, level)?;
+        let generation = self.levels.runtime.queue_open(owner, id, level)?;
         let epoch = self
             .native_lifecycle
             .epoch()
@@ -400,14 +424,21 @@ impl Game<'_> {
         for request in self.levels.runtime.take_queue() {
             match request {
                 Request::Open(id) => {
+                    let owner = self.levels.runtime.owner_of(&id);
                     if let Err(why) = self.apply_runtime_open(&id) {
-                        log::warn!("runtime level {id} did not open: {why}");
-                        self.levels.runtime.remove(&id);
+                        // Nothing of it stays: `is_open` says false and the id opens again.
+                        self.unpublish_runtime_level(&id);
+                        log::warn!("mod {owner}: runtime level {id} did not open: {why}");
                     }
                 }
                 Request::Unload(id) => {
+                    let owner = self.levels.runtime.owner_of(&id);
                     if let Err(why) = self.apply_runtime_unload(&id) {
-                        log::warn!("runtime level {id} did not close: {why}");
+                        // Still open: `is_open` says true and the mod can unload it again.
+                        self.levels.runtime.keep_open(&id);
+                        log::warn!(
+                            "mod {owner}: runtime level {id} stays open, its close failed: {why}"
+                        );
                     }
                 }
             }
@@ -421,12 +452,17 @@ impl Game<'_> {
             .level_of(id)
             .cloned()
             .ok_or("the request is gone")?;
-        let (extra, facts) =
+        let (shape, facts) =
             resolve_type(id, &level).ok_or("its dimension type is no longer known")?;
-        // The level exists for the rest of the world's life or until it closes: the tables the
-        // game reads a level's shape, type and place from learn it first.
+        // The tables the game reads a level's shape, type and place from learn it first; a failure
+        // below takes it out of them again (`unpublish_runtime_level`).
         let mut extras = self.level_shapes.extra.to_vec();
-        extras.push(extra);
+        extras.push(ExtraLevel {
+            id: id.to_owned().leak(),
+            dimension_type: level.dimension_type.clone().leak(),
+            shape,
+            seed: Some(level.seed),
+        });
         self.level_shapes.extra = extras.leak();
         if let Some(host) = self.lan.as_mut() {
             host.hub.config.levels = self.level_shapes;
@@ -447,27 +483,30 @@ impl Game<'_> {
     fn apply_runtime_unload(&mut self, id: &str) -> horizon_client::Result<()> {
         let dim = Dim::extra(id).ok_or("the level is not open")?;
         if self.level_has_players(dim) {
-            self.levels.runtime.keep_open(id);
             return Err("a player came in".into());
         }
         // The level in place is parked by leaving it; the Overworld is always there to enter.
+        let back = self.dim;
         if self.dim == dim {
             self.enter_level(Dim::Overworld)?;
         }
         // A level the idle close already saved and dropped is only forgotten.
-        if self.levels.parked.contains_key(&dim) {
-            self.close_parked_level(dim)?;
+        if self.levels.parked.contains_key(&dim)
+            && let Err(why) = self.close_parked_level(dim)
+        {
+            // The level stays as it was, and in place if it was.
+            if self.dim != back {
+                self.enter_level(back)?;
+            }
+            return Err(why);
         }
-        self.forget_runtime_level(dim);
+        self.unpublish_runtime_level(id);
         Ok(())
     }
 
-    /// The runtime level `dim` was unloaded: it leaves every table it was added to.
-    fn forget_runtime_level(&mut self, dim: Dim) {
-        let id = dim.id();
-        if !self.levels.runtime.holds(id) {
-            return;
-        }
+    /// The runtime level `id` was unloaded, or failed to open: it leaves every table it was added
+    /// to, and its id is free again.
+    fn unpublish_runtime_level(&mut self, id: &str) {
         self.levels.runtime.remove(id);
         Dim::remove_extra(id);
         let extras: Vec<_> = self
