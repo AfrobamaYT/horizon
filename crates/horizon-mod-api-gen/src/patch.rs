@@ -1688,6 +1688,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn a_method_moves_into_a_trait_of_its_own_type() {
         let crate_ = generate_here(
             &["horizon_client::game::autosave::Game<'_>::next_autosave_interval".into()],
@@ -1708,6 +1709,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn refusals_are_named() {
         let error = generate_here(
             &[
@@ -1722,6 +1724,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn a_lower_crate_function_gets_a_patch_crate_of_its_own() {
         let crate_ = generate_here(
             &[
@@ -1862,6 +1865,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn support_modules_and_bridges_land_in_the_mirror_their_rows_name() {
         let extras = Extras {
             modules: vec![SupportModule {
@@ -1926,6 +1930,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn a_filled_loops_entry_runs_the_loop_with_the_mods_slots_in_order() {
         let published = crate::loops::collect(&root())
             .unwrap()
