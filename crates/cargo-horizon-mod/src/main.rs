@@ -382,7 +382,17 @@ fn build(entry: mod_surface::child::ChildEntry) -> Result<PathBuf, String> {
     let package = Package::read(root)?;
     let uses = if package.manifest.native.is_some() || package.manifest.wasm.is_some() {
         let sdk = sdk_fetch::ensure_sdk(root)?;
-        uses_table::table(entry, root, &sdk)?.map(|table| table.to_json().into_bytes())
+        match uses_table::scan(entry, root, &uses_table::surface_of(&sdk)?)? {
+            uses_table::Scanned::Uses(uses) => Some(uses.table(sdk.build).to_json().into_bytes()),
+            uses_table::Scanned::Exact(_) => None,
+            uses_table::Scanned::Unread(why) => {
+                println!(
+                    "note: no uses table packed ({why}); the package counts as made for build {} only.",
+                    sdk.name
+                );
+                None
+            }
+        }
     } else {
         None
     };

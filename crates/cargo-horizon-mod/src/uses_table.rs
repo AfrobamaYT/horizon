@@ -1,16 +1,16 @@
 //! What a code mod uses of the surface (design-fit.md 10.2): the scan of its source against the
 //! pinned SDK's `surface.json`, the table `build` packs as `uses.json`, and `check`'s summary.
 use crate::sdk_fetch::PinnedSdk;
-use horizon_mod_api_gen::mod_uses::{self, ReadError};
+use horizon_mod_api_gen::mod_uses::{self, ModInput, ReadError};
 use mod_surface::child::ChildEntry;
-use mod_surface::uses::{Built, ManifestFacts, Origin, Uses, UsesTable, uses_contained};
+use mod_surface::uses::{Built, ManifestFacts, Origin, Uses, uses_contained};
 use mod_surface::{Surface, leaf};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/// The surface export a fetched SDK folder holds.
+/// The surface export a fetched SDK holds.
 pub(crate) fn surface_of(sdk: &PinnedSdk) -> Result<Surface, String> {
-    read_surface(&sdk.dir.join("surface.json"))
+    read_surface(&sdk.surface)
 }
 
 /// A surface file read and checked.
@@ -19,42 +19,51 @@ fn read_surface(path: &Path) -> Result<Surface, String> {
     Surface::read(&bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// What the mod at `root` uses of `surface`; `None` for a mod made for exactly one build (a
-/// `[native.*]` table or internals), where the question does not apply.
-pub(crate) fn scan(
-    entry: ChildEntry,
-    root: &Path,
-    surface: &Surface,
-) -> Result<Option<Uses>, String> {
-    let input = match mod_uses::read(root) {
+/// What the scan of a mod folder found.
+pub(crate) enum Scanned {
+    /// What the mod uses of the surface.
+    Uses(Uses),
+    /// The mod is made for exactly one build (a `[native.*]` table or internals): why.
+    Exact(String),
+    /// The scan cannot judge the source (a computed `include!`, a file it does not read, more
+    /// source than it reads, a file it cannot parse): why. Such a mod has no table and counts as
+    /// made for its build only; it may still build.
+    Unread(String),
+}
+
+/// The mod folder at `root` read for the scan, or what the scan answers without one. A folder
+/// that cannot be read at all, or a manifest that is not TOML, is an error.
+fn read(root: &Path) -> Result<Result<ModInput, Scanned>, String> {
+    match mod_uses::read(root) {
+        Ok(input) => Ok(Ok(input)),
+        Err(ReadError::Exact(why)) => Ok(Err(Scanned::Exact(why))),
+        Err(e @ (ReadError::Io { .. } | ReadError::Manifest(_))) => Err(e.to_string()),
+        Err(e) => Ok(Err(Scanned::Unread(e.to_string()))),
+    }
+}
+
+/// What the mod at `root` uses of `surface`.
+pub(crate) fn scan(entry: ChildEntry, root: &Path, surface: &Surface) -> Result<Scanned, String> {
+    let input = match read(root)? {
         Ok(input) => input,
-        Err(ReadError::Exact(_)) => return Ok(None),
-        Err(e) => return Err(e.to_string()),
+        Err(scanned) => return Ok(scanned),
     };
     // No manifest form names a hook version today (the schema refuses `hook_version`).
     let manifest = ManifestFacts {
         names: input.manifest_names,
         hook_versions: Default::default(),
     };
-    uses_contained(
-        entry,
-        input.sources.iter().map(|(p, t)| (p.as_str(), t.as_str())),
-        &manifest,
-        surface,
+    Ok(
+        match uses_contained(
+            entry,
+            input.sources.iter().map(|(p, t)| (p.as_str(), t.as_str())),
+            &manifest,
+            surface,
+        ) {
+            Ok(uses) => Scanned::Uses(uses),
+            Err(e) => Scanned::Unread(e.to_string()),
+        },
     )
-    .map(Some)
-    .map_err(|e| e.to_string())
-}
-
-/// The table `build` packs for the mod at `root`, made for the pinned build; `None` when the
-/// mod is made for exactly one build.
-pub(crate) fn table(
-    entry: ChildEntry,
-    root: &Path,
-    sdk: &PinnedSdk,
-) -> Result<Option<UsesTable>, String> {
-    let surface = surface_of(sdk)?;
-    Ok(scan(entry, root, &surface)?.map(|uses| uses.table(sdk.build.clone())))
 }
 
 /// `Greeter uses 14 items of the API (6 hooks, 5 methods, 3 types). Made for nightly-….`, then
@@ -143,6 +152,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_mod_including_build_script_output_is_unread_not_an_error() {
+        let dir = std::env::temp_dir().join(format!("horizon-mod-unread-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("horizon-mod.toml"),
+            "id = \"bindings\"\nname = \"Bindings\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("src/lib.rs"),
+            "include!(concat!(env!(\"OUT_DIR\"), \"/b.rs\"));\n",
+        )
+        .unwrap();
+        let read = read(&dir);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(matches!(read, Ok(Err(Scanned::Unread(_)))));
+    }
+
+    #[test]
     fn the_summary_counts_by_kind_in_words() {
         let used = |id: &str| mod_surface::uses::Used {
             entry: mod_surface::uses::Entry {
@@ -175,6 +203,7 @@ mod tests {
             build: "a".repeat(40),
             name: "nightly-2026-11-13 (afe471c)".into(),
             dir: "sdk".into(),
+            surface: "sdk/surface.json".into(),
         };
         assert_eq!(
             summary("Greeter", &uses, &sdk),

@@ -1,9 +1,9 @@
 //! The commands that read the SDK's data (design §4, design-fit.md 10.2): `check` of a mod
 //! folder, `hooks <text>`, `sdk diff <a> <b>`, `fits` and the report `update` prints before it
 //! repins. Each reads the pinned build's `surface.json` from `.horizon/sdk/`, or another build's
-//! small files through [`fetch_build`]; none links the generator's catalog.
-use crate::sdk_fetch::{Base, PinnedSdk, ensure_sdk, fetch, keys, resolve};
-use crate::uses_table::{self, surface_of};
+//! small files through [`crate::sdk_fetch::fetch_build`]; none links the generator's catalog.
+use crate::sdk_fetch::{PinnedSdk, ensure_sdk, fetch_build};
+use crate::uses_table::{self, Scanned, surface_of};
 use horizon_mod_package::{
     Manifest, Package,
     manifest::{MANIFEST, MAX_MANIFEST, MAX_USES, USES},
@@ -13,15 +13,6 @@ use mod_surface::uses::{Change, Fit, UsesTable, fits as fit};
 use mod_surface::{Surface, leaf};
 use std::path::Path;
 use std::process::{Command, ExitCode};
-
-/// `text` (a Nightly name or a sha)'s build, its small files only (`sdk.json`, `surface.json`),
-/// in the project's `.horizon/cache/<build>/`, verified as the pinned SDK is, without repinning.
-pub(crate) fn fetch_build(project: &Path, text: &str) -> Result<PinnedSdk, String> {
-    let base = Base::from_env();
-    let build = resolve(&base, text)?;
-    let dir = project.join(".horizon/cache").join(&build);
-    fetch(&base, &keys(), &build, &dir, false)
-}
 
 /// One searchable record: its id, its doc text and its names in other mod APIs.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -232,9 +223,7 @@ fn package_subject(path: &Path) -> Result<Subject, String> {
         return Ok(Subject::NotApplicable(exact_text(&name, &why)));
     }
     if package.manifest.native.is_none() && package.manifest.wasm.is_none() {
-        return Ok(Subject::NotApplicable(format!(
-            "{name} is a content mod, with no code to check against a build; `fits` doesn't apply."
-        )));
+        return Ok(Subject::NotApplicable(content_text(&name)));
     }
     let Some(bytes) = Package::entry(path, USES, MAX_USES)? else {
         return Ok(Subject::NotApplicable(format!(
@@ -249,19 +238,28 @@ fn package_subject(path: &Path) -> Result<Subject, String> {
 fn folder_subject(entry: ChildEntry, root: &Path) -> Result<Subject, String> {
     let manifest =
         std::fs::read_to_string(root.join(MANIFEST)).map_err(|e| format!("{MANIFEST}: {e}"))?;
-    let name = display_name(&manifest)?;
+    let parsed = Manifest::parse(&manifest)?;
+    let name = parsed.name;
+    if parsed.native.is_none() && parsed.wasm.is_none() {
+        return Ok(Subject::NotApplicable(content_text(&name)));
+    }
     let table: toml::Table = toml::from_str(&manifest).map_err(|e| format!("{MANIFEST}: {e}"))?;
     if let Some(why) = horizon_mod_api_gen::mod_uses::exact(&table) {
         return Ok(Subject::NotApplicable(exact_text(&name, &why)));
     }
     let sdk = ensure_sdk(root)?;
-    match uses_table::table(entry, root, &sdk)? {
-        Some(table) => Ok(Subject::Table { name, table }),
-        None => Ok(Subject::NotApplicable(exact_text(
-            &name,
-            "it changes game code",
-        ))),
+    match uses_table::scan(entry, root, &surface_of(&sdk)?)? {
+        Scanned::Uses(uses) => Ok(Subject::Table {
+            name,
+            table: uses.table(sdk.build),
+        }),
+        Scanned::Exact(why) => Ok(Subject::NotApplicable(exact_text(&name, &why))),
+        Scanned::Unread(why) => Err(why),
     }
+}
+
+fn content_text(name: &str) -> String {
+    format!("{name} is a content mod, with no code to check against a build; `fits` doesn't apply.")
 }
 
 fn exact_text(name: &str, why: &str) -> String {
@@ -273,8 +271,13 @@ fn exact_text(name: &str, why: &str) -> String {
 /// one does not, and 2 when the question cannot be answered or does not apply.
 pub(crate) fn fits(entry: ChildEntry, args: &[String]) -> ExitCode {
     match fits_lines(entry, args) {
-        Ok(true) => ExitCode::SUCCESS,
-        Ok(false) => ExitCode::from(1),
+        Ok(Answer::Fits) => ExitCode::SUCCESS,
+        Ok(Answer::DoesNotFit) => ExitCode::from(1),
+        // An answer, not a failure: printed plainly.
+        Ok(Answer::NotApplicable(text)) => {
+            println!("{text}");
+            ExitCode::from(2)
+        }
         Err(e) => {
             eprintln!("error: {e}");
             ExitCode::from(2)
@@ -282,7 +285,15 @@ pub(crate) fn fits(entry: ChildEntry, args: &[String]) -> ExitCode {
     }
 }
 
-fn fits_lines(entry: ChildEntry, args: &[String]) -> Result<bool, String> {
+/// What `fits` answered, once its lines are printed.
+enum Answer {
+    Fits,
+    DoesNotFit,
+    /// The question does not apply: why, not yet printed.
+    NotApplicable(String),
+}
+
+fn fits_lines(entry: ChildEntry, args: &[String]) -> Result<Answer, String> {
     let package = args.first().filter(|a| !a.starts_with("--")).map(Path::new);
     let mut builds: Vec<&str> = args
         .windows(2)
@@ -299,7 +310,7 @@ fn fits_lines(entry: ChildEntry, args: &[String]) -> Result<bool, String> {
     };
     let (name, table) = match subject {
         Subject::Table { name, table } => (name, table),
-        Subject::NotApplicable(text) => return Err(text),
+        Subject::NotApplicable(text) => return Ok(Answer::NotApplicable(text)),
     };
     println!("{name}:");
     let mut all = true;
@@ -326,7 +337,11 @@ fn fits_lines(entry: ChildEntry, args: &[String]) -> Result<bool, String> {
             }
         }
     }
-    Ok(all)
+    Ok(if all {
+        Answer::Fits
+    } else {
+        Answer::DoesNotFit
+    })
 }
 
 /// What the mod nearest to a removed item may use now, in `new`: the hook with one of the same
@@ -370,9 +385,15 @@ pub(crate) fn update_report(
     let name = display_name(&manifest)?;
     let old = ensure_sdk(root)?;
     let old_surface = surface_of(&old)?;
-    let Some(uses) = uses_table::scan(entry, root, &old_surface)? else {
-        println!("{name} is made for exactly one build; its declarations are checked as it moves.");
-        return Ok(());
+    let uses = match uses_table::scan(entry, root, &old_surface)? {
+        Scanned::Uses(uses) => uses,
+        Scanned::Exact(_) => {
+            println!(
+                "{name} is made for exactly one build; its declarations are checked as it moves."
+            );
+            return Ok(());
+        }
+        Scanned::Unread(why) => return Err(why),
     };
     let new = fetch_build(root, to.unwrap_or("nightly"))?;
     let new_surface = surface_of(&new)?;
@@ -489,7 +510,7 @@ pub(crate) fn check_mod(entry: ChildEntry, args: &[String]) -> Result<(), String
     let sdk = ensure_sdk(root)?;
     let surface = surface_of(&sdk)?;
     match uses_table::scan(entry, root, &surface)? {
-        Some(uses) => {
+        Scanned::Uses(uses) => {
             print!(
                 "{}",
                 uses_table::summary(&package.manifest.name, &uses, &sdk)
@@ -498,10 +519,11 @@ pub(crate) fn check_mod(entry: ChildEntry, args: &[String]) -> Result<(), String
                 print!("{}", uses_table::list(&uses));
             }
         }
-        None => println!(
+        Scanned::Exact(_) => println!(
             "{} is made for exactly one build ({}); it has no uses table.",
             package.manifest.name, sdk.name
         ),
+        Scanned::Unread(why) => return Err(why),
     }
     Ok(())
 }

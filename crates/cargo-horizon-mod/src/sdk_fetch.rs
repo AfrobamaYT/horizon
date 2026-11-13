@@ -38,6 +38,8 @@ pub(crate) struct PinnedSdk {
     /// The form people read: `nightly-2026-11-13 (afe471c)`, or the short sha.
     pub(crate) name: String,
     pub(crate) dir: PathBuf,
+    /// The build's surface export, `surface.json` in `dir`.
+    pub(crate) surface: PathBuf,
 }
 
 /// The SDK the project at `project` pins, in its `.horizon/sdk/`, fetched first when the folder is
@@ -327,7 +329,22 @@ fn pinned(index: &Index, dir: &Path) -> PinnedSdk {
         },
         build,
         dir: dir.to_owned(),
+        surface: dir.join(SURFACE),
     }
+}
+
+/// `text` (a Nightly name or a sha)'s build, its small files only (`sdk.json`, `surface.json`),
+/// in the project's `.horizon/cache/<build>/`, verified as the pinned SDK is, without repinning.
+pub(crate) fn fetch_build(project: &Path, text: &str) -> Result<PinnedSdk, String> {
+    let base = Base::from_env();
+    let build = resolve(&base, text)?;
+    fetch(
+        &base,
+        &keys(),
+        &build,
+        &project.join(".horizon/cache").join(&build),
+        false,
+    )
 }
 
 #[cfg(test)]
