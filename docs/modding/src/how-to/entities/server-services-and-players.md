@@ -83,3 +83,5 @@ Reads accept `Host`; writes accept `ServerHost`.
 | `sleep_ignored(host)` | Reads the sleep-count exclusion setting. |
 | `counts_for_sleep(host)` | Reports whether the player counts toward the night skip. |
 | `sleep_timer(host)` / `set_sleep_timer(host, ticks)` | Reads or writes `Player.sleepCounter`, from 0 to 109; 100 means slept long enough. The write refuses larger values, fake players, guests in another level and stale players. |
+
+A second disconnect on a guest already leaving is a no-op and keeps the first reason.

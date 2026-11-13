@@ -463,6 +463,7 @@ pub trait PlayersBackendMut {
     /// world published. False for a stale or unavailable player, a fake player, the
     /// single-player owner (`/kick` refuses the owner) and a player whose disconnect is already
     /// pending (a second call, also from `player_kicked`: the first reason stands).
+    /// A second disconnect on a guest already leaving is a no-op and keeps the first reason.
     #[access(WorldOnly)]
     /// Refuses text deeper than 512 component nodes before applying any changes.
     fn player_disconnect(&mut self, player: PlayerRef, reason: Text)
