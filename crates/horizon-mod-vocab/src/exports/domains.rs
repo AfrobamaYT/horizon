@@ -31,7 +31,7 @@ pub use command::types::{Authority, Command, PermissionLevel};
 pub use entity::effect_category::EffectCategory;
 pub use entity::types::{
     ActiveEffect, AttributeModifier, AttributeOperation, AttributeRegistrationError, Billboard,
-    ChannelRef, ChatVisibility, ClientInfo, Deflection, DisplayKind, DisplayRef, DragonPhase,
+    ChannelRef, ChatVisibility, CollisionExclusionsError, ClientInfo, Deflection, DisplayKind, DisplayRef, DragonPhase,
     DragonRef, EffectApplicable, EffectKey, EffectTickChange, EntityAttributeError, EntityRef,
     EntityTypeKey, FishingHookRef, GoalSpec, ItemEntityRef, LeashHolder, LivingRef, MainHand,
     MerchantRef, MinecartKind, MinecartRef, MobFilter, MobGoalEntry, MobRef, ModifierLifetime,
