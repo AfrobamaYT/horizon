@@ -1418,7 +1418,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             entries.join("present.json"),
-            r#"{"temperature":0.8,"downfall":0.4,"effects":{}}"#,
+            r#"{"temperature":0.8,"downfall":0.4,"has_precipitation":true,"effects":{}}"#,
         )
         .unwrap();
         Level {
