@@ -18,6 +18,8 @@ mod biome_region_registration;
 mod block_entity_transform;
 #[path = "wire_loopback/crash_sections.rs"]
 mod crash_sections;
+#[path = "wire_loopback/entity_layers.rs"]
+mod entity_layers;
 #[path = "wire_loopback/entity_renderers.rs"]
 mod entity_renderers;
 #[path = "wire_loopback/item_drop_state.rs"]
@@ -270,6 +272,13 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             event: &mut mod_api::RegisterEntityRenderersEvent<'_>,
         ) {
             entity_renderers::register(event.renderers);
+        }
+        fn register_entity_layers(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterEntityLayersEvent<'_>,
+        ) {
+            entity_layers::register(event.layers);
         }
         fn register(
             &self,
@@ -548,6 +557,11 @@ impl mod_api::BlockEntityPart for MachineBlock {
         _: &mut dyn mod_api::ServerHost,
         event: &mut mod_api::BlockEntityTickEvent<'_>,
     ) {
+        if event.entity.data[0] == -1 {
+            *event.reply = mod_api::BlockEntityTickReply::Unchanged;
+            event.entity.data[0] = 999;
+            return;
+        }
         event.entity.data[0] += 3;
     }
 }
@@ -576,6 +590,7 @@ fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
         &mut guest::Guest,
         &mut mod_api::BlockEntityTickEvent {
             pos: [1, 2, 3],
+            reply: &mut mod_api::BlockEntityTickReply::Changed,
             entity: mod_api::ModBlockEntityView::new(&mut entity),
         },
     );
@@ -596,11 +611,26 @@ fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
         &mut guest::Guest,
         &mut mod_api::BlockEntityTickEvent {
             pos: [1, 2, 3],
+            reply: &mut mod_api::BlockEntityTickReply::Changed,
             entity: mod_api::ModBlockEntityView::new(&mut entity),
         },
     );
     assert_eq!(entity.data, vec![8]);
     assert_eq!(entity.revision().changes(), before);
+    entity.data[0] = -1;
+    let before = entity.revision();
+    let mut reply = mod_api::BlockEntityTickReply::Changed;
+    proxy.block_entity_tick(
+        &mut guest::Guest,
+        &mut mod_api::BlockEntityTickEvent {
+            pos: [1, 2, 3],
+            reply: &mut reply,
+            entity: mod_api::ModBlockEntityView::new(&mut entity),
+        },
+    );
+    assert_eq!(reply, mod_api::BlockEntityTickReply::Unchanged);
+    assert_eq!(entity.data, [-1]);
+    assert_eq!(entity.revision(), before);
 }
 #[test]
 fn borrowed_view_reply_is_byte_identical_to_owned_snapshot() {

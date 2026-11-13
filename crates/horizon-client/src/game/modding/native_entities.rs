@@ -834,6 +834,7 @@ mod tests {
                     guest: None,
                     no_gravity: false,
                     power: 4.0,
+                    used_portal: false,
                     block_state: None,
                 });
                 game.native_joins_flush(false, 0);

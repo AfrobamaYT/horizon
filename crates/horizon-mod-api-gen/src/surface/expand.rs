@@ -347,64 +347,100 @@ pub(super) fn expand_modules(index: &mut Index<'_>, modules: &[usize]) -> Vec<St
         };
         let items = std::mem::take(&mut index.modules[module].items);
         let mut out = Vec::with_capacity(items.len());
-        for item in items {
-            match item {
-                Item::Macro(mac) if mac.ident.is_none() => {
-                    let name = last_name(&mac.mac.path);
-                    if KNOWN.contains(&name.as_str()) {
-                        out.push(Item::Macro(mac));
-                        continue;
-                    }
-                    let expanded = rules
-                        .get(&name)
-                        .and_then(|rules| expand(rules, mac.mac.tokens.clone()))
-                        .and_then(|tokens| syn::parse2::<syn::File>(tokens).ok());
-                    match expanded {
-                        Some(file) => out.extend(file.items),
-                        None => {
-                            notes.push(format!(
-                                "{name}! called in {place}: not expanded, the items it writes are not recorded"
-                            ));
-                            out.push(Item::Macro(mac));
-                        }
-                    }
-                }
-                Item::Impl(mut block) => {
-                    let members = std::mem::take(&mut block.items);
-                    for member in members {
-                        let syn::ImplItem::Macro(mac) = member else {
-                            block.items.push(member);
-                            continue;
-                        };
-                        let name = last_name(&mac.mac.path);
-                        if KNOWN.contains(&name.as_str()) {
-                            block.items.push(syn::ImplItem::Macro(mac));
-                            continue;
-                        }
-                        let expanded = rules
-                            .get(&name)
-                            .and_then(|rules| expand(rules, mac.mac.tokens.clone()))
-                            .and_then(|tokens| {
-                                syn::parse2::<ImplItems>(tokens).ok().map(|items| items.0)
-                            });
-                        match expanded {
-                            Some(items) => block.items.extend(items),
-                            None => {
-                                notes.push(format!(
-                                    "{name}! called in an impl block in {place}: not expanded, the items it writes are not recorded"
-                                ));
-                                block.items.push(syn::ImplItem::Macro(mac));
-                            }
-                        }
-                    }
-                    out.push(Item::Impl(block));
-                }
-                item => out.push(item),
-            }
-        }
+        expand_items(&rules, &place, items, 0, &mut out, &mut notes);
         index.modules[module].items = out;
     }
     notes
+}
+
+/// How deep a macro's expansion may call macros again before the call is noted instead.
+const MAX_NESTING: usize = 8;
+
+/// The note for a call left as it is.
+fn unexpanded(name: &str, where_: &str, place: &str, depth: usize) -> String {
+    let nested = if depth > 0 {
+        " (inside another macro's expansion)"
+    } else {
+        ""
+    };
+    format!(
+        "{name}! called in {where_}{place}{nested}: not expanded, the items it writes are not recorded"
+    )
+}
+
+/// `items` with their macro calls expanded, and the items those write expanded again, at most
+/// [`MAX_NESTING`] deep.
+fn expand_items(
+    rules: &HashMap<String, Rules>,
+    place: &str,
+    items: Vec<Item>,
+    depth: usize,
+    out: &mut Vec<Item>,
+    notes: &mut Vec<String>,
+) {
+    for item in items {
+        match item {
+            Item::Macro(mac) if mac.ident.is_none() => {
+                let name = last_name(&mac.mac.path);
+                if KNOWN.contains(&name.as_str()) {
+                    out.push(Item::Macro(mac));
+                    continue;
+                }
+                let expanded = (depth < MAX_NESTING)
+                    .then(|| rules.get(&name))
+                    .flatten()
+                    .and_then(|rules| expand(rules, mac.mac.tokens.clone()))
+                    .and_then(|tokens| syn::parse2::<syn::File>(tokens).ok());
+                match expanded {
+                    Some(file) => expand_items(rules, place, file.items, depth + 1, out, notes),
+                    None => {
+                        notes.push(unexpanded(&name, "", place, depth));
+                        out.push(Item::Macro(mac));
+                    }
+                }
+            }
+            Item::Impl(mut block) => {
+                let members = std::mem::take(&mut block.items);
+                expand_members(rules, place, members, depth, &mut block.items, notes);
+                out.push(Item::Impl(block));
+            }
+            item => out.push(item),
+        }
+    }
+}
+
+/// An impl block's `members` with their macro calls expanded, as [`expand_items`] does.
+fn expand_members(
+    rules: &HashMap<String, Rules>,
+    place: &str,
+    members: Vec<syn::ImplItem>,
+    depth: usize,
+    out: &mut Vec<syn::ImplItem>,
+    notes: &mut Vec<String>,
+) {
+    for member in members {
+        let syn::ImplItem::Macro(mac) = member else {
+            out.push(member);
+            continue;
+        };
+        let name = last_name(&mac.mac.path);
+        if KNOWN.contains(&name.as_str()) {
+            out.push(syn::ImplItem::Macro(mac));
+            continue;
+        }
+        let expanded = (depth < MAX_NESTING)
+            .then(|| rules.get(&name))
+            .flatten()
+            .and_then(|rules| expand(rules, mac.mac.tokens.clone()))
+            .and_then(|tokens| syn::parse2::<ImplItems>(tokens).ok().map(|items| items.0));
+        match expanded {
+            Some(items) => expand_members(rules, place, items, depth + 1, out, notes),
+            None => {
+                notes.push(unexpanded(&name, "an impl block in ", place, depth));
+                out.push(syn::ImplItem::Macro(mac));
+            }
+        }
+    }
 }
 
 /// The items of an impl block's body.
