@@ -30,6 +30,7 @@ def write_build_data(root: Path, identity: dict | None = None, commit: str = COM
     for name in members["runtime"] + members["api"]:
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_bytes(b"")
+    (root / prebuilt_game.RUNTIME / prebuilt_game.EXECUTABLE).write_bytes(b"\0" + prebuilt_game.HOLDER_MARK + b"\0")
     slices = {"runtime": [prebuilt_game.IDENTITY, *members["runtime"]],
               "api": [*prebuilt_game.BUILD_DATA, *members["api"]]}
     (root / prebuilt_game.IDENTITY).write_text(json.dumps({"slices": slices, **(identity or {}), "commit": commit}))
@@ -244,6 +245,13 @@ class SdkAssetTests(unittest.TestCase):
                 (out / prebuilt_game.IDENTITY).write_text(json.dumps(identity))
                 with self.assertRaisesRegex(SystemExit, why):
                     prebuilt_game.check(out)
+        # The API executable carries the holder marker in its own bytes, or the launcher plays it the wrong way.
+        with tempfile.TemporaryDirectory() as directory, patch.object(sys, "platform", "linux"):
+            out = self.out(Path(directory), 1000)
+            prebuilt_game.check(out)
+            (out / prebuilt_game.RUNTIME / prebuilt_game.EXECUTABLE).write_bytes(b"an executable")
+            with self.assertRaisesRegex(SystemExit, "holder marker"):
+                prebuilt_game.check(out)
 
     def test_slices_come_from_the_build_records_with_proc_macros_as_leaves(self):
         def package(name, kind="lib", deps=()):

@@ -60,6 +60,9 @@ NATIVE_MODS_METADATA = "horizon-native-mods"
 API_MAIN = ROOT / "crates/horizon-client/src/native_api_main.rs"
 # The folder holding that executable and the stub, in the `runtime` slice.
 RUNTIME = "bin"
+# The bytes the launcher looks for in an executable before it runs it under the holder (`holder::capable`).
+HOLDER_MARK = re.search(rb'CAPABILITY: \[u8; \d+\] = \*b"([^"]+)"',
+                        (ROOT / "crates/horizon-mod-package/src/holder.rs").read_bytes()).group(1)
 # The required inputs (`horizon_mod_package::sdk::Inputs`): `members` lists what each slice must hold.
 INPUTS = ROOT / "crates/horizon-mod-package/src/sdk/inputs.json"
 # The crates an API-only mod may name; their closure is the `api` archive.
@@ -541,6 +544,8 @@ def check(out: Path) -> None:
                for member in members if not holds(sliced.get(kind, []), member)]
     if lacking:
         sys.exit(f"prebuilt slices lack required members: {lacking}")
+    if HOLDER_MARK not in (out / RUNTIME / EXECUTABLE).read_bytes():
+        sys.exit(f"{RUNTIME}/{EXECUTABLE} does not carry the holder marker {HOLDER_MARK.decode()}")
 
 
 def smoke(out: Path) -> None:

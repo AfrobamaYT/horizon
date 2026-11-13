@@ -131,6 +131,14 @@ fi
 # take: `prebuilt-api` (every mod API-only) or `prebuilt` (a mod with a `[native]` table row).
 grep -F '"route": "prebuilt' "$data"/versions/*/native-mods.json > /dev/null || grep -rF 'prebuilt' "$log" > /dev/null
 if [ -n "${FNR_ROUTE:-}" ]; then grep -F "Native mods route: $FNR_ROUTE." "$log"; fi
+# The API route plays the package's own executable: it carries the holder marker in its own bytes.
+if [ "${FNR_ROUTE:-}" = prebuilt-api ]; then
+  marker=$(sed -n 's/^pub static CAPABILITY: \[u8; [0-9]*\] = \*b"\([^"]*\)";$/\1/p' "$root/crates/horizon-mod-package/src/holder.rs")
+  test -n "$marker"
+  played=$(ls "$scratch/engine/horizon-engine" "$scratch/engine/horizon-engine.exe" 2>/dev/null | head -1)
+  grep -qaF "$marker" "$played" || { echo "$played does not carry the holder marker $marker"; exit 1; }
+  echo "holder marker $marker found in $played"
+fi
 test ! -d "$data/native/stage/crates/horizon-client" || { echo "the game was staged for a source build"; exit 1; }
 test "$(sha256sum "$(game_library)" | cut -d' ' -f1)" = "$game_hash"
 
