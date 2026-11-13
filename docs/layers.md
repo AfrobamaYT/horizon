@@ -171,7 +171,7 @@ Horizon's own extras and its product, and every built-in address of an outside s
 
 ## Tools
 
-Developer tools that no player runs: `xtask`, `horizon-bots`, `horizon-mod-api-gen-tests`, and the Python in
+Developer tools that no player runs: `xtask`, `horizon-bots`, `horizon-mod-api-gen-tests`, `horizon-mod-wasm-wire-loopback`, and the Python in
 `tools/`. They may depend on anything, and no shipped crate depends on them.
 
 ## Where a new feature goes
