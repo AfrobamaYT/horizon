@@ -229,7 +229,7 @@ impl Hook {
                 let mut refs: Vec<String> = contract
                     .refs
                     .iter()
-                    .filter(|r| mentions(&argument.ty, leaf(r)))
+                    .filter(|r| names(&argument.ty, r))
                     .cloned()
                     .collect();
                 refs.push(id.clone());
@@ -256,10 +256,12 @@ impl Hook {
     }
 }
 
-/// Whether the normalised type `ty` names an item whose last segment is `name`.
-fn mentions(ty: &str, name: &str) -> bool {
-    ty.split(|c: char| !(c.is_alphanumeric() || c == '_'))
-        .any(|word| word == name)
+/// Whether the normalised type `ty` names the item `id` by its full path: `a::Item` and
+/// `b::Item` are different items.
+fn names(ty: &str, id: &str) -> bool {
+    let path = id.split_once(':').map_or(id, |(_, path)| path);
+    ty.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':'))
+        .any(|word| word == path)
 }
 
 /// The hash of a struct's field set: each public field's `name: type`, sorted. A literal or a

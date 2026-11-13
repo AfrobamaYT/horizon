@@ -556,3 +556,38 @@ fn how_a_type_crosses_and_whether_a_struct_can_be_built_are_outside_its_hash() {
     };
     assert_ne!(enum_with(true), enum_with(false));
 }
+
+#[test]
+fn an_argument_references_only_the_items_its_own_type_names_by_path() {
+    let mut contract = hook_with(1, &[]).contract;
+    contract.arguments = vec![
+        Argument {
+            name: "left".into(),
+            ty: "a::Item".into(),
+        },
+        Argument {
+            name: "right".into(),
+            ty: "&'a mut Vec<b::Item>".into(),
+        },
+    ];
+    contract.refs = vec!["type:a::Item".into(), "type:b::Item".into()];
+    let hook = Hook::new(
+        "hook:joined",
+        "",
+        HookEngine::default(),
+        Counterparts::default(),
+        contract,
+    );
+    let refs: Vec<&[String]> = hook
+        .fields
+        .iter()
+        .map(|f| f.contract.refs.as_slice())
+        .collect();
+    assert_eq!(
+        refs,
+        [
+            &["hook:joined".to_owned(), "type:a::Item".to_owned()][..],
+            &["hook:joined".to_owned(), "type:b::Item".to_owned()][..],
+        ]
+    );
+}
