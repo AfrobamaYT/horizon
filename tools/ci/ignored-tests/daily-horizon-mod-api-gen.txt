@@ -15,6 +15,7 @@ horizon-mod-api-gen game_modules::tests::existing_game_exports_keep_their_visibi
 horizon-mod-api-gen hook_targets::tests::every_catalog_target_resolves_and_missing_function_is_rejected lib daily slow
 horizon-mod-api-gen patch::tests::a_filled_loops_entry_runs_the_loop_with_the_mods_slots_in_order lib daily slow
 horizon-mod-api-gen patch::tests::a_lower_crate_function_gets_a_patch_crate_of_its_own lib daily slow
+horizon-mod-api-gen patch::tests::a_lower_free_function_installs_through_its_library_name lib daily slow
 horizon-mod-api-gen patch::tests::a_method_moves_into_a_trait_of_its_own_type lib daily slow
 horizon-mod-api-gen patch::tests::refusals_are_named lib daily slow
 horizon-mod-api-gen patch::tests::support_modules_and_bridges_land_in_the_mirror_their_rows_name lib daily slow
