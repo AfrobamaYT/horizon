@@ -418,6 +418,32 @@ mod tests {
         }
     }
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn staged_mod_terrain_receives_its_level_id() {
+        struct Pocket;
+        impl ModChunkGenerator for Pocket {
+            fn build_terrain(&self, chunk: &mut dyn ChunkAccess) {
+                if chunk.level() == "test:pocket" {
+                    let pos = chunk.pos();
+                    let stone = chunk.state("stone");
+                    assert!(chunk.set_block([pos.x * 16, 64, pos.z * 16], stone));
+                }
+            }
+        }
+        let stem = stem(Value::from("minecraft:overworld"));
+        for (id, expected) in [
+            ("test:pocket", "minecraft:stone"),
+            ("test:other", "minecraft:air"),
+        ] {
+            let level =
+                OverworldGenerator::for_mod(data(), 12345, id, &stem, Arc::new(Pocket), true)
+                    .unwrap();
+            let chunk = level.worker().generate_proto(ChunkPos::new(0, 0)).unwrap();
+            assert_eq!(chunk.block_name(0, 64, 0), expected, "level {id}");
+        }
+    }
+
     /// In a world without placed features or structure sets, a generator that asks only for the
     /// surface and the carvers opens, and its FEATURES status places nothing; one that asks for
     /// features or structures is refused, naming the generator and what is missing.

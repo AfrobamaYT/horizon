@@ -476,6 +476,7 @@ mod tests {
             )]);
             let stem = stem("test:slab");
             ModTerrain::for_stem(
+                "test:pocket",
                 &stem,
                 &generators,
                 &sources(&["minecraft:plains"]),
