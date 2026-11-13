@@ -26,7 +26,7 @@ impl Hooks for Probe {
         let key = r.item_key("minecraft:stick");
         r.item_part(key, self.clone());
     }
-    fn item_toss(&self, _: &mut dyn ServerHost, _: &mut ItemTossEvent<'_>) -> Flow {
+    fn item_toss(&self, _: &mut dyn ServerHost, _: &mut ItemTossEvent) -> Flow {
         self.0.lock().unwrap().tosses += 1;
         Flow::Continue
     }
