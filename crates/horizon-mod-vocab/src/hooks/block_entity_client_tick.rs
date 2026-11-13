@@ -3,12 +3,12 @@
 pub trait Hooks {
     /// A client tick of this client's copy of the mod block entity at `pos`
     /// (`ClientLevel.tickBlockEntities`), when its `id` is yours and its
-    /// block's state ticks on the client (`native_block_entity_client_ticks`):
+    /// block's state ticks on the client (`block_entity_client_ticks`):
     /// once per client tick while the level runs, in vanilla's ticker order
     /// among the others, whether or not the copy is drawn. `block_entity` is
     /// its handle, `state` its block's state and `entity` its data, read only,
     /// as the frame's handling of the server's packets merged it before the
-    /// frame's ticks (`native_block_entity_update_tag`). Start, stop and fade
+    /// frame's ticks (`block_entity_update_tag`). Start, stop and fade
     /// its sounds and add its particles here. Never called on a server, and
     /// never again for a copy removed or whose chunk unloaded.
     #[notes = r##"### Client ticks: hums, smoke and moving parts
