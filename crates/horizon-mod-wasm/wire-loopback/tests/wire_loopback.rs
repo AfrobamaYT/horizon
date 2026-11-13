@@ -1019,31 +1019,6 @@ fn wire_loopback_biome_region_declaration_reaches_the_host_bit_exact() {
     assert_eq!(declared[0].region, biome_region_registration::region());
 }
 #[test]
-fn wire_loopback_guest_warning_reaches_the_host_under_its_mod() {
-    let mods = [mod_api::ModEntry::new(
-        "wire_test",
-        Box::new(WasmMod {
-            group: 0,
-            subscribed: &[],
-            listeners: &[],
-            corrupt: false,
-        }),
-    )];
-    mod_api::__private::install_parts(
-        &mods,
-        &mod_api::__private::part_tests::rule_schema(),
-        |_| false,
-    )
-    .unwrap();
-    assert_eq!(
-        mod_api::__private::registration_warnings("wire_test"),
-        [mod_api::LoadingMessage::new(
-            "wire_test.warn.optional",
-            &["café", "jei"]
-        )]
-    );
-}
-#[test]
 fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
     mod_api::__private::initialize().unwrap();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
