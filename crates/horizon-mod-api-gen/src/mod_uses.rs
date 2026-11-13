@@ -349,6 +349,10 @@ mod tests {
             escapes("#[path = \"/abs/x.rs\"] mod x;"),
             ReadError::Escapes { .. }
         ));
+        assert!(matches!(
+            escapes("#[path = \"C:\\\\x.rs\"] mod x;"),
+            ReadError::Escapes { .. }
+        ));
         assert_eq!(
             escapes("#[cfg_attr(all(), path = \"../../elsewhere/x.rs\")] mod x;"),
             ReadError::Escapes {

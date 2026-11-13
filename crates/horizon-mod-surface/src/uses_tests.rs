@@ -143,6 +143,7 @@ fn hook(name: &str, argument_type: &str, refs: &[&str]) -> Hook {
 }
 
 /// The pieces of a hand-written surface, changed per test before [`Pieces::build`].
+#[derive(Clone)]
 struct Pieces {
     hooks: Vec<Hook>,
     traits: Vec<Trait>,
@@ -691,6 +692,8 @@ fn how_a_struct_is_built_is_read_from_literals_and_patterns() {
     // A tuple struct's constructor is a full literal.
     let pos = |source: &str| entry(&scan_on(wider(), source), "type:Pos").built;
     assert_eq!(pos("let p = Pos(1, 2);"), Some(Built::Full));
+    // A `..` inside a nested bracket is no rest.
+    assert_eq!(pos("let p = Pos((..), 2);"), Some(Built::Full));
     assert_eq!(pos("let Pos(x, ..) = p;"), Some(Built::None));
     assert_eq!(pos("fn f(p: Pos) {}"), Some(Built::None));
 }
@@ -1503,8 +1506,16 @@ fn a_path_through_a_renamed_crate_is_recorded() {
     record.paths = vec!["Biome".into(), "world::Biome".into()];
     made_for.types.push(record.clone());
     let uses = scan_files(
-        made_for,
+        made_for.clone(),
         &[("src/lib.rs", "use mod_api as api;\nfn f(b: api::Biome) {}")],
+    );
+    assert_eq!(entry(&uses, "type:world::Biome").paths, ["Biome"]);
+    let uses = scan_files(
+        made_for,
+        &[(
+            "src/lib.rs",
+            "extern crate mod_api as api;\nfn f(b: api::Biome) {}",
+        )],
     );
     assert_eq!(entry(&uses, "type:world::Biome").paths, ["Biome"]);
 }
@@ -1608,6 +1619,15 @@ fn a_type_alias_of_an_api_struct_is_not_the_mods_own() {
         ("src/world.rs", &world),
     ]));
     // Through a chain of the mod's aliases, or a renamed import.
+    // Two aliases of one name in different files: either may be the one meant.
+    let elsewhere = ("src/a.rs", "struct Mine { a: u8 }\ntype Api = Mine;");
+    let chained_there = format!(
+        "type Api = mod_api::DimensionSettings;\npub type DimensionSettings = Api;\nfn f() -> DimensionSettings {{ {DIMS_LITERAL} }}"
+    );
+    refused_for_the_new_field(fits_a_new_dims_field(&[
+        elsewhere,
+        ("src/b.rs", &chained_there),
+    ]));
     let chained = format!(
         "type Api = mod_api::DimensionSettings;\npub type DimensionSettings = Api;\nfn f() -> DimensionSettings {{ {DIMS_LITERAL} }}"
     );
@@ -1626,8 +1646,8 @@ fn a_type_alias_of_an_api_struct_is_not_the_mods_own() {
         "use crate::types::DimensionSettings;\nfn f() { let d = DimensionSettings { a: 1 }; }",
     );
     assert_eq!(fits_a_new_dims_field(&[own_types, own_world]), Fit::Fits);
-    let own_alias = format!(
-        "struct Mine {{ a: u8 }}\ntype DimensionSettings = Mine;\nfn f() {{ let d = DimensionSettings {{ a: 1 }}; }}"
+    let own_alias = String::from(
+        "struct Mine { a: u8 }\ntype DimensionSettings = Mine;\nfn f() { let d = DimensionSettings { a: 1 }; }",
     );
     assert_eq!(
         fits_a_new_dims_field(&[("src/lib.rs", &own_alias)]),
@@ -1664,6 +1684,16 @@ fn a_path_inside_the_mod_to_an_imported_api_struct_is_the_apis() {
         glob_parent,
         ("src/world/gen.rs", &written),
     ]));
+    // An associated type of that name is no definition a path can lead to.
+    let associated = (
+        "src/a.rs",
+        "struct Mine { a: u8 }\nimpl It for X { type DimensionSettings = Mine; }",
+    );
+    let through = format!("use crate::a::DimensionSettings;\nfn f() {{ let d = {DIMS_LITERAL}; }}");
+    refused_for_the_new_field(fits_a_new_dims_field(&[associated, ("src/b.rs", &through)]));
+    // An import from a path that does not start inside the mod may be the API's.
+    let relative = format!("use world::DimensionSettings;\nfn f() {{ let d = {DIMS_LITERAL}; }}");
+    refused_for_the_new_field(fits_a_new_dims_field(&[own, ("src/b.rs", &relative)]));
     // A glob of an API module that does not export the name hands nothing over.
     let mut made_for = base();
     let mut record = dims(&[]);
@@ -1695,18 +1725,18 @@ fn a_path_inside_the_mod_to_an_imported_api_struct_is_the_apis() {
 
 #[test]
 fn self_in_an_impl_for_a_qualified_api_struct_is_the_apis() {
-    let source = format!(
-        "struct DimensionSettings {{ mine: u8 }}\ntrait Make {{ fn make() -> Self; }}\nimpl Make for mod_api::DimensionSettings {{ fn make() -> Self {{ Self {{ min_y: 0, height: 256, logical_height: 256 }} }} }}"
+    let source = String::from(
+        "struct DimensionSettings { mine: u8 }\ntrait Make { fn make() -> Self; }\nimpl Make for mod_api::DimensionSettings { fn make() -> Self { Self { min_y: 0, height: 256, logical_height: 256 } } }",
     );
     refused_for_the_new_field(fits_a_new_dims_field(&[("src/lib.rs", &source)]));
     // An impl for an alias of the API's, beside the file's own struct of that name.
-    let aliased = format!(
-        "struct DimensionSettings {{ mine: u8 }}\ntype Dims = mod_api::DimensionSettings;\ntrait Make {{ fn make() -> Self; }}\nimpl Make for Dims {{ fn make() -> Self {{ Self {{ min_y: 0, height: 256, logical_height: 256 }} }} }}"
+    let aliased = String::from(
+        "struct DimensionSettings { mine: u8 }\ntype Dims = mod_api::DimensionSettings;\ntrait Make { fn make() -> Self; }\nimpl Make for Dims { fn make() -> Self { Self { min_y: 0, height: 256, logical_height: 256 } } }",
     );
     refused_for_the_new_field(fits_a_new_dims_field(&[("src/lib.rs", &aliased)]));
     // An impl for a path inside the mod that leads to the API's.
-    let through_parent = format!(
-        "trait Make {{ fn make() -> Self; }}\nimpl Make for super::DimensionSettings {{ fn make() -> Self {{ Self {{ min_y: 0, height: 256, logical_height: 256 }} }} }}"
+    let through_parent = String::from(
+        "trait Make { fn make() -> Self; }\nimpl Make for super::DimensionSettings { fn make() -> Self { Self { min_y: 0, height: 256, logical_height: 256 } } }",
     );
     refused_for_the_new_field(fits_a_new_dims_field(&[
         (
