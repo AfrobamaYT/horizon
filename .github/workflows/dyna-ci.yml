@@ -204,6 +204,51 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 tools/ci/dyna_ci_pool_watch.py
 
+  # The conflict-hotspot churn report (tools/hotspots/README.md), on main's nightly dispatch only: replays the last
+  # 3 days of merges with `git merge-tree` (git 2.38 or newer; GitHub's Ubuntu image has it) and rewrites one issue.
+  # Never a gate: every step may fail without failing the job. No build; GitHub's runner, not the pool.
+  churn-report:
+    if: >-
+      github.repository == 'arismoko/horizon' && github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' && !inputs.pr && !inputs.prepare-output-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch the pull request heads and upstream's main
+        continue-on-error: true
+        run: |
+          git fetch -q --no-tags origin '+refs/pull/*/head:refs/pull/*/head'
+          git fetch -q --no-tags https://github.com/horizon-rust/horizon.git main:refs/remotes/upstream/main
+      - name: Update the churn report issue
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: 'Conflict hotspots: churn report'
+        run: |
+          git --version
+          python3 tools/hotspots/measure.py --days 3 --report > "$RUNNER_TEMP/report.md"
+          {
+            echo "> 🤖 Filed by Aria's agent swarm, Dyna, not by Aria."
+            echo
+            head -c 60000 "$RUNNER_TEMP/report.md"
+          } > "$RUNNER_TEMP/body.md"
+          cat "$RUNNER_TEMP/body.md" >> "$GITHUB_STEP_SUMMARY"
+          number=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$TITLE\" in:title" \
+            --json number,title --jq ".[] | select(.title == \"$TITLE\") | .number" | head -1)
+          if [ -n "$number" ]; then
+            gh issue edit "$number" -R "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$TITLE" --body-file "$RUNNER_TEMP/body.md"
+          fi
+
   # Lint and verify use separate Dyna slots when the pool is available; each slot's build folder persists.
   # Outside contributors and pool-down runs stay on GitHub's runners with snapshot caches.
   lint:
@@ -668,6 +713,10 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 tools/check_layers.py ${BASE_SHA:+--base "$BASE_SHA" --pull-request-merge}
+      # tools/hotspots/README.md: a `pub use` brace list under the vocabulary's exports/ names at most 12 items, so two
+      # PRs adding names don't conflict on rustfmt's re-wrap; today's longer lists only shrink.
+      - name: Export lists stay short
+        run: python3 tools/hotspots/check_lists.py
       # Independent of the Rust job. Only after earlier static setup/checks succeeded:
       # compiler fixtures after failed setup would add a second, misleading failure.
       - name: Test offline research tooling

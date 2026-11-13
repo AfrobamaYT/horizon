@@ -1,0 +1,47 @@
+from pathlib import Path
+import tempfile
+import unittest
+from unittest import mock
+
+from tools.hotspots import check_lists
+
+
+def names(n):
+    return ", ".join(f"N{i}" for i in range(n))
+
+
+class CheckListsTest(unittest.TestCase):
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        self.root = Path(self._dir.name)
+        self.folder = self.root / check_lists.EXPORTS
+        self.folder.mkdir(parents=True)
+
+    def write(self, name, text):
+        (self.folder / name).write_text(text)
+
+    def problems(self, long_lists):
+        with mock.patch.dict(check_lists.LONG_LISTS, long_lists, clear=True):
+            return check_lists.problems(self.root)
+
+    def test_a_new_list_over_twelve_names_fails(self):
+        self.write("short.rs", f"pub use a::{{{names(12)}}};\npub use b::One;\n")
+        self.write("nested.rs", f"mod __private {{\n    pub(crate) use a::{{x::{{{names(7)}}}, {names(6)}}};\n}}\n")
+        self.write("domains.rs", f"pub use a::{{{names(60)}}};\n")
+        found = self.problems({})
+        self.assertEqual(len(found), 1)
+        self.assertIn("nested.rs: a `pub use` names 13 items", found[0])
+
+    def test_a_listed_length_may_only_shrink(self):
+        self.write("grew.rs", f"pub use a::{{{names(15)}}};\n")
+        self.write("shrank.rs", f"pub use a::{{{names(13)}}};\n")
+        self.write("same.rs", f"pub use a::{{{names(20)}}};\n// pub use b::{{{names(30)}}};\n")
+        found = self.problems({"grew.rs": (14, ""), "shrank.rs": (14, ""), "same.rs": (20, "")})
+        self.assertEqual(len(found), 2)
+        self.assertIn("grew.rs: its longest `pub use` list grew to 15 names (at most 14", found[0])
+        self.assertIn("shrank.rs: its longest `pub use` list is down to 13 names: lower its entry", found[1])
+
+
+if __name__ == "__main__":
+    unittest.main()
