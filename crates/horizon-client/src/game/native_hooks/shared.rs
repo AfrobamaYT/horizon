@@ -1479,23 +1479,20 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
     if !mod_api::__private::listened(mod_api::HookId::LivingKnockback) {
         return false;
     }
+    let attack = level.attack();
     let attacker = match &pushed {
         Hurting::Mob(mob, damage) => match damage.attacker.or(mob.ai.last_hurt_by) {
             Some(Who::Mob(id)) => id as i32,
-            _ => level.attack().attacker,
+            _ => attack.attacker,
         },
         Hurting::Player(_, source)
         | Hurting::Dragon(_, source)
         | Hurting::ArmorStand(_, source)
-        | Hurting::Entity(_, _, source) => {
-            if source.causing != 0 {
-                source.causing
-            } else {
-                level.attack().attacker
-            }
-        }
+        | Hurting::Entity(_, _, source) => match source.causing {
+            0 => attack.attacker,
+            causing => causing,
+        },
     };
-    let attack = level.attack();
     let (entity, kind, source) = hurt_server_args(pushed, level.attack());
     let mut canceled = false;
     let [main, off] = &attack.held;

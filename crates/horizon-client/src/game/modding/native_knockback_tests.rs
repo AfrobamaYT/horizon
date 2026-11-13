@@ -490,8 +490,8 @@ fn the_hook_names_the_entry_a_push_came_through_once_per_full_entry_call() {
 
         player_with_sword(game);
         let attack = &NO_ATTACK;
-        game.knock_back_player(0.4, 1.0, 0.0, source(0), &attack, 0.0);
-        game.knock_back_player_full(0.4, 1.0, 0.0, source(0), &attack, 0.0, false);
+        game.knock_back_player(0.4, 1.0, 0.0, source(0), attack, 0.0);
+        game.knock_back_player_full(0.4, 1.0, 0.0, source(0), attack, 0.0, false);
         let entries = log.lock().unwrap().entries.clone();
         assert_eq!(
             &entries[3..],
