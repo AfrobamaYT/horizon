@@ -116,6 +116,45 @@ pub(super) const PACKAGES: [(&str, &str); 3] = [
     (INTERNALS_PACKAGE, "internals"),
 ];
 
+/// Where a mod's `Cargo.toml` names the SDK package `package`: the copy of its pinned build that
+/// `cargo horizon-mod` fetches into the project (`.horizon/sdk/`).
+pub(super) fn sdk_path(package: &str) -> String {
+    format!(".horizon/sdk/api/crates/{package}")
+}
+
+/// Whether `value`, a mod's dependency `key` on the SDK package `package`, is a form the launcher
+/// takes: the path to the mod tool's copy of the pinned SDK ([`sdk_path`]), or a version alone.
+/// The launcher builds against its own copy of the same build, so no other source is taken, and
+/// the git form the path form replaced is refused by name.
+pub(super) fn sdk_source(key: &str, package: &str, value: &toml::Value) -> Result<(), String> {
+    let path = sdk_path(package);
+    if value.get("git").is_some() {
+        return Err(format!(
+            "E_SDK_GIT_FORM: {key}: the SDK is no longer named by git; write {key} = {{ path = \"{path}\" }}, then any cargo horizon-mod command fetches the pinned SDK there"
+        ));
+    }
+    for selector in [
+        "registry",
+        "registry-index",
+        "branch",
+        "tag",
+        "rev",
+        "workspace",
+    ] {
+        if value.get(selector).is_some() {
+            return Err(format!(
+                "{key}: {selector} is not a launcher-owned SDK source"
+            ));
+        }
+    }
+    match value.get("path") {
+        Some(written) if written.as_str() != Some(path.as_str()) => Err(format!(
+            "{key}: path must be \"{path}\", the pinned SDK the mod tool fetches"
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// A dependency on one of [`PACKAGES`], under `[dependencies]` or a `[target.*]` table.
 struct ApiDependency {
     target: Option<String>,
@@ -241,32 +280,11 @@ impl<'a> Project<'a> {
                         .get("package")
                         .and_then(toml::Value::as_str)
                         .unwrap_or(key);
-                    if PACKAGES.iter().any(|(sdk, _)| *sdk == package) {
-                        for selector in [
-                            "registry",
-                            "registry-index",
-                            "branch",
-                            "tag",
-                            "workspace",
-                            "path",
-                        ] {
-                            if value.get(selector).is_some() {
-                                return Err(ProjectError::Cargo {
-                                    mod_id: mod_id(),
-                                    reason: format!(
-                                        "{key}: {selector} is not a launcher-owned SDK source"
-                                    ),
-                                });
-                            }
-                        }
-                        if value.get("git").is_some()
-                            && (value.get("git").and_then(toml::Value::as_str)
-                                != Some(horizon_addresses::NATIVE_MOD_SDK_SOURCE)
-                                || value.get("rev").and_then(toml::Value::as_str)
-                                    != Some(bundle.native().horizon.as_str()))
-                        {
-                            return Err(ProjectError::Cargo { mod_id: mod_id(), reason: format!("{key}: SDK git dependency must name the exact pinned Horizon repository and revision") });
-                        }
+                    if let Some(&(sdk, _)) = PACKAGES.iter().find(|(sdk, _)| *sdk == package) {
+                        sdk_source(key, sdk, value).map_err(|reason| ProjectError::Cargo {
+                            mod_id: mod_id(),
+                            reason,
+                        })?;
                     } else {
                         for selector in [
                             "git",
@@ -686,6 +704,36 @@ mod tests {
                     matches!(&error, ProjectError::ApiDependency { .. }),
                     "{error}"
                 ),
+            }
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_sdk_is_taken_by_its_path_form_and_the_git_form_is_refused_by_name() {
+        let dir = fixture();
+        for (form, refusal) in [
+            ("{ path = '.horizon/sdk/api/crates/horizon-mod-api' }", None),
+            (
+                "{ git = 'https://github.com/arismoko/horizon', rev = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }",
+                Some("example: E_SDK_GIT_FORM: horizon-mod-api: "),
+            ),
+            (
+                "{ path = '../horizon/crates/horizon-mod-api' }",
+                Some("example: horizon-mod-api: path must be \".horizon/sdk/api/crates/horizon-mod-api\""),
+            ),
+        ] {
+            let text = format!(
+                "[package]\nname='example-mod'\nversion='1.0.0'\n[dependencies]\nhorizon-mod-api = {form}\n"
+            );
+            fs::write(dir.join("Cargo.toml"), text).unwrap();
+            let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
+            match (Project::read(&bundle), refusal) {
+                (Ok(_), None) => {}
+                (Err(error), Some(refusal)) => {
+                    assert!(error.to_string().starts_with(refusal), "{error}")
+                }
+                (result, _) => panic!("{form}: {:?}", result.err()),
             }
         }
         fs::remove_dir_all(dir).unwrap();

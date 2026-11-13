@@ -2,9 +2,10 @@
 //! items, data and assets, no code. Code mods are native (docs/modding/src/how-to/native-mods.md).
 //!
 //! - `new <path> [--name "Name"]`: a content mod from the template; with
-//!   `--template native [--horizon <commit>]`, a native trait mod's bundle, pinned to the
-//!   newest prebuilt game unless `--horizon` names a commit.
-//! - `update [--horizon <commit>]`: repin this native mod and diff/refresh declared internals.
+//!   `--template native|wasm [--horizon <build>]`, a code mod pinned to the current Nightly's
+//!   SDK unless `--horizon` names another build (`nightly-<date>` or a sha), with that SDK fetched
+//!   into `.horizon/sdk/` (`sdk_fetch.rs`).
+//! - `update [--horizon <build>]`: repin this native mod and diff/refresh declared internals.
 //! - `inject update [--accept <id>]…`: refresh declarations without repinning.
 //! - `inject sync --repo <game checkout>`: validate API injection pins against a game catalog.
 //! - `inject add <at> --kind <kind> [--call <callee>] [--nth N] [--with <fn>]`: pin an inject.
@@ -25,7 +26,7 @@
 //!   do, 1 when one does not, 2 when it cannot be told.
 //! - `registry build|review|check|list`: the registry repository's CI.
 //! - `use-jar <path>`: list an exact original Java jar as a passive asset/data source.
-use horizon_mod_package::{Content, Manifest, Package, index::native, manifest::MANIFEST};
+use horizon_mod_package::{Content, Manifest, Package, manifest::MANIFEST};
 mod bounded;
 mod check;
 mod inject;
@@ -35,6 +36,7 @@ mod jar;
 mod layouts;
 mod registry;
 mod sdk_cmds;
+mod sdk_fetch;
 mod uses_table;
 mod wasm;
 
@@ -81,14 +83,20 @@ fn main() -> ExitCode {
         args.remove(0);
     }
     let result = match args.first().map(String::as_str) {
-        Some("new") => new(&args[1..]),
-        Some("build") if args.get(1).is_some_and(|a| a == "--wasm") => wasm::build(Path::new("."), flag(&args[2..], "--catalog").map(Path::new), &args[2..].windows(2).filter(|a| a[0] == "--with").map(|a| PathBuf::from(&a[1])).collect::<Vec<_>>())
+        Some("new") => new(&args[1..]).and_then(|code| match code {
+            Some(dir) => fetched(&dir),
+            None => Ok(()),
+        }),
+        Some("build") if args.get(1).is_some_and(|a| a == "--wasm") => fetched(Path::new("."))
+            .and_then(|()| wasm::build(Path::new("."), flag(&args[2..], "--catalog").map(Path::new), &args[2..].windows(2).filter(|a| a[0] == "--with").map(|a| PathBuf::from(&a[1])).collect::<Vec<_>>()))
             .and_then(|()| build(entry))
             .map(|p| println!("Built {}", p.display())),
         Some("wasm-std") => wasm::wasm_std(&args[1..]),
-        Some("build") => build(entry).map(|p| {
-            println!("Built {}", p.display());
-        }),
+        Some("build") => code_project(Path::new("."))
+            .then(|| fetched(Path::new(".")))
+            .unwrap_or(Ok(()))
+            .and_then(|()| build(entry))
+            .map(|p| println!("Built {}", p.display())),
         Some("run") => run(&args[1..]).map_err(|e| e.to_string()),
         Some("check") if args.get(1).is_none_or(|a| a.starts_with("--")) => {
             sdk_cmds::check_mod(entry, &args[1..])
@@ -116,7 +124,7 @@ fn main() -> ExitCode {
                 })
                 .map(|()| println!("Run `cargo horizon-mod check`."))
         }
-        _ => Err("usage: cargo horizon-mod new <path> [--name \"Name\"] [--template content|native [--horizon <commit>]] | update [--horizon <commit>] | inject update [--accept <id>]… | inject sync --repo <game checkout> | inject add <at> --kind <kind> [--call <canonical callee>] [--nth N] [--with <fn>] | internals sync [--repo <path>] | internals add <path>… [--kind <kind>] | build [--wasm] | wasm-std <out.wasm> | run [--game <horizon-client>] [-- <game args>] | check [--uses] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | hooks <text> [--all] | sdk diff <build> <build> | fits [<file.hmod>] [--build <name>]… | registry build|review|check|list | use-jar <path>".into()),
+        _ => Err("usage: cargo horizon-mod new <path> [--name \"Name\"] [--template content|native|wasm [--horizon <build>]] | update [--horizon <build>] | inject update [--accept <id>]… | inject sync --repo <game checkout> | inject add <at> --kind <kind> [--call <canonical callee>] [--nth N] [--with <fn>] | internals sync [--repo <path>] | internals add <path>… [--kind <kind>] | build [--wasm] | wasm-std <out.wasm> | run [--game <horizon-client>] [-- <game args>] | check [--uses] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | hooks <text> [--all] | sdk diff <build> <build> | fits [<file.hmod>] [--build <name>]… | registry build|review|check|list | use-jar <path>".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -127,13 +135,31 @@ fn main() -> ExitCode {
     }
 }
 
+/// Whether `dir` is a code mod's project: one with a `Cargo.toml`, which depends on the SDK.
+fn code_project(dir: &Path) -> bool {
+    dir.join("Cargo.toml").is_file()
+}
+
+/// The SDK the project at `dir` pins, fetched into its `.horizon/sdk/` when missing or stale.
+fn fetched(dir: &Path) -> Result<(), String> {
+    let sdk = sdk_fetch::ensure_sdk(dir)?;
+    println!(
+        "SDK {} (build {}) in {}",
+        sdk.name,
+        sdk.build,
+        sdk.dir.display()
+    );
+    Ok(())
+}
+
 /// The value after `flag` in `args`.
 fn flag<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     let i = args.iter().position(|a| a == flag)?;
     args.get(i + 1).map(String::as_str)
 }
 
-fn new(args: &[String]) -> Result<(), String> {
+/// Makes the mod `args` asks for; a code mod's folder is returned, for its SDK to be fetched.
+fn new(args: &[String]) -> Result<Option<PathBuf>, String> {
     let path = args
         .first()
         .filter(|a| !a.starts_with("--"))
@@ -160,8 +186,17 @@ fn new(args: &[String]) -> Result<(), String> {
     let fill = |t: &str| t.replace("{id}", &id).replace("{name}", &name);
     match flag(args, "--template") {
         None | Some("content") => {}
-        Some("native") => return new_native(dir, &id, flag(args, "--horizon"), fill),
-        Some(_) => return Err("--template is content or native".into()),
+        Some(template @ ("native" | "wasm")) => {
+            new_code(
+                dir,
+                &id,
+                template == "native",
+                flag(args, "--horizon"),
+                fill,
+            )?;
+            return Ok(Some(dir.to_owned()));
+        }
+        Some(_) => return Err("--template is content, native or wasm".into()),
     }
     // A block copying a vanilla one, with its model, name, loot, recipe and tag.
     let files = [
@@ -220,53 +255,20 @@ fn new(args: &[String]) -> Result<(), String> {
          (docs/modding/src/start/first-content-mod.md)",
         dir.display()
     );
-    Ok(())
+    Ok(None)
 }
 
-/// The Horizon commit a native mod pins: `--horizon`'s, or the newest prebuilt game's, so the
-/// launcher downloads the game instead of building it.
+/// The build a code mod pins: `--horizon`'s (a sha or a Nightly name), or the current Nightly's,
+/// the build players have.
 fn pin(horizon: Option<&str>) -> Result<String, String> {
-    let Some(horizon) = horizon else {
-        let api = format!(
-            "https://api.github.com/repos/{}/releases?per_page=100",
-            native::PREBUILT_REPO
-        );
-        let releases = ureq::get(&api)
-            .call()
-            .map_err(|e| format!("{api}: {e}"))?
-            .into_string()
-            .map_err(|e| e.to_string())?;
-        return newest_prebuilt(&serde_json::from_str(&releases).map_err(|e| e.to_string())?)
-            .ok_or_else(|| {
-                format!(
-                    "no prebuilt game on {}'s releases: pass --horizon <commit>",
-                    native::PREBUILT_REPO
-                )
-            });
-    };
-    if !horizon_mod_package::manifest::revision(horizon) {
-        return Err("--horizon: a Horizon commit is 40 lowercase hex digits".into());
-    }
-    Ok(horizon.into())
+    sdk_fetch::resolve(
+        &sdk_fetch::Base::from_env(),
+        horizon.unwrap_or(horizon_release_sign::NIGHTLY),
+    )
 }
 
-/// The commit of the newest release (GitHub lists them newest first) carrying prebuilt archives
-/// the launcher reads.
-fn newest_prebuilt(releases: &serde_json::Value) -> Option<String> {
-    releases.as_array()?.iter().find_map(|release| {
-        let commit = release["tag_name"]
-            .as_str()?
-            .strip_prefix(native::PREBUILT_TAG)?;
-        let readable = release["assets"].as_array()?.iter().any(|asset| {
-            asset["name"]
-                .as_str()
-                .is_some_and(|name| name.starts_with(&native::prebuilt_prefix()))
-        });
-        (readable && horizon_mod_package::manifest::revision(commit)).then(|| commit.to_string())
-    })
-}
-
-/// Repins the native mod and its API dependencies, reporting signature changes before writing.
+/// Repins the native mod, reporting signature changes before writing. Its `Cargo.toml` names the
+/// SDK by path, so only the pin moves; the next command fetches the new SDK.
 fn update(dir: &Path, horizon: Option<&str>, accept: &[&str]) -> Result<(), String> {
     let path = dir.join(MANIFEST);
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -278,27 +280,7 @@ fn update(dir: &Path, horizon: Option<&str>, accept: &[&str]) -> Result<(), Stri
     let mut doc: toml_edit::DocumentMut = text
         .parse()
         .map_err(|e| format!("{}: {e}", path.display()))?;
-    let cargo_path = dir.join("Cargo.toml");
-    let cargo_text = std::fs::read_to_string(&cargo_path)
-        .map_err(|e| format!("{}: {e}", cargo_path.display()))?;
-    let mut cargo: toml_edit::DocumentMut = cargo_text
-        .parse()
-        .map_err(|e| format!("{}: {e}", cargo_path.display()))?;
     let horizon = pin(horizon)?;
-    for package in ["horizon-mod-api", "horizon-internals"] {
-        let dependency = cargo
-            .get_mut("dependencies")
-            .and_then(|deps| deps.get_mut(package))
-            .filter(|dep| !dep.is_none());
-        if package == "horizon-internals" && dependency.is_none() {
-            continue;
-        }
-        let rev = dependency
-            .and_then(|dep| dep.get_mut("rev"))
-            .and_then(toml_edit::Item::as_value_mut)
-            .ok_or_else(|| format!("Cargo.toml: no dependencies.{package}.rev"))?;
-        internals::set_string(rev, &horizon);
-    }
     if !manifest.internals.is_empty() || manifest.inject.iter().any(|i| i.hash.is_none()) {
         // #2593: these become the pinned catalogs with the mod's own modules applied.
         let old = internals::load(dir, &native.horizon)?;
@@ -321,16 +303,19 @@ fn update(dir: &Path, horizon: Option<&str>, accept: &[&str]) -> Result<(), Stri
     );
     let candidate = doc.to_string();
     std::fs::write(&path, candidate).map_err(|e| format!("{}: {e}", path.display()))?;
-    std::fs::write(&cargo_path, cargo.to_string())
-        .map_err(|e| format!("{}: {e}", cargo_path.display()))?;
+    // The old pin's SDK goes; the next command fetches this one.
+    sdk_fetch::repin(dir, &horizon)?;
     println!("Pinned to Horizon {horizon}");
     Ok(())
 }
 
-/// A flat native trait mod project, pinned to the Horizon commit it is made for.
-fn new_native(
+/// A flat code mod project, native or wasm, pinned to the build it is made for. Its `Cargo.toml`
+/// names the SDK by path (`.horizon/sdk/api/crates/horizon-mod-api`); a native mod pins its
+/// build in `[native] horizon`, a wasm mod in `[package.metadata.horizon] sdk`.
+fn new_code(
     dir: &Path,
     id: &str,
+    native: bool,
     horizon: Option<&str>,
     fill: impl Fn(&str) -> String,
 ) -> Result<(), String> {
@@ -339,14 +324,26 @@ fn new_native(
     }
     let horizon = pin(horizon)?;
     let horizon = horizon.as_str();
-    let rev = format!(", rev = \"{horizon}\"");
-    let manifest = format!(
-        "{}\n[native]\ngame = \"26.3\"\nhorizon = \"{horizon}\"\nmixins = \"{}\"\n",
-        include_str!("../template/native/horizon-mod.toml"),
-        horizon_mod_package::mixins_tool::REV,
-    );
+    let (manifest, metadata) = if native {
+        (
+            format!(
+                "{}\n[native]\ngame = \"26.3\"\nhorizon = \"{horizon}\"\nmixins = \"{}\"\n",
+                include_str!("../template/native/horizon-mod.toml"),
+                horizon_mod_package::mixins_tool::REV,
+            ),
+            String::new(),
+        )
+    } else {
+        (
+            include_str!("../template/wasm/horizon-mod.toml").to_owned(),
+            format!(
+                "\n# The SDK build this mod is made for: `cargo horizon-mod update` moves it.\n[package.metadata.horizon]\nsdk = \"{horizon}\"\n"
+            ),
+        )
+    };
+    let cargo = include_str!("../template/native/api.toml").replace("{metadata}", &metadata);
     let files = [
-        ("Cargo.toml", include_str!("../template/native/api.toml")),
+        ("Cargo.toml", cargo.as_str()),
         ("src/lib.rs", include_str!("../template/native/lib.rs")),
         (MANIFEST, manifest.as_str()),
         (".gitignore", include_str!("../template/gitignore")),
@@ -355,16 +352,24 @@ fn new_native(
         let to = dir.join(file);
         std::fs::create_dir_all(to.parent().expect("a file in the mod"))
             .map_err(|e| e.to_string())?;
-        let text = fill(text).replace("{rev}", &rev);
-        std::fs::write(&to, text).map_err(|e| format!("{}: {e}", to.display()))?;
+        std::fs::write(&to, fill(text)).map_err(|e| format!("{}: {e}", to.display()))?;
     }
     for folder in ["assets", "data"] {
         std::fs::create_dir_all(dir.join(folder)).map_err(|e| e.to_string())?;
     }
+    let next = if native {
+        format!(
+            "horizon-launcher native-build {} --instance <instance> --trust-native-code",
+            dir.display()
+        )
+    } else {
+        format!("cd {} && cargo horizon-mod build --wasm", dir.display())
+    };
     println!(
-        "Created {} (native mod id {id}). Next: horizon-launcher native-build {} --instance <instance> --trust-native-code",
+        "Created {} ({} mod id {id}). Your editor resolves horizon-mod-api once the SDK is in .horizon/sdk/: \
+         any cargo horizon-mod command fetches it in a fresh clone. Next: {next}",
         dir.display(),
-        dir.display()
+        if native { "native" } else { "wasm" },
     );
     Ok(())
 }
@@ -602,9 +607,20 @@ mod tests {
             "--horizon".into(),
             commit.into(),
         ];
-        new(&args).unwrap();
+        assert_eq!(new(&args).unwrap(), Some(path.clone()));
         let api = std::fs::read_to_string(path.join("Cargo.toml")).unwrap();
-        assert!(api.contains(&format!("rev = \"{commit}\"")), "{api}");
+        // The SDK by path, never git: the build is the manifest's pin.
+        assert!(
+            api.contains(
+                r#"horizon-mod-api = { path = ".horizon/sdk/api/crates/horizon-mod-api" }"#
+            ),
+            "{api}"
+        );
+        assert!(
+            !api.contains("git") && !api.contains("[package.metadata.horizon]"),
+            "{api}"
+        );
+        assert_eq!(sdk_fetch::pin(&path).unwrap(), commit);
         let hmod = build_in(&path).unwrap();
         let bundle = horizon_mod_package::index::native::Bundle::read(&hmod).unwrap();
         assert_eq!(bundle.manifest.id, "machine_mod");
@@ -638,35 +654,45 @@ mod tests {
                 "main".into(),
             ])
             .unwrap_err()
-            .contains("40 lowercase hex")
+            .contains("is not a build")
         );
         let newer = "89abcdef0123456789abcdef0123456789abcdef";
         update(&path, Some(newer), &[]).unwrap();
         let manifest =
             Manifest::parse(&std::fs::read_to_string(path.join(MANIFEST)).unwrap()).unwrap();
         assert_eq!(manifest.native.unwrap().horizon, newer);
-        let api = std::fs::read_to_string(path.join("Cargo.toml")).unwrap();
-        assert!(api.contains(&format!("rev = \"{newer}\" }}")), "{api}");
+        assert_eq!(
+            std::fs::read_to_string(path.join("Cargo.toml")).unwrap(),
+            api
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
-    fn the_pin_is_the_newest_release_the_launcher_can_download() {
-        let (old, new) = (
-            "0123456789abcdef0123456789abcdef01234567",
-            "89abcdef0123456789abcdef0123456789abcdef",
+    fn the_wasm_template_pins_its_build_in_the_cargo_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("greeter");
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        let args = [
+            path.display().to_string(),
+            "--template".into(),
+            "wasm".into(),
+            "--horizon".into(),
+            commit.into(),
+        ];
+        assert_eq!(new(&args).unwrap(), Some(path.clone()));
+        let manifest =
+            Manifest::parse(&std::fs::read_to_string(path.join(MANIFEST)).unwrap()).unwrap();
+        assert!(manifest.native.is_none() && manifest.wasm.is_none());
+        assert_eq!(sdk_fetch::pin(&path).unwrap(), commit);
+        let api = std::fs::read_to_string(path.join("Cargo.toml")).unwrap();
+        assert!(
+            api.contains(".horizon/sdk/api/crates/horizon-mod-api"),
+            "{api}"
         );
-        let releases = serde_json::json!([
-            {"tag_name": "v1.2.0", "assets": [{"name": "horizon-launcher.zip"}]},
-            // An archive layout this launcher doesn't read.
-            {"tag_name": format!("prebuilt-{new}"),
-             "assets": [{"name": "horizon-prebuilt-x86_64-unknown-linux-gnu.tar.gz"}]},
-            {"tag_name": format!("prebuilt-{old}"),
-             "assets": [{"name": "SHA256SUMS"},
-                        {"name": native::prebuilt_archive("aarch64-apple-darwin", false)}]},
-        ]);
-        assert_eq!(newest_prebuilt(&releases).as_deref(), Some(old));
-        assert_eq!(newest_prebuilt(&serde_json::json!([])), None);
+        // The SDK the editor reads is never part of the mod or its repository.
+        let ignored = std::fs::read_to_string(path.join(".gitignore")).unwrap();
+        assert!(ignored.lines().any(|line| line == "/.horizon"), "{ignored}");
     }
 }
 
