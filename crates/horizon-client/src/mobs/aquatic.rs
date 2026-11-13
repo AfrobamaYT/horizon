@@ -17,6 +17,7 @@ use crate::join_seq::JoinList;
 use crate::particles::ParticleType;
 use horizon_core::geometry::trig::Mth;
 use horizon_core::{geometry::Vec3, random::RandomSource};
+use horizon_world::move_gate::MoveGate;
 use std::f32::consts::PI;
 
 // Squid animation slots in AnimState.v.
@@ -625,13 +626,13 @@ pub fn travel(
     match m.species() {
         // Squid.travel: move by the current velocity only.
         S::Squid | S::GlowSquid => {
-            m.do_move(w, level, events);
+            m.do_move(w, level, events, &mut MoveGate::new());
             true
         }
         // Axolotl.travelInWater: no fish sinking or generic water gravity.
         S::Axolotl if m.fluids.in_water => {
             m.move_relative(m.ai.speed, input);
-            m.do_move(w, level, events);
+            m.do_move(w, level, events, &mut MoveGate::new());
             m.velocity = Vec3::new(m.velocity.x * 0.9, m.velocity.y * 0.9, m.velocity.z * 0.9);
             true
         }
@@ -645,7 +646,7 @@ pub fn travel(
                 0.01
             };
             m.move_relative(speed, input);
-            m.do_move(w, level, events);
+            m.do_move(w, level, events, &mut MoveGate::new());
             m.velocity = Vec3::new(m.velocity.x * 0.9, m.velocity.y * 0.9, m.velocity.z * 0.9);
             if m.ai.target.is_none() {
                 // `Vec3.add(0.0, -0.005, 0.0)`: adding 0.0 turns a -0.0 into 0.0.

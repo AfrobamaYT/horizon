@@ -1,5 +1,6 @@
 //! Sandboxed core-wasm transport. One lock, memory and poison flag per dependency group.
-//! Refusals leave the group running; only faults and native unwinds poison it.
+//! Ordinary refusals leave the group running. Faults, native unwinds and a failed
+//! prepared release poison it, since the guest may still own retained state.
 //! The preallocated call path adds an Arc increment/decrement per call, without
 //! allocating on success. Diagnostic keys are built and checked only on refusal.
 #[cfg(test)]
@@ -282,6 +283,8 @@ pub struct WasmMod {
     pub subscribed: &'static [Option<HookId>],
     pub(crate) listeners: &'static [mod_api::Listener],
     released: Arc<Releases>,
+    prepared: Arc<Mutex<crate::prepared::Slots>>,
+    prepared_entries: Arc<std::collections::HashMap<u32, TypedFunc<(), u64>>>,
     subscriptions: Arc<Mutex<std::collections::HashMap<(Id, u32), &'static [Option<HookId>]>>>,
 }
 /// A guest object never owns the store that may itself retain that object.
@@ -294,6 +297,8 @@ pub(crate) struct WeakWasmMod {
     subscribed: &'static [Option<HookId>],
     pub(crate) listeners: &'static [mod_api::Listener],
     released: Arc<Releases>,
+    prepared: Arc<Mutex<crate::prepared::Slots>>,
+    prepared_entries: Arc<std::collections::HashMap<u32, TypedFunc<(), u64>>>,
     subscriptions: Arc<Mutex<std::collections::HashMap<(Id, u32), &'static [Option<HookId>]>>>,
 }
 impl WeakWasmMod {
@@ -302,6 +307,109 @@ impl WeakWasmMod {
         self.running
             .upgrade()
             .is_some_and(|running| running.poisoned.load(Ordering::Relaxed))
+    }
+    pub(crate) fn prepare(&self, bytes: &[u8]) -> Option<(u32, u32)> {
+        if self
+            .running
+            .upgrade()
+            .is_none_or(|running| running.poisoned.load(Ordering::Relaxed))
+        {
+            note("its group has stopped or was unloaded".into());
+            return None;
+        }
+        if self.prepared_entries.len() != 3 {
+            note(
+                "can_equip requires prepare_can_equip, ask_can_equip and release_can_equip exports"
+                    .into(),
+            );
+            return None;
+        }
+        let token = self
+            .prepared
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .prepare()?;
+        struct Pending<'a> {
+            module: &'a WeakWasmMod,
+            token: (u32, u32),
+            committed: bool,
+        }
+        impl Drop for Pending<'_> {
+            fn drop(&mut self) {
+                if !self.committed {
+                    self.module.release(self.token.0, self.token.1);
+                }
+            }
+        }
+        let mut pending = Pending {
+            module: self,
+            token,
+            committed: false,
+        };
+        let result = self.call(
+            CallClass::Hook,
+            Frame::default(),
+            crate::prepared::PREPARE,
+            None,
+            |w| {
+                w.put(&token.0);
+                w.put(&token.1);
+                w.put_bytes(bytes);
+            },
+            |r| {
+                let echoed: (u32, u32) = r.take()?;
+                if echoed != token {
+                    return Err(WireError::Invalid("prepared token mismatch"));
+                }
+                Ok(())
+            },
+        );
+        result?;
+        pending.committed = true;
+        Some(token)
+    }
+    pub(crate) fn check(&self, slot: u32, generation: u32) -> bool {
+        self.running
+            .upgrade()
+            .is_some_and(|r| !r.poisoned.load(Ordering::Relaxed))
+            && self
+                .prepared
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .check(slot, generation)
+    }
+    pub(crate) fn release(&self, slot: u32, generation: u32) {
+        let released = self
+            .prepared
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .release(slot, generation);
+        if released && !std::thread::panicking() {
+            let result = self.call(
+                CallClass::Hook,
+                Frame::default(),
+                crate::prepared::RELEASE,
+                None,
+                |w| {
+                    w.put(&slot);
+                    w.put(&generation);
+                },
+                |r| r.take::<()>(),
+            );
+            if result.is_none() {
+                // The guest may still own the old stack. Stop the shared execution
+                // group before any subsequent preparation can reuse host authority.
+                if let Some(running) = self.running.upgrade() {
+                    running.poisoned.store(true, Ordering::Relaxed);
+                }
+            }
+        } else if released {
+            // Guest cleanup cannot run safely during a native unwind. Stop the
+            // instance's group so retained guest state can never be used again.
+            if let Some(running) = self.running.upgrade() {
+                running.poisoned.store(true, Ordering::Relaxed);
+            }
+        }
     }
     /// Refusals answer unavailable without stopping the group; faults stop all members.
     pub(crate) fn call<R>(
@@ -325,6 +433,8 @@ impl WeakWasmMod {
             subscribed: self.subscribed,
             listeners: self.listeners,
             released: self.released.clone(),
+            prepared: self.prepared.clone(),
+            prepared_entries: self.prepared_entries.clone(),
             subscriptions: self.subscriptions.clone(),
         };
         module.call(class, frame, id, handler, args, reply)
@@ -544,6 +654,23 @@ fn host_reply(mut caller: Caller<'_, State>, ptr: u32) -> wasmtime::Result<()> {
 }
 
 impl WasmMod {
+    pub(crate) fn check_prepared_hooks(&self, hooks: &[Option<HookId>]) -> Result<(), String> {
+        for (hook, entries) in crate::boundary::PREPARED_EXPORTS {
+            if !hooks.iter().flatten().any(|id| {
+                crate::boundary::hook_id(hook).is_some_and(|wanted| wanted as usize == *id as usize)
+            }) {
+                continue;
+            }
+            for (name, id) in entries {
+                if !self.prepared_entries.contains_key(id) {
+                    return Err(format!(
+                        "{hook} requires prepared wasm export {name}; no fallback is available"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
     pub(crate) fn downgrade(&self) -> WeakWasmMod {
         WeakWasmMod {
             id: self.id.clone(),
@@ -553,6 +680,8 @@ impl WasmMod {
             subscribed: self.subscribed,
             listeners: self.listeners,
             released: self.released.clone(),
+            prepared: self.prepared.clone(),
+            prepared_entries: self.prepared_entries.clone(),
             subscriptions: self.subscriptions.clone(),
         }
     }
@@ -630,6 +759,9 @@ impl WasmMod {
                 .call(&mut group.store, ())
                 .map_err(load)?;
             if layout != *mod_api::wire::LAYOUT {
+                if layout == mod_api::wire_core_layout() {
+                    return Err(Refusal::Runtime("prepared can_equip ABI layout mismatch: guest carries the old unprepared layout; rebuild the wasm mod".into()));
+                }
                 return Err(Refusal::Layout {
                     built: layout,
                     game: *mod_api::wire::LAYOUT,
@@ -657,7 +789,15 @@ impl WasmMod {
             let hook = instance
                 .get_typed_func(&mut group.store, "horizon_hook")
                 .map_err(load)?;
-            exports.push((name, input, hook));
+            let mut prepared_entries = std::collections::HashMap::new();
+            for (_, entries) in crate::boundary::PREPARED_EXPORTS {
+                for (name, id) in entries {
+                    if let Ok(entry) = instance.get_typed_func::<(), u64>(&mut group.store, name) {
+                        prepared_entries.insert(*id, entry);
+                    }
+                }
+            }
+            exports.push((name, input, hook, Arc::new(prepared_entries)));
         }
         let lending = group.store.data().lending.clone();
         let running = Arc::new(Running {
@@ -674,7 +814,7 @@ impl WasmMod {
             .group = Arc::as_ptr(&running) as usize;
         Ok(exports
             .into_iter()
-            .map(|(name, input, hook)| Self {
+            .map(|(name, input, hook, prepared_entries)| Self {
                 id: name.into(),
                 running: running.clone(),
                 input,
@@ -682,6 +822,8 @@ impl WasmMod {
                 subscribed: &[],
                 listeners: &[],
                 released: Arc::default(),
+                prepared: Arc::default(),
+                prepared_entries,
                 subscriptions: Arc::default(),
             })
             .collect())
@@ -894,7 +1036,11 @@ impl WasmMod {
             .map_err(|e| CallError::Fault(e.into()))?;
         #[cfg(feature = "test-copy-probe")]
         crate::copy_probe::record(true, input.bytes().len());
-        let result = self.hook.call(&mut *store, id).map_err(CallError::Fault)?;
+        let result = if let Some(entry) = self.prepared_entries.get(&id) {
+            entry.call(&mut *store, ()).map_err(CallError::Fault)?
+        } else {
+            self.hook.call(&mut *store, id).map_err(CallError::Fault)?
+        };
         let ptr = (result >> 32) as usize;
         let len = result as u32;
         if len == u32::MAX {

@@ -6,6 +6,10 @@ mod game_modules;
 mod interface_cache;
 #[cfg(test)]
 mod interface_cache_tests;
+#[cfg(test)]
+mod listener_output_fixture;
+#[cfg(feature = "mixed-output-fixture")]
+mod mixed_output_fixture;
 pub mod sdk_catalog;
 #[doc(hidden)]
 pub use dispatch_fixtures::layout as dispatch_fixture_layout;
@@ -515,7 +519,8 @@ fn native_hook_files(root: &Path) -> Result<Vec<PathBuf>, String> {
 
 /// Parse and validate the catalog and hook/helper signatures.
 fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
-    let catalog = Catalog::load(root)?;
+    #[allow(unused_mut)]
+    let mut catalog = Catalog::load(root)?;
     let mut files = Vec::new();
     let mut methods = Vec::new();
     for path in native_hook_files(root)? {
@@ -532,6 +537,8 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
         }
         files.push((path, source, names));
     }
+    #[cfg(feature = "mixed-output-fixture")]
+    mixed_output_fixture::append(&mut catalog, &mut methods)?;
     let dispatch::HookSources {
         traits,
         dispatch,

@@ -376,6 +376,9 @@ impl<T: 'static> Group<T> {
                         name.as_str(),
                         "horizon_layout" | "horizon_layout_ext" | "horizon_in" | "horizon_hook"
                     )
+                    || crate::boundary::PREPARED_EXPORTS
+                        .iter()
+                        .any(|(_, entries)| entries.iter().any(|(entry, _)| *entry == name))
                     || name == "memory"
                     || !matches!(extern_, Extern::Func(_) | Extern::Global(_))
                 {
