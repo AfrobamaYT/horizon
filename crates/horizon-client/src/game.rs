@@ -15300,13 +15300,6 @@ impl Game<'_> {
             .flatten()
             .any(|s| immune.is_some_and(|t| t.contains(&*s.item)))
     }
-    /// `PowderSnowBlock.canEntityWalkOnPowderSnow`'s boots half: leather boots
-    /// on the feet.
-    pub(crate) fn wears_leather_boots(&self) -> bool {
-        self.armor[3]
-            .as_ref()
-            .is_some_and(|s| &*s.item == "minecraft:leather_boots")
-    }
     fn sync_tick_chunks(&mut self) {
         if !self.tick_chunks.synchronize(&self.world.chunks) {
             return;
