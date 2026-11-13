@@ -306,6 +306,97 @@ fn post_fires_once_for_a_killing_blow_on_a_mob() {
     assert_eq!(heard.post, [(225016, 100.0)]);
 }
 
+/// What a killing blow tells a mod, in order: `("post", entity)` and `("death", entity)`.
+#[derive(Default)]
+struct DeathOrder {
+    heard: Mutex<Vec<(&'static str, i64)>>,
+    cancel: std::sync::atomic::AtomicBool,
+}
+
+struct DeathProbe(Arc<DeathOrder>);
+
+#[mod_api::__subscriptions]
+impl Hooks for DeathProbe {
+    fn living_damage_post(
+        &self,
+        _: &mut dyn LevelRandomHost,
+        event: &mut LivingDamagePostEvent<'_>,
+    ) {
+        let entity = i64::from(event.entity);
+        self.0.heard.lock().unwrap().push(("post", entity));
+    }
+    fn living_death(
+        &self,
+        _: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::LivingDeathEvent<'_>,
+    ) -> mod_api::Flow {
+        let entity = i64::from(event.entity);
+        self.0.heard.lock().unwrap().push(("death", entity));
+        if self.0.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            mod_api::Flow::Cancel
+        } else {
+            mod_api::Flow::Continue
+        }
+    }
+}
+
+/// A pig killed by a 100-damage hit through the game, then the creature tick that settles its
+/// death and one more: what the probe heard, and the pig's health after.
+fn killing_blow(cancel: bool) -> (Vec<(&'static str, i64)>, f32) {
+    let probe = Arc::new(DeathOrder::default());
+    probe
+        .cancel
+        .store(cancel, std::sync::atomic::Ordering::Relaxed);
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "death-order",
+        Box::new(DeathProbe(probe.clone())),
+    )]
+    .into();
+    let mut health = f32::NAN;
+    mod_platform::testing::with_mods(mods, || {
+        with_game(|game| {
+            game.build_registries();
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+            let pig = mob(game, 225017, "minecraft:pig");
+            game.mobs.push(pig);
+            let victim = game.entity(225017).unwrap();
+            assert_eq!(
+                victim.hurt(game, "minecraft:magic", 100.0, None, None),
+                Some(true)
+            );
+            game.tick_creature_entities().unwrap();
+            game.tick_creature_entities().unwrap();
+            health = game.mobs.iter().find(|m| m.id == 225017).unwrap().health;
+        });
+    });
+    let heard = std::mem::take(&mut *probe.heard.lock().unwrap());
+    (heard, health)
+}
+
+/// Horizon's order, not NeoForge's (whose Post follows the death processing): a killing blow's
+/// Post fires once, then the death hooks, as the maintainers ruled on #3963.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_killing_blows_post_fires_once_before_the_death_hooks() {
+    assert_eq!(
+        killing_blow(false),
+        (vec![("post", 225017), ("death", 225017)], 0.0)
+    );
+}
+
+/// A death a mod cancels: the same order, Post still once, and the pig stays at 1 health
+/// without a second Post or death on the next tick.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_cancelled_deaths_post_fires_once_before_the_death_hooks() {
+    assert_eq!(
+        killing_blow(true),
+        (vec![("post", 225017), ("death", 225017)], 1.0)
+    );
+}
+
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn the_container_names_what_armor_took() {

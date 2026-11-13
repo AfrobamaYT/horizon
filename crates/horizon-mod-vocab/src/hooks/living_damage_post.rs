@@ -5,8 +5,10 @@ pub trait Hooks {
     /// hit `container` describes, with its final values (health damage, the reductions, the
     /// post-attack invulnerability ticks). It fires once for every hit that passed
     /// `living_incoming_damage` and the invulnerability cooldown, at the very end of
-    /// `hurtServer`: after a totem and the hurt sounds, and after a player's `die`. A mob's death
-    /// (`living_death`) is settled by the game once its hurt has returned, so it follows. A hit that took no
+    /// `hurtServer`: after a totem and the hurt sounds. The death hooks come after it, which is
+    /// Horizon's order, not NeoForge's (there Post follows the death processing): a player's `die`
+    /// is only a death request at that point, and a mob's death (`living_death`) is settled by the
+    /// game once its hurt has returned. A hit that took no
     /// health (a shield, absorption, armor or a `living_damage_pre` listener took it all) fires
     /// it too, with `container.health_damage()` 0. `container.should_cause_side_effects()`
     /// carries `hurtServer`'s fresh-hit decision (`shouldCauseSideEffects`): false for a stronger

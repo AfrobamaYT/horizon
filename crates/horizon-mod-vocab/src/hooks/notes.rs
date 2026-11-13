@@ -1545,8 +1545,8 @@ mod mixin or use it replaces in its design or PR."#]
   last for the hit.
 
 - `living_damage_post` (NeoForge's `LivingDamageEvent.Post`) observes every hit that passed `living_incoming_damage`
-  and the cooldown, at the end of `hurtServer` (after a totem, the hurt sounds and a player's `die`; a mob's
-  `living_death` comes after), even one that took no health (`container.health_damage()` 0). Its
+  and the cooldown, at the end of `hurtServer` (after a totem and the hurt sounds; the death hooks follow it,
+  Horizon's order, not NeoForge's), even one that took no health (`container.health_damage()` 0). Its
   `container.should_cause_side_effects()` is `hurtServer`'s fresh-hit decision (`shouldCauseSideEffects`), taken
   before the damage: true for a fresh hit, false for a stronger hit inside the invulnerability window, and true for a
   source that bypasses the cooldown. The flag is not inferred from final damage or invulnerability ticks, so a damage
