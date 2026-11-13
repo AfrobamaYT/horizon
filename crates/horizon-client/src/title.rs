@@ -1350,6 +1350,7 @@ impl Title {
         });
     }
 
+    /// A client-lib decision for the game to admit before applying it.
     pub fn take_pending_toast(&mut self) -> Option<crate::toasts::SystemToast> {
         let (title, message) = self.pending_toast.take()?.text();
         Some(crate::toasts::SystemToast::new(title, Some(message)))

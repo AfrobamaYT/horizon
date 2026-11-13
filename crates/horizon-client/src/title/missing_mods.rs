@@ -334,5 +334,4 @@ impl Title {
             self.pending_toast = Some(toast);
         }
     }
-    /// A client-lib decision for the game to admit before applying it.
 }
