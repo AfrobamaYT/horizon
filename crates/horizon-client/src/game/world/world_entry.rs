@@ -409,6 +409,8 @@ impl Game<'_> {
         stack: &functions::PackStack,
         root: &std::path::Path,
     ) -> Result<()> {
+        // A new world load: a saved base clamped into its bounds warns again (#3728).
+        horizon_client::living_attributes::LOAD_CLAMPS.begin_load();
         (self.world_tables, self.health_resources) =
             self.build_world_tables(stack, false, root, self.mods.data_switched)?;
         self.install_profession_save_snapshots();
