@@ -11461,11 +11461,9 @@ impl Game<'_> {
             self.remote_stop_sleeping();
             return;
         }
-        // PlayerWakeUpEvent: heard at the start of stopSleepInBed, still in bed.
-        if let (Some(head), Some(player)) = (self.sleeping, self.lan_acting_uuid) {
-            let name = self.lan_acting_name.clone().unwrap_or_default();
-            self.native_player_bed_leave(player, &name, head, false, update_level);
-        }
+        // PlayerWakeUpEvent: heard at the start of stopSleepInBed, still in bed;
+        // a listener may have woken the player, so the sleep is read after it.
+        self.native_acting_bed_leave(update_level);
         let Some(head) = self.sleeping.take() else {
             return;
         };

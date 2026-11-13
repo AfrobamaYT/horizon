@@ -4000,23 +4000,6 @@ impl Hub {
         d > f64::from(1.0E-5_f32)
     }
 
-    /// A move still queued for guest `i`, which a packet the game handles
-    /// after this pass must not overtake.
-    fn move_queued(&self, i: usize) -> bool {
-        self.guests[i].inbox.iter().any(|entry| {
-            let InboxItem::Packet(p, _) = entry else {
-                return false;
-            };
-            matches!(
-                p,
-                S::MovePlayerPos(_)
-                    | S::MovePlayerPosRot(_)
-                    | S::MovePlayerRot(_)
-                    | S::MovePlayerStatus(_)
-            )
-        })
-    }
-
     /// handlePlayerCommand's START_SPRINTING and STOP_SPRINTING: `setSprinting`, whose movement
     /// speed modifier the attributes then sync to the client (which takes the modifiers as sent:
     /// one without it would slow a sprinting client to a walk).
@@ -4362,8 +4345,13 @@ impl Hub {
                             events.push(HostEvent::Packet(conn, Box::new(S::PlayerCommand(p))));
                         }
                     }
-                    // STOP_SLEEPING: the game wakes the guest, after the mods hear it.
-                    0 => events.push(HostEvent::Packet(conn, Box::new(S::PlayerCommand(p)))),
+                    // STOP_SLEEPING: the game wakes the guest after the mods hear it
+                    // (`stopSleepInBed`), and the rest of this turn waits for that wake:
+                    // a move sent after it must not run while the guest still sleeps.
+                    0 => {
+                        events.push(HostEvent::Packet(conn, Box::new(S::PlayerCommand(p))));
+                        *held = true;
+                    }
                     _ => {}
                 },
                 S::Chat(c) => self.handle_chat(i, c, events),
@@ -7151,19 +7139,28 @@ mod tests {
     /// its client sent after it in the same client tick: the packets handed to
     /// the game, and the guest's position and known movement before.
     fn drain_action_then_move(action: i32) -> (Hub, Vec<S>, ([f64; 3], [f64; 3])) {
+        let action = S::PlayerAction(play::PlayerAction {
+            action,
+            pos: [0; 3],
+            direction: 0,
+            sequence: 0,
+        });
+        drain_then_move(action, |_| {})
+    }
+
+    /// [`drain_action_then_move`] for any packet, with `setup` applied to
+    /// the guest first.
+    fn drain_then_move(
+        first: S,
+        setup: impl FnOnce(&mut Guest),
+    ) -> (Hub, Vec<S>, ([f64; 3], [f64; 3])) {
         let (mut hub, _rx) = hub_with_a_guest();
         let before = (hub.guests[0].position, hub.guests[0].known_movement);
         hub.guests.update(0, |guest| {
             guest.load_timeout = 0;
+            setup(guest);
             let inbox = &mut guest.inbox;
-            inbox.push_back(horizon_client::lan::guest::InboxItem::uncredited(
-                S::PlayerAction(play::PlayerAction {
-                    action,
-                    pos: [0; 3],
-                    direction: 0,
-                    sequence: 0,
-                }),
-            ));
+            inbox.push_back(horizon_client::lan::guest::InboxItem::uncredited(first));
             inbox.push_back(horizon_client::lan::guest::InboxItem::uncredited(
                 S::MovePlayerPos(play::MovePlayerPos {
                     x: before.0[0] + 0.3,
@@ -7241,6 +7238,47 @@ mod tests {
         let g = &hub.guests[0];
         assert!(g.inbox.is_empty(), "the move waited for the next tick");
         assert_eq!(g.position[0], before.0[0] + 0.3, "the move was not handled");
+    }
+
+    /// STOP_SLEEPING goes to the game, which wakes the guest after the mods
+    /// hear it (`player_bed_leave`); the move the client sent after it waits
+    /// for the next tick, so it never runs while the guest still sleeps.
+    #[test]
+    fn a_move_after_leave_bed_waits_for_the_wake() {
+        let leave = S::PlayerCommand(play::PlayerCommand {
+            id: 0,
+            action: 0,
+            data: 0,
+        });
+        let (hub, handled, before) = drain_then_move(leave, |guest| {
+            guest.bed = Some([5, 64, 5]);
+            guest.sleeping = true;
+        });
+        assert!(
+            matches!(
+                handled[..],
+                [S::PlayerCommand(play::PlayerCommand { action: 0, .. })]
+            ),
+            "the game was handed {handled:?}"
+        );
+        let g = &hub.guests[0];
+        assert!(
+            matches!(
+                g.inbox.iter().collect::<Vec<_>>()[..],
+                [InboxItem::Packet(S::MovePlayerPos(_), _)]
+            ),
+            "the move did not wait for the wake"
+        );
+        assert_eq!(
+            (g.bed, g.sleeping),
+            (Some([5, 64, 5]), true),
+            "the hub woke the guest"
+        );
+        assert_eq!(
+            (g.position, g.known_movement),
+            before,
+            "the move ran in bed"
+        );
     }
 
     /// The owner's own shoulder parrots are sent when a slot changes.
