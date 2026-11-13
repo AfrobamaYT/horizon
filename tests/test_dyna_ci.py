@@ -425,6 +425,27 @@ class DynaRoutingTests(unittest.TestCase):
         verify = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["verify"]
         self.assert_positive_stage_export(verify)
 
+    def test_the_surface_report_runs_after_the_stage_build_on_pull_requests_and_dispatches(self):
+        from test_ci_runners import jobs
+        verify = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["verify"]
+        name = "- name: Report the mod API surface change\n"
+        self.assertEqual(verify.count(name), 1)
+        step = verify.split(name, 1)[1].split("\n      - ", 1)[0]
+        fields = {}
+        for line in step.splitlines():
+            if ":" in line and not line.lstrip().startswith("#"):
+                key, value = line.strip().split(":", 1)
+                fields[key] = value.strip()
+        self.assertEqual(fields.get("run"), "python3 tools/ci/surface_report.py")
+        self.assertEqual(fields.get("if"), "needs.changes.outputs.rust_required != 'false' && "
+                                           "(github.event_name == 'pull_request' || inputs.pr != '')")
+        self.assertEqual(fields.get("EVENT"), "${{ github.event_name }}")
+        self.assertEqual(fields.get("PR"), "${{ inputs.pr }}")
+        self.assertEqual(fields.get("GH_TOKEN"), "${{ github.token }}")
+        self.assertNotIn("continue-on-error", fields)
+        # It needs the tool the stage build puts in HORIZON_STAGE_TOOL.
+        self.assertLess(verify.index("- name: Build the source stage generator (test profile)"), verify.index(name))
+
     def test_positive_stage_guard_rejects_commented_command_noop_and_ignored_failure(self):
         from test_ci_runners import jobs
         verify = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["verify"]

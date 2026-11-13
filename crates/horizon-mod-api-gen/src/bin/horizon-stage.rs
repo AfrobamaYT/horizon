@@ -11,6 +11,13 @@
 //!
 //! `horizon-stage fits USES_JSON TARGET_SURFACE`: whether a uses table fits a build's surface,
 //! naming each changed item. Exit 0 fits, 1 does not fit, 2 error.
+//!
+//! `horizon-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--json OUT] [--gate]`:
+//! print what changed between two surface exports, breaking changes first. `--notes` attaches
+//! the change notes of DIR (`crates/horizon-mod-vocab/changes`) whose file names are not in
+//! `--base-notes` (the base tree's folder; required with `--notes`). Exits 1 when a new note
+//! names an id that did not change, or with `--gate` when a breaking change has no note; 2 when
+//! an input cannot be read or the options are wrong.
 use horizon_mod_api_gen::mod_uses;
 use horizon_mod_api_gen::staging::{self, Mode};
 use mod_surface::Surface;
@@ -164,11 +171,70 @@ fn fits_command(args: &[PathBuf]) -> ! {
     }
 }
 
+fn surface_diff(args: &[PathBuf]) -> ! {
+    use horizon_mod_api_gen::surface::notes;
+    let [old, new, options @ ..] = args else {
+        fail(
+            "usage: horizon-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--json OUT] [--gate]",
+        )
+    };
+    let (mut notes_dir, mut base_notes, mut json, mut gate) = (None, None, None, false);
+    let mut options = options.iter();
+    while let Some(option) = options.next() {
+        let slot = match option.to_str() {
+            Some("--gate") => {
+                gate = true;
+                continue;
+            }
+            Some("--notes") => &mut notes_dir,
+            Some("--base-notes") => &mut base_notes,
+            Some("--json") => &mut json,
+            _ => fail(format!("unknown option {}", option.display())),
+        };
+        let value = options
+            .next()
+            .unwrap_or_else(|| fail(format!("{} needs a value", option.display())));
+        *slot = Some(value);
+    }
+    let mut diff = mod_surface::diff(&read_surface(old), &read_surface(new));
+    let mut stale = Vec::new();
+    if let Some(dir) = notes_dir {
+        // Without the base's notes every older note would read as new, and stale.
+        let base = base_notes.unwrap_or_else(|| fail("--notes needs --base-notes"));
+        let found = notes::read(dir, base).unwrap_or_else(|e| fail(e));
+        for file in found {
+            for id in diff.attach(&file.note, &file.ids) {
+                stale.push(format!(
+                    "change note {} names {id}, which did not change",
+                    file.note.file
+                ));
+            }
+        }
+    }
+    print!("{}", diff.to_text());
+    if let Some(out) = json {
+        let text = serde_json::to_string_pretty(&diff).expect("a diff serializes") + "\n";
+        std::fs::write(out, text).unwrap_or_else(|e| fail(format!("{}: {e}", out.display())));
+    }
+    let mut failed = !stale.is_empty();
+    for line in stale {
+        eprintln!("{line}");
+    }
+    if gate {
+        for change in diff.undeclared() {
+            eprintln!("breaking change without a change note: {}", change.id);
+            failed = true;
+        }
+    }
+    std::process::exit(i32::from(failed))
+}
+
 fn main() {
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
     match args.first().and_then(|c| c.to_str()) {
         Some("uses") => return uses_command(&args[1..]),
         Some("fits") => fits_command(&args[1..]),
+        Some("surface-diff") => surface_diff(&args[1..]),
         _ => {}
     }
     if let [command, root, out] = &args[..]
@@ -178,7 +244,7 @@ fn main() {
     }
     let usage = || {
         eprintln!(
-            "usage: horizon-stage ROOT POINTS_JSON INTERNALS_JSON API_VERSION [--sync-internals]\n       horizon-stage surface ROOT OUT\n       horizon-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]\n       horizon-stage fits USES_JSON TARGET_SURFACE"
+            "usage: horizon-stage ROOT POINTS_JSON INTERNALS_JSON API_VERSION [--sync-internals]\n       horizon-stage surface ROOT OUT\n       horizon-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--json OUT] [--gate]\n       horizon-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]\n       horizon-stage fits USES_JSON TARGET_SURFACE"
         );
         std::process::exit(2)
     };

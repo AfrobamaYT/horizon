@@ -376,7 +376,7 @@ jobs:
           cargo fmt --all -- --check
           find crates/horizon-mod-api/src crates/horizon-mod-vocab/src -name '*.rs' -print0 | xargs -0 rustfmt --edition 2024 --check --config skip_children=true
           find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustfmt --edition 2024 --config skip_children=true --check
-          rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs
+          rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*/*.rs
           rustfmt --edition 2024 --check crates/horizon-mod-wasm/wire-loopback/tests/wire_loopback/*.rs
       # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
       - name: Cap build parallelism to the runner
@@ -599,6 +599,17 @@ jobs:
           with open(os.environ["GITHUB_ENV"], "a") as environment:
               environment.write(f"HORIZON_STAGE_TOOL={executable}\n")
           PY
+      - name: Report the mod API surface change
+        # What this pull request changes in what mods can name, in the job summary: the head's horizon-stage exports
+        # the merge base and this tree, then classifies the diff (tools/ci/surface_report.py). A report, not a gate:
+        # it fails only when this tree cannot be exported, for a stale or unreadable new change note, or, with
+        # tools/ci/surface.toml's gate on, for a breaking change no note declares.
+        if: needs.changes.outputs.rust_required != 'false' && (github.event_name == 'pull_request' || inputs.pr != '')
+        env:
+          EVENT: ${{ github.event_name }}
+          PR: ${{ inputs.pr }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/ci/surface_report.py
       - name: Validate prebuilt source stage and listed slots
         if: needs.changes.outputs.rust_required != 'false'
         run: python3 tools/ci/test_stage_catalog.py -v
@@ -638,7 +649,7 @@ jobs:
           cargo fmt --all -- --check
           find crates/horizon-mod-api/src crates/horizon-mod-vocab/src -name '*.rs' -print0 | xargs -0 rustfmt --edition 2024 --check --config skip_children=true
           find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustfmt --edition 2024 --config skip_children=true --check
-          rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs
+          rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*/*.rs
           rustfmt --edition 2024 --check crates/horizon-mod-wasm/wire-loopback/tests/wire_loopback/*.rs
           (cd launcher && cargo fmt --check)
 
@@ -750,6 +761,10 @@ jobs:
       # PRs adding names don't conflict on rustfmt's re-wrap; today's longer lists only shrink.
       - name: Export lists stay short
         run: python3 tools/hotspots/check_lists.py
+      # tools/hotspots/check_stand_ins.py: hand-written stand-ins of the dispatch tests and the wire loopback keep up
+      # with the hooks and vocabulary traits they mirror, on the member PR itself instead of in a rollup's build.
+      - name: Test stand-ins keep up with the API
+        run: python3 tools/hotspots/check_stand_ins.py
       # Independent of the Rust job. Only after earlier static setup/checks succeeded:
       # compiler fixtures after failed setup would add a second, misleading failure.
       - name: Test offline research tooling
