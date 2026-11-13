@@ -159,15 +159,15 @@ class AllocatorSelectionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "manifest API"):
                 prebuilt_game.api_version(root)
 
-    def test_windows_archives_use_the_system_allocator(self):
-        self.assertEqual(prebuilt_game.cargo_features(False, "win32"), ["--features", "system-allocator"])
-        self.assertEqual(prebuilt_game.cargo_features(True, "win32"),
-                         ["--no-default-features", "--features", "system-allocator"])
+    def test_windows_and_macos_archives_use_the_system_allocator(self):
+        for platform in ("win32", "darwin"):
+            self.assertEqual(prebuilt_game.cargo_features(False, platform), ["--features", "system-allocator"])
+            self.assertEqual(prebuilt_game.cargo_features(True, platform),
+                             ["--no-default-features", "--features", "system-allocator"])
 
-    def test_other_systems_keep_mimalloc(self):
-        for platform in ("linux", "darwin"):
-            self.assertEqual(prebuilt_game.cargo_features(False, platform), [])
-            self.assertEqual(prebuilt_game.cargo_features(True, platform), ["--no-default-features"])
+    def test_linux_keeps_mimalloc(self):
+        self.assertEqual(prebuilt_game.cargo_features(False, "linux"), [])
+        self.assertEqual(prebuilt_game.cargo_features(True, "linux"), ["--no-default-features"])
 
     def test_build_uses_explicit_host_target_and_target_dynamic_flags(self):
         class Captured(Exception):
