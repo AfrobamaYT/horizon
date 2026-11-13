@@ -30,7 +30,8 @@ pub enum Drop {
     /// The experience the mob is worth (`getExperienceReward`), before
     /// `ExperienceOrb.award` splits it into orbs.
     Experience(i32),
-    /// An item with an explicit initial age.
+    /// A custom death drop with an explicit initial item-entity age.
+    /// Bypasses stack-only table modifiers; joins the captured living drops.
     Aged(LootStack, i32),
 }
 

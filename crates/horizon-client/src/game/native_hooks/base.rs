@@ -4163,7 +4163,9 @@ impl Game<'_> {
     /// `native_loot_table_load`'s changes), and for a mob what it wore, held or
     /// carried (a fox's mouth item, an allay's, piglin's or horse's inventory),
     /// but not an enderman's carried block or a copper golem's preserved
-    /// equipment, which drop after. A charged creeper's head and a fox's mouth
+    /// equipment, or custom drops carrying item-entity state such as an initial
+    /// age, which join the later living-drops collection instead.
+    /// A charged creeper's head and a fox's mouth
     /// item come before the mob's own table. A block's stacks get its block
     /// entity's data (a shulker box's items) after this. Add, change or take out
     /// stacks; empty ones don't drop (NeoForge's global loot modifiers, Fabric's

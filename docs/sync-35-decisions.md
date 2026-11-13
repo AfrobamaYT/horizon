@@ -19,15 +19,15 @@ Keep fork typed ownership, attachment and join lifetimes, generated module disco
 ### Mobs and entities
 
 - Preserve canonical `borrowed_tick`, typed damage/loot continuations and lifetime-aware entity construction.
-- Keep authoritative Equipment storage, selected-player gaze routing, full-stack piglin finish-admiring ownership and existing age/loot hook ordering.
+- Keep authoritative Equipment storage, selected-player gaze routing and full-stack piglin finish-admiring ownership. Age-bearing custom death drops bypass stack-only table modifiers and join the later typed LivingDrops collection as complete records, following the existing clean-room death-loot ordering contract; mutable table edits cannot transfer their age to another item.
 - Port crystal/frame persistence, TNT runtime portal state, shulker cart behavior, fish voice/flop/sting behavior, goat flags, happy-ghast cloud healing and aged wither-star loot into their canonical owners.
 - Initialize both fork lifetime/join state and incoming fields in `Crystal::new` and local TNT constructors.
 - Keep one unconditional Vex gravity reset in `finish_tick`; preserve the unchanged endermite lifetime helper move and AI/NoAI callers.
-- Move incoming fixture adaptations into the existing canonical test modules, deleting obsolete paths rather than registering duplicates.
+- Move incoming fixture adaptations into the existing canonical test modules, deleting obsolete paths rather than registering duplicates. Pufferfish sting fixtures live beside their canonical owner rather than in the quarantined parallel-mobs folder.
 
 ### Gameplay and generated wiring
 
-- Preserve generated declarations and native API generation. Add upstream staged mob-turn detection without duplicating executable resource linking.
+- Preserve generated declarations and native API generation without duplicating executable resource linking. Omit unconsumed upstream grouped-turn discovery and deferral support; the retained conservative Group/Islands implementation does not call it.
 - Keep `use_hand`, transactional menu handling and prepared-item RNG in their existing canonical implementations. Port substantive fixes from incoming extractions rather than restoring duplicate modules.
 - Keep typed item-on/without-item jukebox interactions while taking component-aware song selection, loaded-clock behavior, events and statistics.
 - Preserve mod dimensions and registered sea levels when taking map and world-loading fixes.
@@ -67,7 +67,7 @@ Carry upstream's `MAX_CHALLENGES = 65_536` pending query-handshake address limit
 
 Upstream's `explosion_entities` hook is not imported: the fork's canonical `explosion_detonate` covers that moment; entity filtering there is a follow-up (maintainer ruling). No sibling event, alias, adapter, fragment, call site or test is introduced. Unrelated explosion fixes remain. Extending canonical detonation with affected-entity read/removal requires a clean-room ordering/contract specification first.
 
-Deferred notifications retain typed context: LivingJump owns `LoopContext`; DamagePost owns the mob snapshot, damage and full `DamageContainer`, replayed through `DamageLevel`. Default borrowed execution never enters deferral. The staged source scanner is not evidence of dynamic-mod parallel safety, and modded turns remain conservatively serialized.
+Unconsumed grouped-turn deferral machinery is not imported: no retained caller enters or replays such turns. Default typed callbacks dispatch directly without additional deferral TLS checks, and the unused staged-turn scan/environment emission is omitted. The default borrowed loop and conservative optional Group/Islands behavior remain unchanged; no claim of dynamic-mod parallel safety is made.
 
 The existing `upstream-parallel-mobs` Group/Islands quarantine remains at its pre-sync implementation rather than importing context-free replay into an incompatible optional path. Its existing rider/typed-level signature mismatches are static findings, not observed compiler failures. Incoming grouped notification buffering, quiet-trait-mod parallel enabling, planned-start/deferred collection and raid grouping rewrite are not imported into that quarantined path. This sync does not revive it or replace the live borrowed loop. Default workspace/all-target compilation does not claim all-features coverage.
 
@@ -77,4 +77,4 @@ Source implementation moves include renderer in-flight/frustum code, crystal con
 
 The file-size baseline is generated separately from the integrated source against the actual fork base, with the pinned upstream marker. It is never hand-edited.
 
-Verification: both the initial integrated source and the authorized main refresh passed `CARGO_INCREMENTAL=0 cargo check --workspace --all-targets --keep-going -j 2`. Those checks reported unused incoming helpers. Static audit confirmed the active container-viewer implementation already exists, and the additional mod/helper sampler support has no imported consumer; duplicate/unconsumed helpers were removed without warning allowances. The full workspace/all-target compile-only check after that cleanup passed without source warnings (pass 7). No local tests, clippy, parity harnesses or game runs are permitted for this sync. Workers performed rustfmt parsing and static area audits only; CI remains the runtime proof.
+Verification: both the initial integrated source and the authorized main refresh passed `CARGO_INCREMENTAL=0 cargo check --workspace --all-targets --keep-going -j 2`. Those checks reported unused incoming helpers. Static audit confirmed the active container-viewer implementation already exists, and the additional mod/helper sampler support has no imported consumer; duplicate/unconsumed helpers were removed without warning allowances. The full workspace/all-target compile-only check after that cleanup passed without source warnings (pass 7). Static-review carry corrections also passed the full compile-only command without source warnings (pass 9); the new replacement/removal/reordering age regression is compiled but not run. No local tests, clippy, parity harnesses or game runs are permitted for this sync. Workers performed rustfmt parsing and static area audits only; CI remains the runtime proof.

@@ -88,5 +88,5 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
-#[path = "../../creatures/pufferfish_sting_tests.rs"]
+#[path = "pufferfish_sting_tests.rs"]
 mod pufferfish_sting_tests;
