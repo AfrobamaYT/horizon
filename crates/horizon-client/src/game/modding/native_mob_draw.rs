@@ -19,15 +19,26 @@ use horizon_client::{
     mobs::{Mob, anim},
 };
 
-/// The render state of `m` at `partial` (`LivingEntityRenderer.extractRenderState`).
-pub(super) fn mob_render<'a>(m: &'a Mob, partial: f32) -> MobRender<'a> {
+/// The entity id a mod is told for a drawn mob. This window's own player is
+/// drawn from a model made for the frame (`Mob::new(0, ..)`), so it is told
+/// `own_id` instead of the model's 0; every other entity carries its own id.
+fn render_id(mob_id: u32, local: bool, own_id: i32) -> u32 {
+    match local {
+        true => u32::try_from(own_id).unwrap_or(mob_id),
+        false => mob_id,
+    }
+}
+
+/// The render state of `m` at `partial` (`LivingEntityRenderer.extractRenderState`),
+/// told as entity `id`.
+fn mob_render<'a>(m: &'a Mob, id: u32, partial: f32) -> MobRender<'a> {
     let body = anim::body_rot(m, partial);
     // The walk cycle, head turn and age as the vanilla models read them:
     // no walking while riding or dead, a baby's legs three times as far
     // (`WalkAnimationState.position(partial)`, `positionScale`).
     let pose = anim::state(m, partial);
     MobRender {
-        id: m.id,
+        id,
         kind: &m.kind.id,
         custom_name: m.custom_name.as_deref(),
         baby: m.is_baby(),
@@ -66,11 +77,12 @@ impl Game<'_> {
         out: &mut Vec<Vertex>,
     ) -> (bool, mod_api::HiddenParts) {
         let mut hidden = mod_api::HiddenParts::default();
-        let drawn = self.mod_entity_draw(mob, partial, camera, light, out, |render, draw| {
-            let mut drawn = false;
-            self.native_mob_submit(render, draw, &mut hidden, &mut drawn);
-            drawn
-        });
+        let drawn =
+            self.mod_entity_draw(mob, false, partial, camera, light, out, |render, draw| {
+                let mut drawn = false;
+                self.native_mob_submit(render, draw, &mut hidden, &mut drawn);
+                drawn
+            });
         (drawn, hidden)
     }
     /// `native_player_submit` for the player `mob` (`who` says which): true
@@ -90,11 +102,13 @@ impl Game<'_> {
             return (false, mod_api::HiddenParts::default());
         }
         let mut hidden = mod_api::HiddenParts::default();
-        let drawn = self.mod_entity_draw(mob, partial, camera, light, out, |render, draw| {
-            let mut drawn = false;
-            self.native_player_submit(render, &who, draw, &mut hidden, &mut drawn);
-            drawn
-        });
+        let local = who.local;
+        let drawn =
+            self.mod_entity_draw(mob, local, partial, camera, light, out, |render, draw| {
+                let mut drawn = false;
+                self.native_player_submit(render, &who, draw, &mut hidden, &mut drawn);
+                drawn
+            });
         (drawn, hidden)
     }
     /// Whether a mod listens to the mob and player render hooks this frame: the
@@ -136,23 +150,27 @@ impl Game<'_> {
         if !self.mob_render_listened() {
             return;
         }
-        self.mod_entity_draw(mob, partial, camera, light, out, |render, draw| {
+        let local = who.as_ref().is_some_and(|who| who.local);
+        self.mod_entity_draw(mob, local, partial, camera, light, out, |render, draw| {
             self.native_mob_layer(render, who.as_ref(), parts.as_ref(), draw);
             true
         });
     }
     /// Gives `hook` the frame of `mob` and a draw posed at its feet; what it
-    /// added to `out` stays when it answers true.
+    /// added to `out` stays when it answers true. `local` marks this window's
+    /// own player, whose frame carries its own entity id.
+    #[allow(clippy::too_many_arguments)]
     fn mod_entity_draw(
         &self,
         mob: &Mob,
+        local: bool,
         partial: f32,
         camera: DVec3,
         light: u32,
         out: &mut Vec<Vertex>,
         hook: impl FnOnce(&MobRender<'_>, &mut BlockEntityDraw) -> bool,
     ) -> bool {
-        let render = mob_render(mob, partial);
+        let render = mob_render(mob, render_id(mob.id, local, self.own_entity_id()), partial);
         let a = f64::from(partial);
         let feet = mob.previous.lerp(mob.position, a);
         let feet = DVec3::new(feet.x, feet.y, feet.z);
@@ -183,6 +201,23 @@ mod tests {
 
     fn close(a: Vec3, b: Vec3) -> bool {
         (a - b).length() < 1e-5
+    }
+
+    #[test]
+    fn this_windows_player_is_told_its_own_entity_id() {
+        // The frame's model has id 0; the server gave this window 4321.
+        assert_eq!(render_id(0, true, 4321), 4321);
+    }
+
+    #[test]
+    fn every_other_entity_keeps_its_own_id() {
+        assert_eq!(render_id(90, false, 4321), 90);
+        assert_eq!(render_id(0, false, 4321), 0);
+    }
+
+    #[test]
+    fn a_missing_own_id_leaves_the_models_id() {
+        assert_eq!(render_id(7, true, -1), 7);
     }
 
     #[test]
