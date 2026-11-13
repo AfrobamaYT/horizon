@@ -16,6 +16,8 @@ mod biome_region_registration;
 mod block_entity_transform;
 #[path = "wire_loopback/crash_sections.rs"]
 mod crash_sections;
+#[path = "wire_loopback/entity_layers.rs"]
+mod entity_layers;
 #[path = "wire_loopback/entity_renderers.rs"]
 mod entity_renderers;
 #[path = "wire_loopback/item_drop_state.rs"]
@@ -268,6 +270,13 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             event: &mut mod_api::RegisterEntityRenderersEvent<'_>,
         ) {
             entity_renderers::register(event.renderers);
+        }
+        fn register_entity_layers(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterEntityLayersEvent<'_>,
+        ) {
+            entity_layers::register(event.layers);
         }
         fn register(
             &self,

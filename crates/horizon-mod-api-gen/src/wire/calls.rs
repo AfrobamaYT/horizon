@@ -1049,6 +1049,26 @@ pub(super) fn dispatch(
                     .unwrap();
                     args.push(format!("&p{i}"));
                 }
+                // An optional borrow (`Option<&PosedParts>`) arrives owned and is lent again.
+                Ty::Option(inner)
+                    if matches!(
+                        **inner,
+                        Ty::Ref(_, false) | Ty::Str(Str::Borrowed) | Ty::List(_, List::Slice)
+                    ) =>
+                {
+                    writeln!(
+                        body,
+                        "let p{i}: {} = input.take()?;",
+                        held(types, ty).unwrap()
+                    )
+                    .unwrap();
+                    let lend = if matches!(**inner, Ty::Ref(..)) {
+                        "as_ref"
+                    } else {
+                        "as_deref"
+                    };
+                    args.push(format!("p{i}.{lend}()"));
+                }
                 _ => {
                     writeln!(
                         body,

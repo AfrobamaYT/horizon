@@ -4,9 +4,11 @@
 //! its feet and turned with its body, so a mod draws a model of its own with
 //! the helpers block entities draw with (`native_draw_cube`,
 //! `native_draw_quad`, `native_draw_block`, `native_draw_item`). A player
-//! has `native_player_submit` (`RenderPlayerEvent.Pre`), and every mob and
-//! player in view gets `native_mob_layer` after its vanilla model
-//! (`EntityRenderersEvent.AddLayers`), in the same frame.
+//! has `native_player_submit` (`RenderPlayerEvent.Pre`). After its vanilla
+//! model and layers, in the same frame, a mob or player in view gets the layers
+//! mods added to its type or player model (`register_entity_layers`,
+//! `EntityRenderersEvent.AddLayers`), then `native_mob_layer`
+//! (`RenderLivingEvent.Post`).
 pub use mod_api::game::{MobRender, PlayerRender};
 
 use super::{Game, native_block_entity_draw::BlockEntityDraw};
@@ -102,20 +104,34 @@ impl Game<'_> {
         self.native_player_render_listened(&mut listened);
         listened
     }
-    /// `native_mob_layer` for `mob` (`who` set for a player): what a mod adds
-    /// is kept, drawn after the vanilla model and its layers. `parts` are the
-    /// humanoid parts as the vanilla draw posed them this frame, kept by it.
+    /// The mods' layers over `mob` (`who` set for a player), drawn after the
+    /// vanilla model and its layers: `layers`, the ones added to its type or
+    /// player model (`register_entity_layers`, looked up once for the mob by
+    /// `mod_layers`, whose answer also decided whether the draw kept its parts),
+    /// then `native_mob_layer`. `parts` are the humanoid parts as the vanilla
+    /// draw posed them this frame, kept by it.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn mod_mob_layer_geometry(
+    pub(super) fn mod_layer_geometry(
         &self,
         mob: &Mob,
         who: Option<PlayerRender<'_>>,
         parts: Option<mod_api::PosedParts>,
+        layers: Option<super::native_entity_layers::Layers>,
         partial: f32,
         camera: DVec3,
         light: u32,
         out: &mut Vec<Vertex>,
     ) {
+        if let Some(layers) = layers {
+            // This window's player is drawn from a model made for the frame (`Mob::new(0, ..)`):
+            // its layers are told its own network id.
+            let id = match &who {
+                Some(who) if who.local => u32::try_from(self.own_entity_id()).unwrap_or(mob.id),
+                _ => mob.id,
+            };
+            let parts = parts.as_ref();
+            self.registered_layer_geometry(mob, id, &layers, parts, partial, camera, light, out);
+        }
         // Every mob in view each frame: only when a mod listens.
         if !self.mob_render_listened() {
             return;

@@ -793,7 +793,12 @@ impl Cx {
                                 Ty::Ref(..)
                                     | Ty::Str(super::ty::Str::Borrowed)
                                     | Ty::List(_, super::ty::List::Slice)
-                            ) {
+                            ) || matches!(ty, Ty::Option(inner) if matches!(
+                                **inner,
+                                Ty::Ref(_, false)
+                                    | Ty::Str(super::ty::Str::Borrowed)
+                                    | Ty::List(_, super::ty::List::Slice)
+                            )) {
                                 self::put(ty, &format!("p{i}"))
                             } else {
                                 format!("w.put_owned(p{i});")
