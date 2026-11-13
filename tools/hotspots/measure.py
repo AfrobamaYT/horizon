@@ -206,17 +206,17 @@ class Measure:
             p1, p2 = ps
             if p2 in self.main_fp:
                 self.replay[h] = (p1, p2, kind, label, t)
-            elif kind == "sync" or self.is_sync(p1, p2, ""):
-                # An upstream sync riding this chain: its merge and its own chain are sync conflicts, not a PR.
-                self.replay[h] = (p1, p2, "sync", label, t)
-                if kind == "rollup":
-                    self.walk(p1, p2, "sync", label)
             elif kind == "rollup" and self.is_rollup(p2, p1):
                 # A rollup merged into the next: its merge is replayed once, as a rollup conflict and not a PR;
                 # its own chain's members are walked (once: a chain already walked is skipped commit by commit).
                 self.replay[h] = (p1, p2, kind, label, t)
                 self.nested.append(h)
                 self.walk(p1, p2, kind, label)
+            elif kind == "sync" or self.is_sync(p1, p2, ""):
+                # An upstream sync riding this chain: its merge and its own chain are sync conflicts, not a PR.
+                self.replay[h] = (p1, p2, "sync", label, t)
+                if kind == "rollup":
+                    self.walk(p1, p2, "sync", label)
             else:
                 self.replay[h] = (p1, p2, kind, label, t)
                 if kind == "rollup":

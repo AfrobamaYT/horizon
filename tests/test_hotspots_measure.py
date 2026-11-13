@@ -112,6 +112,29 @@ class MeasureTest(unittest.TestCase):
         self.assertEqual((c["sync"], c["rollup"], c["branch"]), (1, 0, 0))
         self.assertEqual(raw["prs"], 2)
 
+    def test_a_rollup_carrying_a_sync_merged_into_the_next_keeps_its_prs(self):
+        r = self.repo
+        upstream = r.commit("up", {"y.txt": "upstream\n"}, base="main")
+        r.git("update-ref", "refs/remotes/upstream/main", upstream)
+        r.git("checkout", "-q", "-b", "sync-1", "main")
+        r.merge("sync-1", "up", "Merge upstream")
+        r.pull(40, r.git("rev-parse", "sync-1"))
+        r.pull(8, r.commit("p8", {"other.txt": "8\n"}, base="main"))
+        r.pull(9, r.commit("p9", {"z.txt": "9\n"}, base="main"))
+        r.git("checkout", "-q", "-b", "fork-review-rollup-5", "main")
+        r.merge("fork-review-rollup-5", "p8", "Merge PR #8 into fork-review-rollup-5")
+        r.merge("fork-review-rollup-5", "sync-1", "Merge PR #40 into fork-review-rollup-5")
+        r.git("checkout", "-q", "-b", "fork-review-rollup-6", "main")
+        r.merge("fork-review-rollup-6", "p9", "Merge PR #9 into fork-review-rollup-6")
+        r.merge("fork-review-rollup-6", "fork-review-rollup-5", "Merge rollup 5 into fork-review-rollup-6")
+        r.merge("main", "fork-review-rollup-6", "Merge pull request #43 from o/fork-review-rollup-6")
+
+        _, raw = self.run_measure()
+        self.assertEqual(raw["files"]["other.txt"]["prs"], ["#8"])
+        self.assertEqual(raw["files"]["z.txt"]["prs"], ["#9"])
+        self.assertNotIn("y.txt", raw["files"])
+        self.assertEqual(raw["prs"], 2)
+
     def test_a_carry_branch_and_an_earlier_head_map_to_their_prs(self):
         r = self.repo
         r.pull(5, r.commit("p5", {"a.txt": "5\n"}, base="main"))

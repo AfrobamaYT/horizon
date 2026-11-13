@@ -32,6 +32,13 @@ class CheckListsTest(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertIn("nested.rs: a `pub use` names 13 items", found[0])
 
+    def test_an_entry_ends_with_its_list_and_a_pending_one_has_no_ceiling(self):
+        self.write("fixed.rs", f"pub use a::{{{names(12)}}};\n")
+        self.write("pending.rs", f"pub use a::{{{names(70)}}};\n")
+        found = self.problems({"fixed.rs": (20, ""), "pending.rs": (None, "")})
+        self.assertEqual(len(found), 1)
+        self.assertIn("fixed.rs: no `pub use` list there names more than 12 items any more: remove its entry", found[0])
+
     def test_a_listed_length_may_only_shrink(self):
         self.write("grew.rs", f"pub use a::{{{names(15)}}};\n")
         self.write("shrank.rs", f"pub use a::{{{names(13)}}};\n")
