@@ -81,8 +81,14 @@ POINTS = "points.json"
 INTERNALS = "internals.json"
 # The published loops (`#[horizon_loop]`), which a mod's `[[native.loop]]` rows name.
 LOOPS = "loops.json"
+# The function index: where each function a mixin may target is, and whether it takes a replacement; the
+# launcher's patch step reads it instead of walking the game's source. Only the engine route patches functions, so it
+# is in the `engine` slice, not with the rest of the build data in `api`.
+FUNCTIONS = "functions.json"
 # The SDK's build data (`point_shape::build_data`): each file opens with `schema` and `build.commit`.
-BUILD_DATA = (INTERNALS, LOOPS, POINTS)
+BUILD_DATA = (FUNCTIONS, INTERNALS, LOOPS, POINTS)
+# The build data the API route reads, in the `api` slice.
+API_BUILD_DATA = (INTERNALS, LOOPS, POINTS)
 BUILD_DATA_SCHEMA = 1
 BUILD_DATA_ARCHIVE = "build-data.tar.xz"
 # The surface export (`horizon-stage surface`), an SDK asset of its own.
@@ -117,25 +123,38 @@ def package_format(root: Path) -> int:
     return int(text)
 
 
+def tracked_blobs(root: Path, commit: str, paths: tuple[str, ...] = ()):
+    """Each regular file `commit` tracks under `paths` (everywhere when empty), with its bytes as the commit holds them:
+    the bytes GitHub's archive of the commit serves, which the launcher downloads and checks against the function
+    index, whatever line endings the working tree was checked out with (Git for Windows' core.autocrlf) and whatever
+    it has that is not committed. Links are left out, as the launcher's download leaves them out."""
+    process = subprocess.Popen(["git", "archive", "--format=tar", commit, *(["--", *paths] if paths else [])],
+                               cwd=root, stdout=subprocess.PIPE)
+    with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
+        for member in archive:
+            if member.isfile():
+                yield member.name, archive.extractfile(member).read()
+    if process.wait() != 0:
+        sys.exit(f"git archive {commit} failed in {root}")
+
+
 def head() -> str:
     return run(["git", "rev-parse", "HEAD"], cwd=ROOT).strip()
 
 
 def stage(target_dir: Path, stage_tool: Path | None = None) -> Path:
-    """A copy of the tracked source with the staging pass run over it (#589): every point method gets its
+    """A copy of HEAD's tracked source with the staging pass run over it (#589): every point method gets its
     `#[point]`, internals become public, and the build data is written with HEAD's commit in its header.
-    The working tree is never rewritten."""
+    The copy is the commit's own bytes ([`tracked_blobs`]), never the working tree's, which is never rewritten."""
     setup_started = time.monotonic()
     staged = target_dir / "stage"
     if staged.exists():
         shutil.rmtree(staged)
-    tracked = run(["git", "ls-files", "-z"], cwd=ROOT).split("\0")
-    for name in filter(None, tracked):
-        source = ROOT / name
-        if source.is_file():
-            (staged / name).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, staged / name)
-    arguments = [str(staged), str(staged / POINTS), str(staged / INTERNALS), head()]
+    commit = head()
+    for name, data in tracked_blobs(ROOT, commit):
+        (staged / name).parent.mkdir(parents=True, exist_ok=True)
+        (staged / name).write_bytes(data)
+    arguments = [str(staged), str(staged / POINTS), str(staged / INTERNALS), commit]
     command = ([str(stage_tool.resolve())] if stage_tool is not None else
                ["cargo", "run", "--locked", "--release", "-q", "-p", "horizon-mod-api-gen", "--bin", "horizon-stage", "--"])
     print(f"stage_phase=copy_setup seconds={time.monotonic() - setup_started:.3f}", flush=True)
@@ -216,7 +235,7 @@ def slices(metadata: dict, copied: dict[str, list[str]], api_route: list[str]) -
     """The package's files for the `runtime` and `api` archives, from the build's own records (never a hand-kept list);
     every other file is the `engine` archive's. `runtime`: the identity, the game's two libraries and `api_route` (the
     API route's executable and stub). `api`: the API closure's compiled files, the point data and the mods library's
-    template."""
+    template (not the function index, which only the engine route reads)."""
     names = {package["id"]: package["name"] for package in metadata["packages"]}
     libraries = {crate.replace("_", "-") for crate in GAME_LIBRARIES}
     closure = api_closure(metadata)
@@ -226,7 +245,8 @@ def slices(metadata: dict, copied: dict[str, list[str]], api_route: list[str]) -
         sys.exit(f"the API closure holds game libraries {inside}, which the api slice cannot carry")
     runtime = [IDENTITY, *api_route] + [file for package_id, files in copied.items()
                                         if names.get(package_id) in libraries for file in files]
-    api = [file for package_id in closure for file in copied.get(package_id, [])] + [*BUILD_DATA, NATIVE_MODS_TEMPLATE]
+    api = [file for package_id in closure for file in copied.get(package_id, [])] + [*API_BUILD_DATA,
+                                                                                    NATIVE_MODS_TEMPLATE]
     return {"runtime": sorted(set(runtime)), "api": sorted(set(api))}
 
 

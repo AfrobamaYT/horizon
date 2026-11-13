@@ -26,7 +26,8 @@ pub struct Staged {
 }
 
 /// Expose internals, mark points, give functions their replacement slots and write the build
-/// data (`points.json`, `internals.json`, `loops.json`, each with the header naming `build`) in a
+/// data (`points.json`, `internals.json`, `loops.json`, `functions.json`, each with the header
+/// naming `build`) in a
 /// disposable source copy. Internals precede points so their catalog contains only the
 /// original game items, and points precede the slots so only game functions are points.
 /// A pass stamps the copy before edits; even a failed pass requires fresh source for a retry.
@@ -55,14 +56,27 @@ pub fn stage(
     let loops = Loops {
         loops: crate::loops::collect(root)?,
     };
-    write(
-        &points_json.with_file_name(crate::loops::FILE),
-        &Document::new(build, loops),
-    )?;
     eprintln!(
         "stage_phase=loops seconds={:.3}",
         started.elapsed().as_secs_f64()
     );
+    // Indexed before any pass edits a file: its spans and hashes are of the source a mixin
+    // build downloads.
+    let started = Instant::now();
+    let generic: std::collections::BTreeSet<String> = loops
+        .loops
+        .iter()
+        .map(|l| crate::functions::key(&l.generic_target()))
+        .collect();
+    let mut functions = crate::functions::index(root, &generic)?;
+    eprintln!(
+        "stage_phase=functions seconds={:.3}",
+        started.elapsed().as_secs_f64()
+    );
+    write(
+        &points_json.with_file_name(crate::loops::FILE),
+        &Document::new(build, loops),
+    )?;
     let started = Instant::now();
     let mut internals = match mode {
         Mode::Build => internals::widen(root)?,
@@ -127,6 +141,12 @@ pub fn stage(
         "stage_phase=replace seconds={:.3}",
         started.elapsed().as_secs_f64()
     );
+    functions.retain_slotted(&replace.slots, &generic);
+    // One line: the index is the largest build-data file, and only programs read it.
+    let path = points_json.with_file_name(crate::functions::FILE);
+    let text = serde_json::to_string(&Document::new(build, &functions))
+        .map_err(|error| error.to_string())?;
+    std::fs::write(&path, text + "\n").map_err(|error| format!("{}: {error}", path.display()))?;
     Ok(Staged {
         points,
         replace,
