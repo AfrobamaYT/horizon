@@ -332,3 +332,39 @@ impl GameplayAttributes {
         v
     }
 }
+
+#[cfg(test)]
+mod tag_cycle_tests {
+    use super::*;
+    #[test]
+    fn mutual_timeline_tags_terminate_from_either_dimension() {
+        let root = tempfile::tempdir().unwrap();
+        let write = |path: &str, value: serde_json::Value| {
+            let path = root.path().join(format!("data/minecraft/{path}.json"));
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, value.to_string()).unwrap();
+        };
+        write(
+            "tags/timeline/a",
+            serde_json::json!({"values":["#minecraft:b"]}),
+        );
+        write(
+            "tags/timeline/b",
+            serde_json::json!({"values":["#minecraft:a", "minecraft:blocked"]}),
+        );
+        write(
+            "timeline/blocked",
+            serde_json::json!({"tracks":{(CAN_PILLAGER_PATROL_SPAWN):{"keyframes":[{"ticks":0,"value":false}]}}}),
+        );
+        for (dimension, tag) in [("one", "a"), ("two", "b")] {
+            write(
+                &format!("dimension_type/{dimension}"),
+                serde_json::json!({"timelines":format!("#minecraft:{tag}")}),
+            );
+        }
+        let attributes = GameplayAttributes::load(root.path());
+        for dimension in ["minecraft:one", "minecraft:two"] {
+            assert!(!attributes.value(CAN_PILLAGER_PATROL_SPAWN, dimension, "minecraft:plains", 0));
+        }
+    }
+}

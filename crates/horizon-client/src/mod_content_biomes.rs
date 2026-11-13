@@ -1307,9 +1307,35 @@ mod removal_cycles {
             ids: &ids,
             tags: &tags,
         };
-        let out = registry.resolve(&serde_json::json!("#test:a")).unwrap();
-        assert_eq!(out, ["test:one"]);
-        let out = registry.resolve(&serde_json::json!("#test:b")).unwrap();
-        assert_eq!(out, ["test:two"]);
+        struct Logger;
+        thread_local! { static WARNINGS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) }; }
+        impl log::Log for Logger {
+            fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+                true
+            }
+            fn log(&self, record: &log::Record<'_>) {
+                WARNINGS.with(|lines| lines.borrow_mut().push(record.args().to_string()));
+            }
+            fn flush(&self) {}
+        }
+        static LOGGER: Logger = Logger;
+        log::set_logger(&LOGGER).unwrap();
+        log::set_max_level(log::LevelFilter::Warn);
+        for (start, expected) in [("test:a", "test:one"), ("test:b", "test:two")] {
+            WARNINGS.with(|lines| lines.borrow_mut().clear());
+            let out = registry
+                .resolve(&serde_json::json!(format!("#{start}")))
+                .unwrap();
+            assert_eq!(out, [expected]);
+            WARNINGS.with(|lines| {
+                let lines = lines.borrow();
+                assert!(
+                    lines.iter().any(|line| line.contains("test:a")
+                        && line.contains("test:b")
+                        && line.contains("only removal edge test:a -> test:b is ignored")),
+                    "{lines:?}"
+                );
+            });
+        }
     }
 }

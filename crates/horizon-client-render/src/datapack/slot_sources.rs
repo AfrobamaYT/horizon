@@ -97,6 +97,42 @@ impl DataStore {
 mod tests {
     use super::*;
     #[test]
+    fn mutual_removal_cycles_drop_the_same_named_edge_from_both_roots() {
+        let mut store = DataStore::default();
+        for name in ["test:one", "test:two"] {
+            store
+                .slot_sources
+                .insert(name.into(), serde_json::json!({}));
+        }
+        store.slot_source_tags.insert(
+            "test:a".into(),
+            vec![
+                ("test:one".into(), true, false),
+                ("#test:b".into(), true, true),
+            ],
+        );
+        store.slot_source_tags.insert(
+            "test:b".into(),
+            vec![
+                ("test:one".into(), true, false),
+                ("test:two".into(), true, false),
+                ("#test:a".into(), true, true),
+            ],
+        );
+        for (start, expected) in [("test:a", "test:one"), ("test:b", "test:two")] {
+            let (out, warnings) =
+                crate::test_log::capture(|| store.slot_source_tag(start).unwrap());
+            assert_eq!(out, [expected]);
+            assert!(
+                warnings.iter().any(|line| line.contains("test:a")
+                    && line.contains("test:b")
+                    && line.contains("only removal edge test:a -> test:b is ignored")),
+                "{warnings:?}"
+            );
+        }
+    }
+
+    #[test]
     fn holder_set_tags_keep_order_required_members_and_snapshot_authority() {
         let mut store = DataStore::default();
         for name in ["t:a", "t:b"] {
