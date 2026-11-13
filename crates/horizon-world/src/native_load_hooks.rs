@@ -75,3 +75,7 @@ pub fn item_ability_default(item: &str, ability: &str, tags: &dyn LootTags) -> b
         .get()
         .is_some_and(|hooks| (hooks.item_ability_default)(item, ability, tags))
 }
+
+#[cfg(test)]
+#[path = "native_load_hook_fixtures.rs"]
+pub(crate) mod testing;

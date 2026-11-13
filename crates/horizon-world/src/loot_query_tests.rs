@@ -89,7 +89,7 @@ fn queried_id_nested_and_unnamed_roots() {
 
 #[test]
 fn queried_context_and_ability_reach_native_adapter() {
-    install_test_hooks();
+    crate::native_load_hooks::testing::install();
     let stack = || {
         let mut s = LootStack::new("minecraft:stick");
         s.count = 3;
@@ -125,6 +125,10 @@ fn queried_context_and_ability_reach_native_adapter() {
                 data.roll("test:a", &mut LegacyRandom::new(9), 0.0, None, None)
             });
             assert_eq!(
+                crate::native_load_hooks::testing::take_ability(),
+                tool.map(|item| (item.to_owned(), ability.to_owned()))
+            );
+            assert_eq!(
                 drops.len(),
                 if ability == "shears_dig" { expected } else { 0 }
             );
@@ -145,47 +149,16 @@ fn queried_context_and_ability_reach_native_adapter() {
         data.roll("test:a", &mut LegacyRandom::new(9), 0.0, None, None)
     });
     assert_eq!(drops.len(), 1);
-}
-
-fn install_test_hooks() {
-    static INIT: std::sync::Once = std::sync::Once::new();
-    use crate::native_load_hooks::{self, NativeLoadHooks};
-    INIT.call_once(|| {
-        assert!(
-            native_load_hooks::install(NativeLoadHooks {
-                item_ability_default: |item, ability, tags| match ability {
-                    "shears_dig" => item == "minecraft:shears",
-                    "sword_sweep" => tags.contains("item", "minecraft:swords", item),
-                    _ => false,
-                },
-                loot_table_load: |_, _, _| {},
-                modify_default_components: |_, _, _| {},
-                loot_function: |_, _, _, _, _| {},
-                loot_condition: |kind, _, ctx, holds, _| {
-                    assert_eq!(kind, "test:query");
-                    assert_eq!(ctx.table_id(), "minecraft:blocks/short_grass");
-                    let stack = ctx.queried_stack.as_ref().unwrap();
-                    assert_eq!((&*stack.item, stack.count), ("minecraft:stick", 3));
-                    *holds = true;
-                },
-                loot_ability: |tool, ability, holds| {
-                    if tool.item == "test:grant" && ability == "shears_dig" {
-                        *holds = true;
-                    }
-                    if tool.item == "test:deny" {
-                        *holds = false;
-                    }
-                },
-            })
-            .is_ok()
-        );
-    });
+    let (id, stack) = crate::native_load_hooks::testing::take_context().expect("query callback");
+    assert_eq!(id, "minecraft:blocks/short_grass");
+    let stack = stack.expect("queried stack");
+    assert_eq!((&*stack.item, stack.count), ("minecraft:stick", 3));
 }
 
 #[test]
 #[ignore = "requires prepared resources"]
 fn queried_ability_tags_use_prepared_world_sets() {
-    install_test_hooks();
+    crate::native_load_hooks::testing::install();
     let root = std::path::PathBuf::from(
         std::env::var_os("HORIZON_TEST_RESOURCES")
             .or_else(|| std::env::var_os("HORIZON_RESOURCES"))

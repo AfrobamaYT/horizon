@@ -1,3 +1,7 @@
+thread_local! {
+    static OBSERVED_CONTEXT: std::cell::RefCell<Option<(String, Option<horizon_world::loot::LootStack>)>> = const { std::cell::RefCell::new(None) };
+    static OBSERVED_ABILITY: std::cell::RefCell<Option<(String, String)>> = const { std::cell::RefCell::new(None) };
+}
 use super::*;
 use horizon_core::random::LegacyRandom;
 use horizon_world::loot::query;
@@ -94,13 +98,17 @@ fn queried_context_and_ability_reach_native_adapter() {
             modify_default_components: |_, _, _| {},
             loot_function: |_, _, _, _, _| {},
             loot_condition: |kind, _, ctx, holds, _| {
-                assert_eq!(kind, "test:query");
-                assert_eq!(ctx.table_id(), "minecraft:blocks/short_grass");
-                let stack = ctx.queried_stack.as_ref().unwrap();
-                assert_eq!((&*stack.item, stack.count), ("minecraft:stick", 3));
-                *holds = true;
+                if kind == "test:query" {
+                    OBSERVED_CONTEXT.with(|v| {
+                        *v.borrow_mut() =
+                            Some((ctx.table_id().to_owned(), ctx.queried_stack.clone()))
+                    });
+                    *holds = true;
+                }
             },
             loot_ability: |tool, ability, holds| {
+                OBSERVED_ABILITY
+                    .with(|v| *v.borrow_mut() = Some((tool.item.clone(), ability.to_owned())));
                 if tool.item == "test:grant" && ability == "shears_dig" {
                     *holds = true;
                 }
@@ -155,6 +163,10 @@ fn queried_context_and_ability_reach_native_adapter() {
                 data.loot_table("test:a", false, held.as_ref(), &mut LegacyRandom::new(9))
             });
             assert_eq!(
+                OBSERVED_ABILITY.with(|v| v.take()),
+                tool.map(|item| (item.to_owned(), ability.to_owned()))
+            );
+            assert_eq!(
                 drops.len(),
                 if ability == "shears_dig" { expected } else { 0 }
             );
@@ -175,6 +187,10 @@ fn queried_context_and_ability_reach_native_adapter() {
         data.loot_table("test:a", false, None, &mut LegacyRandom::new(9))
     });
     assert_eq!(drops.len(), 1);
+    let (id, stack) = OBSERVED_CONTEXT.with(|v| v.take()).expect("query callback");
+    assert_eq!(id, "minecraft:blocks/short_grass");
+    let stack = stack.expect("queried stack");
+    assert_eq!((&*stack.item, stack.count), ("minecraft:stick", 3));
 }
 
 #[test]
