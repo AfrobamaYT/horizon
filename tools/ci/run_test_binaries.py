@@ -92,12 +92,17 @@ def listed_tests(binary: dict, env: dict, test_args: list[str]) -> list[str] | N
 
 
 def read_log(text: str) -> dict[str, tuple[str, float | None]]:
-    """libtest's --logfile records (`ok a::b <0.012s>`, `failed a::c <1.0s>`, `ignored, reason a::d`):
-    test name -> (its status, its time or None)."""
+    """libtest's --logfile records: test name -> (its status, its time or None).
+
+    A record is the status word, an ignored test's message if it has one, the name (never containing a space, so the
+    last word) and the time: `ok a::b <0.012s>`, `failed a::c <1.000s>`, `ignored a::d`,
+    `ignored: daily a::e`, `ignored: measurement: cargo test ... a::f`."""
     records = {}
     for line in text.splitlines():
-        if found := re.match(r"^(\w+)(?:,.*)? (\S+?)(?: <(\d+(?:\.\d+)?)s>)?$", line):
-            records[found[2]] = (found[1], float(found[3]) if found[3] is not None else None)
+        timed = re.search(r" <(\d+(?:\.\d+)?)s>$", line)
+        words = (line[:timed.start()] if timed else line).split()
+        if len(words) >= 2 and (status := re.match(r"^\w+", words[0])):
+            records[words[-1]] = (status[0], float(timed[1]) if timed else None)
     return records
 
 

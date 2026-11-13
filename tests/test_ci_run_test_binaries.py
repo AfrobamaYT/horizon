@@ -101,10 +101,14 @@ class RunTestBinariesTests(unittest.TestCase):
             self.assertEqual(runner.report(result), ["a::bad", "a::plain"])
 
     def test_the_log_gives_each_tests_status_and_time(self):
-        self.assertEqual(runner.read_log("ok a::fast <0.012s>\nfailed a::bad <6.250s>\nignored a::skip\n"
-                                         "ignored, daily a::moved\nok a::nested\n"), {
+        # The records libtest writes (an ignored test's message follows `ignored:` and may hold spaces and colons).
+        self.assertEqual(runner.read_log(
+            "ok a::fast <0.012s>\nfailed a::bad <6.250s>\nignored a::skip\nignored: daily a::moved\n"
+            "ignored: measurement: cargo test -p x --release y -- --ignored a::measured\nok a::nested\n"
+            "ok a::panics_as_expected <0.000s>\n"), {
             "a::fast": ("ok", 0.012), "a::bad": ("failed", 6.25), "a::skip": ("ignored", None),
-            "a::moved": ("ignored", None), "a::nested": ("ok", None)})
+            "a::moved": ("ignored", None), "a::measured": ("ignored", None), "a::nested": ("ok", None),
+            "a::panics_as_expected": ("ok", 0.0)})
 
     def test_a_passing_binary_without_a_timed_record_for_a_listed_test_is_caught(self):
         result = {"status": "ok", "listed": ["a::timed", "a::ignored", "a::lost", "a::untimed"],
