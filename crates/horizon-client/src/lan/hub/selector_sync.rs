@@ -10,7 +10,7 @@ impl Hub {
     }
 
     /// Commands.sendCommands: the command tree for this player.
-    fn send_commands(&self, i: usize) {
+    pub(super) fn send_commands(&self, i: usize) {
         let g = &self.guests[i];
         let mut packet = self.commands_packet(g.permission);
         // What the mods took out is not in the tree the client gets.
@@ -30,12 +30,11 @@ impl Hub {
         if g.brand == "horizon" {
             g.send(&C::CustomPayload(
                 horizon_protocol::packets::configuration::CustomPayload {
-                    channel: super::commands::selector_sync::CHANNEL.into(),
-                    data: super::commands::selector_sync::encode(&self.selector_tokens),
+                    channel: crate::lan::commands::selector_sync::CHANNEL.into(),
+                    data: crate::lan::commands::selector_sync::encode(&self.selector_tokens),
                 },
             ));
         }
         g.send(&C::Commands(packet));
     }
-
 }

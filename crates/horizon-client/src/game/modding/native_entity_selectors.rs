@@ -6,8 +6,7 @@ use horizon_client::command::args::Selector;
 use horizon_client_core::registries::SelectorToken;
 use mod_api::SelectorSort;
 
-/// The tokens the installed mods registered, each with its type's base selection. A type whose
-/// `base` panics is left out, with why.
+/// The frozen base selections validated when the installed mods registered their tokens.
 pub(super) fn selector_tokens() -> Vec<SelectorToken> {
     mod_api::__private::entity_selector_types()
         .map(|(name, base)| SelectorToken {

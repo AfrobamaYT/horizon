@@ -20,7 +20,8 @@ impl dyn Registrar + '_ {
     /// Register selector token `name` (`allies` gives `@allies`), once, from `Hooks::register`.
     /// A name that is empty, not lowercase letters, digits and `_`, one of vanilla's
     /// `p a r s e n`, or registered by any mod already refuses the mods at startup, naming the
-    /// mod.
+    /// mod. Names must fit 32767 ASCII bytes. The base is read once here; a panic,
+    /// zero limit or tooltip exceeding 32767 UTF-16 units also refuses registration.
     pub fn register_entity_selector<T: crate::EntitySelectorType>(
         &mut self,
         name: &str,

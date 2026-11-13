@@ -3553,8 +3553,7 @@ impl Game<'_> {
             C::CustomPayload(p)
                 if p.channel == horizon_client::lan::commands::selector_sync::CHANNEL =>
             {
-                let tokens = horizon_client::lan::commands::selector_sync::decode(&p.data)?;
-                self.ui.registries.selector_tokens = tokens;
+                self.receive_selector_tokens(&p.data)?;
             }
             // Another level's world: its open, its packets and its close (`viewed_worlds`).
             C::CustomPayload(p) if p.channel == horizon_protocol::viewed_levels::CHANNEL => {

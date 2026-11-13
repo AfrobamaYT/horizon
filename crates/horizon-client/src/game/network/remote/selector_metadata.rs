@@ -2,7 +2,7 @@ use super::*;
 
 /// The hurt sound of a `ClientboundDamageEventPacket`'s damage type, by its
 /// synchronized registry id: `Player.getHurtSound` picks the type's effects.
-fn hurt_sound_for(
+pub(super) fn hurt_sound_for(
     registries: &Dynamic,
     damage: &horizon_world::damage_source::Catalog,
     source_type: i32,
@@ -22,3 +22,10 @@ fn hurt_sound_for(
         })
 }
 
+impl Game<'_> {
+    pub(super) fn receive_selector_tokens(&mut self, data: &[u8]) -> Result<()> {
+        self.ui.registries.selector_tokens =
+            horizon_client::lan::commands::selector_sync::decode(data)?;
+        Ok(())
+    }
+}

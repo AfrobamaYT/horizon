@@ -40,7 +40,6 @@ use {
 
 /// GameEvent types (ClientboundGameEventPacket).
 pub mod advancements;
-mod selector_sync;
 mod block_changes;
 pub mod chat;
 pub mod chat_filter;
@@ -50,6 +49,7 @@ mod move_collision;
 mod moves;
 pub mod passage_cross;
 mod raw_inbox;
+mod selector_sync;
 mod spawn_info;
 use advancements::AdvancementOwners;
 use chat::yellow_names;
