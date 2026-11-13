@@ -362,6 +362,10 @@ impl Game<'_> {
             game.control_command_inner(line, reply, event_loop)
         });
         self.settle_title_mode();
+        // After handling, as the window's: the mods' mappings and `input_key` hear the key.
+        if let Some((key, action)) = socket_key(line) {
+            self.with_user_input(true, |game| game.socket_key_input(key, action));
+        }
         if let Some(key) = released {
             self.press_modifier_key(key, false);
         }
@@ -687,8 +691,6 @@ impl Game<'_> {
                     )
                     .into());
                 }
-                // The mods' mappings hear it as the window's key, before anything takes it.
-                self.agent_mod_mappings_key(key, action);
                 if arg(2)? != "up" {
                     self.input_keyboard_used();
                     // As a window's key press: the radial menu closes, and the key goes on.
@@ -1714,6 +1716,17 @@ fn vendor_name(id: u32) -> String {
 }
 
 /// The key a `key <name> tap|up` command releases, whatever its handler does.
+/// A `key KEY down|up|tap|repeat` line's key and action.
+fn socket_key(line: &str) -> Option<(KeyCode, &str)> {
+    let mut words = line.split_whitespace();
+    match (words.next(), words.next(), words.next()) {
+        (Some("key"), Some(key), Some(action @ ("down" | "up" | "tap" | "repeat"))) => {
+            Some((key_code(key)?, action))
+        }
+        _ => None,
+    }
+}
+
 fn released_modifier(line: &str) -> Option<KeyCode> {
     let mut words = line.split_whitespace();
     match (words.next(), words.next(), words.next()) {

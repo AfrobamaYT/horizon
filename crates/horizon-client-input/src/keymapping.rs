@@ -1,5 +1,6 @@
 //! The down/click state of `KeyMapping` and `ToggleKeyMapping` (sneak,
 //! sprint, attack and use can be toggled instead of held).
+use std::collections::HashMap;
 
 /// One mapping's runtime state. `toggle` is `Some(restore)` for a
 /// `ToggleKeyMapping` (with its `shouldRestore` flag), `None` for a plain one.
@@ -216,68 +217,211 @@ impl ToggleKeys {
     }
 }
 
-/// The plain `KeyMapping`s mods register (`Registrar::register_key_mapping`), by
-/// their place in the registration list. A mapping no input reached yet is up,
-/// with no clicks.
+/// The screens a mod's mapping acts in (`KeyConflictContext`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MappingContext {
+    Universal,
+    InGame,
+    Gui,
+}
+
+/// A mod's mapping as the player bound it, for [`ModKeys::bind`].
+pub struct ModBinding<'a> {
+    pub owner: &'a str,
+    pub id: &'a str,
+    /// The key's or mouse button's name (`key.keyboard.z`, `key.mouse.left`).
+    pub input: String,
+    /// The modifiers it holds, in GLFW's encoding (shift 1, control 2, alt 4).
+    pub modifiers: u32,
+    pub context: MappingContext,
+}
+
+#[derive(Clone, Debug)]
+struct ModKey {
+    state: KeyState,
+    modifiers: u32,
+    context: MappingContext,
+}
+impl ModKey {
+    /// `isConflictContextAndModifierActive`: its context's screens are showing
+    /// (in game with none open, a GUI with one) and every modifier its binding
+    /// holds is down (`KeyModifier.isActive`).
+    fn active(&self, held: u32, screen_open: bool) -> bool {
+        let shown = match self.context {
+            MappingContext::Universal => true,
+            MappingContext::InGame => !screen_open,
+            MappingContext::Gui => screen_open,
+        };
+        shown && self.modifiers & held == self.modifiers
+    }
+}
+
+/// The plain `KeyMapping`s mods register (`Registrar::register_key_mapping`):
+/// bound once at registration and again when a binding changes, with an index
+/// from each key to its mappings, so an input touches only the mappings bound
+/// to it and allocates nothing.
 #[derive(Clone, Debug, Default)]
-pub struct ModKeys(Vec<KeyState>);
+pub struct ModKeys {
+    keys: Vec<ModKey>,
+    /// Each bound key's mappings, by its name.
+    by_input: HashMap<Box<str>, Vec<usize>>,
+    /// Each mod's mappings, by id.
+    by_id: HashMap<Box<str>, HashMap<Box<str>, usize>>,
+    /// Every mapping is up with no clicks, so `release_all` has nothing to do.
+    idle: bool,
+}
 impl ModKeys {
-    /// Mapping `index`, to set or click.
-    pub fn get_mut(&mut self, index: usize) -> &mut KeyState {
-        if self.0.len() <= index {
-            self.0.resize_with(index + 1, KeyState::plain);
+    /// Binds the mappings, in registration order. A mapping keeps its held state
+    /// and pending clicks across a rebinding; an unbound one hears no input.
+    pub fn bind<'a>(&mut self, bindings: impl IntoIterator<Item = ModBinding<'a>>) {
+        self.by_input.clear();
+        self.by_id.clear();
+        let mut count = 0;
+        for (index, binding) in bindings.into_iter().enumerate() {
+            count = index + 1;
+            let key = ModKey {
+                state: KeyState::plain(),
+                modifiers: binding.modifiers,
+                context: binding.context,
+            };
+            match self.keys.get_mut(index) {
+                Some(old) => {
+                    old.modifiers = key.modifiers;
+                    old.context = key.context;
+                }
+                None => self.keys.push(key),
+            }
+            if !binding.input.is_empty() && binding.input != "key.keyboard.unknown" {
+                self.by_input
+                    .entry(binding.input.into_boxed_str())
+                    .or_default()
+                    .push(index);
+            }
+            self.by_id
+                .entry(binding.owner.into())
+                .or_default()
+                .insert(binding.id.into(), index);
         }
-        &mut self.0[index]
+        self.keys.truncate(count);
     }
-    /// Whether mapping `index` is held.
-    pub fn is_down(&self, index: usize) -> bool {
-        self.0.get(index).is_some_and(|key| key.is_down)
+    /// `KeyboardHandler.keyPress` (`mouse` false) or `MouseHandler.onButton`
+    /// (`mouse` true) for the mappings bound to `input`: a press sets and
+    /// clicks each one whose conflict context and modifiers are active
+    /// (NeoForge's `isActiveAndMatches`), a release lets go of every one.
+    /// `held` is the modifier word now.
+    pub fn input(
+        &mut self,
+        input: &str,
+        action: KeyAction,
+        mouse: bool,
+        screen_open: bool,
+        held: u32,
+    ) {
+        let Some(indices) = self.by_input.get(input) else {
+            return;
+        };
+        for &index in indices {
+            let key = &mut self.keys[index];
+            if action != KeyAction::Release && !key.active(held, screen_open) {
+                continue;
+            }
+            if mouse {
+                key.state
+                    .button(action != KeyAction::Release, screen_open, false);
+            } else {
+                key.state.key(action, screen_open, false);
+            }
+            self.idle = false;
+        }
     }
-    /// `consumeClick` of mapping `index`.
-    pub fn consume_click(&mut self, index: usize) -> bool {
-        self.0.get_mut(index).is_some_and(KeyState::consume_click)
+    fn index(&self, owner: &str, id: &str) -> Option<usize> {
+        self.by_id.get(owner)?.get(id).copied()
+    }
+    /// `isDown` of mod `owner`'s mapping `id`: held, while its conflict context
+    /// and modifiers are active.
+    pub fn is_down(&self, owner: &str, id: &str, held: u32, screen_open: bool) -> bool {
+        self.index(owner, id).is_some_and(|index| {
+            let key = &self.keys[index];
+            key.state.is_down && key.active(held, screen_open)
+        })
+    }
+    /// `consumeClick` of mod `owner`'s mapping `id`.
+    pub fn consume_click(&mut self, owner: &str, id: &str) -> bool {
+        self.index(owner, id)
+            .is_some_and(|index| self.keys[index].state.consume_click())
     }
     /// `KeyMapping.releaseAll` (a screen opened): every mapping is up and its
     /// pending clicks are gone.
     pub fn release_all(&mut self) {
-        for key in &mut self.0 {
-            key.release(false);
+        if self.idle {
+            return;
         }
+        for key in &mut self.keys {
+            key.state.release(false);
+        }
+        self.idle = true;
     }
     /// Every mapping is up (a script let go of all its keys); pending clicks stay.
     pub fn set_all_up(&mut self) {
-        for key in &mut self.0 {
-            key.set_down(false, false);
+        for key in &mut self.keys {
+            key.state.set_down(false, false);
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    fn binding(
+        id: &'static str,
+        input: &str,
+        modifiers: u32,
+        context: MappingContext,
+    ) -> ModBinding<'static> {
+        ModBinding {
+            owner: "m",
+            id,
+            input: input.to_owned(),
+            modifiers,
+            context,
+        }
+    }
+    /// `zoom` on Z, `boost` on Shift + Z in game, `grab` on the left button.
+    fn keys() -> ModKeys {
+        let mut keys = ModKeys::default();
+        keys.bind([
+            binding("zoom", "key.keyboard.z", 0, MappingContext::Universal),
+            binding("boost", "key.keyboard.z", 1, MappingContext::InGame),
+            binding("grab", "key.mouse.left", 0, MappingContext::Universal),
+        ]);
+        keys
+    }
     /// A tap is one click, consumed once.
     #[test]
     fn a_tap_adds_one_click() {
-        let mut keys = ModKeys::default();
-        keys.get_mut(1).key(KeyAction::Press, false, false);
-        assert!(keys.is_down(1));
-        keys.get_mut(1).key(KeyAction::Release, false, false);
-        assert!(!keys.is_down(1));
-        assert!(keys.consume_click(1));
-        assert!(!keys.consume_click(1));
-        assert!(!keys.consume_click(0), "another mapping has none");
+        let mut keys = keys();
+        keys.input("key.keyboard.z", KeyAction::Press, false, false, 0);
+        assert!(keys.is_down("m", "zoom", 0, false));
+        keys.input("key.keyboard.z", KeyAction::Release, false, false, 0);
+        assert!(!keys.is_down("m", "zoom", 0, false));
+        assert!(keys.consume_click("m", "zoom"));
+        assert!(!keys.consume_click("m", "zoom"));
+        assert!(!keys.consume_click("m", "boost"), "shift was up");
+        assert!(!keys.consume_click("m", "grab"));
+        assert!(!keys.consume_click("other", "zoom"));
     }
     /// Each auto-repeat of a held key is one more click, as its press.
     #[test]
     fn a_held_key_adds_one_click_per_repeat() {
-        let mut keys = ModKeys::default();
-        let key = keys.get_mut(0);
-        key.key(KeyAction::Press, false, false);
-        key.key(KeyAction::Repeat, false, false);
-        key.key(KeyAction::Repeat, false, false);
-        assert_eq!(key.pending_clicks(), 3);
-        assert!(keys.is_down(0));
+        let mut keys = keys();
+        keys.input("key.keyboard.z", KeyAction::Press, false, false, 1);
+        keys.input("key.keyboard.z", KeyAction::Repeat, false, false, 1);
+        keys.input("key.keyboard.z", KeyAction::Repeat, false, false, 1);
+        assert!(keys.is_down("m", "boost", 1, false));
+        assert!(!keys.is_down("m", "boost", 0, false), "shift let go");
         assert_eq!(
-            (0..4).map(|_| keys.consume_click(0)).collect::<Vec<_>>(),
+            (0..4)
+                .map(|_| keys.consume_click("m", "boost"))
+                .collect::<Vec<_>>(),
             [true, true, true, false]
         );
     }
@@ -285,29 +429,49 @@ mod tests {
     /// it count nothing, its releases still let go.
     #[test]
     fn a_screen_opening_zeroes_the_clicks() {
-        let mut keys = ModKeys::default();
-        keys.get_mut(0).key(KeyAction::Press, false, false);
-        keys.get_mut(0).key(KeyAction::Repeat, false, false);
-        keys.get_mut(2).button(true, false, false);
+        let mut keys = keys();
+        keys.input("key.keyboard.z", KeyAction::Press, false, false, 0);
+        keys.input("key.keyboard.z", KeyAction::Repeat, false, false, 0);
+        keys.input("key.mouse.left", KeyAction::Press, true, false, 0);
         keys.release_all();
-        assert!(!keys.is_down(0) && !keys.is_down(2));
-        assert!(!keys.consume_click(0) && !keys.consume_click(2));
-        keys.get_mut(0).key(KeyAction::Press, true, false);
-        keys.get_mut(2).button(true, true, false);
-        assert!(!keys.is_down(0) && !keys.is_down(2));
-        assert_eq!(keys.get_mut(0).pending_clicks(), 0);
+        assert!(!keys.is_down("m", "zoom", 0, true) && !keys.is_down("m", "grab", 0, true));
+        assert!(!keys.consume_click("m", "zoom") && !keys.consume_click("m", "grab"));
+        keys.input("key.keyboard.z", KeyAction::Press, false, true, 0);
+        keys.input("key.mouse.left", KeyAction::Press, true, true, 0);
+        assert!(!keys.consume_click("m", "zoom") && !keys.consume_click("m", "grab"));
+    }
+    /// A rebinding moves a mapping to its new key and keeps its pending clicks.
+    #[test]
+    fn a_rebinding_moves_the_mapping() {
+        let mut keys = keys();
+        keys.input("key.keyboard.z", KeyAction::Press, false, false, 0);
+        keys.bind([binding(
+            "zoom",
+            "key.keyboard.x",
+            0,
+            MappingContext::Universal,
+        )]);
+        keys.input("key.keyboard.z", KeyAction::Press, false, false, 0);
+        keys.input("key.keyboard.x", KeyAction::Press, false, false, 0);
+        assert_eq!(
+            (0..3)
+                .map(|_| keys.consume_click("m", "zoom"))
+                .collect::<Vec<_>>(),
+            [true, true, false]
+        );
+        assert!(!keys.consume_click("m", "boost"), "no longer registered");
     }
     /// `KeyMapping.setDown` holds without a click; `KeyMapping.click` is a press's increment.
     #[test]
     fn set_changes_only_the_held_state() {
-        let mut keys = ModKeys::default();
-        keys.get_mut(0).set_down(true, false);
-        assert!(keys.is_down(0));
-        assert!(!keys.consume_click(0));
-        keys.get_mut(0).click();
-        assert!(keys.is_down(0));
-        assert!(keys.consume_click(0));
-        assert!(!keys.consume_click(0));
+        let mut key = KeyState::plain();
+        key.set_down(true, false);
+        assert!(key.is_down);
+        assert!(!key.consume_click());
+        key.click();
+        assert!(key.is_down);
+        assert!(key.consume_click());
+        assert!(!key.consume_click());
     }
 
     /// `KeyMapping.resetToggleKeys` (a new `LocalPlayer`): a sneak and a sprint toggled on in one

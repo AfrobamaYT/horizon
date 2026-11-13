@@ -120,21 +120,6 @@ impl Game<'_> {
                 self.physical_keys.remove(&key);
             }
         }
-        if let WindowEvent::KeyboardInput {
-            event,
-            is_synthetic: false,
-            ..
-        } = &event
-            && let PhysicalKey::Code(key) = event.physical_key
-        {
-            use horizon_client::keymapping::KeyAction;
-            let action = match (event.state, event.repeat) {
-                (ElementState::Released, _) => KeyAction::Release,
-                (_, false) => KeyAction::Press,
-                (_, true) => KeyAction::Repeat,
-            };
-            self.mod_mappings_key(key, action);
-        }
         if matches!(
             &event,
             WindowEvent::MouseInput {
@@ -1928,13 +1913,7 @@ impl ApplicationHandler for Game<'_> {
             };
             // Still the key's handling: a mod's key hook may reach the clipboard.
             self.with_user_input(true, |game| {
-                game.native_input_key(
-                    name.unwrap_or("key.keyboard.unknown"),
-                    layout_key,
-                    raw_code,
-                    action,
-                    modifiers,
-                );
+                game.key_input(name, layout_key, raw_code, action, modifiers);
             });
         }
     }
