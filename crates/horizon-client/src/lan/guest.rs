@@ -349,6 +349,8 @@ pub struct Guest {
     /// until that body exists: the scale a player has set stays through a
     /// respawn and a change of level (#3684).
     pub carried_attributes: Option<horizon_core::nbt::Tag>,
+    /// The accepted hit follows the same living body through a full teleport restore.
+    pub carried_hit: Option<std::sync::Arc<crate::health::AcceptedHit>>,
     /// The vehicle the player's file names (`ServerPlayer.saveParentVehicle`'s
     /// "RootVehicle"), for the ride to come back on the next login.
     pub saved_vehicle: Option<[i32; 4]>,
@@ -440,6 +442,8 @@ pub struct Guest {
     /// their client, zero after a client tick without one.
     pub known_movement: [f64; 3],
     pub dead: bool,
+    /// A cancelled die at non-positive health belongs to this body, across full restores.
+    pub death_canceled: bool,
     /// `LivingEntity.deathTime`: ticks since the guest died.
     pub death_time: u32,
     /// The player record is materialized for gameplay and handle lookup.
@@ -739,6 +743,7 @@ impl Guest {
             motion: None,
             loaded_body: None,
             carried_attributes: None,
+            carried_hit: None,
             saved_vehicle: None,
             logs_kept: None,
             inventory: vec![None; 36],
@@ -784,6 +789,7 @@ impl Guest {
             moves_from_ground: false,
             known_movement: [0.0; 3],
             dead: false,
+            death_canceled: false,
             death_time: 0,
             placed: false,
             handover: None,
@@ -927,6 +933,10 @@ impl Guest {
     pub fn stop_riding(&mut self) {
         (self.vehicle, self.vehicle_good) = (None, None);
     }
+    /// The body remains paired while alive, or until its twentieth death tick.
+    pub fn body_present(&self) -> bool {
+        self.health > 0.0 || self.death_time < 20
+    }
     /// `LivingEntity.tickDeath` for a dead player: true once its body is
     /// removed, 20 ticks after it died (`remove(KILLED)`, whose
     /// `Entity.setRemoved` stops its riding). The body sits in its vehicle
@@ -1005,8 +1015,16 @@ impl Guest {
     /// same player in another level (`restore_all`), only their base values
     /// after a death. The old body, for what else it hands over.
     pub fn new_body(&mut self, restore_all: bool) -> Option<Box<PlayerMotion>> {
-        let m = self.motion.take()?;
+        if !restore_all {
+            self.carried_hit = None;
+            self.death_canceled = false;
+            self.death_time = 0;
+        }
+        let mut m = self.motion.take()?;
         self.carried_attributes = Some(m.carried_attributes(restore_all));
+        if restore_all {
+            self.carried_hit = m.health.accepted_hit.take();
+        }
         Some(m)
     }
     /// `ServerPlayer.restoreFrom(old, false)`'s `setHealth(getMaxHealth())`:

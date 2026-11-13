@@ -1859,7 +1859,7 @@ impl Game<'_> {
     pub(in crate::game) fn network_entity_id(&self, t: Target) -> Option<i32> {
         let host = self.lan.as_ref();
         match t {
-            Target::Player => host?.hub.guest(self.lan_acting?).map(|g| g.entity_id),
+            Target::Player => self.player_entity_id_by_connection(self.lan_acting),
             Target::Guest(conn) => host?.hub.guest(conn).map(|g| g.entity_id),
             other => targets::non_player_entity_id(other),
         }
@@ -2336,9 +2336,6 @@ impl Game<'_> {
                         m.last_damage = Some((source, i64::from(m.age)));
                     }
                     m.health = 0.0;
-                    if m.death_time == 0 {
-                        m.death_time = 1;
-                    }
                     killed = alive.then(|| m.clone());
                 }
                 // The hit runs LivingEntity.die before the command returns:

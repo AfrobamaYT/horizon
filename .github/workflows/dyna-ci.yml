@@ -377,6 +377,7 @@ jobs:
           find crates/horizon-mod-api/src crates/horizon-mod-vocab/src -name '*.rs' -print0 | xargs -0 rustfmt --edition 2024 --check --config skip_children=true
           find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustfmt --edition 2024 --config skip_children=true --check
           rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs
+          rustfmt --edition 2024 --check crates/horizon-mod-wasm/wire-loopback/tests/wire_loopback/*.rs
       # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
       - name: Cap build parallelism to the runner
         run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
@@ -638,6 +639,7 @@ jobs:
           find crates/horizon-mod-api/src crates/horizon-mod-vocab/src -name '*.rs' -print0 | xargs -0 rustfmt --edition 2024 --check --config skip_children=true
           find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustfmt --edition 2024 --config skip_children=true --check
           rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs
+          rustfmt --edition 2024 --check crates/horizon-mod-wasm/wire-loopback/tests/wire_loopback/*.rs
           (cd launcher && cargo fmt --check)
 
   verify-static:
@@ -712,6 +714,11 @@ jobs:
           BRANCH: ${{ needs.changes.outputs.trusted == 'true' && github.head_ref || '' }}
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
         run: python3 tools/hotspots/check_guards.py ${BASE_SHA:+--base "$BASE_SHA" --pull-request-merge} --branch "$BRANCH" --labels "$LABELS"
+      # horizon-mod-wasm-wire-loopback's build.rs declares tests/wire_loopback/*.rs: its root gains no module line and no test.
+      - name: wire_loopback root does not grow
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 tools/hotspots/check_wire_loopback.py ${BASE_SHA:+--base "$BASE_SHA" --pull-request-merge}
       # Offline tooling compiles tiny standalone fixtures even when no game Rust changed.
       # Install their tools explicitly rather than making missing compilers turn cases into skips.
       - name: Install Rust tools for isolated tooling fixtures
@@ -729,6 +736,10 @@ jobs:
           bash tools/ci/rustup_install.sh --profile minimal --component rustfmt --component clippy
       - name: Vocabulary state has explicit ownership
         run: python3 tools/check_mod_vocabulary_state.py
+      # One file per topic in tools/ci/ignored-tests/: well-formed rows, each test in one file, nothing else in the
+      # folder, no file at the retired single-list path.
+      - name: Ignored-test policy files read cleanly
+        run: python3 tools/ci/check_ignored_test_rows.py
       # docs/layers.md: a crate depends only on its own layer or a lower one; today's exceptions only shrink.
       - name: Crates follow the layers
         if: needs.changes.outputs.rust_required != 'false'

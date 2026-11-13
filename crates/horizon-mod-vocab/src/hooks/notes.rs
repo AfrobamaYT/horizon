@@ -553,7 +553,7 @@ place; `server_tick` does not define one, so name the dimension and expect a ref
 
 Changing loot a mod didn't make, as NeoForge's `LootTableLoadEvent` and global loot modifiers and Fabric's
 `LootTableEvents.MODIFY` and `MODIFY_DROPS` do. A mod's own loot function and condition kinds are #5451.
-
+- **`living_death(entity, kind, source, weapon, cancel)` (version 2)**: server-only, before loot, experience and death messages. `source: &HurtSource` retains the accepted killing blow's damage type, real causing entity (including players), direct entity (including projectiles) and original optional position; `weapon: Option<&ItemStack>` retains its full killing stack and components. `LivingDeathEvent` exposes `entity`, `kind`, `source`, `weapon`, `cancel`; the old top-level `damage_type`/`attacker` fields and callback signature are removed, with no shim. Cancel suppresses death loot and leaves health exactly where the listener left it: health 5 stays 5; an unhealed body at health <= 0 is removed after 20 ticks without redispatch or loot.
 - **`horizon_world::loot::loot_table_load(context, id, table)`**: each table's JSON as it loads, after the data packs'. `Hooks::loot_table_load` gets the owning load's `&dyn DataLoadContext` first (see "Items' default components"); its `origin()` is always `ServerDataLoad`, since only the server loads loot tables. Push a pool
   onto `table["pools"]` or an entry onto a pool's `entries`; chests, block and mob drops, fishing and the rest then roll the
   changed table. Keep a replaced table's `random_sequence`: a mob's table without one drops nothing. It runs once per table on
@@ -2223,27 +2223,27 @@ registration path.
 
 - `mod_container_viewers(dimension, pos, viewers, previous)` is heard once each time the number of players with the mod container at `pos` open changes (vanilla's `ContainerOpenersCounter`, as a barrel keeps it): `previous` 0 is `onOpen`, `viewers` 0 is `onClose`, so a block can show itself open while `viewers` is not 0. It is counted every tick from the players' open menus, so a player who leaves without closing (a lost connection, death, another dimension, out of reach, the block gone) is heard too. On a server, with no player's state swapped in.
 
-- Knockback a mod can change or cancel through `native_living_knockback` (NeoForge's
-  `LivingKnockBackEvent`): at the start of `LivingEntity.knockback`, on the raw strength, before the entity's knockback
-  resistance takes its share and its motion changes, with the hit's level host (its blocks, random and own attachments),
-  the pushed entity's id and type (`minecraft:player` for a player), the push's `source` (`HurtSource`, named as
-  `native_living_incoming_damage` names a hit's, with the same entity ids left at 0; a goat's ram pushes with
-  `minecraft:mob_attack` and hurts with `minecraft:mob_attack_no_aggro`, as in vanilla), the `attacker` (the attacking
-  entity's network id, falling back to a known last hurt-by mob, or 0 when unknown) and what it holds (`attacker_main`
-  and `attacker_off`: a player's selected and off-hand stacks, a mob's main hand; none when unknown, recorded only
-  while a native mod is loaded), the `strength`, the direction (`x`, `z`; vanilla points it at the source of a hit, the
-  attacker's side, and the entity is pushed the other way) and a `canceled` flag. A mod may change the three numbers or
-  set `canceled`, and the push follows: canceled, the entity's motion is left alone. A `strength` of 0 or less after the
-  hook is no push, and a direction too short to tell draws a random one after it, as in vanilla; the resistance scales
-  the strength the hook leaves, so a full knockback resistance still stops the push. A value a mod leaves that is not
-  a finite number is put back as it was. It fires for the players, mobs and armor stands the game knocks back: a hit's
-  own push, a sprinting or Knockback hit, a sweep, a spear, a shield's push on its holder and a goat's ram. It does not
-  fire for a sulfur cube with a block that a hit with a causing entity knocks back (`SulfurCube.knockback` does not
-  call `super` there), for the pushes vanilla doesn't make with `LivingEntity.knockback` (the ender dragon's wings,
-  Punch arrows, explosions, wind charges, a mace smash's area, a hoglin's throw), nor yet for the ones Horizon makes
-  another way: the ender dragon's. The hit is in the middle of its work: the level host reads and draws random but
-  can't write the entity or the world. It runs on the thread that ticks the world (the server thread), so state a
-  mod shares with its render thread hooks needs synchronising.
+- Knockback a mod can change or cancel through `native_living_knockback` (NeoForge's `LivingKnockBackEvent`): at the
+  start of `LivingEntity.knockback`, on the raw strength, before the entity's knockback resistance takes its share and
+  its motion changes, with the hit's level host (its blocks, random and own attachments), the pushed entity's id and
+  type (`minecraft:player` for a player), the push's `source` (`HurtSource`, named as `native_living_incoming_damage`
+  names a hit's, with the same entity ids left at 0; a goat's ram pushes with `minecraft:mob_attack` and hurts with
+  `minecraft:mob_attack_no_aggro`, as in vanilla), the `attacker` (the attacking entity's network id, falling back to a
+  known last hurt-by mob, or 0 when unknown) and what it holds (`attacker_main` and `attacker_off`: a player's selected
+  and off-hand stacks, a mob's main hand; none when unknown, recorded only while a native mod is loaded), the `entry`
+  (`Short` via `knockback(power, x, z)`, else `Full`), the `strength`, the direction (`x`, `z`; vanilla points it at the
+  source of a hit, the attacker's side, and the entity is pushed the other way) and a `canceled` flag. A mod may change
+  the three numbers or set `canceled`, and the push follows: canceled, the entity's motion is left alone. A `strength`
+  of 0 or less after the hook is no push, and a direction too short to tell draws a random one after it, as in vanilla;
+  the resistance scales the strength the hook leaves, so a full knockback resistance still stops the push. A value a mod
+  leaves that is not a finite number is put back as it was. It fires for the players, mobs and armor stands the game
+  knocks back: a hit's own push, a sprinting or Knockback hit, a sweep, a spear, a shield's push on its holder and a
+  goat's ram. It does not fire for a sulfur cube with a block that a hit with a causing entity knocks back
+  (`SulfurCube.knockback` does not call `super` there), for the pushes vanilla doesn't make with
+  `LivingEntity.knockback` (the ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's area, a
+  hoglin's throw), nor yet for the ones Horizon makes another way: the ender dragon's. The hit is in the middle of its
+  work: the level host reads and draws random but can't write the entity or the world. It runs on the thread that ticks
+  the world (the server thread), so state a mod shares with its render thread hooks needs synchronising.
 
 
 - `native_edit_blocks(dimension, edit)` for server mods: runs up columns, from a height or a heightmap's, of block states and filters written as commands write them, made at once straight into the chunks of the level being ticked with what `fill ... strict` does for block entities; the chunks changed go to the players whole.
