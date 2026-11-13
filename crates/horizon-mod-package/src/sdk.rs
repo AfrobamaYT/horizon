@@ -631,18 +631,39 @@ impl Index {
         serde_json::to_string_pretty(self).expect("an index serializes") + "\n"
     }
 
-    /// Read `sdk.json` for build `commit`: its schema, build, package format and every asset's
-    /// kind, codec and name are checked here, once.
-    pub fn read(bytes: &[u8], commit: &str) -> Result<Index, Refusal> {
+    /// The build an index names, read before that build's id is known: a game release carries
+    /// a copy of its SDK's index, and that copy is where its build id comes from. Only the schema
+    /// is checked here; [`Index::read`] checks the rest once the build is fetched by its id.
+    pub fn build_of(bytes: &[u8]) -> Result<Build, Refusal> {
+        #[derive(Deserialize)]
+        struct Named {
+            build: Build,
+        }
+        Self::schema(bytes)?;
+        serde_json::from_slice::<Named>(bytes)
+            .map(|named| named.build)
+            .map_err(|error| Refusal::Malformed(error.to_string()))
+    }
+
+    /// Refuses a document that is not JSON with a `schema`, or whose schema is not [`SCHEMA`].
+    fn schema(bytes: &[u8]) -> Result<(), Refusal> {
         #[derive(Deserialize)]
         struct Schema {
             schema: u64,
         }
-        let malformed = |error: serde_json::Error| Refusal::Malformed(error.to_string());
-        let Schema { schema } = serde_json::from_slice(bytes).map_err(malformed)?;
+        let Schema { schema } =
+            serde_json::from_slice(bytes).map_err(|error| Refusal::Malformed(error.to_string()))?;
         if schema != u64::from(SCHEMA) {
             return Err(Refusal::Schema(schema));
         }
+        Ok(())
+    }
+
+    /// Read `sdk.json` for build `commit`: its schema, build, package format and every asset's
+    /// kind, codec and name are checked here, once.
+    pub fn read(bytes: &[u8], commit: &str) -> Result<Index, Refusal> {
+        let malformed = |error: serde_json::Error| Refusal::Malformed(error.to_string());
+        Self::schema(bytes)?;
         let written: Written = serde_json::from_slice(bytes).map_err(malformed)?;
         if written.build.commit != commit {
             return Err(Refusal::Build {
