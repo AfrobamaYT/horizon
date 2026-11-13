@@ -3,8 +3,8 @@
 
 Fails on a malformed row, a test listed in two files, a folder with no rows or with a file other than `*.txt`
 and README.md, and a file at the retired single-list path. The shared reader validates both `needs`
-and `needs-plain` fixture rows; neither is a known failure. Every `daily` row must name a workspace package and one
-of its test targets, and some leg of the daily run's matrix must run it: its package's shard, or the `daily-rows`
+and `needs-plain` fixture rows; neither is a known failure. Every `daily` row must name a package of a workspace (the game's or the launcher's) and
+one of its test targets, and some leg of the daily run's matrix must run it: its package's shard, or the `daily-rows`
 leg (tools/ci/ignored_shards.py), so no moved test runs nowhere. Builds nothing.
 
 The rows and the source agree both ways (read with tools/ci/rust_tests.py): every function marked
@@ -18,7 +18,6 @@ runs each row by its exact path, still fails a row whose test does not run.
 """
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -42,24 +41,23 @@ def daily_problems(rows, targets, matrix):
         elif ignored_tests.shard_runs(row.package, row.reference):
             if not any(ignored_tests.parse_shard(shard)[0] == row.package for shard in matrix):
                 problems.append(f"{where}: no leg runs {row.package}'s shard")
-        elif ignored_shards.DAILY_ROWS not in matrix or row.test not in groups.get((row.package, row.reference), ()):
-            problems.append(f"{where}: no leg runs it (the {ignored_shards.DAILY_ROWS} leg is missing)")
+        elif (leg := ignored_shards.daily_rows_leg(row.package)) not in matrix or \
+                row.test not in groups.get((row.package, row.reference), ()):
+            problems.append(f"{where}: no leg runs it (the {leg} leg is missing)")
     return problems
 
 
-def source_packages(root=ROOT):
-    """Each workspace member's source folder -> the packages whose sources it holds (the deepest folder wins, and
-    crates/horizon-client also builds horizon-client-lib: tools/ci/ignored_shards.py SHARED_SOURCES)."""
-    owners = {}
-    for member in tomllib.loads((root / "Cargo.toml").read_text())["workspace"]["members"]:
-        name = tomllib.loads((root / member / "Cargo.toml").read_text())["package"]["name"]
-        owners[member] = set(ignored_shards.SHARED_SOURCES.get(Path(member).name, (name,))) | {name}
-    return owners
+def source_packages():
+    """Each member's source folder, in every workspace (the launcher's too) -> the packages whose sources it holds
+    (the deepest folder wins, and crates/horizon-client also builds horizon-client-lib:
+    tools/ci/ignored_shards.py SHARED_SOURCES)."""
+    return {member: set(ignored_shards.SHARED_SOURCES.get(Path(member).name, (name,))) | {name}
+            for name, (member, _) in ignored_shards.workspace_members().items()}
 
 
 def daily_functions(root=ROOT):
     """(path, line, function name, packages) of every function marked `#[ignore = "daily"]` in tracked sources."""
-    owners = source_packages(root)
+    owners = source_packages()
     listing = subprocess.run(["git", "ls-files", "-z", "--", "*.rs"], cwd=root, capture_output=True, text=True,
                              check=True)
     found = []
@@ -98,7 +96,7 @@ if __name__ == "__main__":
     print(f"{len(rows)} rows in {len({row.file for row in rows})} files of {ignored_tests.POLICY_PATH}/")
     daily = [row for row in rows if row.mark == "daily"]
     problems = daily_problems(daily, ignored_shards.workspace_targets(),
-                              [*ignored_shards.expand(ignored_shards.SHARDS), ignored_shards.DAILY_ROWS])
+                              [*ignored_shards.expand(ignored_shards.SHARDS), *ignored_shards.DAILY_ROWS_LEGS.values()])
     functions = daily_functions()
     problems += source_problems(daily, functions)
     for problem in problems:

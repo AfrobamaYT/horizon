@@ -27,8 +27,9 @@ A row marked `daily` (`PACKAGE TEST TARGET daily REASON`, in `daily-<package>.tx
 `verify` into the daily run with `#[ignore = "daily"]` (tools/ci/move_to_daily.py): not a known failure, it must
 pass, and its row must name a test that still runs. A package's shard runs the daily rows of the targets it
 already runs (its library; every target for the packages in INTEGRATION_TESTS); the shard `daily-rows`
-(tools/ci/ignored_shards.py) runs every other daily row, one `cargo test -p PACKAGE TARGET -- --ignored --exact
-TEST...` per package and target.
+(tools/ci/ignored_shards.py; `daily-rows-launcher` for the launcher's) runs every other daily row, one `cargo test -p PACKAGE TARGET -- --ignored --exact
+TEST...` per package and target, from the package's own workspace: a launcher row runs from launcher/ against its
+own lockfile (`--locked`).
 
 `--needs VARIABLE --one-process-each` runs the tests marked `needs VARIABLE`, each alone in its own process
 (`--list` prints those commands instead), and fails unless every run reports exactly one test passed: a
@@ -66,6 +67,8 @@ from typing import NamedTuple
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools import lab
 from tools.ci import ignored_shards
+
+ROOT = Path(__file__).resolve().parents[2]
 
 # One file per topic, read in file-name order (README.md there gives the row format).
 POLICY = Path(__file__).with_name("ignored-tests")
@@ -245,14 +248,14 @@ def shard_runs(package, target):
     return package in ignored_shards.SHARDS and (target == "lib" or package in INTEGRATION_TESTS)
 
 
-@lru_cache(maxsize=1)
-def workspace_features():
-    """{package: its features as the whole workspace resolves them}: what `verify`'s `--workspace` build compiles.
+@lru_cache(maxsize=None)
+def workspace_features(workspace="."):
+    """{package: its features as the workspace at `workspace` resolves them}: what its `--workspace` build compiles.
 
     `cargo test -p PACKAGE` alone resolves only that package's own needs, which leaves out a test behind a feature
     another member turns on (or a target's required-features), so a daily-rows run passes these explicitly."""
     metadata = subprocess.run(["cargo", "metadata", "--format-version", "1"], capture_output=True, text=True,
-                              check=True)
+                              check=True, cwd=ROOT / workspace)
     data = json.loads(metadata.stdout)
     names = {package["id"]: package["name"] for package in data["packages"]}
     members = set(data["workspace_members"])
@@ -691,10 +694,14 @@ def run(package, skip, number=None, count=None, only=None):
         # Owner-approved stopgap; #2944 removes this when the legs run under 15 minutes.
         client_half = package == "horizon-client" and count == 2 and number in (1, 2)
         command = ["cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []), "--no-fail-fast"]
+        workspace = "."
         if only:
             target = only[0]
-            features = workspace_features().get(package, [])
-            command = ["cargo", "test", "-p", package, *(["--features", ",".join(features)] if features else []),
+            # A package of another workspace (the launcher's) runs from that workspace, against its own lockfile.
+            workspace = ignored_shards.workspace_members()[package][1]
+            features = workspace_features(workspace).get(package, [])
+            command = ["cargo", "test", *(["--locked"] if workspace != "." else []), "-p", package,
+                       *(["--features", ",".join(features)] if features else []),
                        *(["--lib"] if target == "lib" else [f"--{target.split(':')[0]}", target.split(":", 1)[1]])]
         if client_half:
             # The runner's own cap (tools/ci/cargo_jobs.py --cap) when set, else the old fixed one.
@@ -710,6 +717,7 @@ def run(package, skip, number=None, count=None, only=None):
             listing = subprocess.run(
                 [*command, "--", "--list", "--include-ignored"],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace", env=env,
+                cwd=ROOT / workspace,
             )
             names = {found[1] for line in listing.stdout.splitlines() if (found := LISTED.match(line))}
             if listing.returncode or not names:
@@ -733,6 +741,7 @@ def run(package, skip, number=None, count=None, only=None):
         process = subprocess.run(
             [*command, "--", *selection],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace", env=env,
+            cwd=ROOT / workspace,
         )
         if timing:
             print(f"data-leg phase={phase} test-command-end utc={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} execution_seconds={time.monotonic() - execution_started:.3f}", flush=True)
@@ -892,8 +901,9 @@ def main(shards, report=None):
         for selection in (
             ("horizon-client-lib#1of2", "horizon-client-lib#2of2")
             if shard == "horizon-client-lib" else
-            [f"{ignored_shards.DAILY_ROWS}:{package}:{target}" for package, target in groups]
-            if shard == ignored_shards.DAILY_ROWS else (shard,)
+            [f"{shard}:{package}:{target}" for package, target in groups
+             if ignored_shards.daily_rows_leg(package) == shard]
+            if shard in ignored_shards.DAILY_ROWS_LEGS.values() else (shard,)
         )
     ]
     for shard in selections:
@@ -902,7 +912,8 @@ def main(shards, report=None):
         write_report(report, dict(verdict, incomplete=[*verdict["incomplete"], {
             "shard": shard, "in_progress": True, "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}]))
         _stopped.clear()
-        if shard.startswith(f"{ignored_shards.DAILY_ROWS}:"):
+        daily_group = shard.split(":", 1)[0] in ignored_shards.DAILY_ROWS_LEGS.values()
+        if daily_group:
             _, package, target = shard.split(":", 2)
             print(f"{package} {target}: {len(groups[package, target])} daily tests", flush=True)
             results = run(package, [], only=(target, groups[package, target]))
@@ -947,7 +958,7 @@ def main(shards, report=None):
             if test not in results:
                 problems.append(f"{package} {safe_identity(test)}: listed in {files[package, test]} but no longer runs")
                 problem(package, test, "no-longer-runs", files[package, test])
-        if shard.startswith(f"{ignored_shards.DAILY_ROWS}:"):
+        if daily_group:
             continue
         for (listed, test), mark in known.items():
             if listed == package and mark not in skipped and in_leg(test, number, count) and test not in results:

@@ -30,6 +30,10 @@ longer runs fails. Its package's shard runs it when that shard builds its target
 every other one; verify-static fails a row no leg runs. `python3 tools/ci/move_to_daily.py apply LIST` writes the
 attribute and the row (its docstring has the list format). The attribute is the source's mark and the row is the
 daily run's list of what must run: an attribute without a row in a package no shard covers would run nowhere.
+A launcher test is moved the same way (`daily-horizon-launcher.txt`): its own leg, `daily-rows-launcher`, runs it
+from `launcher/`, its own workspace, against its own lockfile. A launcher test that starts the launcher binary also belongs to
+the Windows release job `launcher-processes` (`launcher-windows-check.yml`), which runs those `tests/` targets by
+`--test` name: add its target there too.
 verify-static also checks both directions statically: a `#[ignore = "daily"]` function with no row, or a row with no
 such function, fails (`check_ignored_test_rows.py`; matched by package and function name).
 

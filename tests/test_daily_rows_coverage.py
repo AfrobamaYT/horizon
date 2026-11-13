@@ -13,7 +13,7 @@ spec = importlib.util.spec_from_file_location("check_ignored_test_rows", ROOT / 
 check = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(check)
 
-FULL = [*ignored_shards.expand(ignored_shards.SHARDS), ignored_shards.DAILY_ROWS]
+FULL = [*ignored_shards.expand(ignored_shards.SHARDS), *ignored_shards.DAILY_ROWS_LEGS.values()]
 
 
 def row(package, test, target="lib"):
@@ -32,7 +32,9 @@ class DailyRowsCoverage(unittest.TestCase):
     def test_the_full_matrix_has_the_daily_rows_leg(self):
         printed = subprocess.run([sys.executable, str(ROOT / "tools/ci/ignored_shards.py"), "--matrix", "--all"],
                                  capture_output=True, text=True, check=True).stdout
-        self.assertIn(ignored_shards.DAILY_ROWS, json.loads(printed.removeprefix("matrix="))["shard"])
+        legs = json.loads(printed.removeprefix("matrix="))["shard"]
+        self.assertIn(ignored_shards.DAILY_ROWS, legs)
+        self.assertIn("daily-rows-launcher", legs)
 
     def test_a_row_no_leg_runs_fails(self):
         rows = [row("horizon-world", "a"), row("horizon-relay", "b", "test:tunnel")]
@@ -100,6 +102,41 @@ class DailyRowsMatchTheSource(unittest.TestCase):
         functions = [("crates/horizon-client/src/save.rs", 3, "slow", self.CLIENT)]
         self.assertEqual(check.source_problems([row("horizon-client-lib", "save::tests::slow")], functions), [])
         self.assertEqual(len(check.source_problems([row("horizon-world", "save::tests::slow")], functions)), 2)
+
+
+
+class LauncherDailyRows(unittest.TestCase):
+    """The launcher is its own workspace: its daily rows run from launcher/ in the daily-rows leg, and both static
+    checks read its sources. No launcher test carries the mark yet, so these use a synthetic row."""
+
+    def test_a_launcher_row_names_a_launcher_target_and_runs_in_the_daily_rows_leg(self):
+        targets = ignored_shards.workspace_targets()
+        self.assertTrue({"lib", "bin:horizon-launcher", "test:storage"} <= targets["horizon-launcher"])
+        rows = [row("horizon-launcher", "logs::each_command_logs_its_time", "test:logs")]
+        self.assertEqual(check.daily_problems(rows, targets, FULL), [])
+        self.assertEqual(ignored_tests.daily_rows_groups(rows),
+                         {("horizon-launcher", "test:logs"): ["logs::each_command_logs_its_time"]})
+        # Its own leg: the game's daily-rows leg does not build the launcher's workspace.
+        self.assertEqual(ignored_shards.daily_rows_leg("horizon-launcher"), "daily-rows-launcher")
+        missing = check.daily_problems(rows, targets, [*ignored_shards.expand(ignored_shards.SHARDS), ignored_shards.DAILY_ROWS])
+        self.assertIn("no leg runs it (the daily-rows-launcher leg is missing)", missing[0])
+
+    def test_launcher_sources_are_read_for_the_attribute_both_ways(self):
+        self.assertEqual(ignored_shards.workspace_members()["horizon-launcher"], ("launcher", "launcher"))
+        self.assertEqual(check.source_packages()["launcher"], {"horizon-launcher"})
+        functions = [("launcher/tests/logs.rs", 12, "each_command_logs_its_time", {"horizon-launcher"})]
+        self.assertEqual(check.source_problems([row("horizon-launcher", "each_command_logs_its_time", "test:logs")],
+                                               functions), [])
+        self.assertIn("no daily row of horizon-launcher names it", check.source_problems([], functions)[0])
+
+    def test_the_game_boot_check_reads_launcher_sources(self):
+        boot = importlib.util.spec_from_file_location("check_game_boot_tests", ROOT / "tools/ci/check_game_boot_tests.py")
+        module = importlib.util.module_from_spec(boot)
+        boot.loader.exec_module(module)
+        sources = module.tracked_sources()
+        self.assertIn("launcher/src/main.rs", sources)
+        self.assertIn("crates/horizon-core/src/lib.rs", sources)
+
 
 
 if __name__ == "__main__":

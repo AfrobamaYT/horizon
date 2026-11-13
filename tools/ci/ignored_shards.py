@@ -2,7 +2,7 @@
 """Print the ignored-tests shard matrix: every shard, or the ones a pull request needs.
 
 Usage:
-  ignored_shards.py --matrix --all      `matrix=`, every shard and the daily-rows leg (the daily run)
+  ignored_shards.py --matrix --all      `matrix=`, every shard and the daily-rows legs (the daily run)
   ignored_shards.py --matrix BASE HEAD  `matrix=`, the shards this pull request must run
 
 The ignored-tests check is a matrix with one package per shard; this file is the single
@@ -17,6 +17,7 @@ workspace (launcher/Cargo.lock) and selects nothing.
 import json
 import sys
 import tomllib
+from functools import lru_cache
 from pathlib import Path
 
 # The repository root, appended so a script run finds `tools` without shadowing anything already importable.
@@ -34,6 +35,10 @@ SHARDS = ("horizon-client", "horizon-client-lib", "horizon-client-render", "hori
 # tests of every other package, and of the shard packages' targets their shard does not build (tools/ci/ignored_tests.py
 # daily_rows_groups). Coverage, not speed: without it those tests would run nowhere. Main's full matrix only.
 DAILY_ROWS = "daily-rows"
+# The leg that runs each workspace's daily rows. The launcher's get a leg of their own, on the same runner size: its
+# workspace builds GPUI and the launcher from nothing (25 minutes on 8 cores, measured cold), which does not fit beside
+# the other packages' groups in one 60-minute leg. Coverage, not spreading a slow job.
+DAILY_ROWS_LEGS = {".": DAILY_ROWS, "launcher": "daily-rows-launcher"}
 # A package too big for one test process's memory runs as several legs, `PACKAGE#NofM` (tools/ci/ignored_tests.py
 # gives each test to exactly one leg). horizon-client's single process was killed (signal 9) on three main runs.
 LEGS = {"horizon-client": 2}
@@ -44,6 +49,9 @@ ROOT_WIDE_FILES = {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rustfmt.t
 SHARED_SOURCES = {"horizon-client": ("horizon-client", "horizon-client-lib")}
 # Workspaces of their own: nothing under them builds the shard packages.
 SEPARATE_WORKSPACES = ("launcher/",)
+# Every Cargo workspace whose tests the daily rows may name, by folder: the game's, and the launcher's own (its own
+# Cargo.lock; the daily-rows leg runs a launcher row from launcher/).
+WORKSPACES = (".", "launcher")
 
 
 def expand(packages):
@@ -55,13 +63,31 @@ def expand(packages):
     ]
 
 
+@lru_cache(maxsize=1)
+def workspace_members():
+    """{package: (its folder, its workspace's folder)} for every member of WORKSPACES, relative to the root."""
+    members = {}
+    for workspace in WORKSPACES:
+        table = tomllib.loads((ROOT / workspace / "Cargo.toml").read_text())
+        for member in ([workspace] if "package" in table else []) + [
+                Path(workspace, folder).as_posix() for folder in table["workspace"].get("members", ())]:
+            name = tomllib.loads((ROOT / member / "Cargo.toml").read_text())["package"]["name"]
+            members[name] = (member, workspace)
+    return members
+
+
+def daily_rows_leg(package):
+    """The leg that runs `package`'s daily rows that no package shard runs (DAILY_ROWS_LEGS, by its workspace)."""
+    return DAILY_ROWS_LEGS[workspace_members()[package][1]]
+
+
 def workspace_targets():
-    """Each workspace member's test targets as the daily rows name them: {package: {"lib", "bin:NAME", "test:NAME"}}.
+    """Each member's test targets as the daily rows name them, in every workspace (WORKSPACES):
+    {package: {"lib", "bin:NAME", "test:NAME"}}.
 
     Read from the manifests and Cargo's default layout (src/lib.rs, src/main.rs, src/bin/, tests/), not by building."""
-    members = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["members"]
     targets = {}
-    for member in members:
+    for member, _ in workspace_members().values():
         folder = ROOT / member
         table = tomllib.loads((folder / "Cargo.toml").read_text())
         name = table["package"]["name"]
@@ -135,7 +161,7 @@ if __name__ == "__main__":
     every = arguments[:2] == ["--matrix", "--all"]
     selected = len(arguments) == 3 and arguments[0] == "--matrix"
     if every:
-        shards = [*expand(SHARDS), DAILY_ROWS]
+        shards = [*expand(SHARDS), *DAILY_ROWS_LEGS.values()]
     elif selected:
         shards = expand(select(rust_changes.changed_paths(arguments[1], arguments[2]), workspace_dependencies()))
     else:

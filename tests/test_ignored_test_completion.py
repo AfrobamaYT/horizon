@@ -236,6 +236,33 @@ class IgnoredTests(unittest.TestCase):
                          ["cargo", "test", "-p", "horizon-relay", "--features", "fixture,index", "--test", "tunnel"])
         self.assertEqual(command[command.index("--") + 1:], ["--ignored", "--exact", "--test-threads=4", "a", "b"])
 
+    def test_each_daily_rows_leg_runs_only_its_workspaces_groups(self):
+        rows = [ignored_tests.Row("horizon-relay", "a", "test:tunnel", "daily", "daily-horizon-relay.txt", "slow"),
+                ignored_tests.Row("horizon-launcher", "b", "lib", "daily", "daily-horizon-launcher.txt", "child-process")]
+        for leg, expected in (("daily-rows", [("horizon-relay", ("test:tunnel", ["a"]))]),
+                              ("daily-rows-launcher", [("horizon-launcher", ("lib", ["b"]))])):
+            _, execute, _, _ = self.daily_main([leg], rows, lambda package, skip, only: {only[1][0]: True})
+            self.assertEqual([(call.args[0], call.kwargs["only"]) for call in execute.call_args_list], expected)
+
+    def test_a_launcher_daily_row_runs_from_the_launcher_workspace_against_its_lockfile(self):
+        output = target(1, "test logs::slow ... ok\n", summary(passed=1))
+        with patch.object(ignored_tests.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, output)) as execute, \
+                patch.object(ignored_tests, "workspace_features", return_value={"horizon-launcher": ["default"]}) as features, \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ignored_tests.run("horizon-launcher", [], only=("test:logs", ["logs::slow"])),
+                             {"logs::slow": True})
+        features.assert_called_once_with("launcher")
+        command = execute.call_args.args[0]
+        self.assertEqual(command[:command.index("--")],
+                         ["cargo", "test", "--locked", "-p", "horizon-launcher", "--features", "default", "--test", "logs"])
+        self.assertEqual(execute.call_args.kwargs["cwd"], ignored_tests.ROOT / "launcher")
+        # A game package still runs from the repository root.
+        with patch.object(ignored_tests.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, output)) as execute, \
+                patch.object(ignored_tests, "workspace_features", return_value={}), contextlib.redirect_stdout(io.StringIO()):
+            ignored_tests.run("horizon-relay", [], only=("test:tunnel", ["logs::slow"]))
+        self.assertEqual(execute.call_args.kwargs["cwd"], ignored_tests.ROOT / ".")
+        self.assertNotIn("--locked", execute.call_args.args[0])
+
     def test_a_parent_that_crashes_after_its_childs_same_count_summary_did_not_complete(self):
         # A fixture reruns its own test in a child, which reports FAILED and a one-test summary;
         # the parent then aborts before its own summary. The child's summary has the parent's count.
