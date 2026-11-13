@@ -25,6 +25,8 @@ pub use replace::own_average;
 pub use shutdown::on_shutdown;
 pub use turn::turn_angle;
 
+mod strict_math_checks;
+
 #[derive(Default)]
 pub struct Mod;
 
@@ -47,6 +49,10 @@ impl Hooks for Mod {
         host: &dyn mod_api::ClientHost,
         event: &mut mod_api::TickTargetMillisEvent,
     ) {
+        if event.millis == -2.0 {
+            event.millis = strict_math_checks::check_vectors() as f32;
+            return;
+        }
         let profile = host.math_profile();
         assert_eq!(profile, host.math_profile());
         event.millis = match profile {
