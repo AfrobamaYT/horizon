@@ -2388,6 +2388,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-mod-surface"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "horizon-mod-vocab"
 version = "0.1.0"
 dependencies = [
