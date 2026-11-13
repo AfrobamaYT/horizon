@@ -140,9 +140,28 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' ||", static)
         self.assertIn("RUNNER_KIND: ${{ needs.changes.outputs.trusted != 'true' && 'github' ||", static)
 
+    def test_windows_jobs_share_the_rollup_and_sync_gate(self):
+        import yaml
+
+        workflow = yaml.safe_load((ROOT / ".github/workflows/launcher-windows-check.yml").read_text())
+        jobs = workflow["jobs"]
+        gate = jobs["gate"]
+        step = next(step for step in gate["steps"] if step.get("id") == "gate")
+        self.assertEqual(step["run"], 'python3 tools/ci/pr_gate.py >> "$GITHUB_OUTPUT"')
+        self.assertEqual(step["env"], {
+            "EVENT": "${{ github.event_name }}",
+            "HEAD_REPO": "${{ github.event.pull_request.head.repo.full_name }}",
+            "PR_LABELS": "${{ toJSON(github.event.pull_request.labels.*.name) }}",
+            "HEAD_REF": "${{ github.event.pull_request.head.ref }}",
+        })
+        self.assertEqual(gate["outputs"]["heavy"], "${{ steps.gate.outputs.heavy }}")
+        for name in ("test", "runtime-leases"):
+            with self.subTest(job=name):
+                self.assertEqual(jobs[name]["needs"], "gate")
+                self.assertEqual(jobs[name]["if"], "needs.gate.outputs.heavy == 'true'")
+
     def test_other_pull_request_workflows_skip_what_compiles_for_forks(self):
-        for workflow, jobs in (("launcher-windows-check.yml", ("test", "runtime-leases")),
-                               ("cargo-horizon-mod.yml", ("build",)), ("modding-book.yml", ("book",))):
+        for workflow, jobs in (("cargo-horizon-mod.yml", ("build",)), ("modding-book.yml", ("book",))):
             text = (ROOT / ".github/workflows" / workflow).read_text()
             for name in jobs:
                 with self.subTest(workflow=workflow, job=name):

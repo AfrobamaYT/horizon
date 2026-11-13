@@ -1490,6 +1490,7 @@ impl Game<'_> {
             world.water_tickets.clear();
         }
         self.attachment_indexes.remove(&dim);
+        self.passages.retire_level(dim.key());
     }
 
     /// Every level still open closes with the server, however it ends
