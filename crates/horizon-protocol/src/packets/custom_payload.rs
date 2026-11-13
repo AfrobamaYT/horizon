@@ -229,7 +229,7 @@ mod tests {
             ("horizon:quiet_commands", [false, true, true, false]),
             ("horizon:mod_list", [true, false, false, false]),
             ("horizon:attachment_sync", [false, false, false, true]),
-            ("horizon:menu_extra", [false, false, false, true]),
+            ("horizon:menu_extra", [true, true, false, true]),
             ("horizon:anvil_cost", [false, false, false, true]),
             ("horizon:passage_sync", [false, false, false, true]),
             ("horizon:passage_cross", [false, false, true, false]),
