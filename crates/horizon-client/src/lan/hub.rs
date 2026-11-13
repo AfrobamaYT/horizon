@@ -1668,7 +1668,7 @@ impl Hub {
             .center
             .is_some_and(|c| c != self.guests[i].chunk());
         if recentered {
-            self.update_view(i, super::chunk_watch::listened());
+            self.update_view(i, self.chunk_watches.recording());
         }
         let g = &self.guests[i];
         g.send(&C::GameEvent(play::GameEvent {
@@ -2773,7 +2773,7 @@ impl Hub {
         if let Some(far) = self.far.as_mut() {
             far.poll();
         }
-        let watching = super::chunk_watch::listened();
+        let watching = self.chunk_watches.recording();
         let mut batches = Vec::new();
         for i in 0..self.guests.len() {
             if self.watches(&self.guests[i]) {
@@ -7765,6 +7765,30 @@ mod tests {
                 })
             })
             .collect()
+    }
+
+    /// With no mod listening, a registered passage (`record_for_passages`) makes the hub
+    /// record the chunks it sends from then on, for the passages the game sends with them.
+    #[test]
+    fn a_passage_makes_the_hub_record_the_chunks_it_sends() {
+        use super::super::chunk_watch::ChunkWatchKind::{Sent, Watch};
+        let (mut hub, _rx) = hub_with_a_guest();
+        let mut world = floor_at(1);
+        {
+            let value = 2;
+            hub.guests.update(0, |g| g.view_distance = value);
+        }
+        hub.chunk_watches.record_for_passages();
+        send_chunks(&mut hub, &mut world);
+        let mut got = watches(&mut hub);
+        got.sort_by_key(|(k, _, c)| (*k as u8, *c));
+        let overworld = "minecraft:overworld".to_string();
+        let four = [[-1, -1], [-1, 0], [0, -1], [0, 0]];
+        let expected: Vec<_> = [Watch, Sent]
+            .into_iter()
+            .flat_map(|kind| four.map(|c| (kind, overworld.clone(), c)))
+            .collect();
+        assert_eq!(got, expected);
     }
 
     /// `ChunkWatchEvent`: each near chunk sent is watched then sent, once;

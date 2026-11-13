@@ -879,13 +879,17 @@ impl Game<'_> {
 
     /// The chunks players started and stopped watching that the hub
     /// recorded (`lan::chunk_watch`), told to the mods in the hub's order,
-    /// with no player's state swapped in. The player handle is built from
-    /// the record, so an unwatch after a disconnect still names them.
+    /// with no player's state swapped in, and a sent chunk's passages sent
+    /// after it. The player handle is built from the record, so an unwatch
+    /// after a disconnect still names them. Nothing while the log is empty.
     pub(super) fn run_chunk_watches(&mut self) {
         use horizon_client::lan::chunk_watch::ChunkWatchKind;
         let Some(host) = self.lan.as_mut() else {
             return;
         };
+        if host.hub.chunk_watches.is_empty() {
+            return;
+        }
         let runs = host.hub.chunk_watches.take();
         let Some(epoch) = self.native_lifecycle.epoch() else {
             return;
@@ -906,7 +910,10 @@ impl Game<'_> {
                 let chunk = mod_api::ChunkRef::new(level, watch.chunk);
                 match watch.kind {
                     ChunkWatchKind::Watch => self.native_chunk_watch(player, chunk),
-                    ChunkWatchKind::Sent => self.native_chunk_sent(player, chunk),
+                    ChunkWatchKind::Sent => {
+                        self.native_chunk_sent(player, chunk);
+                        self.send_chunk_passages(level, watch.uuid, watch.chunk);
+                    }
                     ChunkWatchKind::Unwatch => self.native_chunk_unwatch(player, chunk),
                 }
             }

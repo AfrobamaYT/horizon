@@ -217,8 +217,7 @@ fn menu_title(tag: &Tag) -> horizon_client::text::Text {
     remote_text(tag).resolve_legacy()
 }
 
-/// `ChatTrustLevel`; a modified message keeps the signed content it was
-/// changed from.
+/// `ChatTrustLevel`; a modified message keeps the signed content it was changed from.
 pub(super) enum ChatTrust {
     Secure,
     Modified(String),
@@ -261,8 +260,7 @@ pub(super) struct Tracked {
     /// this base, so the server's next delta still lands where it means.
     codec_base: [f64; 3],
     silent: bool,
-    /// `Entity.vehicle`: the entity it rides (`SetPassengers`), whatever
-    /// either one's type.
+    /// `Entity.vehicle`: the entity it rides (`SetPassengers`), whatever either one's type.
     pub(in crate::game) vehicle: Option<u32>,
 }
 
@@ -639,8 +637,7 @@ pub(super) struct Remote {
     pub(super) first_passenger: bool,
     /// The player's place in its vehicle's `getPassengers`.
     pub(super) passenger_index: usize,
-    /// Item entities waiting for their item data: where they are and their
-    /// motion.
+    /// Item entities waiting for their item data: where they are and their motion.
     pub(super) pending_items: HashMap<i32, ([f64; 3], Vec3)>,
     health: (f32, i32, f32),
     /// `LocalPlayer.flashOnSetHealth`: set by the first health the server
@@ -714,8 +711,7 @@ pub(super) struct Remote {
     /// Entities with shared flag 6 (`Entity.isCurrentlyGlowing` on a client); mobs keep
     /// theirs in `Mob::glowing`.
     pub(super) glowing: std::collections::HashSet<i32>,
-    /// The player's own shared flag 5 (`Entity.isInvisible`) as the server
-    /// last set it.
+    /// The player's own shared flag 5 (`Entity.isInvisible`) as the server last set it.
     pub(super) own_invisible: bool,
     /// The player's own shared flag 0 (`Entity.isOnFire`) as the server last
     /// set it: its fire (blaze fireballs, fire aspect, lightning) never
@@ -3676,6 +3672,10 @@ impl Game<'_> {
             // The server's recipes its native mods asked to send.
             C::CustomPayload(p) if p.channel == horizon_client::lan::recipes::CONTENT_CHANNEL => {
                 self.remote_recipe_content(&p.data);
+            }
+            // The passages of the chunks the server shows the window.
+            C::CustomPayload(p) if p.channel == horizon_protocol::passage_sync::CHANNEL => {
+                self.remote_passage_sync(&p.data);
             }
             // PingDebugMonitor.onPongReceived.
             C::PongResponse(p) => {

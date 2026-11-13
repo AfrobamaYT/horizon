@@ -959,8 +959,7 @@ struct FallingBlock {
     pub rotation: [f32; 2],
     /// When it joined its list (`horizon_client::join_seq`); set by the list.
     pub(super) join: horizon_client::join_seq::JoinSeq,
-    /// Its entity id: from the entity counter on the server, the server's on
-    /// a client.
+    /// Its entity id: from the entity counter on the server, the server's on a client.
     id: u32,
     state: BlockStateId,
     /// `DATA_START_POS`: spawn position used to select weighted block models.
@@ -1080,8 +1079,7 @@ struct WorldTables {
     recipes: Recipes,
     stations: horizon_client::stations::StationData,
     reload_sources: Option<Arc<horizon_client::crafting::ResolvedSources>>,
-    /// The values of the data map types native mods registered
-    /// (`native_data_map_types`).
+    /// The values of the data map types native mods registered (`native_data_map_types`).
     data_maps: native_data_maps::DataMaps,
     /// The entity type, biome, structure and damage type tags with the packs'
     /// over the game's own, by registry (`TagLoader.loadTagsForExistingRegistries`):
@@ -2171,6 +2169,8 @@ struct Game<'a> {
     /// The natural spawning policy mods set on each level (`LevelRef::set_spawn_limits`,
     /// `set_spawn_flags`); a level with none spawns as vanilla. Kept while the world is open.
     spawn_policies: HashMap<mod_api::DimensionKey, natural_spawning::SpawnPolicy>,
+    /// The passages mods registered in each level, and a client's copy (`native_passages.rs`).
+    passages: native_passages::Passages,
     /// PauseScreen.showPauseMenu (false after F3+Escape).
     pause_menu: bool,
     pause_focus: Option<u8>,
@@ -2231,8 +2231,7 @@ struct Game<'a> {
     /// the song's network id is only known once the hub is in hand.
     lan_songs: Vec<([i32; 3], Option<String>)>,
     lan_cushion_breaks: Vec<(horizon_world::registry::BlockStateId, [f64; 3])>,
-    /// Block events (position, b0, b1, state) and entity events (id, event)
-    /// for the guests.
+    /// Block events (position, b0, b1, state) and entity events (id, event) for the guests.
     lan_block_events: Vec<([i32; 3], i32, i32, u32)>,
     lan_entity_events: Vec<(i32, i8)>,
     /// Successful crits (attacking guest, hit entity), queued while the hub is taken.
@@ -15003,6 +15002,7 @@ impl<'a> Game<'a> {
             screen_blur_requested: Default::default(),
             spawn_counts: HashMap::new(),
             spawn_policies: HashMap::new(),
+            passages: Default::default(),
             pause_menu: true,
             pause_focus: None,
             death_focus: None,
