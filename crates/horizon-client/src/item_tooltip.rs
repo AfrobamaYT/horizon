@@ -83,8 +83,8 @@ fn modifier_line(
     } else if amount < 0.0 {
         ("take", -amount * scale)
     } else if amount.is_nan() {
-        // A NaN modifier still gets its line, read as an added amount.
-        ("plus", amount)
+        // A NaN modifier uses the decrease layout, whose key carries the minus.
+        ("take", amount)
     } else {
         return None;
     };
@@ -2127,7 +2127,7 @@ mod tests {
                 "-\u{221e} Armor",
                 "-\u{221e}% Speed",
             ),
-            (f64::NAN, false, "+NaN Armor", "+NaN% Speed"),
+            (f64::NAN, false, "-NaN Armor", "-NaN% Speed"),
             (f64::NAN, true, "NaN Armor", "NaN% Speed"),
             (-0.001, true, "-0 Armor", "-0.1% Speed"),
             (-0.00001, true, "-0 Armor", "-0% Speed"),
