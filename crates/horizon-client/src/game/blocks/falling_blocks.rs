@@ -63,17 +63,6 @@ impl Game<'_> {
             vertex.light = light;
         }
     }
-    /// FallingBlockEntity.tick: fall with 0.04 gravity and 0.98F drag, then land.
-    /// One falling block's `tick`: places or drops its block in its own tick,
-    /// so a block falling onto one that just landed lands on top of it. `i` is
-    /// its place in the list; the caller has checked it is ticking.
-    /// `entities` are the boxes that stop its move (`Game::item_entity_collisions`).
-    ///
-    /// The block keeps its place in the list while it moves (nothing its move
-    /// reads looks at the falling blocks): taking it out and putting it back
-    /// shifted every block after it twice, for every falling block, every tick.
-    /// One that lands, drops or goes leaves the list before its block is placed
-    /// or dropped, as before; on an error the list keeps it as it was.
     /// The end of a piston's `Entity.move(MoverType.PISTON, …)` for falling
     /// block `i` after a step of `moved`: `checkFallDamage` adds the drop and,
     /// on the ground, runs fallOn and posts HIT_GROUND after a fall, then
@@ -91,43 +80,47 @@ impl Game<'_> {
             }
             f.fall_distance = 0.0;
         }
-        self.falling[i] = f;
+        self.falling.update(i, |block| *block = f);
     }
-    pub(super) fn tick_one_falling(&mut self, i: usize, entities: &[Aabb]) -> Result<()> {
-        let entity_drops = self.ui.rules.bool("entity_drops");
-        let join = self.falling[i].join;
-        let mut f = self.falling[i].clone();
-        let mut step = self.fall_step(&mut f, entity_drops, entities)?;
-        // FallingBlockEntity.tick: a block that comes down where a piston is
-        // moving a block neither lands nor breaks (whatever its cancelDrop).
-        // It slows like any landing and falls on, so the piston pushes it.
-        if let FallStep::Landed([x, y, z]) = step
-            && &*self.res.facts().get(self.world.block(x, y, z)).name == "minecraft:moving_piston"
-        {
-            f.velocity = horizon_client::entity_rules::scale_air_drag(
-                f.velocity.multiply(Vec3::new(0.7, -0.5, 0.7)),
-            );
-            step = FallStep::Falling;
-        }
-        let slot = if self.falling.get(i).is_some_and(|e| e.join == join) {
-            Some(i)
-        } else {
-            self.falling.iter().position(|e| e.join == join)
-        };
-        if matches!(step, FallStep::Falling) {
-            if let Some(j) = slot {
-                self.falling[j] = f;
-            }
-            return Ok(());
-        }
-        if let Some(j) = slot {
-            self.falling.remove(j);
+    /// FallingBlockEntity.tick: fall with 0.04 gravity and 0.98F drag, then land.
+    /// One falling block's `tick`: places or drops its block in its own tick,
+    /// so a block falling onto one that just landed lands on top of it. `i` is
+    /// its place in the list; the caller has checked it is ticking.
+    /// `entities` are the boxes that stop its move.
+    pub(in crate::game) fn tick_one_falling(&mut self, i: usize, entities: &[Aabb]) -> Result<()> {
+        let entity_drops = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS);
+        let _save_lease = horizon_client::join_seq::visibility::PassLease::enter();
+        let mut f = self.falling.extract(self.falling[i].join).unwrap();
+        let original = f.clone();
+        let (id, join) = (f.id, f.join);
+        let step = self.fall_step(&mut f, entity_drops, entities);
+        // Its move is filed at once, also for one that lands or drops.
+        if step.is_ok() {
+            let (from, to) = (original.position, f.position);
+            self.entity_section_step(id, [from.x, from.y, from.z], [to.x, to.y, to.z]);
         }
         match step {
-            FallStep::Falling | FallStep::Gone => {}
-            FallStep::Dropped(at) => self.drop_falling_block(f.state, at),
-            FallStep::Landed(pos) => self.finish_falling_block(f, pos),
+            Ok(FallStep::Falling) => {
+                let state = f.state;
+                self.falling.put_back(i.min(self.falling.len()), f);
+                self.note_falling_tick(id, join, state);
+                return Ok(());
+            }
+            Ok(FallStep::Gone) => {}
+            Ok(FallStep::Dropped(at)) => self.drop_falling_block(f.state, at),
+            Ok(FallStep::Landed(pos)) => self.finish_falling_block(f, pos),
+            Err(error) => {
+                horizon_client::join_seq::store_back(&mut f, original);
+                self.falling.put_back(i.min(self.falling.len()), f);
+                return Err(error);
+            }
         }
+        // Gone, dropped and landed owners have completed their terminal work;
+        // unlike a continuing fall, they will never be put back into the list.
+        self.falling.retire_extracted(id, join);
         Ok(())
     }
     /// One `FallingBlockEntity.tick` move of `f`.
@@ -143,7 +136,18 @@ impl Game<'_> {
         f.previous = f.position;
         f.age = f.age.wrapping_add(1);
         f.velocity.y -= horizon_client::entity_rules::EntityRules::get_gravity(f);
-        let mut wanted = f.velocity;
+        let wanted = f.velocity;
+        // The falling block's Entity.move goes through the move gate (#2414),
+        // armed before the stuck multiplier of the move itself; PR 1a records
+        // the movement unchanged.
+        let mut gate = horizon_client::move_gate::armed(
+            &self.loop_context,
+            f.id,
+            "minecraft:falling_block",
+            MoverType::SelfMovement,
+            wanted,
+        );
+        let mut wanted = gate.delta();
         // Entity.move: a cobweb it was in scales this move, which then
         // starts from rest.
         if f.stuck.length_squared() > 1.0e-7 {
@@ -176,12 +180,14 @@ impl Game<'_> {
         // On an error the caller keeps the block as it was before this tick.
         // Entity.collide: the world border's walls and the entities that
         // `canBeCollidedWith` it (a boat, a shulker) stop it too.
-        let movement = collisions::EntityCollisions {
+        let mut collisions = collisions::EntityCollisions {
             blocks: scene,
             entities,
             border: Some((self.border.geometry(), [f.position.x, f.position.z])),
-        }
-        .resolve_with_context(
+        };
+        let movement = horizon_client::move_gate::entities_resolve_with_context(
+            &mut gate,
+            &mut collisions,
             horizon_client::falling_block::bounds(f.position),
             wanted,
             0.0,
@@ -195,8 +201,6 @@ impl Game<'_> {
         );
         let on_ground = wanted.y < 0.0 && movement.y != wanted.y;
         f.on_ground = on_ground;
-        // Entity.checkFallDamage: each step down, narrowed to a float (a
-        // falling block never runs baseTick, so it is never in water).
         if movement.y < 0.0 {
             f.fall_distance -= f64::from(movement.y as f32);
         }
@@ -213,11 +217,13 @@ impl Game<'_> {
             f.velocity.z = 0.0;
         }
         if on_ground {
-            // fallOn (causeFallDamage), then HIT_GROUND after a fall.
             self.falling_block_impact(f);
             if f.fall_distance > 0.0 {
-                let bounds = horizon_client::falling_block::bounds(f.position);
-                self.post_landing_event(f.position, bounds, false);
+                self.post_landing_event(
+                    f.position,
+                    horizon_client::falling_block::bounds(f.position),
+                    false,
+                );
             }
             f.fall_distance = 0.0;
         }
@@ -325,90 +331,66 @@ mod geometry_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn falling_model_cache_matches_direct_vertices() {
-        let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let settings = Settings::default();
-        let loaded = load_resources(
-            root.clone(),
-            None,
-            &root,
-            &settings,
-            Instant::now(),
-            false,
-            false,
-            &Progress::new(),
-            &mut |_, _| unreachable!(),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.execution_role = execution_role::ExecutionRole::IntegratedServer;
-        let game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&root),
-            None,
-        )
-        .unwrap();
-        for frame in 0..2 {
-            for (name, pos, origin, light) in [
-                (
-                    "minecraft:sand",
-                    BlockPos::new(1, 80, 3),
-                    glam::Vec3::new(-3.25, 12.5, 0.0),
-                    0x7010,
-                ),
-                (
-                    "minecraft:sand",
-                    BlockPos::new(9, 90, -4),
-                    glam::Vec3::new(8.125, -0.0, -9.5),
-                    0xf020,
-                ),
-                (
-                    "minecraft:gravel",
-                    BlockPos::new(-2, 70, 5),
-                    glam::Vec3::new(-0.0, -17.75, 2.5),
-                    0x5080,
-                ),
-            ] {
-                let state = game.pack.assets.registry.default_state(name).unwrap();
-                let seed = horizon_core::random::position_seed(pos);
-                let mut expected = Vec::new();
-                game.block_model_vertices(
-                    state,
-                    seed,
-                    glam::Mat4::from_translation(origin),
-                    light,
-                    false,
-                    &mut expected,
-                );
-                let mut actual = Vec::new();
-                game.falling_model_vertices(state, pos, origin, light, &mut actual);
-                let (_, tint) = game.block_face_sprite(state).unwrap();
-                let tint = horizon_client::mobs::render::abgr(tint);
-                for vertices in [&mut expected, &mut actual] {
-                    for v in vertices {
-                        v.color = horizon_client::hud_layout::multiply(v.color, tint);
+        // Geometry belongs to the client resource graph; server packs have no models.
+        crate::game::native_entity_refs::tests::with_client_game(|game| {
+            for frame in 0..2 {
+                for (name, pos, origin, light) in [
+                    (
+                        "minecraft:sand",
+                        BlockPos::new(1, 80, 3),
+                        glam::Vec3::new(-3.25, 12.5, 0.0),
+                        0x7010,
+                    ),
+                    (
+                        "minecraft:sand",
+                        BlockPos::new(9, 90, -4),
+                        glam::Vec3::new(8.125, -0.0, -9.5),
+                        0xf020,
+                    ),
+                    (
+                        "minecraft:gravel",
+                        BlockPos::new(-2, 70, 5),
+                        glam::Vec3::new(-0.0, -17.75, 2.5),
+                        0x5080,
+                    ),
+                ] {
+                    let state = game.pack.assets.registry.default_state(name).unwrap();
+                    let seed = horizon_core::random::position_seed(pos);
+                    let mut expected = Vec::new();
+                    game.block_model_vertices(
+                        state,
+                        seed,
+                        glam::Mat4::from_translation(origin),
+                        light,
+                        false,
+                        &mut expected,
+                    );
+                    let mut actual = Vec::new();
+                    game.falling_model_vertices(state, pos, origin, light, &mut actual);
+                    let (_, tint) = game.falling_block_face_sprite(state).unwrap();
+                    let tint = horizon_client::mobs::render::abgr(tint);
+                    for vertices in [&mut expected, &mut actual] {
+                        for v in vertices {
+                            v.color = horizon_client::hud_layout::multiply(v.color, tint);
+                        }
+                    }
+                    assert!(!expected.is_empty());
+                    assert_eq!(actual.len(), expected.len());
+                    for (a, b) in actual.iter().zip(&expected) {
+                        assert_eq!(
+                            a.pos.map(f32::to_bits),
+                            b.pos.map(f32::to_bits),
+                            "frame {frame}"
+                        );
+                        assert_eq!(a.uv.map(f32::to_bits), b.uv.map(f32::to_bits));
+                        assert_eq!(a.glint_uv.map(f32::to_bits), b.glint_uv.map(f32::to_bits));
+                        assert_eq!(
+                            (a.color, a.light, a.normal, a.layer),
+                            (b.color, b.light, b.normal, b.layer)
+                        );
                     }
                 }
-                assert!(!expected.is_empty());
-                assert_eq!(actual.len(), expected.len());
-                for (a, b) in actual.iter().zip(&expected) {
-                    assert_eq!(
-                        a.pos.map(f32::to_bits),
-                        b.pos.map(f32::to_bits),
-                        "frame {frame}"
-                    );
-                    assert_eq!(a.uv.map(f32::to_bits), b.uv.map(f32::to_bits));
-                    assert_eq!(a.glint_uv.map(f32::to_bits), b.glint_uv.map(f32::to_bits));
-                    assert_eq!(
-                        (a.color, a.light, a.normal, a.layer),
-                        (b.color, b.light, b.normal, b.layer)
-                    );
-                }
             }
-        }
+        });
     }
 }
