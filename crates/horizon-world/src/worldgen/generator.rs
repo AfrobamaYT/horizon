@@ -586,7 +586,7 @@ where
         let mut source_json = generator["biome_source"].to_string();
         let definition = data.source_catalog.decode(&source_json)?;
         let source = definition
-            .resolve(&data.presets)
+            .resolve(&data.presets, seed)
             .map_err(|e| resource(format!("biome source: {e}")))?;
         // Only the multi-noise presets (Overworld, Nether) take regions, not inline point lists.
         let source = if matches!(definition, BiomeSourceDefinition::Preset { .. }) {

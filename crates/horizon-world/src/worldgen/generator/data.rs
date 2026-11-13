@@ -440,7 +440,7 @@ impl GeneratorData {
         let source = self
             .source_catalog
             .decode(&source_json)?
-            .resolve(&self.presets)
+            .resolve(&self.presets, 0)
             .map_err(|e| resource(format!("biome source: {e}")))?;
         self.decoration_for(&source_json, &source).map(drop)
     }

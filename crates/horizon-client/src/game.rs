@@ -14890,14 +14890,9 @@ pub(crate) fn run_with(
     {
         log::warn!("Mod dimensions already installed; keeping the first table");
     }
-    // Their chunk generators, which those levels' and the packs' stems name.
-    if horizon_world::worldgen::mod_generators::install_mod_chunk_generators(
-        native_chunk_generator::installed_chunk_generators(),
-    )
-    .is_err()
-    {
-        log::warn!("Mod chunk generators already installed; keeping the first table");
-    }
+    // Their chunk generators and biome sources, which those levels' and the packs' stems name.
+    native_chunk_generator::install();
+    native_biome_source::install();
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models(options.execution_role);
     mods::register_layer_definitions(options.execution_role, &vanilla_root);
