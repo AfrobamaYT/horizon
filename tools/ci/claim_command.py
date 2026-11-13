@@ -280,6 +280,9 @@ def run(api, cmd: Command, actor: ns.Actor, number: int, reviewers: ns.Reviewers
     held = {h.lower() for h in holders}
     if cmd.verb == "claim":
         if login.lower() in held:
+            # A claim made before the label existed, or by hand, gets it now.
+            if "claimed" not in {str(l.get("name", "")).lower() for l in issue.get("labels") or []}:
+                api.label(number, "claimed", "help wanted")
             raise Refused("You already hold this issue.")
         if holders:
             names = ", ".join(f"@{h}" for h in holders)
