@@ -84,7 +84,6 @@ jobs:
             --expanded "$CARGO_TARGET_DIR/wire-goldens/expanded.rs" --check
           cargo test --locked -p horizon-mod-vocab --lib existing_fieldless_enum_layouts_match_baseline
           cargo test --locked -p horizon-mod-api --test wire_math_profile
-          cargo test --locked -p horizon-client --lib math_profile_selection_matches_platform_and_is_stable
       - name: Compile and test emitted point records
         run: |
           manifest=crates/horizon-mod-point-shape/tests/record-wire/Cargo.toml
@@ -160,13 +159,14 @@ jobs:
             game::native_server::wasm_selector_tests::wasm_selectors_resolve_in_game_and_refuse_before_guest_dispatch \
             game::native_server::wasm_selector_tests::wasm_server_tick_messages_reach_dedicated_game \
             game::native_hooks::math::tests::compiled_wasm_math_profile_import_matches_actual_game_host \
+            game::native_hooks::math::tests::math_profile_selection_matches_platform_and_is_stable \
             game::payload_transport::wasm_tests::compiled_guest_runs_in_actual_game_roots \
             game::payload_transport::wasm_config_tests::compiled_guest_runs_on_configuration_connection_thread \
             game::block_entity_tick_reply_tests::native_and_compiled_wasm_tick_reply_matrix \
             game::remote::interaction_event_tests::interaction_event_wasm_tests::wasm_interaction_shared_matrix \
             game::remote::movement_input_tests::wasm_movement_input_keys_axes_and_sprint \
             game::native_hooks::runtime_environment::tests::native_and_wasm_process_environment_in_registration_and_game_hosts; do
-            run_exact 1 -p horizon-client --lib -- --ignored --exact "$test"
+            run_exact 1 -p horizon-client --lib -- --include-ignored --exact "$test"
           done
       - name: Build independent library members
         run: |
