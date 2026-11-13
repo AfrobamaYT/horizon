@@ -4413,7 +4413,7 @@ impl Game<'_> {
                                     && let Some(stack) = self.stack_in(slot).cloned()
                                 {
                                     self.use_duration = self.use_duration(&stack);
-                                    self.use_ticks_set = false;
+                                    self.use_start = super::using_item::UseStart::of(stack);
                                 }
                             }
                             _ => {}
@@ -5161,7 +5161,7 @@ impl Game<'_> {
                     // CrafterBlockEntity.containerData.
                     Some(BlockEntity::Crafter(c)) => match usize::try_from(p.id) {
                         Ok(k @ 0..9) => c.disabled[k] = v == 1,
-                        Ok(9) => c.triggered = v == 1,
+                        Ok(9) => c.triggered = v,
                         _ => {}
                     },
                     // BrewingStandBlockEntity.dataAccess.

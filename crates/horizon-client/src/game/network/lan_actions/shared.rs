@@ -13,9 +13,8 @@ pub(super) struct GuestPlay {
     mining: Option<Mining>,
     destroy_delay: u32,
     using: Option<(usize, u32)>,
-    use_item: Option<ItemStack>,
     use_duration: i32,
-    use_ticks_set: bool,
+    use_start: super::using_item::UseStart,
     use_delay: u32,
     /// The shield's ItemCooldowns entry: an axe disabled it for this many ticks.
     pub(super) shield_cooldown: u32,
@@ -177,9 +176,8 @@ pub(super) struct GuestSwap {
     mining: Option<Mining>,
     destroy_delay: u32,
     using: Option<(usize, u32)>,
-    use_item: Option<ItemStack>,
     use_duration: i32,
-    use_ticks_set: bool,
+    use_start: super::using_item::UseStart,
     use_delay: u32,
     pub(super) shield_cooldown: u32,
     /// The guest's item cooldowns (`Game::cooldowns` for its turn).
