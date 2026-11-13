@@ -25,34 +25,35 @@ def granted(workflow, job):
     return permissions(job.get("permissions", workflow.get("permissions", {})))
 
 
-def requests(path, seen=()):
-    """Every (job, scope, level) a called workflow's jobs ask for, nested calls included."""
+def bounded(path, grant, via, seen=()):
+    """Problems where a job of the called workflow `path` asks for more than `grant`, the effective permissions of
+    the job that calls it. A job that is itself a call is bounded first, then bounds its own called workflow with
+    what it declares (or, declaring nothing, with what it was given), at every level."""
     workflow = yaml.safe_load(path.read_text())
     top = workflow.get("permissions")
-    asked = []
+    problems = []
     for name, job in workflow["jobs"].items():
+        where = f"{via} -> {path.name}:{name}"
+        declared = job.get("permissions", top)
+        asked = permissions(declared) if declared is not None else dict(grant)
+        for scope, level in asked.items():
+            if LEVELS[level] > LEVELS[grant.get(scope, "none")]:
+                problems.append(f"{where} asks for {scope}: {level}, but is only granted {scope}: "
+                                f"{grant.get(scope, 'none')}")
         if "uses" in job:
             nested = WORKFLOWS / job["uses"].rsplit("/", 1)[1]
             if nested not in seen:
-                asked += [(f"{path.name}:{name} -> {job_name}", scope, level)
-                          for job_name, scope, level in requests(nested, seen + (path,))]
-            continue
-        for scope, level in permissions(job.get("permissions", top)).items():
-            asked.append((f"{path.name}:{name}", scope, level))
-    return asked
+                problems += bounded(nested, asked, where, seen + (path,))
+    return problems
 
 
 def mismatches(caller_path):
     workflow = yaml.safe_load(caller_path.read_text())
     problems = []
     for name, job in workflow["jobs"].items():
-        if not str(job.get("uses", "")).startswith("./.github/workflows/"):
-            continue
-        grant = granted(workflow, job)
-        for where, scope, level in requests(WORKFLOWS / job["uses"].rsplit("/", 1)[1]):
-            if LEVELS[level] > LEVELS[grant.get(scope, "none")]:
-                problems.append(f"{caller_path.name}:{name} grants {scope}: {grant.get(scope, 'none')}, "
-                                f"but {where} asks for {scope}: {level}")
+        if str(job.get("uses", "")).startswith("./.github/workflows/"):
+            problems += bounded(WORKFLOWS / job["uses"].rsplit("/", 1)[1], granted(workflow, job),
+                                f"{caller_path.name}:{name}")
     return problems
 
 
@@ -78,8 +79,33 @@ class CallPermissionTests(unittest.TestCase):
             global WORKFLOWS
             saved, WORKFLOWS = WORKFLOWS, Path(folder)
             try:
-                self.assertEqual(mismatches(caller), ["caller.yml:leg grants contents: read, but called.yml:publish "
-                                                      "asks for contents: write"])
+                self.assertEqual(mismatches(caller), ["caller.yml:leg -> called.yml:publish asks for contents: write, "
+                                                      "but is only granted contents: read"])
+            finally:
+                WORKFLOWS = saved
+
+    def test_an_elevation_three_levels_deep_is_caught(self):
+        import tempfile
+        from pathlib import Path
+        job = "    runs-on: ubuntu-latest\n    steps: [{run: 'true'}]\n"
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            # caller grants actions: write; the middle call job narrows it to read; the leaf asks for write.
+            (root / "caller.yml").write_text("on: workflow_dispatch\njobs:\n  leg:\n    permissions:\n"
+                                             "      actions: write\n    uses: ./.github/workflows/middle.yml\n")
+            (root / "middle.yml").write_text("on: workflow_call\njobs:\n  inner:\n    permissions:\n"
+                                             "      actions: read\n    uses: ./.github/workflows/leaf.yml\n")
+            (root / "leaf.yml").write_text("on: workflow_call\njobs:\n  dispatch:\n    permissions:\n"
+                                           "      actions: write\n" + job)
+            global WORKFLOWS
+            saved, WORKFLOWS = WORKFLOWS, root
+            try:
+                self.assertEqual(mismatches(root / "caller.yml"), [
+                    "caller.yml:leg -> middle.yml:inner -> leaf.yml:dispatch asks for actions: write, "
+                    "but is only granted actions: read"])
+                (root / "middle.yml").write_text("on: workflow_call\njobs:\n  inner:\n"
+                                                 "    uses: ./.github/workflows/leaf.yml\n")
+                self.assertEqual(mismatches(root / "caller.yml"), [], "a call job declaring nothing passes on its grant")
             finally:
                 WORKFLOWS = saved
 
