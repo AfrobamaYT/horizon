@@ -3701,32 +3701,8 @@ impl Game<'_> {
         pickup_delay: u32,
         random: Option<spill::ItemRandom>,
     ) -> [f64; 3] {
-        let random = random.unwrap_or_else(|| spill::prepare_item_random(velocity));
-        let item = stack.item.clone();
-        let count = stack.count as i32;
-        self.next_entity += 1;
-        let p = Vec3::new(position[0], position[1], position[2]);
-        self.persist.uuids.insert(self.next_entity, random.uuid);
-        let (bob, yaw) = (random.bob, random.yaw);
-        let velocity = velocity.unwrap_or(random.velocity);
-        self.dropped.push(random.state.apply(ItemEntity {
-            attachment_lifetime: Default::default(),
-            fall_distance: 0.0,
-            rotation: [yaw, 0.0],
-            pickup_delay: i64::from(pickup_delay),
-            random: random.own.into(),
-            ..ItemEntity::new(
-                self.next_entity,
-                stack,
-                p,
-                Vec3::new(velocity[0], velocity[1], velocity[2]),
-                bob,
-            )
-        }));
-        // ServerLevel.addFreshEntity.
-        if self.native_joins_flush(false, self.next_entity) {
-            self.native_item_spawn(self.next_entity, &item, count, position);
-        }
+        let velocity = self.push_item_entity(stack, position, velocity, pickup_delay, random);
+        self.join_item_entity(self.next_entity, position);
         velocity
     }
     /// The block entity at `pos` saved with its id and position
@@ -3825,21 +3801,6 @@ impl Game<'_> {
         }
         self.spawn_item(stack, p, v, 10);
     }
-    /// Player.drop: thrown from the eyes along the view direction.
-    fn drop_held(&mut self, all: bool) {
-        if self.eye_position().is_none() {
-            return;
-        }
-        let spectator = self.spectator();
-        let Some(thrown) = horizon_client::items::take_held_drop(
-            &mut self.inventory[self.selected],
-            all,
-            spectator,
-        ) else {
-            return;
-        };
-        self.player_drop(thrown);
-    }
     /// `Player.drop`: the statistics and a thrown item entity in front of the player.
     pub(super) fn player_drop(&mut self, thrown: ItemStack) -> Option<u32> {
         let eye = self.eye_position()?;
@@ -3883,20 +3844,16 @@ impl Game<'_> {
     ) -> Option<u32> {
         let r = &mut self.world.random;
         let v = horizon_client::entities::drop_motion(r, self.yaw, self.pitch, randomly);
-        let y = eye[1] - f64::from(0.3f32);
-        // ItemTossEvent: a canceled toss never enters the world; what was thrown is gone.
-        // Only `drop(.., false)` tosses fire it: a death's scatter (`randomly`) does not.
-        if !randomly {
-            let player = self.native_acting_id();
-            let mut canceled = false;
-            self.native_item_toss(player, &thrown.item, thrown.count, &mut canceled);
-            if canceled {
-                return None;
-            }
-        }
-        self.spawn_item(thrown, [eye[0], y, eye[2]], v, 40);
+        let at = [eye[0], eye[1] - f64::from(0.3f32), eye[2]];
         let uuid = thrown_from_hand.then(|| self.acting_player_uuid());
-        let item = self.just_spawned_item()?;
+        // Only `drop(.., false)` tosses ask `item_toss`: a death's scatter (`randomly`) does not.
+        let id = if randomly {
+            self.spawn_item(thrown, at, v, 40);
+            self.next_entity
+        } else {
+            self.toss_item(thrown, at, v, uuid)?
+        };
+        let item = self.dropped.iter_mut().rev().find(|d| d.id == id)?;
         item.thrower = uuid;
         Some(item.id)
     }
@@ -10260,6 +10217,7 @@ impl Game<'_> {
             shapes,
             level,
             world,
+            biomes,
             streaming,
             save,
             session_lock,
@@ -10276,9 +10234,8 @@ impl Game<'_> {
         // final save must not run: the lock below only marks tag tables.
         self.world_adopted = false;
         self.owner_migration = owner_migration;
-        // The world's packs over the game's biomes (`Biomes::with_packs`),
-        // the table its chunks were built with.
-        self.world_biomes = self.packed_biomes();
+        // Saves and chunk readers share the same placeholder IDs.
+        self.world_biomes = Some(biomes);
         self.world_biomes_base = self.world_biomes.clone();
         horizon_client::crash::set_detail(
             "World",
@@ -16565,15 +16522,6 @@ mod destroyed_contents_tests {
 #[cfg(test)]
 #[path = "game/interface/tests/sign_chain_tests.rs"]
 mod sign_chain_tests;
-
-impl Game<'_> {
-    pub(super) fn guest_drop_held(&mut self, gi: usize, conn: u32, all: bool) {
-        self.as_guest(conn, |g| g.drop_held(all));
-        if let Some(host) = self.lan.as_mut() {
-            host.hub.guests.update(gi, |g| g.told_selected());
-        }
-    }
-}
 
 impl Game<'_> {
     pub(super) fn apply_crafter_slot_states(&mut self, menu: &horizon_client::menu::Menu) {
