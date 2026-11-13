@@ -2100,7 +2100,7 @@ fn scan_result(source: &str) -> Result<Uses, ScanError> {
 #[test]
 fn source_nested_past_the_limit_cannot_be_judged_and_nothing_overflows() {
     // Each shape the parser reads by recursion, nested `n` deep after a literal on line 1.
-    let shapes: [(&str, fn(usize) -> String); 18] = [
+    let shapes: [(&str, fn(usize) -> String); 20] = [
         ("parens", |n| {
             format!("let x = {}1{};", "(".repeat(n), ")".repeat(n))
         }),
@@ -2138,6 +2138,12 @@ fn source_nested_past_the_limit_cannot_be_judged_and_nothing_overflows() {
         }),
         ("generics with commas", |n| {
             format!("let x: {}u8{} = y;", "V<u8, ".repeat(n), ">".repeat(n))
+        }),
+        ("qualified paths after a literal", |n| {
+            format!("let x = 1 < {}T{};", "<".repeat(n), " as A>::B".repeat(n))
+        }),
+        ("prefixes on method calls", |n| {
+            format!("let x = {}y{};", "-x.f(".repeat(n), ")".repeat(n))
         }),
     ];
     for (shape, nest) in shapes {
@@ -2190,7 +2196,17 @@ fn source_nested_past_the_limit_cannot_be_judged_and_nothing_overflows() {
     let shifts: Vec<String> = (0..1000).map(|i| format!("1 << {i}")).collect();
     let arms: Vec<String> = (0..1000).map(|i| format!("v if v < {i} => {i},")).collect();
     let closures = "|x: u8| x, ".repeat(1000);
+    let derefs: Vec<String> = (0..1000).map(|i| format!("*v[{i}]")).collect();
+    let nots: Vec<String> = (0..1000).map(|i| format!("!(a{i})")).collect();
     for source in [
+        format!(
+            "fn g(v: &[&u8]) -> u8 {{ {} }}\nfn f() {{ let s = Settings {{ height: 1 }}; }}",
+            derefs.join(" + ")
+        ),
+        format!(
+            "fn g() -> bool {{ {} }}\nfn f() {{ let s = Settings {{ height: 1 }}; }}",
+            nots.join(" && ")
+        ),
         format!(
             "const M: [u128; 1000] = [{}];\nfn f() {{ let s = Settings {{ height: 1 }}; }}",
             shifts.join(", ")

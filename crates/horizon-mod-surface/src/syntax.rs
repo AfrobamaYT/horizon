@@ -268,6 +268,9 @@ const RECURSIVE: &[&str] = &[
 enum Frame {
     Bracket,
     Angle,
+    /// A `<` straight after a literal, `)`, `]` or `?`, which compares or shifts, unless a type
+    /// follows it: counted like a generic, but ended by a `,` like an expression.
+    Compare,
     Params,
 }
 
@@ -275,13 +278,17 @@ enum Frame {
 ///
 /// The count is taken along the path of nesting. Each open bracket, generic `<` and closure
 /// counts until it closes, and so does each assignment, `@` and keyword the parser reads what
-/// follows by recursion. A run of prefix operators counts until its operand ends. A count is
+/// follows by recursion. A run of prefix operators counts until its operand ends, through
+/// method calls and fields (`-x.f(…)`), and no further than the bracket after it. A count is
 /// dropped only where the parser has certainly returned: at the bracket that encloses it
 /// closing, at a `;`, at a match arm's `=>`, at a `}` that ends a statement, and at a `,`
 /// directly inside a bracket (between elements, arms or fields). A `,` inside a generic or a
 /// closure's parameters drops nothing, since generic arguments and parameters are listed with
-/// commas. A `<` straight after a literal, `)`, `]` or `?` compares or shifts, so it counts as
-/// nothing.
+/// commas. A `<` straight after a literal, `)`, `]` or `?` counts like any other, but a `,`
+/// ends it, as it ends the comparison or shift it most likely is (`[1 << 0, 1 << 1]`).
+///
+/// This is a cheap filter, not the guarantee: the scan's parse runs in a child process first
+/// ([`crate::child`]), so a parse that still runs out of stack ends the child, not the caller.
 pub(crate) fn too_deep(tokens: &[(Token<'_>, usize)]) -> Option<usize> {
     let token = |at: usize| tokens.get(at).map(|(t, _)| *t);
     let punct = |at: usize, byte: u8| token(at) == Some(Token::Punct(byte));
@@ -294,8 +301,6 @@ pub(crate) fn too_deep(tokens: &[(Token<'_>, usize)]) -> Option<usize> {
     let mut frames: Vec<(usize, Frame)> = Vec::new();
     // The count that stays until a drop, and the prefix operators of the current operand.
     let (mut depth, mut run) = (0usize, 0usize);
-    // The previous `<` counted as nothing (`1 << 2`).
-    let mut compared = false;
     let mut skip = false;
     // Drops the generics and closure parameters above the innermost bracket, and the count of
     // the statement inside it.
@@ -313,10 +318,10 @@ pub(crate) fn too_deep(tokens: &[(Token<'_>, usize)]) -> Option<usize> {
             skip = false;
             continue;
         }
-        let was_compared = std::mem::take(&mut compared);
         match current {
+            // A prefix operator's count ends where the bracket after it closes.
             Token::Punct(b'(' | b'[' | b'{') => {
-                frames.push((depth + run, Frame::Bracket));
+                frames.push((depth, Frame::Bracket));
                 depth += run + 1;
                 run = 0;
             }
@@ -345,6 +350,10 @@ pub(crate) fn too_deep(tokens: &[(Token<'_>, usize)]) -> Option<usize> {
                 run = 0;
             }
             Token::Punct(b',') => {
+                while let Some((before, Frame::Compare)) = frames.last().copied() {
+                    frames.pop();
+                    depth = before;
+                }
                 if frames
                     .last()
                     .is_none_or(|(_, frame)| *frame == Frame::Bracket)
@@ -354,18 +363,21 @@ pub(crate) fn too_deep(tokens: &[(Token<'_>, usize)]) -> Option<usize> {
                 run = 0;
             }
             Token::Punct(b'<') if punct(at + 1, b'=') => run = 0,
-            Token::Punct(b'<')
-                if was_compared
-                    || matches!(
-                        at.checked_sub(1).and_then(token),
-                        Some(Token::Literal(_) | Token::Punct(b')' | b']' | b'?'))
-                    ) =>
-            {
-                compared = true;
-                run = 0;
-            }
             Token::Punct(b'<') => {
-                frames.push((depth + run, Frame::Angle));
+                // The second `<` of a shift (`1 << 2`) compares too.
+                let compare = match at.checked_sub(1).and_then(token) {
+                    Some(Token::Literal(_) | Token::Punct(b')' | b']' | b'?')) => true,
+                    Some(Token::Punct(b'<')) => {
+                        matches!(frames.last(), Some((_, Frame::Compare)))
+                    }
+                    _ => false,
+                };
+                let frame = if compare {
+                    Frame::Compare
+                } else {
+                    Frame::Angle
+                };
+                frames.push((depth + run, frame));
                 depth += run + 1;
                 run = 0;
             }
@@ -373,7 +385,7 @@ pub(crate) fn too_deep(tokens: &[(Token<'_>, usize)]) -> Option<usize> {
                 // Not `->`, `=>` or `>=`: the close of the innermost generic, if one is open.
                 if !(at >= 1 && (punct(at - 1, b'-') || punct(at - 1, b'=')))
                     && !punct(at + 1, b'=')
-                    && let Some((before, Frame::Angle)) = frames.last().copied()
+                    && let Some((before, Frame::Angle | Frame::Compare)) = frames.last().copied()
                 {
                     frames.pop();
                     depth = before;
@@ -419,8 +431,8 @@ pub(crate) fn too_deep(tokens: &[(Token<'_>, usize)]) -> Option<usize> {
                 run = 0;
             }
             Token::Punct(b'-' | b'!' | b'*' | b'&' | b'.') if !operand_end(at) => run += 1,
-            // A path's `::` continues the operand.
-            Token::Punct(b':') => {}
+            // A path's `::`, and a method call's or field's `.`, continue the operand.
+            Token::Punct(b':' | b'.') => {}
             Token::Punct(_) => run = 0,
             Token::Ident(name) if RECURSIVE.contains(name) => depth += 1,
             _ => {}
@@ -434,7 +446,8 @@ pub(crate) fn too_deep(tokens: &[(Token<'_>, usize)]) -> Option<usize> {
 
 /// The stack the parser runs on. Measured on 20 shapes nested as deep as [`too_deep`] accepts
 /// (brackets, generics with and without commas, closures with one and two parameters,
-/// references, `fn` types, assignments, `return`, `@`, `else if`, mixes of them), the deepest
+/// references, `fn` types, assignments, `return`, `@`, `else if`, qualified paths after a
+/// comparison, prefix operators on method calls, mixes of them), the deepest
 /// needs 1.6 MiB in a release build and 1.5 MiB in a test build; this leaves a tenfold margin.
 const PARSER_STACK: usize = 16 << 20;
 
