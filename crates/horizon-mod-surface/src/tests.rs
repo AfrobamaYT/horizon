@@ -220,3 +220,128 @@ fn deeply_nested_json_neither_overflows_nor_passes_as_records() {
     // In a field this reader does not know: skipped.
     assert!(Surface::read(deep("future").as_bytes()).is_ok());
 }
+
+fn api_trait(id: &str, role: Role, bounds: &[&str], methods: &[&str]) -> Trait {
+    Trait::new(
+        id,
+        "",
+        TraitContract {
+            role,
+            side: Side::Both,
+            generics: String::new(),
+            bounds: bounds.iter().map(|b| leaf(b).to_owned()).collect(),
+            required: vec![],
+            refs: bounds.iter().map(|b| b.to_string()).collect(),
+        },
+        methods
+            .iter()
+            .map(|name| {
+                Method::new(
+                    format!("method:{}::{name}", leaf(id)),
+                    "",
+                    MethodContract {
+                        signature: format!("fn {name}(&self)"),
+                        required: false,
+                        wasm: true,
+                        refs: vec![id.to_owned()],
+                    },
+                )
+            })
+            .collect(),
+        vec![],
+    )
+}
+
+fn traits(list: Vec<Trait>) -> Surface {
+    Surface::new(vec![], list, vec![], vec![], vec![], vec![], vec![], vec![])
+}
+
+/// The ids of `before` that `after` lacks or hashes differently.
+fn differences(before: &Surface, after: &Surface) -> Vec<String> {
+    let after: BTreeMap<&str, &str> = after.entries().collect();
+    let mut out: Vec<String> = before
+        .entries()
+        .filter(|(id, hash)| after.get(id) != Some(hash))
+        .map(|(id, _)| id.to_owned())
+        .collect();
+    out.sort();
+    out
+}
+
+#[test]
+fn a_called_trait_gaining_a_supertrait_changes_no_existing_hash() {
+    let before = traits(vec![
+        api_trait("trait:Host", Role::Call, &["trait:PlayersHost"], &[]),
+        api_trait("trait:PlayersHost", Role::Call, &[], &["player"]),
+    ]);
+    let after = traits(vec![
+        api_trait(
+            "trait:Host",
+            Role::Call,
+            &["trait:PlayersHost", "trait:FluidsHost"],
+            &[],
+        ),
+        api_trait("trait:PlayersHost", Role::Call, &[], &["player"]),
+        api_trait("trait:FluidsHost", Role::Call, &[], &["fluid"]),
+    ]);
+    assert_eq!(differences(&before, &after), Vec::<String>::new());
+}
+
+#[test]
+fn a_called_trait_losing_a_supertrait_shows_only_what_went() {
+    let before = traits(vec![
+        api_trait(
+            "trait:Host",
+            Role::Call,
+            &["trait:PlayersHost", "trait:FluidsHost"],
+            &[],
+        ),
+        api_trait("trait:PlayersHost", Role::Call, &[], &["player"]),
+        api_trait("trait:FluidsHost", Role::Call, &[], &["fluid"]),
+    ]);
+    let after = traits(vec![
+        api_trait("trait:Host", Role::Call, &["trait:PlayersHost"], &[]),
+        api_trait("trait:PlayersHost", Role::Call, &[], &["player"]),
+    ]);
+    assert_eq!(
+        differences(&before, &after),
+        ["method:FluidsHost::fluid", "trait:FluidsHost"]
+    );
+    // The closure does not go from a called trait into its supertraits; a method still reaches
+    // its own trait.
+    let closure: Vec<String> = before
+        .closure(["trait:Host", "method:PlayersHost::player"])
+        .into_iter()
+        .collect();
+    assert_eq!(
+        closure,
+        [
+            "method:PlayersHost::player",
+            "trait:Host",
+            "trait:PlayersHost"
+        ]
+    );
+}
+
+#[test]
+fn an_implemented_trait_gaining_a_supertrait_changes_its_hash_and_leads_to_it() {
+    let before = traits(vec![
+        api_trait("trait:BlockEntityPart", Role::Implement, &[], &[]),
+        api_trait("trait:BlockPart", Role::Implement, &[], &[]),
+    ]);
+    let after = traits(vec![
+        api_trait(
+            "trait:BlockEntityPart",
+            Role::Implement,
+            &["trait:BlockPart"],
+            &[],
+        ),
+        api_trait("trait:BlockPart", Role::Implement, &[], &[]),
+    ]);
+    assert_eq!(differences(&before, &after), ["trait:BlockEntityPart"]);
+    let closure: Vec<String> = after
+        .closure(["trait:BlockEntityPart"])
+        .into_iter()
+        .collect();
+    assert_eq!(closure, ["trait:BlockEntityPart", "trait:BlockPart"]);
+}

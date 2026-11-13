@@ -134,7 +134,8 @@ pub struct Required {
 }
 
 /// A trait's own contract. Its methods are records of their own; only the required methods of
-/// a trait mods implement are part of it, because a new one breaks every implementation.
+/// a trait mods implement are part of it, because a new one breaks every implementation. Its
+/// `bounds` and `refs` are hashed only when mods implement it ([`crate::Trait::new`]).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraitContract {
     pub role: Role,

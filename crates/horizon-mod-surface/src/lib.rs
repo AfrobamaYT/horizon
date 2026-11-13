@@ -38,7 +38,10 @@
 //! hook or adding a field to a type mods cannot build changes no existing record's hash. A
 //! container's hash covers its members only where a new member breaks users: the fields of a
 //! `constructible` struct, the variants of an exhaustive enum, the required methods of a trait
-//! mods implement. A type's `shape` is its full wire layout ([`shape`]) and is not hashed into
+//! mods implement. A trait's supertrait bounds and their references are in its hash only when
+//! mods implement it (role `implement`): a trait mods only call is its method set, so gaining or
+//! losing a supertrait (a sub-host trait of `Host`) changes no existing record's hash, and a
+//! method that goes shows as that method removed. A type's `shape` is its full wire layout ([`shape`]) and is not hashed into
 //! its contract. The document's `hash` is [`Surface::document_hash`] over every (id, hash).
 //!
 //! A trait's `role` says whether mods implement it, call it, or neither: the generator takes it
@@ -194,9 +197,20 @@ impl Trait {
         methods: Vec<Method>,
         associated: Vec<Associated>,
     ) -> Self {
+        // A trait mods only call is its method set: a supertrait it gains or loses shows through
+        // the methods themselves, so its bounds and their references stay out of its hash.
+        let hash = if contract.role == Role::Implement {
+            contract_hash(&contract)
+        } else {
+            contract_hash(&TraitContract {
+                bounds: Vec::new(),
+                refs: Vec::new(),
+                ..contract.clone()
+            })
+        };
         Self {
             id: id.into(),
-            hash: contract_hash(&contract),
+            hash,
             doc: doc.into(),
             paths: Vec::new(),
             contract,
@@ -355,7 +369,7 @@ impl Surface {
 
     /// `ids` with every API type or trait their signatures reference, transitively. A type's
     /// references are those of its fields, variants and alias target; a trait's, those of its
-    /// supertraits. Unknown ids are kept and lead nowhere.
+    /// supertraits when mods implement it, and none otherwise. Unknown ids are kept and lead nowhere.
     pub fn closure<'a>(&self, ids: impl IntoIterator<Item = &'a str>) -> BTreeSet<String> {
         let mut refs: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for hook in &self.hooks {
@@ -365,10 +379,14 @@ impl Surface {
             );
         }
         for item in &self.traits {
-            refs.insert(
-                &item.id,
-                item.contract.refs.iter().map(String::as_str).collect(),
-            );
+            // Only a trait mods implement leads to its supertraits: implementing it means
+            // implementing them.
+            let own = if item.contract.role == Role::Implement {
+                item.contract.refs.iter().map(String::as_str).collect()
+            } else {
+                Vec::new()
+            };
+            refs.insert(&item.id, own);
             for associated in &item.associated {
                 refs.insert(
                     &associated.id,

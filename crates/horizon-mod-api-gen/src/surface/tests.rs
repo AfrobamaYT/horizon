@@ -515,14 +515,20 @@ fn each_declaration_aspect_changes_exactly_its_records_hash() {
             &["hook:ping", "type:PingEvent"],
         ),
         (
-            "a supertrait bound",
+            "a supertrait bound on a trait mods call",
             &[(
                 LIB,
                 "pub trait ServerHost: Host {",
                 "pub trait ServerHost: Host + Send {",
             )],
             HOOKS,
-            &["trait:ServerHost"],
+            &[],
+        ),
+        (
+            "a supertrait bound on a trait mods implement",
+            &[(LIB, "pub trait Hooks {", "pub trait Hooks: Send {")],
+            HOOKS,
+            &["trait:Hooks"],
         ),
         (
             "a defaulted method becoming required on a trait mods implement",
