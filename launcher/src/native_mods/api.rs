@@ -46,6 +46,11 @@ pub(super) fn main_rs(
     mods: &[&horizon_mod_package::Manifest],
     catalog: &internals::Catalog,
 ) -> String {
+    // Own the bytes even when the staged SDK template references a static in a dylib.
+    let template = template.replace(
+        "std::hint::black_box(&horizon_mod_package::holder::CAPABILITY);",
+        "#[used] static HOLDER_CAPABILITY: [u8; horizon_mod_package::holder::CAPABILITY.len()] = horizon_mod_package::holder::CAPABILITY; std::hint::black_box(&HOLDER_CAPABILITY);",
+    );
     let listed = &catalog.points;
     let entries = mods
         .iter()
