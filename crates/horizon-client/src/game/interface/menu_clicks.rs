@@ -6,7 +6,7 @@ use super::*;
 impl Game<'_> {
     /// `quickMoveStack` of the open plain menu for a shift-click.
     pub(super) fn inventory_quick_move(&mut self, slot: usize) -> bool {
-        self.menu_click(Some(slot), 0, horizon_client::menu::Input::QuickMove)
+        self.click_open_inventory(Some(slot), 0, horizon_client::menu::Input::QuickMove)
     }
     /// `AbstractContainerMenu.clicked` on the open inventory, crafting table,
     /// chest, hopper, dispenser or furnace menu, run by the verified menu
@@ -98,7 +98,9 @@ impl Game<'_> {
             // handleCreativeModeItemDrop: on a server the stack goes to it (SetCreativeModeSlot
             // to slot -1), which drops it; a local drop here would never reach the server.
             DisplayClick::Drop(stack) if self.remote.is_some() => self.remote_creative_throw(stack),
-            DisplayClick::Drop(stack) => self.player_drop(stack),
+            DisplayClick::Drop(stack) => {
+                self.player_drop(stack);
+            }
             _ => {}
         }
         // handleCreativeModeItemAdd / broadcastChanges: a swapped-in hotbar slot goes out now.
@@ -333,7 +335,7 @@ impl Game<'_> {
             )
         } else {
             let (kind, map) = if self.container.is_some() {
-                let size = self.container_size();
+                let size = self.open_container_size();
                 let (kind, count) = match self.container_kind() {
                     Some(BlockEntity::Chest(_)) => {
                         let shulker = self.container.is_some_and(|k| {
@@ -349,9 +351,6 @@ impl Game<'_> {
                         (kind, size)
                     }
                     Some(BlockEntity::Brewing(_)) => (Kind::Brewing, 5),
-                    // A server's content mod menu type: the server runs the
-                    // same engine over it (its crafting grid, its linked
-                    // slots), so its clicks are predicted as vanilla's.
                     Some(BlockEntity::Mod(_)) => {
                         match self
                             .remote_menu_type()
@@ -409,6 +408,15 @@ impl Game<'_> {
             None => game_of.iter().position(|x| *x == Some(g)),
         };
         let mut menu = Menu::new(kind);
+        let menu_id = if matches!(kind, Kind::Mount(_)) {
+            Some("horizon:mount_inventory")
+        } else if matches!(kind, Kind::Inventory | Kind::ItemPicker) {
+            None
+        } else {
+            self.remote_menu_type()
+        };
+        menu.set_registry_id(menu_id);
+        menu.brewed_potion_hook = !mod_api::__private::mods().is_empty();
         if matches!(kind, Kind::Mount(_)) {
             menu.mount = self.mount_menu_entity();
         }
@@ -479,20 +487,13 @@ impl Game<'_> {
             enchantments: &self.stations().enchantments,
             maps: Some(&maps),
         };
+        let menu_can_equip = self.menu_can_equip();
         let env = Env {
-            items: self.items(),
-            recipes: self.recipes(),
-            brewing: &self.stations().brewing,
-            banners: &self.stations().banners,
-            station_recipes: &self.stations().recipes,
-            enchantments: self.enchantments(),
-            names: &self.pack.names,
+            enchantments: self.item_enchantments(),
             trade: Some(&trade_env),
-            maps: level_maps
-                .as_ref()
-                .map(|m| m as &dyn horizon_client::menu::Maps),
-            limited_crafting: self.limited_crafting(),
-            known_recipes: Some(&self.level.recipe_book),
+            maps: level_maps.as_ref().map(|m| m as _),
+            can_equip: Some(&menu_can_equip),
+            ..self.menu_env()
         };
         menu.creative = creative;
         menu.selected = self.selected;
@@ -599,9 +600,10 @@ impl Game<'_> {
         }
         let crafted = std::mem::take(&mut menu.crafted);
         let brewed = std::mem::take(&mut menu.brewed);
+        let brewed_potion_takes = std::mem::take(&mut menu.brewed_potion_takes);
         let equipped = std::mem::take(&mut menu.equipped);
         let item_crafted = std::mem::take(&mut menu.item_crafted);
-        for (_, stack) in &item_crafted {
+        for (_, stack, _) in &item_crafted {
             if !predicting {
                 self.award_stat("crafted", &stack.item, stack.count as i32);
             }
@@ -617,6 +619,12 @@ impl Game<'_> {
             self.offhand = menu.player_item(40).cloned();
         }
         if !predicting {
+            if !brewed_potion_takes.is_empty() {
+                let (player, entity_id) = (self.native_acting_id(), self.own_entity_id());
+                for stack in &brewed_potion_takes {
+                    self.native_player_brewed_potion(player, entity_id, stack);
+                }
+            }
             for stack in dropped {
                 self.player_drop(stack);
             }
@@ -656,9 +664,6 @@ impl Game<'_> {
                 self.station_sound(sound);
             }
         } else if kind == Kind::Stonecutter {
-            // `StonecutterMenu.container`'s listener runs on every change of the
-            // input slot (`slotsChanged` and `containerChanged` both hang off
-            // it): a recipe button or an inventory click is not one.
             let input_changed = before[0] != menu.slot(0).cloned();
             if let Some(s) = self.station.as_mut() {
                 s.selected = usize::try_from(menu.data[0]).ok();
@@ -693,7 +698,7 @@ impl Game<'_> {
                 .and_then(|k| self.world.block_entities.get_mut(&k))
         {
             // AbstractFurnaceBlockEntity.setItem: only a new input restarts cooking.
-            f.input_clicked(world_recipes!(self), before[0].clone());
+            f.input_clicked(&self.loop_context, world_recipes!(self), before[0].clone());
         }
         match equipment_before {
             Some(before) => self.player_equipment_changed(&before),
@@ -748,7 +753,7 @@ impl Game<'_> {
         else {
             return;
         };
-        let batch = HudBatch::new(size);
+        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         let Some(slot) = self.slot_at(&batch, self.cursor.0, self.cursor.1) else {
             return;
         };
@@ -802,13 +807,8 @@ impl Game<'_> {
                 let taken = result.clone();
                 let cells = self.craft_size * self.craft_size;
                 let ingredients = self.craft_grid[..cells].to_vec();
-                let remainders = world_recipes!(self).remainders(
-                    &recipe,
-                    &self.craft_grid[..cells],
-                    self.craft_size,
-                );
                 if shift {
-                    if self.give(result).is_some() {
+                    if self.add_stack_to_inventory(result).is_some() {
                         break;
                     }
                 } else {
@@ -823,6 +823,7 @@ impl Game<'_> {
                         _ => return,
                     }
                 }
+                let remainders = self.craft_grid_remainders(&recipe);
                 for cell in self.craft_grid.iter_mut() {
                     if let Some(s) = cell {
                         s.count -= 1;
@@ -840,13 +841,13 @@ impl Game<'_> {
                     }
                 }
                 crafted += 1;
-                // `ResultSlot.onTake`: the recipe and the stack taken
-                // (native_item_crafted).
+                // `ResultSlot.onTake` (native_item_crafted): recipe, stack taken, grid before.
                 let player = self.native_acting_id();
-                self.native_item_crafted(player, &format!("minecraft:{recipe}"), &taken);
+                let id = format!("minecraft:{recipe}");
+                self.native_item_crafted(player, &id, &taken, &ingredients);
                 self.tutorial_get_item(Some(&taken));
                 self.award_stat("crafted", &made.0, made.1 as i32);
-                self.award_crafted(&[(format!("minecraft:{recipe}"), ingredients)]);
+                self.award_crafted(&[(id, ingredients)]);
                 if !shift || crafted >= 64 {
                     break;
                 }
@@ -918,17 +919,11 @@ impl Game<'_> {
                 .container
                 .and_then(|k| self.world.block_entities.get_mut(&k))
         {
-            f.input_clicked(world_recipes!(self), before);
+            f.input_clicked(&self.loop_context, world_recipes!(self), before);
         }
     }
 
-    /// `AbstractContainerScreen` keeps `isQuickCrafting` and the drag it
-    /// belongs to on the screen. Horizon keeps both on `Game` (`inv_clicks`,
-    /// `inv_drag`, `last_inv_click`), so they are dropped when the pointer
-    /// changes hands: a screen that opens or closes starts with its own
-    /// state, and a press whose release never reached the screen -- the
-    /// pointer left the window, or the screen closed first -- would
-    /// otherwise leave every later press on every later screen swallowed.
+    /// A screen closed or lost its pointer: discard the unfinished click gesture.
     pub(super) fn reset_inventory_clicks(&mut self) {
         self.inv_clicks.cancel_drag();
         self.inv_drag = None;
@@ -947,6 +942,10 @@ impl Game<'_> {
         } else {
             (0.8, 0.8 + self.world.random.next_float() * 0.4)
         };
-        self.audio.play(sound, Some(at), volume, pitch);
+        if self.is_logical_server() {
+            self.audio.play(sound, Some(at), volume, pitch);
+        } else {
+            self.play_client_player_sound(sound, volume, pitch);
+        }
     }
 }
