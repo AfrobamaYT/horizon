@@ -2469,26 +2469,39 @@ impl Game<'_> {
     }
 
     pub(super) fn kick_uuid(&mut self, uuid: u128, reason: Tag) {
-        if let Some(h) = self.lan.as_mut() {
-            let conns: Vec<u32> = h
-                .hub
+        let conns: Vec<u32> = self.lan.as_ref().map_or_else(Vec::new, |h| {
+            h.hub
                 .guests
                 .iter()
                 .filter(|g| g.participates_online() && g.uuid == uuid)
                 .map(|g| g.conn)
-                .collect();
-            for conn in conns {
-                h.hub.kick(conn, reason.clone());
-                if let Some(g) = h.hub.guest(conn) {
-                    events::record(
-                        "kick",
-                        &g.name,
-                        uuid,
-                        serde_json::json!({ "reason": g.left_reason }),
-                    );
-                }
-            }
+                .collect()
+        });
+        for conn in conns {
+            self.kick_conn(conn, reason.clone());
         }
+    }
+
+    /// `Hub::kick`, with the server's `kick` event recorded. Whether it started the guest's
+    /// disconnect: false for a missing guest and one whose disconnect is already pending.
+    pub(super) fn kick_conn(&mut self, conn: u32, reason: Tag) -> bool {
+        let Some(h) = self.lan.as_mut() else {
+            return false;
+        };
+        if h.hub.guest(conn).is_none_or(|g| g.disconnect_pending) {
+            return false;
+        }
+        h.hub.kick(conn, reason);
+        let Some(g) = h.hub.guest(conn) else {
+            return false;
+        };
+        events::record(
+            "kick",
+            &g.name,
+            g.uuid,
+            serde_json::json!({ "reason": g.left_reason }),
+        );
+        true
     }
 
     /// MinecraftServer.stopServer: players saved and sent away, worlds saved.
