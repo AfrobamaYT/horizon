@@ -16,8 +16,14 @@
 //! - `wasm-std <out.wasm>`: the standard library member the game ships for wasm mods.
 //! - `run [--game <horizon-client>] [-- <game args>]`: build, then play with
 //!   the mod.
+//! - `check [--uses]` in a mod folder: `cargo check` for the host and wasm32, the package
+//!   rules, and what the mod uses of its pinned build (`sdk_cmds.rs`).
 //! - `check <file> [--json]`: what the registry checks of a submission
 //!   (`.hmod`, `.hpack`, resource pack `.zip`, `.hshader`).
+//! - `hooks <text> [--all]`: search the pinned build's hooks (or every item) offline.
+//! - `sdk diff <build> <build>`: what changed in the surface between two builds.
+//! - `fits [<file.hmod>] [--build <name>]…`: whether the mod fits each build; exit 0 when all
+//!   do, 1 when one does not, 2 when it cannot be told.
 //! - `registry build|review|check|list`: the registry repository's CI.
 //! - `use-jar <path>`: list an exact original Java jar as a passive asset/data source.
 use horizon_mod_package::{Content, Manifest, Package, manifest::MANIFEST};
@@ -29,7 +35,9 @@ mod internals;
 mod jar;
 mod layouts;
 mod registry;
+mod sdk_cmds;
 mod sdk_fetch;
+mod uses_table;
 mod wasm;
 
 use std::{
@@ -42,6 +50,9 @@ fn is_compiler_wrapper(name: &str) -> bool {
 }
 
 fn main() -> ExitCode {
+    // The uses scan parses a mod's source in a child, this program started again: run its part
+    // and exit.
+    let entry = mod_surface::child::child_entry();
     // Cargo runs `cargo-horizon-mod horizon-mod <args>`.
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if std::env::var_os("HORIZON_GROUP_WRAPPER").is_some()
@@ -78,30 +89,42 @@ fn main() -> ExitCode {
         }),
         Some("build") if args.get(1).is_some_and(|a| a == "--wasm") => fetched(Path::new("."))
             .and_then(|()| wasm::build(Path::new("."), flag(&args[2..], "--catalog").map(Path::new), &args[2..].windows(2).filter(|a| a[0] == "--with").map(|a| PathBuf::from(&a[1])).collect::<Vec<_>>()))
-            .and_then(|()| build())
+            .and_then(|()| build(entry))
             .map(|p| println!("Built {}", p.display())),
         Some("wasm-std") => wasm::wasm_std(&args[1..]),
         Some("build") => code_project(Path::new("."))
             .then(|| fetched(Path::new(".")))
             .unwrap_or(Ok(()))
-            .and_then(|()| build())
+            .and_then(|()| build(entry))
             .map(|p| println!("Built {}", p.display())),
         Some("run") => run(&args[1..]).map_err(|e| e.to_string()),
+        Some("check") if args.get(1).is_none_or(|a| a.starts_with("--")) => {
+            sdk_cmds::check_mod(entry, &args[1..])
+        }
         Some("check") => check(&args[1..]),
+        Some("hooks") => sdk_cmds::hooks(&args[1..]),
+        Some("sdk") => sdk_cmds::sdk(&args[1..]),
+        Some("fits") => return sdk_cmds::fits(entry, &args[1..]),
         Some("registry") => registry::main(&args[1..]),
         Some("use-jar") => jar::run(&args[1..]),
         Some("internals") => internals::run(&args[1..]),
         Some("inject") => inject::run(&args[1..]),
-        Some("update") => update(
-            Path::new("."),
-            flag(&args[1..], "--horizon"),
-            &args[1..]
-                .windows(2)
-                .filter(|pair| pair[0] == "--accept")
-                .map(|pair| pair[1].as_str())
-                .collect::<Vec<_>>(),
-        ),
-        _ => Err("usage: cargo horizon-mod new <path> [--name \"Name\"] [--template content|native|wasm [--horizon <build>]] | update [--horizon <build>] | inject update [--accept <id>]… | inject sync --repo <game checkout> | inject add <at> --kind <kind> [--call <canonical callee>] [--nth N] [--with <fn>] | internals sync [--repo <path>] | internals add <path>… [--kind <kind>] | build [--wasm] | wasm-std <out.wasm> | run [--game <horizon-client>] [-- <game args>] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | registry build|review|check|list | use-jar <path>".into()),
+        Some("update") => {
+            sdk_cmds::update_report(entry, Path::new("."), flag(&args[1..], "--horizon"))
+                .and_then(|()| {
+                    update(
+                        Path::new("."),
+                        flag(&args[1..], "--horizon"),
+                        &args[1..]
+                            .windows(2)
+                            .filter(|pair| pair[0] == "--accept")
+                            .map(|pair| pair[1].as_str())
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .map(|()| println!("Run `cargo horizon-mod check`."))
+        }
+        _ => Err("usage: cargo horizon-mod new <path> [--name \"Name\"] [--template content|native|wasm [--horizon <build>]] | update [--horizon <build>] | inject update [--accept <id>]… | inject sync --repo <game checkout> | inject add <at> --kind <kind> [--call <canonical callee>] [--nth N] [--with <fn>] | internals sync [--repo <path>] | internals add <path>… [--kind <kind>] | build [--wasm] | wasm-std <out.wasm> | run [--game <horizon-client>] [-- <game args>] | check [--uses] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | hooks <text> [--all] | sdk diff <build> <build> | fits [<file.hmod>] [--build <name>]… | registry build|review|check|list | use-jar <path>".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -351,22 +374,41 @@ fn new_code(
     Ok(())
 }
 
-/// Packs the content mod in the current folder into `target/horizon-mod/<id>.hmod`: the
-/// manifest and the files in `assets/` and `data/`.
-fn build() -> Result<PathBuf, String> {
-    build_in(Path::new("."))
+/// Packs the mod in the current folder into `target/horizon-mod/<id>.hmod`: the manifest and
+/// the files in `assets/` and `data/`, and for a code mod its source and its uses table, scanned
+/// against the pinned build (none for a mod made for exactly one build).
+fn build(entry: mod_surface::child::ChildEntry) -> Result<PathBuf, String> {
+    let root = Path::new(".");
+    let package = Package::read(root)?;
+    let uses = if package.manifest.native.is_some() || package.manifest.wasm.is_some() {
+        let sdk = sdk_fetch::ensure_sdk(root)?;
+        match uses_table::scan(entry, root, &uses_table::surface_of(&sdk)?)? {
+            uses_table::Scanned::Uses(uses) => Some(uses.table(sdk.build).to_json().into_bytes()),
+            uses_table::Scanned::Exact(_) => None,
+            uses_table::Scanned::Unread(why) => {
+                println!(
+                    "note: no uses table packed ({why}); the package counts as made for build {} only.",
+                    sdk.name
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+    pack_into(root, &root.join("target/horizon-mod"), uses.as_deref())
 }
 
 fn build_in(root: &Path) -> Result<PathBuf, String> {
-    pack_into(root, &root.join("target/horizon-mod"))
+    pack_into(root, &root.join("target/horizon-mod"), None)
 }
 
-fn pack_into(root: &Path, dir: &Path) -> Result<PathBuf, String> {
+fn pack_into(root: &Path, dir: &Path, uses: Option<&[u8]>) -> Result<PathBuf, String> {
     let package = Package::read(root)?;
     if package.manifest.native.is_some() || package.manifest.wasm.is_some() {
         layouts::build(root)?;
     }
-    let bytes = Package::pack_directory(root)?;
+    let bytes = Package::pack_directory_with(root, uses)?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{}.hmod", package.manifest.id));
     // Write then rename, so a running game never reads half a file.
@@ -437,7 +479,8 @@ fn run(args: &[String]) -> Result<(), RunError> {
     if Path::new("Cargo.toml").is_file() {
         return Err(RunError::CodeMod);
     }
-    let path = build().map_err(RunError::Build)?;
+    // `run` packs content mods only (a code mod goes through the launcher), which carry no table.
+    let path = build_in(Path::new(".")).map_err(RunError::Build)?;
     let game = flag(args, "--game")
         .map(str::to_string)
         .or_else(|| std::env::var("HORIZON_CLIENT").ok())

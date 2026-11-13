@@ -21,6 +21,8 @@ cap-std = "3.4.6"
 dunce = "1.0.5"
 horizon-mod-package = { path = "../horizon-mod-package", default-features = false, features = ["index", "prebuilt"] }
 horizon-mod-point-emit = { path = "../horizon-mod-point-emit" }
+# The uses scan, the fit test, the surface search and its diff, over the fetched SDK's `surface.json`.
+horizon-mod-surface = { path = "../horizon-mod-surface" }
 horizon-release-sign = { path = "../horizon-release-sign" }
 horizon-port-pack = { path = "../horizon-port-pack" }
 rustc-demangle = "0.1"
