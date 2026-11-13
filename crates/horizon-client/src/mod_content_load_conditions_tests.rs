@@ -16,7 +16,7 @@ fn worldgen_entry_reads_the_feature_folder() {
 }
 
 #[test]
-#[ignore = "full content root: requires prepared resources"]
+#[ignore = "daily"]
 fn registered_conditions_select_content_root_tags_and_structure_modifiers() {
     let scratch = tempfile::tempdir().unwrap();
     let Some(base) = prepared() else {
@@ -144,7 +144,7 @@ fn tags_merge_without_repeats() {
 }
 
 #[test]
-#[ignore = "full content root: requires prepared resources"]
+#[ignore = "daily"]
 fn failed_condition_build_removes_generated_staging() {
     let Some(base) = prepared() else {
         return;
