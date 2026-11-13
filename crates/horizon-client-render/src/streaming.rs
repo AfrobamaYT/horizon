@@ -4946,6 +4946,7 @@ mod cover_tests {
     /// cell's position relative to the areas: the full check took 20 of the ~30 s of the crate's tests.
     /// `cargo test --release -p horizon-client --lib the_grid_answers_as_the_scan` checks every cell.
     #[test]
+    #[ignore = "daily"]
     fn the_grid_answers_as_the_scan() {
         let stride = if cfg!(debug_assertions) { 4 } else { 1 };
         let mut seed = 0x9E37_79B9_7F4A_7C15u64;
@@ -4987,6 +4988,7 @@ mod cover_tests {
     /// Players thousands of blocks apart: no grid fits them, and the buckets
     /// answer what a scan of every area does, the nearest centre included.
     #[test]
+    #[ignore = "daily"]
     fn the_buckets_answer_as_the_scan() {
         let mut seed = 0x51_7CC1_B727_220Au64;
         let forced: HashSet<(i32, i32)> = HashSet::new();

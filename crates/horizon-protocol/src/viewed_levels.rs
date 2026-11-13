@@ -5,8 +5,22 @@
 //! **Configuration** (both directions): the server sends a client whose `minecraft:brand` is
 //! Horizon's a query, [`query`] (`[0, REVISION]`). A client that knows the channel answers with
 //! [`answer`] (`[1, REVISION, max_levels]`) before it acknowledges `FinishConfiguration`:
-//! `max_levels` is how many levels besides its own it can view. No answer, or one of another
-//! revision, means none. A vanilla client is never asked.
+//! `max_levels` is how many levels besides its own it can view. No answer, or one of a revision
+//! the server does not serve, means none. A vanilla client is never asked.
+//!
+//! **Revisions.** Each side asks and answers with its own, [`REVISION`]. A server serves every
+//! revision from [`OLDEST_REVISION`] to its own and keeps what the client answered ([`Answer`]),
+//! so that it gives a client only what that client's revision knows. A client of an older server
+//! is not served: an older server reads a later revision's answer as none.
+//!
+//! | Revision | Feature | Introduced by |
+//! |---|---|---|
+//! | 1 | Viewed levels, stages 9a–9d: channel and play payloads below | #3716 |
+//! | 2 ([`REVISION_2`]) | Switch into a viewed level on Respawn (keep 3), retaining the level left as viewed ([`Answer::switches`]) | #4004 |
+//!
+//! Pending sounds (#3983) and acts (#3982) each need their own next revision (3 and 4,
+//! in actual merge order), not revision 2. A new message kind is accepted only at its
+//! own revision or later; its decoder must land before any sender enables it.
 //!
 //! **Play** (clientbound only): the payload after the channel is a kind byte, then:
 //!
@@ -27,8 +41,13 @@ use crate::{
 
 /// The reserved engine channel (`custom_payload::is_reserved_channel`).
 pub const CHANNEL: &str = "horizon:levels";
-/// The capability exchange's revision.
-pub const REVISION: u8 = 1;
+/// Revision 2 of the exchange: what a client of it does besides revision 1's is in the module's
+/// list of revisions.
+pub const REVISION_2: u8 = 2;
+/// The capability exchange's revision this build asks and answers.
+pub const REVISION: u8 = REVISION_2;
+/// The oldest revision a server serves.
+pub const OLDEST_REVISION: u8 = 1;
 
 const QUERY: u8 = 0;
 const ANSWER: u8 = 1;
@@ -77,6 +96,11 @@ pub const LEVEL_SCOPED: [i32; 30] = [
 /// `GameEvent`s about a level's weather: START_RAINING, STOP_RAINING, RAIN_LEVEL_CHANGE and
 /// THUNDER_LEVEL_CHANGE.
 const WEATHER_EVENTS: [u8; 4] = [1, 2, 7, 8];
+
+/// The most entities one viewed level holds on its client: a server tracks no more for one view,
+/// and a client sent an `AddEntity` of a new one past it closes the connection. A fixed engine
+/// limit of this revision, so that a server cannot fill a client's memory through one level.
+pub const MAX_ENTITIES: usize = 8192;
 
 /// Why a `horizon:levels` payload closes the connection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,17 +172,36 @@ pub fn answer(max_levels: u8) -> Vec<u8> {
     vec![ANSWER, REVISION, max_levels]
 }
 
-/// Reads a client's answer: how many levels besides its own it can view. An answer of another
-/// revision means none, and its bytes after the revision are not read.
-pub fn read_answer(data: &[u8]) -> Result<u8, ViewedLevelsError> {
+/// What a client answered: the revision it speaks and how many levels besides its own it can
+/// view. The default is no answer: none.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Answer {
+    pub revision: u8,
+    pub max_levels: u8,
+}
+
+impl Answer {
+    /// Whether the client swaps worlds on a travel into a level it views ([`REVISION_2`]).
+    pub fn switches(self) -> bool {
+        self.revision >= REVISION_2
+    }
+}
+
+/// Reads a client's answer. An answer of a revision outside [`OLDEST_REVISION`] to [`REVISION`]
+/// means none, and its bytes after the revision are not read.
+pub fn read_answer(data: &[u8]) -> Result<Answer, ViewedLevelsError> {
     let mut r = Reader::new(data);
     expect_kind(&mut r, ANSWER)?;
-    if r.u8()? != REVISION {
-        return Ok(0);
+    let revision = r.u8()?;
+    if !(OLDEST_REVISION..=REVISION).contains(&revision) {
+        return Ok(Answer::default());
     }
     let max_levels = r.u8()?;
     end(&r)?;
-    Ok(max_levels)
+    Ok(Answer {
+        revision,
+        max_levels,
+    })
 }
 
 /// A play payload, read.
@@ -507,23 +550,36 @@ mod tests {
     }
 
     #[test]
-    fn answers_read_as_their_level_count_or_none() {
-        assert_eq!(query(), [0, 1]);
-        assert_eq!(read_query(&[0, 1]), Ok(()));
+    fn answers_read_as_their_revision_and_level_count_or_none() {
+        let answered = |revision, max_levels| {
+            Ok(Answer {
+                revision,
+                max_levels,
+            })
+        };
+        assert_eq!(query(), [0, 2]);
+        assert_eq!(read_query(&[0, 2]), Ok(()));
         assert_eq!(
-            read_query(&[0, 2, 7, 7]),
+            read_query(&[0, 3, 7, 7]),
             Ok(()),
             "a later revision's query"
         );
-        assert_eq!(read_query(&[0, 1, 7]), Err(ViewedLevelsError::LeftOver));
-        assert_eq!(answer(2), [1, 1, 2]);
-        assert_eq!(read_answer(&[1, 1, 2]), Ok(2));
-        assert_eq!(
-            read_answer(&[1, 2, 5]),
-            Ok(0),
-            "another revision views none"
-        );
-        assert_eq!(read_answer(&[1, 1]), Err(ViewedLevelsError::CutShort));
-        assert_eq!(read_answer(&[0, 1]), Err(ViewedLevelsError::UnknownKind(0)));
+        assert_eq!(read_query(&[0, 1]), Ok(()), "an older revision's query");
+        assert_eq!(read_query(&[0, 2, 7]), Err(ViewedLevelsError::LeftOver));
+        assert_eq!(answer(2), [1, 2, 2]);
+        assert_eq!(read_answer(&[1, 2, 2]), answered(2, 2));
+        assert!(read_answer(&[1, 2, 2]).unwrap().switches());
+        let older = read_answer(&[1, 1, 2]);
+        assert_eq!(older, answered(1, 2), "revision 1 is still served");
+        assert!(!older.unwrap().switches());
+        for revision in [0, 3] {
+            assert_eq!(
+                read_answer(&[1, revision, 5, 9]),
+                Ok(Answer::default()),
+                "revision {revision} views none"
+            );
+        }
+        assert_eq!(read_answer(&[1, 2]), Err(ViewedLevelsError::CutShort));
+        assert_eq!(read_answer(&[0, 2]), Err(ViewedLevelsError::UnknownKind(0)));
     }
 }
