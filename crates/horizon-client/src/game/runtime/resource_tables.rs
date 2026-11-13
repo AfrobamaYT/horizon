@@ -1,6 +1,7 @@
 //! The game's shared read-only tables: `Resources` (blocks, items, recipes, mob types, biomes),
 //! `UiResources` and `PackResources`.
 use super::*;
+use std::path::Path;
 
 pub(super) fn load_animate_tables(
     root: &Path,
