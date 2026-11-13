@@ -850,7 +850,16 @@ fn a_delete_stops_at_a_folder_that_holds_a_level() {
         write_file(&child);
         write_file(&own);
         write_file(&named_region);
-        for id in ["fold:p", "fold:q"] {
+        // `fold:r/data/ab` is a level that only exists as a folder under `data`.
+        let in_data = game
+            .world_root
+            .join("dimensions/fold/r/data/ab/region/r.0.0.mca");
+        let own_data = game
+            .world_root
+            .join("dimensions/fold/r/data/minecraft/raids.dat");
+        write_file(&in_data);
+        write_file(&own_data);
+        for id in ["fold:p", "fold:q", "fold:r"] {
             assert_eq!(
                 delete_as(game, "fold", id),
                 Err(RuntimeLevelError::LevelsBelow),
@@ -858,7 +867,7 @@ fn a_delete_stops_at_a_folder_that_holds_a_level() {
             );
         }
         game.apply_runtime_levels();
-        assert!(child.is_file() && own.is_file() && named_region.is_file());
+        assert!(child.is_file() && own.is_file() && named_region.is_file() && in_data.is_file());
         // Only the level itself: `fold:p/ab` has no folder below it.
         assert_eq!(delete_as(game, "fold", "fold:p/ab"), Ok(()));
         game.apply_runtime_levels();
@@ -866,6 +875,12 @@ fn a_delete_stops_at_a_folder_that_holds_a_level() {
         assert_eq!(delete_as(game, "fold", "fold:p"), Ok(()));
         game.apply_runtime_levels();
         assert!(!own.exists());
+        // What `data` holds besides a level goes with its level.
+        assert_eq!(delete_as(game, "fold", "fold:r/data/ab"), Ok(()));
+        game.apply_runtime_levels();
+        assert_eq!(delete_as(game, "fold", "fold:r"), Ok(()));
+        game.apply_runtime_levels();
+        assert!(!own_data.exists() && !in_data.exists());
     });
 }
 
@@ -960,49 +975,158 @@ fn an_open_queued_behind_a_failed_removal_is_dropped() {
     });
 }
 
-/// A link under `dimensions` or `data` is never followed out of the world.
+/// A symbolic link, or on Windows a junction, from `at` to the folder `to`. Panics if the machine
+/// cannot make one: these tests are about links, and a skip would look like a pass.
+fn make_link(to: &std::path::Path, at: &std::path::Path) {
+    std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+    // A symbolic link needs a privilege on Windows; a junction does not.
+    #[cfg(windows)]
+    let made = std::os::windows::fs::symlink_dir(to, at).or_else(|_| {
+        std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(at.to_string_lossy().replace('/', "\\"))
+            .arg(to.to_string_lossy().replace('/', "\\"))
+            .output()
+            .map(|_| ())
+            .and_then(|()| std::fs::symlink_metadata(at).map(|_| ()))
+    });
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink(to, at);
+    made.expect("this machine cannot create a symbolic link or a junction");
+}
+
+/// A link under `dimensions` or `data`, or one of the two being a link, is never followed out of
+/// the world, and nothing is removed first.
 #[test]
+#[ignore = "needs permission to create a symbolic link or junction"]
 fn a_removal_does_not_follow_links_out_of_the_world() {
     let root = TempRoot::new("links");
     let outside = root.0.join("outside");
     let victim = outside.join("region/r.0.0.mca");
     write_file(&victim);
-    let link = |to: &std::path::Path, at: &std::path::Path| -> bool {
-        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
-        // A symbolic link needs a privilege on Windows; a junction does not.
-        #[cfg(windows)]
-        let made = std::os::windows::fs::symlink_dir(to, at).or_else(|_| {
-            std::process::Command::new("cmd")
-                .args(["/C", "mklink", "/J"])
-                .arg(at.to_string_lossy().replace('/', "\\"))
-                .arg(to.to_string_lossy().replace('/', "\\"))
-                .output()
-                .map(|_| ())
-                .and_then(|()| std::fs::symlink_metadata(at).map(|_| ()))
-        });
-        #[cfg(unix)]
-        let made = std::os::unix::fs::symlink(to, at);
-        made.is_ok()
+    let erase = |world: &std::path::Path, id: &str| {
+        super::runtime_levels::erase_level_files(world, id, true)
     };
-    let world = root.0.join("world");
     // The namespace folder is a link.
-    if !link(&outside, &world.join("dimensions/lnk")) {
-        eprintln!("symbolic links are not available here: not checked");
-        return;
-    }
-    assert!(super::runtime_levels::erase_level_files(&world, "lnk:x", true).is_err());
+    let world = root.0.join("world");
+    make_link(&outside, &world.join("dimensions/lnk"));
+    assert!(erase(&world, "lnk:x").is_err());
     // The level's own folder is a link.
     std::fs::remove_dir(world.join("dimensions/lnk")).unwrap();
-    assert!(link(&outside, &world.join("dimensions/ns/x")));
-    assert!(super::runtime_levels::erase_level_files(&world, "ns:x", true).is_err());
+    make_link(&outside, &world.join("dimensions/ns/x"));
+    assert!(erase(&world, "ns:x").is_err());
     // The folder of the references file is a link; nothing of the level's own is removed first.
     let own = world.join("dimensions/ns/y/region/r.0.0.mca");
     write_file(&own);
     write_file(&outside.join("ab.json"));
-    assert!(link(
+    make_link(
         &outside,
-        &world.join("data/horizon_structure_references_ns_y")
-    ));
-    assert!(super::runtime_levels::erase_level_files(&world, "ns:y/ab", true).is_err());
+        &world.join("data/horizon_structure_references_ns_y"),
+    );
+    assert!(erase(&world, "ns:y/ab").is_err());
     assert!(victim.is_file() && outside.join("ab.json").is_file() && own.is_file());
+    // `dimensions` is a link.
+    let by_dimensions = root.0.join("by_dimensions");
+    write_file(&outside.join("ns/x/region/r.0.0.mca"));
+    make_link(&outside, &by_dimensions.join("dimensions"));
+    assert!(erase(&by_dimensions, "ns:x").is_err());
+    assert!(outside.join("ns/x/region/r.0.0.mca").is_file());
+    // `data` is a link, with the references file behind it.
+    let by_data = root.0.join("by_data");
+    let reference = outside.join("horizon_structure_references_ns_z.json");
+    write_file(&reference);
+    make_link(&outside, &by_data.join("data"));
+    assert!(erase(&by_data, "ns:z").is_err());
+    assert!(reference.is_file());
+}
+
+/// Something that makes the removal of a file in a folder fail, until it is dropped: on Unix the
+/// folder loses its write permission, on Windows the file is held open without sharing.
+struct Lock {
+    #[cfg(windows)]
+    _file: std::fs::File,
+    #[cfg(unix)]
+    folder: std::path::PathBuf,
+}
+
+impl Lock {
+    /// None when the machine does not enforce it (a process that is root ignores permissions).
+    fn on(file: &std::path::Path) -> Option<Self> {
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            let held = std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(file)
+                .unwrap();
+            Some(Self { _file: held })
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let folder = file.parent().unwrap().to_owned();
+            std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+            let lock = Self { folder };
+            let probe = lock.folder.join("probe");
+            if std::fs::write(&probe, b"x").is_ok() {
+                let _ = std::fs::remove_file(&probe);
+                return None;
+            }
+            Some(lock)
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Lock {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&self.folder, std::fs::Permissions::from_mode(0o755));
+    }
+}
+
+/// A removal that really fails part way, a file that cannot be removed: the level is closed and
+/// its id is refused to `open`, the file is still there, and a `delete` asked again, once the
+/// file can go, finishes the work.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_removal_that_fails_part_way_is_finished_by_a_second_delete() {
+    with_opener("part", "part:a", flat(), |game, seen| {
+        tick_post(game);
+        game.apply_runtime_levels();
+        let folder = game.world_root.join("dimensions/part/a");
+        let locked = folder.join("data/locked/x.dat");
+        write_file(&locked);
+        write_file(&folder.join("poi/r.0.0.mca"));
+        let Some(lock) = Lock::on(&locked) else {
+            eprintln!("SKIPPED: this process is not held back by file permissions (root)");
+            return;
+        };
+        assert_eq!(delete_as(game, "part", "part:a"), Ok(()));
+        game.apply_runtime_levels();
+        assert!(!game.runtime_level_is_open("part:a"));
+        assert!(super::Dim::extra("part:a").is_none());
+        assert_eq!(*seen.unloads.lock().unwrap(), ["part:a"]);
+        assert!(locked.is_file(), "the file that could not go is still there");
+        seen.answers.lock().unwrap().clear();
+        tick_post(game);
+        assert_eq!(
+            seen.answers.lock().unwrap()[0],
+            Err(RuntimeLevelError::Removing)
+        );
+        game.apply_runtime_levels();
+        assert!(!game.runtime_level_is_open("part:a"));
+        // The file can go: the same delete, asked again, finishes.
+        drop(lock);
+        assert_eq!(delete_as(game, "part", "part:a"), Ok(()));
+        game.apply_runtime_levels();
+        assert!(!folder.exists());
+        seen.answers.lock().unwrap().clear();
+        tick_post(game);
+        game.apply_runtime_levels();
+        assert!(seen.answers.lock().unwrap()[0].is_ok());
+        assert!(game.runtime_level_is_open("part:a"));
+        assert!(!locked.exists(), "the level starts empty");
+    });
 }

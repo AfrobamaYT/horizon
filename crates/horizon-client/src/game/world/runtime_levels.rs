@@ -319,10 +319,34 @@ fn portable_level_id(id: &str) -> bool {
     })
 }
 
+/// Whether `folder`, or a folder below it, has the shape of a level: it holds a folder named
+/// `region`, `entities` or `poi`, as every level's save writes. A link counts, since it cannot be
+/// looked into.
+fn tree_has_level_shape(folder: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let Ok(kind) = entry.file_type() else {
+            return true;
+        };
+        if kind.is_file() {
+            return false;
+        }
+        kind.is_symlink()
+            || matches!(
+                entry.file_name().to_str(),
+                Some("region" | "entities" | "poi")
+            )
+            || tree_has_level_shape(&entry.path())
+    })
+}
+
 /// Whether the folder of a level holds a level of its own: a folder that is not one a level's
-/// save writes (`region`, `entities`, `poi`, `data`), or one of those three holding a folder, as
-/// the level `mymod:a/region` does under `mymod:a`. Plain files are not levels. What `data`
-/// holds is open-ended (mods keep their own files there) and is not looked into.
+/// save writes (`region`, `entities`, `poi`, `data`), one of the first three holding a folder, as
+/// the level `mymod:a/region` does under `mymod:a`, or a folder of `data` with a level's shape
+/// somewhere below (`mymod:a/data/ab`). Plain files are not levels, and what else `data` holds
+/// (mods keep their own files there) is not in the way.
 fn folder_holds_levels(folder: &Path) -> bool {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return false;
@@ -338,7 +362,7 @@ fn folder_holds_levels(folder: &Path) -> bool {
         let name = entry.file_name();
         let own = !kind.is_symlink()
             && match name.to_str() {
-                Some("data") => true,
+                Some("data") => !tree_has_level_shape(&entry.path()),
                 Some("region" | "entities" | "poi") => !std::fs::read_dir(entry.path())
                     .is_ok_and(|inner| {
                         inner.flatten().any(|child| {
@@ -366,13 +390,12 @@ fn sharing_references_file(id: &str) -> Vec<String> {
         .collect()
 }
 
-/// Fail if `path`, or a folder above it up to `stop` (not included), is a link: a link would be
+/// Fail if `path`, or a folder above it up to `stop` (included), is a link: a link would be
 /// followed out of the world. What does not exist is no link.
 fn ensure_no_links(path: &Path, stop: &Path, include_path: bool) -> std::io::Result<()> {
     for folder in path.ancestors().skip(usize::from(!include_path)) {
-        if folder == stop {
-            break;
-        }
+        // `stop` itself, `dimensions` or `data`, is looked at too: a link there leads out of the
+        // world as well.
         match std::fs::symlink_metadata(folder) {
             Ok(meta) if meta.file_type().is_symlink() => {
                 return Err(std::io::Error::other(format!(
@@ -383,6 +406,9 @@ fn ensure_no_links(path: &Path, stop: &Path, include_path: bool) -> std::io::Res
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
+        }
+        if folder == stop {
+            break;
         }
     }
     Ok(())
