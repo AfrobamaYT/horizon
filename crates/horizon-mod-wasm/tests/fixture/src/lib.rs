@@ -16,6 +16,7 @@ pub mod projectile_owner;
 pub mod replace;
 pub mod runtime_environment;
 pub mod selector_command;
+pub mod tick_reply;
 pub mod turn;
 pub use matrix::{mirrors, sum_return};
 pub mod shutdown;
@@ -144,6 +145,34 @@ impl Hooks for Mod {
         ));
     }
 
+    fn standalone_models(
+        &self,
+        _: &mod_api::RegistrationContext,
+        event: &mut mod_api::StandaloneModelsEvent<'_>,
+    ) {
+        assert!(
+            event.forms.is_empty(),
+            "dispatch owns the guest's form batch"
+        );
+        assert_eq!(event.models.as_slice(), ["native:kept"]);
+        event.models.push("wasm_fixture:block/plain".into());
+        event.forms.extend([
+            mod_api::StandaloneModelForm::Rotated {
+                id: "another_namespace:east".into(),
+                model: "dependency:block/arrow".into(),
+                turns: [2, 1, 3],
+                uvlock: true,
+            },
+            mod_api::StandaloneModelForm::Combined {
+                id: "wasm_fixture:assembly".into(),
+                parts: vec![
+                    "dependency:block/base".into(),
+                    "dependency:block/overlay".into(),
+                ],
+            },
+        ]);
+    }
+
     fn entity_tick_listened(
         &self,
         _: &mut dyn mod_api::ServerHost,
@@ -199,6 +228,7 @@ impl Hooks for Mod {
         game_payload::register(registrar);
         interaction::register(registrar);
         cauldron::register(registrar);
+        tick_reply::register(registrar);
         registrar
             .declare_datapack_registry(
                 "spell",

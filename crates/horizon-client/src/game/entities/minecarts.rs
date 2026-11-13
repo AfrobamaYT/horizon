@@ -3082,8 +3082,8 @@ impl Minecart {
         c.ticks_frozen = super::boats::saved_ticks_frozen(tag);
         c.flipped = flag("FlippedRotation", false);
         c.first_tick = flag("HasTicked", false);
-        c.loot = horizon_client::save::PendingContainerLoot::from_tag(tag);
         if kind.slots() > 0 {
+            c.loot = horizon_client::save::PendingContainerLoot::from_tag(tag);
             c.items = if c.loot.is_some() {
                 vec![None; kind.slots()]
             } else {

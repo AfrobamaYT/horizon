@@ -40,7 +40,9 @@ horizon-client game::native_hooks::math::tests::compiled_wasm_math_profile_impor
 horizon-client game::payload_transport::wasm_tests::compiled_guest_runs_in_actual_game_roots HORIZON_WASM_FIXTURE needs
 horizon-client game::payload_transport::wasm_config_tests::compiled_guest_runs_on_configuration_connection_thread HORIZON_WASM_FIXTURE needs
 horizon-client game::remote::interaction_event_tests::interaction_event_wasm_tests::wasm_interaction_shared_matrix HORIZON_WASM_FIXTURE needs
+horizon-client game::block_entity_tick_reply_tests::native_and_compiled_wasm_tick_reply_matrix HORIZON_WASM_FIXTURE needs # HORIZON_WASM_STD is supplied alongside the fixture by wasm-mods.yml.
 horizon-client game::remote::movement_input_tests::wasm_movement_input_keys_axes_and_sprint HORIZON_WASM_FIXTURE needs
+horizon-client game::native_hooks::runtime_environment::tests::native_and_wasm_process_environment_in_registration_and_game_hosts HORIZON_WASM_FIXTURE needs
 horizon-client-lib raw_payloads::wasm_tests::compiled_guest_observes_physical_provider_pressure HORIZON_WASM_FIXTURE needs
 
 # Disabled by the owner's decision until H077_OLD_WORLD is wired into CI.

@@ -532,6 +532,12 @@ def run(package, skip, number=None, count=None):
     results = {}
     summaries = []
     print(f"{package}: cargo exit {process.returncode}")
+    long_running = dict.fromkeys(
+        found[1] for line in process.stdout.splitlines() if (found := RUNNING_LONG.match(line.strip()))
+    )
+    if long_running:
+        print(f"{package}: {len(long_running)} tests ran past 60 s: "
+              + ", ".join(safe_identity(name) for name in long_running))
     target_count = None
     target_number = 0
     awaiting_count = False

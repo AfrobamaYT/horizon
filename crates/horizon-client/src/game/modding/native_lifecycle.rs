@@ -69,6 +69,11 @@ pub(super) struct NativeLifecycle {
     tasks: ScheduledTasks,
     /// The section `entity_entering_section` files each entity under, for this epoch's world.
     pub(super) entity_sections: super::entity_sections::EntitySections,
+    /// Tossed item entities `item_toss` is still asking about, innermost last: a join flush
+    /// stops before them, so a cancel never takes back an entity already announced.
+    pub(super) held_joins: Vec<u32>,
+    /// Item notices waiting for their join decision.
+    pub(super) pending_item_spawns: Vec<(u32, String, i32, [f64; 3])>,
 }
 
 impl NativeLifecycle {
