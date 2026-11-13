@@ -3516,36 +3516,8 @@ pub trait ModEffectTicks {
     /// effect stays at no ticks and asks again next tick.
     fn effect_expired(&self, mob: u32, effect: usize, amplifier: i32, cancel: &mut bool);
 }
-/// Native mod hooks the mob AI asks while it decides.
-pub trait MobHooks {
-    /// `EnderManAngerEvent`: whether a mod keeps enderman `enderman` calm
-    /// though `player` stares at it.
-    fn enderman_anger_suppressed(&self, enderman: u32, player: &PlayerView) -> bool;
-    /// `EntityMobGriefingEvent`: whether mob `mob` may grief, `rule` (the
-    /// `mob_griefing` game rule) unless a mod says otherwise.
-    fn can_grief(&self, mob: u32, rule: bool) -> bool;
-    /// Whether `can_grief` may differ from the rule (a mod listens), so a
-    /// scan that griefing off would skip still has to run.
-    fn grief_hooked(&self) -> bool;
-    /// `LivingVisibilityEvent`: `visibility`, the player's visibility
-    /// percent as mob `looking` targets it, as mods scale it.
-    fn living_visibility(&self, player: &PlayerView, looking: u32, visibility: f64) -> f64;
-    /// `LivingVisibilityEvent` for a mob target `target`: its visibility
-    /// percent as mob `looking` targets it, as mods scale it.
-    fn living_visibility_mob(&self, _target: u32, _looking: u32, visibility: f64) -> f64 {
-        visibility
-    }
-    /// A proposed target change. A listener may cancel or substitute a target.
-    fn living_change_target(
-        &self,
-        _mob: &mut Mob,
-        _world: &MobWorld<'_>,
-        _is_brain: bool,
-        target: Option<Who>,
-    ) -> TargetChange {
-        TargetChange::Set(target)
-    }
-}
+mod mob_hooks;
+pub use mob_hooks::MobHooks;
 /// Outcome of a target-change event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TargetChange {

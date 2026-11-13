@@ -1,7 +1,7 @@
 use super::*;
 use mod_api::{
-    BlockPart, BreakBlockEvent, CanDropFromExplosionEvent, ExpDropEvent, ExplosionResistanceEvent,
-    Flow, Hooks, LevelHost, OnBlockExplodedEvent, Registrar, ServerHost,
+    BlockPart, BreakBlockEvent, CanDropFromExplosionEvent, CanEntityDestroyEvent, ExpDropEvent,
+    ExplosionResistanceEvent, Flow, Hooks, LevelHost, OnBlockExplodedEvent, Registrar, ServerHost,
 };
 use std::sync::{
     Arc, Mutex,
@@ -525,5 +525,71 @@ fn block_parts_answer_drops_from_explosions() {
         };
         hit(game, infested, 5);
         assert_eq!(silverfish(game), 1);
+    });
+}
+
+/// Stone a dangerous wither skull may not destroy, while `.0` is set.
+#[derive(Clone)]
+struct SkullProof(Arc<AtomicBool>);
+#[mod_api::horizon_part]
+impl BlockPart for SkullProof {
+    fn can_entity_destroy(
+        &self,
+        _: &dyn mod_api::Host,
+        _: &mut CanEntityDestroyEvent,
+    ) -> Option<bool> {
+        self.0.load(Ordering::Relaxed).then_some(false)
+    }
+}
+struct SkullMod(SkullProof);
+#[mod_api::__subscriptions]
+impl Hooks for SkullMod {
+    fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+        let key = r.block_key("minecraft:stone");
+        r.block_part(key, self.0.clone());
+    }
+}
+
+#[test]
+#[ignore = "needs prepared resources and isolated native mod state"]
+fn a_block_part_keeps_its_block_from_a_dangerous_skull_cap() {
+    let proof = Arc::new(AtomicBool::new(false));
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "skull_proof",
+        Box::new(SkullMod(SkullProof(proof.clone()))),
+    )]
+    .into();
+    mod_platform::testing::with_mods(mods.clone(), || {
+        crate::game::api_values::install_parts(&mods).unwrap();
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            // A dangerous skull's radius-1 blast just west of a stone block: a ray east
+            // reaches the stone on its second step with at least 0.7 - 0.225 = 0.475 power.
+            let survives = |game: &mut Game<'_>| {
+                game.world.set(2, 65, 3, stone).unwrap();
+                game.combat.blast_resistance_cap = Some(0.8);
+                game.combat.explosion_direct = Some(4242);
+                game.server_explode([1.9, 65.5, 3.5], 1.0, BlockInteraction::Destroy, false)
+                    .unwrap();
+                game.combat.explosion_direct = None;
+                game.combat.blast_resistance_cap = None;
+                game.world.block(2, 65, 3) == stone
+            };
+            // Capped at 0.8, a step through the stone costs (0.8 + 0.3) × 0.3 = 0.33.
+            assert!(!survives(game));
+            // Answering no for the skull, the stone keeps its 6: (6 + 0.3) × 0.3 = 1.89 a
+            // step, more than a ray's 1.3 at most.
+            proof.store(true, Ordering::Relaxed);
+            assert!(survives(game));
+        });
     });
 }

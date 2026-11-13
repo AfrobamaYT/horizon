@@ -97,6 +97,7 @@ pub(super) enum Finalized {
 
 mod death_source;
 mod death_weapon;
+mod destroy_rules;
 pub(in crate::game) use death_source::death_hurt_source;
 pub(in crate::game) use death_weapon::AcceptedWeapon;
 
@@ -2219,29 +2220,6 @@ impl Game<'_> {
             self.particles.llama_spit_burst(at, [v.x, v.y, v.z]);
         }
         self.spawn_mob_projectile(p);
-    }
-    /// `LivingDestroyBlockEvent` for the mob `id` about to destroy the block at
-    /// `pos`: false when a mod canceled. Nothing is built when no mod is loaded.
-    fn mob_may_destroy(&mut self, id: u32, pos: [i32; 3]) -> bool {
-        if !mod_api::__private::listened(mod_api::HookId::LivingDestroyBlock) {
-            return true;
-        }
-        let Some(kind) = self
-            .mobs
-            .iter()
-            .find(|m| m.id == id)
-            .map(super::native_hooks::mob_kind)
-        else {
-            return true;
-        };
-        self.may_destroy(id, &kind, pos)
-    }
-    /// Asks the mods whether the entity `id` of type `kind` may destroy the block at `pos`.
-    pub(super) fn may_destroy(&mut self, id: u32, kind: &str, pos: [i32; 3]) -> bool {
-        let state = self.world.block(pos[0], pos[1], pos[2]);
-        let mut cancel = false;
-        self.native_living_destroy_block(id, kind, pos, state, &mut cancel);
-        !cancel
     }
     /// `Entity.igniteForSeconds`: `seconds * 20` ticks of fire, scaled by the
     /// target's burning-time attribute.
@@ -8726,6 +8704,9 @@ impl horizon_client::mobs::MobHooks for Game<'_> {
     }
     fn grief_hooked(&self) -> bool {
         Game::grief_hooked(self)
+    }
+    fn can_entity_destroy(&self, mob: u32, pos: [i32; 3], vanilla: bool) -> bool {
+        self.entity_may_destroy(mob, pos, vanilla)
     }
     fn living_visibility(&self, player: &PlayerView, looking: u32, visibility: f64) -> f64 {
         let uuid = horizon_client::lan::playerdata::ints_uuid(player.uuid);
