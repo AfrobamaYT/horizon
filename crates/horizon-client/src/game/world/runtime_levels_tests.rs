@@ -150,9 +150,34 @@ fn with_opener(
     mod_platform::testing::with_mods(mods, || {
         with_game(|game| {
             let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+            // Levels' folders go under a world root of the test's own, never the checkout.
+            let root = TempRoot::new(name);
+            game.world_root = root.0.clone();
             test(game, &fixture);
         });
     });
+}
+
+/// A world root of one test, removed when the test ends, even by a failed assertion.
+struct TempRoot(std::path::PathBuf);
+
+impl TempRoot {
+    fn new(name: &str) -> Self {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-runtime-levels-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        Self(root)
+    }
+}
+
+impl Drop for TempRoot {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 /// `RuntimeLevels::unload` as the mod `name` calls it.
@@ -252,9 +277,6 @@ fn a_handle_from_before_an_unload_never_names_the_reopened_level() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn the_idle_close_keeps_a_runtime_level_open_until_its_unload() {
     with_opener("idle", "idle:a", flat(), |game, seen| {
-        // The test game saves under its working directory: start and end without a folder.
-        let folder = game.world_root.join("dimensions/idle");
-        let _ = std::fs::remove_dir_all(&folder);
         tick_post(game);
         game.apply_runtime_levels();
         let handle = seen.answers.lock().unwrap()[0].unwrap();
@@ -272,7 +294,6 @@ fn the_idle_close_keeps_a_runtime_level_open_until_its_unload() {
         assert!(!game.runtime_level_is_open("idle:a"));
         assert!(super::Dim::extra("idle:a").is_none());
         assert_eq!(*seen.unloads.lock().unwrap(), ["idle:a", "idle:a"]);
-        let _ = std::fs::remove_dir_all(&folder);
     });
 }
 
@@ -282,8 +303,6 @@ fn the_idle_close_keeps_a_runtime_level_open_until_its_unload() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_failed_unload_leaves_the_level_open_for_a_retry() {
     with_opener("stuck", "stuck:a", flat(), |game, _| {
-        let folder = game.world_root.join("dimensions/stuck");
-        let _ = std::fs::remove_dir_all(&folder);
         tick_post(game);
         game.apply_runtime_levels();
         let dim = super::Dim::extra("stuck:a").unwrap();
@@ -304,7 +323,26 @@ fn a_failed_unload_leaves_the_level_open_for_a_retry() {
         game.apply_runtime_levels();
         assert!(!game.runtime_level_is_open("stuck:a"));
         assert!(super::Dim::extra("stuck:a").is_none());
-        let _ = std::fs::remove_dir_all(&folder);
+    });
+}
+
+/// A save a mod asked for, then an unload in the same tick: the save leaves with the level, so
+/// the next tick does not open it again.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn an_unload_drops_a_save_waiting_for_its_level() {
+    with_opener("saved", "saved:a", flat(), |game, seen| {
+        tick_post(game);
+        game.apply_runtime_levels();
+        let dim = super::Dim::extra("saved:a").unwrap();
+        game.levels.request_save(dim);
+        assert_eq!(unload_as(game, "saved", "saved:a"), Ok(()));
+        game.apply_runtime_levels();
+        assert!(!game.levels.save_pending(dim));
+        game.run_requested_saves();
+        assert!(!game.runtime_level_is_open("saved:a"));
+        assert!(!game.levels.parked.contains_key(&dim));
+        assert_eq!(*seen.loads.lock().unwrap(), ["saved:a"]);
     });
 }
 
@@ -340,9 +378,6 @@ fn a_level_with_a_player_in_it_is_not_unloaded() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_reopened_level_comes_back_from_its_folder_with_its_block() {
     with_opener("keep", "keep:a", flat(), |game, seen| {
-        // The test game saves under its working directory: start and end without a folder.
-        let folder = game.world_root.join("dimensions/keep");
-        let _ = std::fs::remove_dir_all(&folder);
         let stone = game
             .pack
             .assets
@@ -391,6 +426,5 @@ fn a_reopened_level_comes_back_from_its_folder_with_its_block() {
         game.enter_level(super::Dim::Overworld).unwrap();
         unload_as(game, "keep", "keep:a").unwrap();
         game.apply_runtime_levels();
-        let _ = std::fs::remove_dir_all(&folder);
     });
 }

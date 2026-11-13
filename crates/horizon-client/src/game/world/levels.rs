@@ -448,6 +448,11 @@ impl Levels {
         self.requested_saves.contains(&dim)
     }
 
+    /// Drop a save of `dim` still waiting for a tick: its level is gone.
+    pub(super) fn cancel_requested_save(&mut self, dim: Dim) {
+        self.requested_saves.retain(|saved| *saved != dim);
+    }
+
     /// Clear every parked level and dimensions recorded as heard open.
     pub(super) fn clear(&mut self) {
         self.parked.clear();

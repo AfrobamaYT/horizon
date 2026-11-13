@@ -507,6 +507,10 @@ impl Game<'_> {
     /// The runtime level `id` was unloaded, or failed to open: it leaves every table it was added
     /// to, and its id is free again.
     fn unpublish_runtime_level(&mut self, id: &str) {
+        // A save a mod asked for has nothing left to write, and must not open the level again.
+        if let Some(dim) = Dim::extra(id) {
+            self.levels.cancel_requested_save(dim);
+        }
         self.levels.runtime.remove(id);
         Dim::remove_extra(id);
         let extras: Vec<_> = self
