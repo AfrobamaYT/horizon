@@ -117,6 +117,10 @@ use horizon_client::random_source;
 use loading_window::{
     build_renderer, loading_frame, loading_renderer, prepare_renderer_textures, start_game,
 };
+use resource_loader::{
+    EntityModels, GameCpuResources, Loaded, LoaderMsg, PendingWorldEntry, WorldRestLoader,
+    run_loading, write_report,
+};
 // `Action` here is the title screen's buttons (`title::Action`).
 use self::api_values::TryIntoApi;
 pub(crate) use api_values::{block_jump_factor, block_speed_factor, is_ladder};
