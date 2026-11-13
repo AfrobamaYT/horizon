@@ -119,7 +119,16 @@ pub(crate) fn resolve(base: &Base, text: &str) -> Result<String, String> {
     if horizon_mod_package::manifest::revision(text) {
         return Ok(text.to_owned());
     }
-    if horizon_release_sign::is_nightly(text) {
+    // A Nightly name becomes a release tag, so a path segment: only its exact forms are taken.
+    let nightly = text == "nightly"
+        || text.strip_prefix("nightly-").is_some_and(|date| {
+            date.len() == 10
+                && date.bytes().enumerate().all(|(i, b)| match i {
+                    4 | 7 => b == b'-',
+                    _ => b.is_ascii_digit(),
+                })
+        });
+    if nightly {
         let bytes = base.read(text, sdk::INDEX, SMALL).map_err(|e| {
             format!(
                 "Nightly {text} has no SDK ({e}). Pin a build that has one: --horizon <full sha>"

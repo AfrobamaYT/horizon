@@ -189,11 +189,15 @@ mod tests {
                     "{{ git='https://github.com/arismoko/horizon', rev='{}' }}",
                     "a".repeat(40)
                 ),
-                "E_SDK_GIT_FORM: horizon-mod-api: ",
+                "E_SDK_SOURCE: horizon-mod-api: the SDK is no longer named by git",
+            ),
+            (
+                "'0.1'".to_owned(),
+                "E_SDK_SOURCE: horizon-mod-api: a version names no source",
             ),
             (
                 "{ path='../horizon/crates/horizon-mod-api' }".to_owned(),
-                "horizon-mod-api: path must be \".horizon/sdk/api/crates/horizon-mod-api\"",
+                "E_SDK_SOURCE: horizon-mod-api: the path must be \".horizon/sdk/api/crates/horizon-mod-api\"",
             ),
         ] {
             fs::write(

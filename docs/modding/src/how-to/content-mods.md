@@ -24,7 +24,8 @@ cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks
   they name one build). A native mod pins it in `[native] horizon`, a wasm mod in `Cargo.toml`'s
   `[package.metadata.horizon] sdk`. `Cargo.toml` names the API by path,
   `horizon-mod-api = { path = ".horizon/sdk/api/crates/horizon-mod-api" }`, the only form the tool and the launcher
-  take (the old git form is refused by name, `E_SDK_GIT_FORM`). `new` fetches that build's SDK into `.horizon/sdk/`,
+  take. Every other form is refused under `E_SDK_SOURCE`, naming why: the old git form, a version alone (Cargo
+  would take the crate from crates.io, where anyone can publish its name), another source, or another path. `new` fetches that build's SDK into `.horizon/sdk/`,
   and every command that compiles the mod fetches it again when it is missing or another build's, so a fresh clone
   works after one command; your editor needs that first command too. `.horizon/` is in the template's `.gitignore`
   and is never packed. The fetch checks Horizon's signature on the release and every file against its `sdk.json`;

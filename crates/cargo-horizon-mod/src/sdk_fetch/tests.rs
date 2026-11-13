@@ -135,6 +135,32 @@ fn a_build_is_named_by_sha_short_sha_or_nightly() {
 }
 
 #[test]
+fn a_nightly_name_is_only_nightly_or_a_dated_one() {
+    let root = tempfile::tempdir().unwrap();
+    let base = root.path().join("releases");
+    // A name that read through the base would reach this decoy outside it.
+    fs::create_dir_all(base.join("nightly-")).unwrap();
+    let decoy = root.path().join("decoy");
+    fs::create_dir_all(&decoy).unwrap();
+    fs::write(
+        decoy.join(sdk::INDEX),
+        format!(r#"{{"schema":1,"build":{{"commit":"{BUILD}"}}}}"#),
+    )
+    .unwrap();
+    let base = Base::Folder(base);
+    for text in [
+        "nightly-/../../decoy",
+        "nightly-2026-11-1x",
+        "nightly-2026/11/13",
+        "nightly-2026-11-130",
+        "nightly-",
+    ] {
+        let error = resolve(&base, text).unwrap_err();
+        assert!(error.contains("is not a build"), "{text}: {error}");
+    }
+}
+
+#[test]
 fn the_pin_is_the_native_tables_or_the_cargo_metadata() {
     let project = tempfile::tempdir().unwrap();
     let write = |name: &str, text: &str| fs::write(project.path().join(name), text).unwrap();

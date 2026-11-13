@@ -122,37 +122,41 @@ pub(super) fn sdk_path(package: &str) -> String {
     format!(".horizon/sdk/api/crates/{package}")
 }
 
-/// Whether `value`, a mod's dependency `key` on the SDK package `package`, is a form the launcher
-/// takes: the path to the mod tool's copy of the pinned SDK ([`sdk_path`]), or a version alone.
-/// The launcher builds against its own copy of the same build, so no other source is taken, and
-/// the git form the path form replaced is refused by name.
+/// Whether `value`, a mod's dependency `key` on the SDK package `package`, names the SDK the one
+/// way the launcher takes: by the path to the mod tool's copy of the pinned SDK ([`sdk_path`]).
+/// The launcher builds against its own copy of the same build. Every other form is refused under
+/// one code, each with its own reason: the git form the path form replaced, a version alone (which
+/// Cargo would resolve from crates.io), any other source selector, and a path elsewhere.
 pub(super) fn sdk_source(key: &str, package: &str, value: &toml::Value) -> Result<(), String> {
     let path = sdk_path(package);
-    if value.get("git").is_some() {
-        return Err(format!(
-            "E_SDK_GIT_FORM: {key}: the SDK is no longer named by git; write {key} = {{ path = \"{path}\" }}, then any cargo horizon-mod command fetches the pinned SDK there"
-        ));
-    }
-    for selector in [
+    let why = if value.get("git").is_some() {
+        "the SDK is no longer named by git".to_owned()
+    } else if let Some(selector) = [
         "registry",
         "registry-index",
         "branch",
         "tag",
         "rev",
         "workspace",
-    ] {
-        if value.get(selector).is_some() {
-            return Err(format!(
-                "{key}: {selector} is not a launcher-owned SDK source"
-            ));
+    ]
+    .into_iter()
+    .find(|selector| value.get(*selector).is_some())
+    {
+        format!("{selector} does not name the SDK")
+    } else {
+        match value.get("path") {
+            None => format!(
+                "a version names no source, so Cargo would take {package} from crates.io, where anyone can publish that name"
+            ),
+            Some(written) if written.as_str() != Some(path.as_str()) => {
+                format!("the path must be \"{path}\", the pinned SDK the mod tool fetches")
+            }
+            Some(_) => return Ok(()),
         }
-    }
-    match value.get("path") {
-        Some(written) if written.as_str() != Some(path.as_str()) => Err(format!(
-            "{key}: path must be \"{path}\", the pinned SDK the mod tool fetches"
-        )),
-        _ => Ok(()),
-    }
+    };
+    Err(format!(
+        "E_SDK_SOURCE: {key}: {why}; write {key} = {{ path = \"{path}\" }}, then any cargo horizon-mod command fetches the pinned SDK there"
+    ))
 }
 
 /// A dependency on one of [`PACKAGES`], under `[dependencies]` or a `[target.*]` table.
@@ -621,7 +625,7 @@ mod tests {
         let name = std::thread::current().name().unwrap().replace(':', "-");
         let dir = super::super::tests::dir(&name);
         super::super::tests::write_bundle(&dir, "example", "");
-        fs::write(dir.join("Cargo.toml"), "[package]\nname='example-mod'\nversion='9.0.0'\nedition='2024'\n[dependencies]\nhorizon-mod-api='0.1'\n").unwrap();
+        fs::write(dir.join("Cargo.toml"), "[package]\nname='example-mod'\nversion='9.0.0'\nedition='2024'\n[dependencies]\nhorizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}\n").unwrap();
         dir
     }
 
@@ -678,16 +682,16 @@ mod tests {
         let dir = fixture();
         for (dependencies, game) in [
             (
-                "[dependencies]\nhorizon-mod-api='0.1'\nhorizon-client='0.1'",
+                "[dependencies]\nhorizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}\nhorizon-client='0.1'",
                 Some("horizon-client"),
             ),
             (
-                "[dependencies.api]\npackage='horizon-mod-api'\nversion='0.1'\n[target.'cfg(unix)'.dependencies.game]\npackage='horizon-client'\nversion='0.1'",
+                "[dependencies.api]\npackage='horizon-mod-api'\npath='.horizon/sdk/api/crates/horizon-mod-api'\n[target.'cfg(unix)'.dependencies.game]\npackage='horizon-client'\nversion='0.1'",
                 Some("game"),
             ),
             ("[dependencies]\nserde='1'", None),
             (
-                "[target.'cfg(unix)'.dependencies]\nhorizon-mod-api='0.1'",
+                "[target.'cfg(unix)'.dependencies]\nhorizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}",
                 None,
             ),
         ] {
@@ -710,17 +714,33 @@ mod tests {
     }
 
     #[test]
-    fn the_sdk_is_taken_by_its_path_form_and_the_git_form_is_refused_by_name() {
+    fn the_sdk_is_taken_only_by_its_path_form_and_every_other_form_is_refused_by_name() {
         let dir = fixture();
         for (form, refusal) in [
             ("{ path = '.horizon/sdk/api/crates/horizon-mod-api' }", None),
             (
+                "{ path = '.horizon/sdk/api/crates/horizon-mod-api', features = ['testing'] }",
+                None,
+            ),
+            (
                 "{ git = 'https://github.com/arismoko/horizon', rev = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }",
-                Some("example: E_SDK_GIT_FORM: horizon-mod-api: "),
+                Some("example: E_SDK_SOURCE: horizon-mod-api: the SDK is no longer named by git; write horizon-mod-api = { path = \".horizon/sdk/api/crates/horizon-mod-api\" }"),
+            ),
+            (
+                "'0.1'",
+                Some("example: E_SDK_SOURCE: horizon-mod-api: a version names no source, so Cargo would take horizon-mod-api from crates.io"),
+            ),
+            (
+                "{ version = '0.1', features = ['testing'] }",
+                Some("example: E_SDK_SOURCE: horizon-mod-api: a version names no source"),
+            ),
+            (
+                "{ workspace = true }",
+                Some("example: E_SDK_SOURCE: horizon-mod-api: workspace does not name the SDK"),
             ),
             (
                 "{ path = '../horizon/crates/horizon-mod-api' }",
-                Some("example: horizon-mod-api: path must be \".horizon/sdk/api/crates/horizon-mod-api\""),
+                Some("example: E_SDK_SOURCE: horizon-mod-api: the path must be \".horizon/sdk/api/crates/horizon-mod-api\""),
             ),
         ] {
             let text = format!(

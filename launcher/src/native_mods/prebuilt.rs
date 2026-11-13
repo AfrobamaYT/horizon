@@ -1076,10 +1076,13 @@ mod tests {
         };
         let api_only = write(
             "api_only",
-            "horizon-mod-api='0.1'\nhorizon-mod-points='0.1'",
+            "horizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}\nhorizon-mod-points={path='.horizon/sdk/api/crates/horizon-mod-points'}",
         );
-        let facade = write("facade", "horizon-mod-api='0.1'\nhorizon-internals='0.1'");
-        let registry = write("registry", "horizon-mod-api='0.1'\nserde='1'");
+        let facade = write("facade", "horizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}\nhorizon-internals={path='.horizon/sdk/api/crates/horizon-internals'}");
+        let registry = write(
+            "registry",
+            "horizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}\nserde='1'",
+        );
         let with = |change: &dyn Fn(&mut horizon_mod_package::manifest::Manifest)| {
             let mut bundle = api_only.clone();
             change(&mut bundle.manifest);
@@ -1362,13 +1365,18 @@ mod tests {
 
     #[test]
     fn mods_on_the_mod_api_alone_take_the_prebuilt_game() {
-        assert_eq!(refusal_of("[dependencies]\nhorizon-mod-api='0.1'"), None);
         assert_eq!(
-            refusal_of("build=false\n[dependencies]\nhorizon-mod-api='0.1'"),
+            refusal_of(
+                "[dependencies]\nhorizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}"
+            ),
             None
         );
         assert_eq!(
-            refusal_of("[dependencies.api]\npackage='horizon-mod-api'\nversion='0.1'"),
+            refusal_of("build=false\n[dependencies]\nhorizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}"),
+            None
+        );
+        assert_eq!(
+            refusal_of("[dependencies.api]\npackage='horizon-mod-api'\npath='.horizon/sdk/api/crates/horizon-mod-api'"),
             None
         );
     }
@@ -1376,8 +1384,8 @@ mod tests {
     #[test]
     fn registry_dependencies_do_not_rebuild_the_game() {
         for cargo in [
-            "[dependencies]\nhorizon-mod-api='0.1'\nserde='1'",
-            "[dependencies]\nhorizon-mod-api='0.1'\n[target.'cfg(unix)'.dependencies]\nlibc='0.2'",
+            "[dependencies]\nhorizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}\nserde='1'",
+            "[dependencies]\nhorizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}\n[target.'cfg(unix)'.dependencies]\nlibc='0.2'",
         ] {
             assert_eq!(refusal_of(cargo), None);
         }
@@ -1388,15 +1396,15 @@ mod tests {
         let id = || "example".to_owned();
         for (cargo, reason) in [
             (
-                "[dependencies]\nhorizon-mod-api={version='0.1',features=['testing']}",
+                "[dependencies]\nhorizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api',features=['testing']}",
                 Refusal::Features { mod_id: id() },
             ),
             (
-                "[dependencies]\nhorizon-mod-api='0.1'\n[features]\nextra=[]",
+                "[dependencies]\nhorizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}\n[features]\nextra=[]",
                 Refusal::Features { mod_id: id() },
             ),
             (
-                "build='make.rs'\n[dependencies]\nhorizon-mod-api='0.1'",
+                "build='make.rs'\n[dependencies]\nhorizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}",
                 Refusal::BuildScript { mod_id: id() },
             ),
         ] {
