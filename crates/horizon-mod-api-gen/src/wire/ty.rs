@@ -122,7 +122,7 @@ pub(crate) struct Case {
 
 /// The resolved types, by definition.
 pub(crate) struct Types<'a> {
-    pub(super) index: Index<'a>,
+    pub(crate) index: Index<'a>,
     pub(super) defs: Vec<Def>,
     pub(super) by_item: HashMap<ItemId, usize>,
     /// The `mod_api` root module, where re-exported names are looked up.
