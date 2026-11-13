@@ -16,6 +16,18 @@ or exit the process. The first reason wins, including an empty reason. Reasons
 are preserved verbatim up to 4096 UTF-8 bytes; longer strings are truncated at the
 last character boundary within that limit.
 
+A problem that should not stop the mod, such as a missing optional integration or a
+setting it corrected, is a warning: `cx.warn("mymod.warn.no_jei", &["jei"])` inside
+`Hooks::register`. The key is a translation key in the mod's own `lang/` files and the
+arguments fill its `%s` in order (NeoForge's `ModLoadingIssue.warning`). Like `refuse`,
+it takes no mod ID: the warning belongs to the calling mod. The mod keeps loading and
+its declarations are kept. The log names the mod, the key and the arguments at warn
+level, and the Mods screen shows the mod's first warning under its row in the player's
+language, or the key when no language has it; the row is not marked failed. A mod keeps
+its first 16 warnings and later ones are dropped. The key and each argument are cut as
+refusal reasons are, to 4096 UTF-8 bytes at a character boundary. Native and wasm mods
+take the same path; the host applies the cap and the cut again to what a guest sends.
+
 A panic in a trait mod's hook adds `in native mod <id>, hook <hook>` to the panic's message, in the crash report
 and in the server thread's log line, with the `horizon-mod.toml` id. Each entry passed to
 `entry::main_with` must bind its id and hooks together: `ModEntry::new("example", example::hooks())`.

@@ -248,7 +248,6 @@ pub(crate) fn install_registrar(
             warning.args()
         );
     }
-    mod_vocab::__private::install_registration_warnings(std::mem::take(&mut registrar.warnings));
     if !registrar.refused.is_empty() {
         return Err(registrar.refused);
     }
@@ -290,6 +289,7 @@ pub(crate) fn install_registrar(
         structure_types: registrar.structure_types,
         dimensions: registrar.dimensions,
         chunk_generators: registrar.chunk_generators,
+        warnings: registrar.warnings,
     };
     mod_vocab::__private::parts_installation::install(installed);
 

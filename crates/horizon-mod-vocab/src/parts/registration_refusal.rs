@@ -63,27 +63,18 @@ pub fn take_registration_warnings(cx: &crate::RegistrationContext) -> Vec<Loadin
     std::mem::take(&mut *cx.warnings.lock().unwrap_or_else(|p| p.into_inner()))
 }
 
-static WARNINGS: std::sync::Mutex<Vec<(String, LoadingMessage)>> =
-    std::sync::Mutex::new(Vec::new());
-
-/// Engine admission plumbing: every mod's loading warnings from the last registration.
-// hidden: the Parts installer publishes them; the game reads them per mod.
-#[doc(hidden)]
-pub fn install_registration_warnings(warnings: Vec<(String, LoadingMessage)>) {
-    *WARNINGS.lock().unwrap_or_else(|p| p.into_inner()) = warnings;
-}
-
-/// The loading warnings mod `id` gave during registration, in order.
+/// The loading warnings mod `id` gave during registration, in order, from the installed Parts.
 // hidden: read by the game's Mods screen.
 #[doc(hidden)]
 pub fn registration_warnings(id: &str) -> Vec<LoadingMessage> {
-    WARNINGS
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .iter()
-        .filter(|(owner, _)| owner == id)
-        .map(|(_, warning)| warning.clone())
-        .collect()
+    super::installed().map_or_else(Vec::new, |installed| {
+        installed
+            .warnings
+            .iter()
+            .filter(|(owner, _)| owner == id)
+            .map(|(_, warning)| warning.clone())
+            .collect()
+    })
 }
 
 /// Engine transport plumbing for the generated guest dispatch arm.
@@ -123,6 +114,22 @@ mod tests {
         assert_eq!(warnings.len(), super::MAX_LOADING_WARNINGS);
         assert_eq!(warnings[0].key(), "test.warn.optional");
         assert_eq!(warnings[0].args(), ["jei", "0"]);
+        assert_eq!(warnings[15].args(), ["jei", "15"]);
         assert_eq!(*cx.self_refusal.lock().unwrap(), None);
+    }
+
+    #[test]
+    fn a_warning_cuts_key_and_arguments_at_a_character_boundary_and_keeps_every_argument() {
+        let fits = "a".repeat(4096);
+        let over = format!("{}é", "a".repeat(4095));
+        let many: Vec<String> = (0..20).map(|i| i.to_string()).collect();
+        let mut args: Vec<&str> = vec![&fits, &over];
+        args.extend(many.iter().map(String::as_str));
+        let warning = super::LoadingMessage::new(&format!("{fits}b"), &args);
+        assert_eq!(warning.key(), fits);
+        assert_eq!(warning.args()[0], fits);
+        assert_eq!(warning.args()[1], "a".repeat(4095));
+        assert_eq!(warning.args().len(), 22);
+        assert_eq!(warning.args()[21], "19");
     }
 }

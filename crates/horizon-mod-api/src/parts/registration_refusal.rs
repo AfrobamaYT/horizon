@@ -16,8 +16,8 @@ impl RegistrationRefusalRegistrar for PartRegistrar {
             .filter(|(owner, _)| owner == self.mod_id)
             .count();
         if kept < mod_vocab::__private::MAX_LOADING_WARNINGS {
-            // A guest's message crosses the wire whole: bound it again here.
-            let args: Vec<&str> = warning.args().iter().take(16).map(String::as_str).collect();
+            // A guest's message crosses the wire whole: cut its key and arguments again here.
+            let args: Vec<&str> = warning.args().iter().map(String::as_str).collect();
             let warning = crate::LoadingMessage::new(warning.key(), &args);
             self.warnings.push((self.mod_id.to_owned(), warning));
         }
@@ -164,6 +164,58 @@ mod tests {
                 "warns".to_owned(),
                 crate::LoadingMessage::new("test.warn.optional", &["jei"])
             )]
+        );
+    }
+
+    struct WarnsPastTheCap;
+    impl Hooks for WarnsPastTheCap {
+        fn subscribed(&self) -> &'static [Option<crate::HookId>] {
+            &[]
+        }
+        fn register(&self, _: &mut dyn Registrar, cx: &RegistrationContext) {
+            for i in 0..=mod_vocab::__private::MAX_LOADING_WARNINGS {
+                cx.warn("test.warn.many", &[&i.to_string()]);
+            }
+        }
+    }
+
+    #[test]
+    fn warnings_are_published_under_the_mod_that_gave_them() {
+        let mods = [
+            ModEntry::new("warns", Box::new(Warns)),
+            ModEntry::new("quiet", Box::new(Healthy)),
+            ModEntry::new("many", Box::new(WarnsPastTheCap)),
+        ];
+        crate::__private::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false)
+            .unwrap();
+        assert_eq!(
+            crate::__private::registration_warnings("warns"),
+            [crate::LoadingMessage::new("test.warn.optional", &["jei"])]
+        );
+        assert!(crate::__private::registration_warnings("quiet").is_empty());
+        let many = crate::__private::registration_warnings("many");
+        assert_eq!(many.len(), mod_vocab::__private::MAX_LOADING_WARNINGS);
+        assert_eq!(many[15].args(), ["15"]);
+    }
+
+    #[test]
+    fn the_host_caps_and_cuts_what_a_guest_sends() {
+        use crate::RegistrationRefusalRegistrar;
+        let mut registrar = super::PartRegistrar::new("guest");
+        let long = format!("{}é", "a".repeat(4095));
+        for _ in 0..=mod_vocab::__private::MAX_LOADING_WARNINGS {
+            // As the guest dispatch arm delivers it: the owner is the registrar's mod, not the message's.
+            registrar.registration_warning(crate::LoadingMessage::new("guest.warn", &[&long]));
+        }
+        assert_eq!(
+            registrar.warnings.len(),
+            mod_vocab::__private::MAX_LOADING_WARNINGS
+        );
+        assert!(
+            registrar
+                .warnings
+                .iter()
+                .all(|(owner, warning)| owner == "guest" && warning.args() == ["a".repeat(4095)])
         );
     }
 
