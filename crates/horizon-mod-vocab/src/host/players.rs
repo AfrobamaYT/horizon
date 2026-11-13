@@ -776,6 +776,20 @@ pub trait PlayersBackendMut {
         volume: f32,
         pitch: f32,
     ) -> bool;
+    /// Side: server.
+    /// The calling mod's chunk areas for this player, in place of the ones it asked before; an
+    /// empty slice withdraws them, and other mods' areas stay. The engine keeps each area's
+    /// chunks loaded with a ticket of its own (`Loaded`, or `Ticking` as a player's simulation
+    /// ticket), generates what is missing, and sends a level besides the player's own to a client
+    /// that can view it. A chunk no area covers any more is forgotten 52 ticks later. An area
+    /// counts as no player for spawning, sleeping, raids or any other rule. Areas are never saved
+    /// and end when the player leaves. A call that breaks a limit changes nothing and names it.
+    #[access(WorldOnly)]
+    fn player_set_chunk_areas(
+        &mut self,
+        player: PlayerRef,
+        areas: &[ChunkArea],
+    ) -> Result<(), ChunkAreaRefusal>;
     /// Side: both.
     /// Simulate one client movement tick for this server player without changing the player. Refuses stale, absent, dead, spectator or riding players and invalid input.
     #[access(WorldOnly)]

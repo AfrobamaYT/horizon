@@ -247,11 +247,12 @@ minutes (96 MB at most), so a player walking back isn't sent the save again.
 
 ### Other levels a mod shows a player: `max_viewed_*`
 
-A server mod (a portal mod, for example) can ask for areas of chunks in other levels for one player. The
-server keeps them loaded and sends them to a Horizon client that can keep other levels; a vanilla client
-is sent nothing. An area either only keeps its chunks loaded (nothing ticks there because of it) or ticks
-them as a player standing there would. An area counts as no player: no mobs spawn around it, it doesn't
-count for sleeping, raids or spawners. Terrain generated for it is saved like any other.
+A server mod (a portal mod, for example) can ask for areas of chunks in other levels for one player
+(`PlayerRef::set_chunk_areas`). The server keeps them loaded and sends them to a Horizon client that can
+keep other levels; a vanilla client is sent nothing. An area either only keeps its chunks loaded (nothing
+ticks there because of it) or ticks them as a player standing there would. An area counts as no player:
+no mobs spawn around it, it doesn't count for sleeping, raids or spawners. Terrain generated for it is
+saved like any other.
 
 The four caps limit what mods can ask for, counted per level:
 

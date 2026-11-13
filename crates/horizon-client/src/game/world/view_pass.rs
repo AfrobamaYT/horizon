@@ -84,7 +84,7 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::game) mod tests {
     use super::*;
     use horizon_protocol::{
         buf::Reader,
@@ -94,7 +94,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     /// A server game on a scratch world, as `levels.rs`'s tests open one.
-    fn open_game<'a>(
+    pub(in crate::game) fn open_game<'a>(
         resources: &'a mut Option<std::sync::Arc<crate::game::Resources>>,
         root: &std::path::Path,
         home: &std::path::Path,
@@ -151,7 +151,9 @@ mod tests {
 
     /// Opens the world to the network with one player in the Overworld whose client views 2
     /// levels; its packets.
-    fn host_a_viewer(game: &mut Game<'_>) -> std::sync::mpsc::Receiver<horizon_client::lan::Out> {
+    pub(in crate::game) fn host_a_viewer(
+        game: &mut Game<'_>,
+    ) -> std::sync::mpsc::Receiver<horizon_client::lan::Out> {
         use horizon_client::lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig};
         let net = NetConfig {
             announce: false,
@@ -204,15 +206,15 @@ mod tests {
 
     /// What a client was sent of the Nether (level 2) on `horizon:levels`.
     #[derive(Default)]
-    struct Sent {
-        opened: bool,
-        chunks: Vec<(i32, i32)>,
-        forgotten: Vec<(i32, i32)>,
-        closed: bool,
+    pub(in crate::game) struct Sent {
+        pub(in crate::game) opened: bool,
+        pub(in crate::game) chunks: Vec<(i32, i32)>,
+        pub(in crate::game) forgotten: Vec<(i32, i32)>,
+        pub(in crate::game) closed: bool,
         times: Vec<i64>,
     }
 
-    fn sent(rx: &std::sync::mpsc::Receiver<horizon_client::lan::Out>) -> Sent {
+    pub(in crate::game) fn sent(rx: &std::sync::mpsc::Receiver<horizon_client::lan::Out>) -> Sent {
         let mut sent = Sent::default();
         let bodies = rx.try_iter().flat_map(|o| match o {
             horizon_client::lan::Out::Packet(body) => vec![body],
