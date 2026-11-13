@@ -10,7 +10,7 @@ use crate::lan::{
 };
 use crate::world::World;
 use horizon_protocol::{
-    buf::Reader,
+    buf::{Reader, Writer},
     ids::play::clientbound as ids,
     packets::play::Clientbound as C,
     viewed_levels::{CHANNEL, Message},
@@ -508,4 +508,84 @@ fn a_centre_past_the_world_border_is_refused() {
         !levels.block_ticking(1_875_000, -1_875_000),
         "Loaded ticks nothing"
     );
+}
+
+/// A column still waiting for its postprocessing (vanilla runs `postProcessGeneration` before
+/// a chunk is sent) is held back until it is done; the others go meanwhile.
+#[test]
+fn a_column_waiting_for_its_postprocessing_is_not_sent() {
+    let (mut hub, rx) = hub_with(&[1], 2);
+    hub.set_viewed_areas(1, "test:portal", nether(1)).unwrap();
+    hub.set_dimension(NETHER);
+    let mut world = lit_columns(2);
+    let mark = |world: &mut World, marks: Vec<[i32; 3]>| {
+        std::sync::Arc::make_mut(world.chunks.get_mut(&(0, 0)).unwrap()).postprocess = marks;
+    };
+    mark(&mut world, vec![[3, 64, 3]]);
+    run_level(&mut hub, &mut world);
+    let mut first = wrapped_columns(&got(&rx[0]), ids::LEVEL_CHUNK_WITH_LIGHT);
+    first.sort_unstable();
+    assert_eq!(
+        first,
+        vec![
+            (-1, -1),
+            (-1, 0),
+            (-1, 1),
+            (0, -1),
+            (0, 1),
+            (1, -1),
+            (1, 0),
+            (1, 1)
+        ]
+    );
+    mark(&mut world, Vec::new());
+    hub.guests.update(0, |g| {
+        g.batch_quota = 9.0;
+        g.unacknowledged = 0;
+    });
+    hub.ticks += 1;
+    run_level(&mut hub, &mut world);
+    assert_eq!(
+        wrapped_columns(&got(&rx[0]), ids::LEVEL_CHUNK_WITH_LIGHT),
+        vec![(0, 0)]
+    );
+}
+
+/// A column whose packet is too large to wrap is not counted in the batch, stays queued and is
+/// not recorded as sent; a batch of none of them sends nothing.
+#[test]
+fn a_column_too_large_to_wrap_is_not_counted_as_sent() {
+    use super::send::batch_runs;
+    let (hub, _rx) = hub_with(&[1], 2);
+    let world = lit_columns(1);
+    let body = |key| hub.encoder.body_in(&world.chunks[&key], &world);
+    // A LevelChunkWithLight id and 2 MiB after it: past a frame's limit once wrapped.
+    let mut oversized = Writer::new();
+    oversized.varint(ids::LEVEL_CHUNK_WITH_LIGHT);
+    oversized.bytes(&vec![0; 1 << 21]);
+    let taken = [(3, ()), (5, ()), (8, ())];
+    let bodies = [body((0, 0)), oversized.data.clone(), body((1, 0))];
+    let (payloads, sent) = batch_runs(NETHER_INDEX, &taken, &bodies);
+    assert_eq!(sent, vec![3, 8], "the queue places of the columns sent");
+    let mut columns = Vec::new();
+    for payload in &payloads {
+        let mut r = Reader::new(payload);
+        let id = r.varint().unwrap();
+        let Ok(C::CustomPayload(p)) = C::decode(id, r.rest()) else {
+            panic!("not a custom payload");
+        };
+        let Message::Run { level, packets } = Message::decode(&p.data).unwrap() else {
+            panic!("not a run");
+        };
+        assert_eq!(level, NETHER_INDEX);
+        for (id, body) in packets {
+            let Ok(C::LevelChunkWithLight(c)) = C::decode(id, body) else {
+                panic!("not a chunk");
+            };
+            columns.push((c.x, c.z));
+        }
+    }
+    assert_eq!(columns, vec![(0, 0), (1, 0)]);
+    let (payloads, sent) = batch_runs(NETHER_INDEX, &[(0, ())], &[oversized.data]);
+    assert!(payloads.is_empty() && sent.is_empty(), "no empty batch");
 }

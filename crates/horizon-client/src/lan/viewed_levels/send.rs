@@ -38,9 +38,10 @@ impl Runs {
             payloads: Vec::new(),
         }
     }
-    /// Adds a play clientbound packet as `Clientbound::encode` writes it. One too large to wrap
-    /// at all is not sent, and logged once.
-    pub(crate) fn push(&mut self, packet: &[u8]) {
+    /// Adds a play clientbound packet as `Clientbound::encode` writes it, and says whether it
+    /// will be sent. One too large to wrap at all, or that the codec refuses, is not; the first
+    /// is logged once.
+    pub(crate) fn push(&mut self, packet: &[u8]) -> bool {
         let entry = packet.len() + 5;
         if RUN_HEAD + entry > MAX_RUN {
             static LOGGED: AtomicBool = AtomicBool::new(false);
@@ -50,20 +51,27 @@ impl Runs {
                     packet.len()
                 );
             }
-            return;
+            return false;
         }
         if let Some((run, len)) = self.run.as_mut()
             && *len + entry <= MAX_RUN
         {
-            if run.push(packet).is_ok() {
+            let pushed = run.push(packet).is_ok();
+            if pushed {
                 *len += entry;
             }
-            return;
+            return pushed;
         }
         self.flush();
         match Run::new(self.level, packet) {
-            Ok(run) => self.run = Some((run, RUN_HEAD + entry)),
-            Err(e) => log::warn!("[lan] not sent in a viewed level: {e}"),
+            Ok(run) => {
+                self.run = Some((run, RUN_HEAD + entry));
+                true
+            }
+            Err(e) => {
+                log::warn!("[lan] not sent in a viewed level: {e}");
+                false
+            }
         }
     }
     fn flush(&mut self) {
@@ -79,9 +87,11 @@ impl Runs {
 }
 
 /// `ChunkStatus.LIGHT` needs its neighbours at `INITIALIZE_LIGHT`: a column whose light layers
-/// would leave one out waits for it (as `Hub::next_batch`).
+/// would leave one out waits for it (as `Hub::next_batch`). So does one still waiting for its
+/// postprocessing, which vanilla runs before a chunk is sent (`ChunkMap.prepareTickingChunk`).
 fn ready(world: &World, streaming: Option<&Streaming>, c: &Chunk) -> bool {
     c.lit
+        && c.postprocess.is_empty()
         && streaming.is_none_or(|streaming| {
             (-1..=1).all(|dz| {
                 (-1..=1).all(|dx| {
@@ -90,6 +100,24 @@ fn ready(world: &World, streaming: Option<&Streaming>, c: &Chunk) -> bool {
                 })
             })
         })
+}
+
+/// A batch's columns of `level` in runs: `taken`'s queue places and `bodies`, their encoded
+/// packets, in order. Only the columns the runs took come back, so only they are counted in the
+/// batch, taken out of the queue and recorded as sent; one too large stays queued.
+pub(crate) fn batch_runs<T>(
+    level: i32,
+    taken: &[(usize, T)],
+    bodies: &[Vec<u8>],
+) -> (Vec<Vec<u8>>, Vec<usize>) {
+    let mut runs = Runs::new(level);
+    let sent = taken
+        .iter()
+        .zip(bodies)
+        .filter(|(_, body)| runs.push(body))
+        .map(|((idx, _), _)| *idx)
+        .collect();
+    (runs.finish(), sent)
 }
 
 impl Hub {
@@ -233,17 +261,16 @@ impl Hub {
         let bodies = self.encoder.bodies_with(&chunks, world, &|x, z| {
             streaming.and_then(|s| s.proto_sections(x, z))
         });
-        let mut runs = Runs::new(view.level);
-        for body in &bodies {
-            runs.push(body);
+        let (payloads, taken) = batch_runs(view.level, &taken, &bodies);
+        if taken.is_empty() {
+            return;
         }
         let dimension = self.config.dimension.clone();
         let size = taken.len();
-        let taken: Vec<usize> = taken.into_iter().map(|(idx, _)| idx).collect();
         self.guests.update(i, |g| {
             g.batch_quota -= size as f32;
             g.send(&C::ChunkBatchStart(Empty));
-            g.sender.send_many(runs.finish());
+            g.sender.send_many(payloads);
             g.send(&C::ChunkBatchFinished(play::ChunkBatchFinished {
                 size: size as i32,
             }));

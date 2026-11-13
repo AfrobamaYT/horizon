@@ -3,8 +3,9 @@
 //!
 //! After the ticked levels, `tick_server` runs a pass for each such level: it enters the level,
 //! rebuilds `Streaming.extra` (`lan_update_streaming`, where the areas are added: no `tick_lan`
-//! runs here to call it), collects the finished columns (`update_world`), then runs only the hub's
-//! viewed-level sending. Nothing ticks there: no block, fluid, scheduled or random ticks, no
+//! runs here to call it), collects the finished columns (`update_world`), postprocesses them as
+//! vanilla does before a chunk is sent (`postprocess_chunks`: what it schedules waits for a tick),
+//! then runs only the hub's viewed-level sending. Nothing ticks there: no block, fluid, scheduled or random ticks, no
 //! entities, no weather cycle, no level tick hooks and no player work. Its time is the server's,
 //! as in 26.3, where no level but the Overworld runs a clock of its own: `enter_level` gives it
 //! the clocks as they are, and its viewers get its game time every 20 ticks. A level whose last
@@ -45,6 +46,9 @@ impl Game<'_> {
             self.update_dedicated_streaming();
             self.lan_update_streaming();
             self.update_world();
+            // `LevelChunk.postProcessGeneration` comes before a chunk is sent
+            // (`ChunkMap.prepareTickingChunk`, then `onChunkReadyToSend`), ticked or not.
+            self.postprocess_chunks()?;
             self.view_pass_send();
         }
         Ok(())
@@ -295,8 +299,8 @@ mod tests {
         (game, rx, all)
     }
 
-    /// The view pass generates and sends a `Loaded` area's chunks in a level nobody is in, keeps
-    /// them loaded across ticks (`lan_update_streaming`'s rebuild keeps the area), never ticks
+    /// The view pass generates, postprocesses and sends a `Loaded` area's chunks in a level nobody
+    /// is in, keeps them loaded across ticks (`lan_update_streaming`'s rebuild keeps the area), never ticks
     /// the level, and sends its game time, the server's, every 20 ticks.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
@@ -314,6 +318,12 @@ mod tests {
         assert!(
             square().iter().all(|c| world.chunks.contains_key(c)),
             "still loaded"
+        );
+        assert!(
+            square()
+                .iter()
+                .all(|c| world.chunks[c].postprocess.is_empty()),
+            "postprocessed by the view pass"
         );
         assert_eq!(world.game_time, game.world.game_time);
         let times = all.times;
