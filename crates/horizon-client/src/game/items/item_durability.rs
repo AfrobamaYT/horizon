@@ -106,6 +106,16 @@ impl Game<'_> {
     ) {
         self.hurt_equipment(source, damage, &[3, 2, 1, 0]);
     }
+
+    /// `Player.hurtHelmet`: the head slot alone wears.
+    pub(in crate::game) fn hurt_helmet(
+        &mut self,
+        source: &horizon_client::health::HurtSource<'_>,
+        damage: f32,
+    ) {
+        self.hurt_equipment(source, damage, &[0]);
+    }
+
     /// `LivingEntity.doHurtEquipment` of the `slots` of `armor`: each worn piece that
     /// wears when its wearer is hurt loses max(1, damage / 4) durability, except
     /// to a fire source when the piece resists fire (`ItemStack.canBeHurtBy`).
