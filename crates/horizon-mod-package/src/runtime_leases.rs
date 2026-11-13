@@ -394,7 +394,7 @@ pub(crate) fn isolated_test() -> bool {
     let test = std::thread::current().name().unwrap().to_owned();
     assert!(
         std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", &test, "--nocapture"])
+            .args(["--include-ignored", "--exact", &test, "--nocapture"])
             .env("RUNTIME_LEASE_TEST_ISOLATED", "1")
             .status()
             .unwrap()

@@ -7261,6 +7261,7 @@ mod tests {
             for mode in ["accepted", "revoked"] {
                 let output = std::process::Command::new(std::env::current_exe().unwrap())
                     .args([
+                        "--include-ignored",
                         "--exact",
                         "save::tests::native_saved_ids_must_match_the_declared_block_membership",
                         "--nocapture",

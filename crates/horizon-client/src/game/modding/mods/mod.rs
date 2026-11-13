@@ -1966,7 +1966,7 @@ mod tests {
         std::fs::create_dir_all(&cwd).unwrap();
         let status = std::process::Command::new(std::env::current_exe().unwrap())
             .current_dir(&cwd)
-            .args(["--exact", test, "--nocapture"])
+            .args(["--include-ignored", "--exact", test, "--nocapture"])
             .env(mode, "1")
             .status()
             .unwrap();
@@ -2754,7 +2754,7 @@ mod tests {
             for mode in ["compiled", "vanilla"] {
                 let status = std::process::Command::new(std::env::current_exe().unwrap())
                     .current_dir(std::env::temp_dir())
-                    .args(["--exact", "game::mods::tests::native_content_follows_the_build_and_misplaced_content_follows_its_selection", "--nocapture"])
+                    .args(["--include-ignored", "--exact", "game::mods::tests::native_content_follows_the_build_and_misplaced_content_follows_its_selection", "--nocapture"])
                     .env(MODE, mode).status().unwrap();
                 assert!(status.success());
             }

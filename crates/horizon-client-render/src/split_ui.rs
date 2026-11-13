@@ -1576,6 +1576,7 @@ mod tests {
             let module = module_path!().split_once("::").unwrap().1;
             let output = std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
+                    "--include-ignored",
                     "--exact",
                     &format!("{module}::locale_switch_and_pack_overrides_keep_the_same_draft"),
                     "--nocapture",

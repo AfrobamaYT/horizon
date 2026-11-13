@@ -625,6 +625,7 @@ mod tests {
         if std::env::var_os(CHILD).is_none() {
             let output = std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
+                    "--include-ignored",
                     "--exact",
                     "block_entity_item::tests::a_mod_block_entity_rides_its_item",
                     "--nocapture",

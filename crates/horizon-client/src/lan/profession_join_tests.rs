@@ -5,6 +5,7 @@ fn profession_mod_missing_refused_before_pairing() {
     if std::env::var_os(CHILD).is_none() {
         let result = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
+                "--include-ignored",
                 "--exact",
                 "lan::conn::tests::profession_mod_missing_refused_before_pairing",
                 "--nocapture",

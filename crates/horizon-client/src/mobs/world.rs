@@ -1073,7 +1073,7 @@ mod missing_data_report_tests {
         .unwrap()
         .1;
         let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", test]) // Deliberately keep libtest's default capture.
+            .args(["--include-ignored", "--exact", test]) // Deliberately keep libtest's default capture.
             .env(CHILD, "1")
             .output()
             .unwrap();

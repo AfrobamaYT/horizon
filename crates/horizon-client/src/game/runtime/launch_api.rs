@@ -284,6 +284,7 @@ mod tests {
         std::fs::write(&file, b"unconsumed session sentinel").unwrap();
         let result = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
+                "--include-ignored",
                 "--exact",
                 "game::launch_api::tests::developer_offline_never_consumes_inherited_sessions",
                 "--nocapture",

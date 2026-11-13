@@ -167,6 +167,7 @@ mod tests {
         if std::env::var_os("HORIZON_CAPTURE_FD_TEST").is_none() {
             let status = std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
+                    "--include-ignored",
                     "--exact",
                     "output::stdio::tests::saved_copy_never_uses_stdio_or_inherits",
                     "--nocapture",

@@ -18,6 +18,7 @@ fn modprofile_state_and_report_side_effects() {
         assert!(
             std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
+                    "--include-ignored",
                     "--exact",
                     "game::commands::modprofile::tests::modprofile_state_and_report_side_effects"
                 ])

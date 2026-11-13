@@ -93,6 +93,7 @@ fn processes_serialize_the_entire_manifest_transaction() {
     let guard = lock_home(&home).unwrap();
     let mut child = Command::new(std::env::current_exe().unwrap())
         .args([
+            "--include-ignored",
             "--exact",
             "install_lock::tests::process_probe",
             "--nocapture",

@@ -901,6 +901,7 @@ mod tests {
             assert!(
                 std::process::Command::new(std::env::current_exe().unwrap())
                     .args([
+                        "--include-ignored",
                         "--exact",
                         "item::tests::block_entity_data_takes_a_type_a_mod_declared",
                         "--nocapture"

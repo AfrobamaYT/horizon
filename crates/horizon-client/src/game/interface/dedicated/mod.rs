@@ -2927,6 +2927,7 @@ mod tests {
             fs::create_dir(&home).unwrap();
             let mut child = Command::new(std::env::current_exe().unwrap())
                 .args([
+                    "--include-ignored",
                     "--exact",
                     "game::dedicated::tests::console_logging_survives_closed_stdout",
                     "--nocapture",

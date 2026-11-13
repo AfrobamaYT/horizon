@@ -9,7 +9,7 @@ fn isolated() -> bool {
     let test = std::thread::current().name().unwrap().to_owned();
     assert!(
         Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", &test, "--nocapture"])
+            .args(["--include-ignored", "--exact", &test, "--nocapture"])
             .env("RECORD_GC_ISOLATED", "1")
             .status()
             .unwrap()
@@ -121,7 +121,7 @@ fn collection_with_closed_stdio() {
     }
     let (root, path) = fixture();
     let status = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "holder::record::gc::tests::closed_stdio_actor"])
+        .args(["--include-ignored", "--exact", "holder::record::gc::tests::closed_stdio_actor"])
         .env("RECORD_GC_CLOSED_ROOT", root.path())
         .status()
         .unwrap();
@@ -153,6 +153,7 @@ fn final_process_exit_authorizes_collection() {
     let spawn = || {
         let mut child = Command::new(std::env::current_exe().unwrap())
             .args([
+                "--include-ignored",
                 "--exact",
                 "holder::record::gc::tests::independent_owner_actor",
                 "--nocapture",

@@ -121,7 +121,7 @@ fn every_fresh_lease_and_retained_metadata_fd_survives_closed_stdio() {
     }
     for mask in 1..8 {
         assert!(Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "holder::entry_tests::every_fresh_lease_and_retained_metadata_fd_survives_closed_stdio"])
+            .args(["--include-ignored", "--exact", "holder::entry_tests::every_fresh_lease_and_retained_metadata_fd_survives_closed_stdio"])
             .env(MASK, mask.to_string()).status().unwrap().success());
     }
 }
