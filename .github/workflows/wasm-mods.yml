@@ -12,8 +12,10 @@ permissions:
 # with a manual dispatch on a suspect commit (through a branch pointing at it) when needed. Dispatches
 # queue in their own group per ref and never displace main's runs.
 concurrency:
-  group: wasm-mods-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: false
+  # Main: each push runs at once, beside any other. Elsewhere a newer dispatch on the same branch
+  # replaces the one before, which checked a superseded head.
+  group: wasm-mods-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   fixture:
     runs-on: dyna-large
@@ -61,6 +63,11 @@ jobs:
           toolchain: ${{ steps.rust.outputs.version }}
           components: rust-src, rustfmt
           targets: wasm32-unknown-unknown
+      # Every job that builds in this runner's persistent target keeps its source snapshot true: a
+      # build of another tree without it left artifacts that a later job judged fresh (stale generated
+      # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
+      - name: Restore unchanged source timestamps
+        run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
       - name: Check fieldless Wire layout coverage and hashes
         shell: bash
         run: |
@@ -150,6 +157,7 @@ jobs:
             game::native_hooks::math::tests::compiled_wasm_math_profile_import_matches_actual_game_host \
             game::payload_transport::wasm_tests::compiled_guest_runs_in_actual_game_roots \
             game::payload_transport::wasm_config_tests::compiled_guest_runs_on_configuration_connection_thread \
+            game::block_entity_tick_reply_tests::native_and_compiled_wasm_tick_reply_matrix \
             game::remote::interaction_event_tests::interaction_event_wasm_tests::wasm_interaction_shared_matrix \
             game::remote::movement_input_tests::wasm_movement_input_keys_axes_and_sprint \
             game::native_hooks::runtime_environment::tests::native_and_wasm_process_environment_in_registration_and_game_hosts; do

@@ -215,6 +215,9 @@ impl LevelAccess for GameLevel<'_> {
         }
         !cancel
     }
+    fn has_water_ticket(&self, pos: BlockPos) -> bool {
+        self.world.water_tickets.contains([pos.x, pos.y, pos.z])
+    }
     fn allow_moisture_change(&self, pos: BlockPos, from: i32, to: i32) -> bool {
         let mut cancel = false;
         if self.native_authoritative {
