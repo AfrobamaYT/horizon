@@ -318,12 +318,12 @@ impl Game<'_> {
             return;
         }
         let menu = host
-            .play
+            .menus
             .get_mut(&conn)
             .and_then(|p| p.crafting.inventory.take());
         if let Some(mut menu) = menu {
             menu.set_slot(&self.menu_env(), 0, result);
-            if let Some(play) = self.lan.as_mut().and_then(|host| host.play.get_mut(&conn)) {
+            if let Some(play) = self.lan.as_mut().and_then(|host| host.menus.get_mut(&conn)) {
                 *play.crafting.inventory = Some(menu);
             }
         }
@@ -344,7 +344,7 @@ impl Game<'_> {
         if host.hub.guests[gi].spectator() {
             return true;
         }
-        let crafting = host.play.entry(conn).or_default();
+        let crafting = host.menus.entry(conn).or_default();
         let mut menu = crafting
             .crafting
             .inventory
@@ -383,7 +383,7 @@ impl Game<'_> {
             }
             g.craft_result = menu.slot(0).cloned();
         });
-        *host.play.entry(conn).or_default().crafting.inventory = Some(menu);
+        *host.menus.entry(conn).or_default().crafting.inventory = Some(menu);
         host.hub.inventory_clicked(conn, p, &self.world, &changed);
         true
     }
@@ -462,7 +462,7 @@ impl Game<'_> {
             return true;
         }
         let mut menu = host
-            .play
+            .menus
             .entry(conn)
             .or_default()
             .crafting
@@ -596,7 +596,7 @@ impl Game<'_> {
             changed.push(slot);
         }
         if let Some(host) = self.lan.as_mut() {
-            *host.play.entry(conn).or_default().crafting.machine = Some((p.container, menu));
+            *host.menus.entry(conn).or_default().crafting.machine = Some((p.container, menu));
             host.hub.inventory_clicked(conn, p, &self.world, &changed);
         }
         true
@@ -717,7 +717,7 @@ impl Game<'_> {
                 .lan
                 .as_mut()
                 .unwrap()
-                .play
+                .menus
                 .entry(conn)
                 .or_default()
                 .crafting
@@ -745,7 +745,7 @@ impl Game<'_> {
                 .lan
                 .as_mut()
                 .unwrap()
-                .play
+                .menus
                 .entry(conn)
                 .or_default()
                 .crafting
@@ -906,7 +906,7 @@ impl Game<'_> {
             menu
         } else {
             let host = self.lan.as_ref()?;
-            let (_, _, table, _) = (host.play.get(&conn)?.crafting.table.as_ref())
+            let (_, _, table, _) = (host.menus.get(&conn)?.crafting.table.as_ref())
                 .filter(|(window, ..)| *window == container)?;
             let mut menu = Menu::clone(table);
             load_player(&mut menu, &host.hub.guests[gi]);
@@ -937,7 +937,7 @@ impl Game<'_> {
         let conn = self.lan.as_ref()?.hub.guests[gi].conn;
         let host = self.lan.as_mut()?;
         let placed = if container == 0 {
-            let crafting = host.play.entry(conn).or_default();
+            let crafting = host.menus.entry(conn).or_default();
             let mut menu = crafting
                 .crafting
                 .inventory
@@ -957,17 +957,17 @@ impl Game<'_> {
                 }
                 g.craft_result = menu.slot(0).cloned();
             });
-            *host.play.entry(conn).or_default().crafting.inventory = Some(menu);
+            *host.menus.entry(conn).or_default().crafting.inventory = Some(menu);
             host.hub.send_inventory(gi);
             placed
         } else {
             let (window, state, mut menu, pos) = host
-                .play
+                .menus
                 .get_mut(&conn)
                 .and_then(|play| play.crafting.table.take_if(|(w, ..)| *w == container))?;
             let placed = self.guest_menu_op(gi, &mut menu, apply)?;
             let host = self.lan.as_mut()?;
-            *host.play.entry(conn).or_default().crafting.table = Some((window, state, menu, pos));
+            *host.menus.entry(conn).or_default().crafting.table = Some((window, state, menu, pos));
             self.lan_send_table_content(conn);
             placed
         };
@@ -990,7 +990,7 @@ impl Game<'_> {
         };
         let mut menu = Box::new(Menu::new(Kind::Crafting));
         menu.set_registry_id(Some("minecraft:crafting"));
-        *host.play.entry(conn).or_default().crafting.table = Some((window, 0, menu, pos));
+        *host.menus.entry(conn).or_default().crafting.table = Some((window, 0, menu, pos));
         self.lan_send_table_content(conn);
     }
 
@@ -999,7 +999,7 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return false;
         };
-        let Some(play) = host.play.get_mut(&conn) else {
+        let Some(play) = host.menus.get_mut(&conn) else {
             return false;
         };
         let Some((window, state, mut menu, pos)) = play
@@ -1068,7 +1068,7 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return true;
         };
-        *host.play.entry(conn).or_default().crafting.table = Some((window, state, menu, pos));
+        *host.menus.entry(conn).or_default().crafting.table = Some((window, state, menu, pos));
         if !agreed {
             self.lan_send_table_content(conn);
         }
@@ -1126,7 +1126,7 @@ impl Game<'_> {
         let conn = host.hub.guests[gi].conn;
         let kind = Kind::Mod(t);
         let mut menu = host
-            .play
+            .menus
             .entry(conn)
             .or_default()
             .crafting
@@ -1175,7 +1175,7 @@ impl Game<'_> {
         *self
             .lan
             .as_mut()?
-            .play
+            .menus
             .entry(conn)
             .or_default()
             .crafting
@@ -1362,7 +1362,7 @@ impl Game<'_> {
             return;
         };
         let invalid: Vec<(u32, i32)> = host
-            .play
+            .menus
             .iter()
             .filter_map(|(c, p)| p.crafting.table.as_ref().map(|t| (*c, t.0, t.3)))
             .filter(|&(c, _, pos)| {
@@ -1398,7 +1398,7 @@ impl Game<'_> {
             return;
         };
         let Some((window, state, menu, _)) = host
-            .play
+            .menus
             .get_mut(&conn)
             .and_then(|p| p.crafting.table.as_mut())
         else {
@@ -1434,7 +1434,7 @@ impl Game<'_> {
         let (_, _, menu, _) = self
             .lan
             .as_ref()?
-            .play
+            .menus
             .get(&conn)?
             .crafting
             .table
@@ -1459,7 +1459,7 @@ impl Game<'_> {
         let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
             return false;
         };
-        let crafting = &mut host.play.entry(conn).or_default().crafting;
+        let crafting = &mut host.menus.entry(conn).or_default().crafting;
         let grid: Vec<ItemStack> = if window == Some(0) {
             *crafting.inventory = None;
             host.hub.guests.update(gi, |g| {
@@ -1499,7 +1499,7 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        let play = host.play.get_mut(&g.conn);
+        let play = host.menus.get_mut(&g.conn);
         let mut grid: Vec<ItemStack> = g.craft_grid.iter_mut().filter_map(Option::take).collect();
         g.craft_result = None;
         if let Some(play) = play {
@@ -1653,7 +1653,7 @@ mod machine_recipe_placement_tests {
                 game.lan
                     .as_ref()
                     .unwrap()
-                    .play
+                    .menus
                     .get(&2)
                     .and_then(|p| p.crafting.table.as_ref())
                     .map(|(window, ..)| *window)
@@ -1709,7 +1709,7 @@ mod machine_recipe_placement_tests {
             assert!(game.run_command("setblock 10 200 8 crafting_table"));
             let window = open(game, [10, 200, 8]);
             place(game, window, planks);
-            let (_, _, table, _) = game.lan.as_ref().unwrap().play[&2]
+            let (_, _, table, _) = game.lan.as_ref().unwrap().menus[&2]
                 .crafting
                 .table
                 .as_ref()
@@ -1852,7 +1852,7 @@ mod recipe_check_tests {
             g.craft_grid,
             g.carried,
             g.menu.as_ref().map(|m| (&m.sent, m.state, &m.craft)),
-            host.play
+            host.menus
                 .get(&2)
                 .is_some_and(|p| p.crafting.machine.is_some()),
             changed,
