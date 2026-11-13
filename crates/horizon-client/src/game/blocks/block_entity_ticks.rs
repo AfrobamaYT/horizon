@@ -16,6 +16,16 @@ use horizon_client::{
 use horizon_core::position::BlockPos;
 use horizon_world::registry::BlockStateId;
 
+/// Shared decision for a borrowed position read and an owned tick-phase snapshot.
+fn block_ticking_at(
+    levels: &horizon_client::ticket_levels::Levels,
+    pending: &horizon_client::fast_hash::FxHashSet<(i32, i32)>,
+    x: i32,
+    z: i32,
+) -> bool {
+    levels.block_ticking_at(x, z) && !pending.contains(&(x >> 4, z >> 4))
+}
+
 /// What `block_entities.tick` is visiting: the kinds its dispatch ticks, read once per entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TickedKind {
@@ -285,6 +295,28 @@ impl Drop for Enclosing<'_, '_> {
     }
 }
 
+/// The block entity type a sample is attributed to while its ticker runs.
+fn ticker_name(entity: &BlockEntity) -> &'static str {
+    match entity {
+        BlockEntity::Chest(_) => "hopper",
+        BlockEntity::Crafter(_) => "crafter",
+        BlockEntity::Jukebox(_) => "jukebox",
+        BlockEntity::Beacon(_) => "beacon",
+        BlockEntity::CreakingHeart(_) => "creaking_heart",
+        BlockEntity::Spawner(_) => "mob_spawner",
+        BlockEntity::TrialSpawner(_) => "trial_spawner",
+        BlockEntity::Vault(_) => "vault",
+        BlockEntity::Beehive(_) => "beehive",
+        BlockEntity::Furnace(_) => "furnace",
+        BlockEntity::Brewing(_) => "brewing_stand",
+        BlockEntity::DaylightDetector => "daylight_detector",
+        BlockEntity::Campfire(_) => "campfire",
+        BlockEntity::Mod(_) => "mod_block_entity",
+        BlockEntity::PotentSulfur(_) => "potent_sulfur",
+        _ => "block_entity",
+    }
+}
+
 impl Game<'_> {
     /// The published loop `block_entities.tick` (`published_loops.rs`): with no
     /// `[[native.loop]]` mod its slot is `()`, and a mod build installs its own copy of this
@@ -399,6 +431,10 @@ impl Game<'_> {
             {
                 continue;
             }
+            horizon_threads::work::set_chunk(chunk.0, chunk.1);
+            horizon_threads::work::set_entity(horizon_threads::work::entity_id(
+                this.world.block_entities.get(&pos).map_or("", ticker_name),
+            ));
             match kind {
                 TickedKind::Hopper => this.tick_hopper(pos),
                 TickedKind::Crafter => this.tick_crafter(pos),
@@ -437,6 +473,7 @@ impl Game<'_> {
                 mod_type,
             });
         }
+        horizon_threads::work::clear_work();
         // Items move between passes: the columns hold for this one only.
         this.item_columns = None;
         this.pass_mobs = None;
@@ -573,14 +610,12 @@ impl Game<'_> {
     /// (`ServerLevel.areEntitiesLoaded`).
     pub(super) fn block_ticking_area(&self) -> impl Fn(i32, i32) -> bool + use<> {
         let levels = self.tickets.levels();
-        let has_pending = !self.world.entities_pending.is_empty();
-        let pending = has_pending.then(|| self.world.entities_pending.clone());
-        move |x, z| {
-            levels.block_ticking_at(x, z)
-                && pending
-                    .as_ref()
-                    .is_none_or(|p| !p.contains(&(x >> 4, z >> 4)))
-        }
+        let pending = self.world.entities_pending.clone();
+        move |x, z| block_ticking_at(&levels, &pending, x, z)
+    }
+    /// Single-position read without copying the pending-entity set.
+    pub(super) fn block_ticking_at(&self, x: i32, z: i32) -> bool {
+        block_ticking_at(&self.tickets.levels(), &self.world.entities_pending, x, z)
     }
     /// `DaylightDetectorBlock.tickEntity` of the detector at `pos`.
     fn tick_daylight_detector(&mut self, pos: Pos) {
