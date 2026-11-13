@@ -288,12 +288,21 @@ impl Game<'_> {
             (&sources, &recipes),
         );
         self.prepare_professions(root, &items, &mut stations)?;
+        // The world's loaded datapack registries are a mod-declared registry's
+        // authority for the data maps' id checks, as the command ids are for
+        // the registries they list.
+        let datapack_set = if self.is_logical_server() {
+            self.mods.datapack_registries.clone()
+        } else {
+            horizon_client::datapack_net::received()
+        };
         let registries = native_data_maps::WorldRegistries::new(
             self.ui
                 .registries
                 .by_registry
                 .iter()
                 .map(|(registry, entries)| (registry.as_str(), entries.ids.as_slice())),
+            datapack_set.as_deref(),
             &items,
             root,
             &overlay,

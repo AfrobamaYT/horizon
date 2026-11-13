@@ -56,52 +56,83 @@ pub(crate) trait MapRegistries {
 
 /// A world's registries while its server tables build: every registry's ids
 /// as the command registries hold them (built in, the packs' and content
-/// mods'), the loaded item and block tags, and another registry's tags read
-/// from the same packs on first use.
+/// mods'), the world's loaded datapack registries (the authority for a
+/// mod-declared one the command ids do not list), the loaded item and block
+/// tags, and another registry's tags read from the same packs on first use.
 pub(crate) struct WorldRegistries<'a> {
     ids: BTreeMap<&'a str, &'a [String]>,
+    datapack: Option<&'a mod_api::DatapackRegistrySet>,
     item_tags: &'a HashMap<String, HashSet<String>>,
     block_tags: &'a HashMap<String, HashSet<String>>,
     root: &'a std::path::Path,
     overlay: &'a horizon_world::loot::PackOverlay<'a>,
     id_sets: RefCell<HashMap<String, HashSet<String>>>,
+    datapack_ids: RefCell<HashMap<String, HashSet<String>>>,
     tags: RefCell<HashMap<String, HashMap<String, HashSet<String>>>>,
 }
 impl<'a> WorldRegistries<'a> {
     pub(crate) fn new(
         ids: impl IntoIterator<Item = (&'a str, &'a [String])>,
+        datapack: Option<&'a mod_api::DatapackRegistrySet>,
         items: &'a horizon_client::items::Items,
         root: &'a std::path::Path,
         overlay: &'a horizon_world::loot::PackOverlay<'a>,
     ) -> Self {
         Self {
             ids: ids.into_iter().collect(),
+            datapack,
             item_tags: &items.item_tags,
             block_tags: &items.block_tags,
             root,
             overlay,
             id_sets: RefCell::default(),
+            datapack_ids: RefCell::default(),
             tags: RefCell::default(),
         }
+    }
+    /// Whether a mod's declaration names `registry`.
+    fn declared(&self, registry: &str) -> bool {
+        mod_api::__private::datapack_registry_declarations()
+            .iter()
+            .any(|declaration| declaration.key == registry)
+    }
+    /// The loaded entries of a mod-declared datapack registry, read once.
+    fn datapack_entries(&self, registry: &str) -> Option<HashSet<String>> {
+        let mut sets = self.datapack_ids.borrow_mut();
+        Some(
+            sets.entry(registry.to_owned())
+                .or_insert_with(|| {
+                    self.datapack
+                        .and_then(|set| set.entries(registry).ok())
+                        .map(|entries| entries.into_iter().map(String::from).collect())
+                        .unwrap_or_default()
+                })
+                .clone(),
+        )
     }
 }
 impl MapRegistries for WorldRegistries<'_> {
     fn known(&self, registry: &str) -> bool {
-        self.ids.contains_key(registry)
-            || TYPED.contains(&registry)
-            || mod_api::__private::datapack_registry_declarations()
-                .iter()
-                .any(|declaration| declaration.key == registry)
+        self.ids.contains_key(registry) || TYPED.contains(&registry) || self.declared(registry)
     }
     fn contains(&self, registry: &str, entry: &str) -> bool {
-        let Some(ids) = self.ids.get(registry).filter(|ids| !ids.is_empty()) else {
-            return true;
-        };
-        let mut sets = self.id_sets.borrow_mut();
-        let set = sets
-            .entry(registry.to_owned())
-            .or_insert_with(|| ids.iter().cloned().collect());
-        set.contains(entry)
+        if let Some(ids) = self.ids.get(registry).filter(|ids| !ids.is_empty()) {
+            let mut sets = self.id_sets.borrow_mut();
+            let set = sets
+                .entry(registry.to_owned())
+                .or_insert_with(|| ids.iter().cloned().collect());
+            return set.contains(entry);
+        }
+        // A mod-declared datapack registry the command ids do not list: the
+        // world's loaded entries are the authority, and an id not held is
+        // refused (#3357's unknown-id rejection).
+        if self.declared(registry) {
+            return self
+                .datapack_entries(registry)
+                .is_some_and(|set| set.contains(entry));
+        }
+        // A typed registry the sync did not list: no source says its entries.
+        true
     }
     fn tag(&self, registry: &str, tag: &str) -> Vec<String> {
         let members = |tags: &HashMap<String, HashSet<String>>| -> Vec<String> {
@@ -188,7 +219,20 @@ fn apply_file(
     // The members of a tag or the entry itself, if the registry holds it.
     let mut members = |key: &str| -> Vec<String> {
         match key.strip_prefix('#') {
-            Some(tag) => registries.tag(registry, &full_id(tag)),
+            // A tag's members go through the same membership check the entry
+            // does: a tag naming an id the registry doesn't hold publishes
+            // nothing for it.
+            Some(tag) => registries
+                .tag(registry, &full_id(tag))
+                .into_iter()
+                .filter(|member| {
+                    let held = registries.contains(registry, member);
+                    if !held {
+                        unknown.insert(member.clone());
+                    }
+                    held
+                })
+                .collect(),
             None if registries.contains(registry, &full_id(key)) => vec![full_id(key)],
             None => {
                 unknown.insert(full_id(key));
@@ -563,10 +607,12 @@ mod tests {
 
     #[test]
     fn a_map_on_any_registry_resolves_ids_tags_and_lists_whole() {
+        // `minecraft:ghost` is not in the fixture's entity types: a tag naming
+        // an id the registry doesn't hold publishes nothing for it.
         let registries = Fixture::with(&[(
             "minecraft:entity_type",
             "minecraft:skeletons",
-            &["minecraft:skeleton", "minecraft:stray"],
+            &["minecraft:skeleton", "minecraft:stray", "minecraft:ghost"],
         )]);
         let f = files(&[(
             "data_maps/test:entity_type/weight",
@@ -590,6 +636,8 @@ mod tests {
         assert_eq!(value("minecraft:cow"), Ok(None));
         // An id the registry doesn't hold is skipped.
         assert_eq!(value("minecraft:missing"), Ok(None));
+        // A tag member the registry doesn't hold is skipped with the plain ids.
+        assert_eq!(value("minecraft:ghost"), Ok(None));
         assert_eq!(
             maps.entries("minecraft:entity_type", "test:weight"),
             Ok(vec![
@@ -599,6 +647,45 @@ mod tests {
             ])
         );
         assert_eq!(maps.registries(), ["minecraft:entity_type"]);
+    }
+
+    /// A mod-declared datapack registry the command ids do not list is checked
+    /// against the world's loaded entries; a registry with no source of ids
+    /// still accepts an entry, as before.
+    #[test]
+    fn a_declared_datapack_registry_rejects_unknown_ids() {
+        // The declaration the process reads, as a registering mod's would be.
+        mod_api::__private::install_process_datapack_registry_declarations(vec![
+            mod_api::DatapackRegistryDeclaration {
+                mod_id: "example".into(),
+                key: "example:spell".into(),
+                fields: vec![mod_api::DatapackField::required(
+                    "power",
+                    mod_api::DatapackFieldKind::Int { min: 0, max: 100 },
+                )],
+                sync: mod_api::DatapackRegistrySync::Required,
+            },
+        ]);
+        let set = mod_api::DatapackRegistrySet::with_entries_for_testing(
+            "example:spell",
+            &["example:fire"],
+        );
+        let items = horizon_client::items::Items::empty();
+        let registries = WorldRegistries::new(
+            [],
+            Some(&set),
+            &items,
+            std::path::Path::new("unused"),
+            &horizon_world::loot::PackOverlay::NONE,
+        );
+        assert!(
+            !registries.contains("example:spell", "example:ice"),
+            "an id the world never loaded is refused"
+        );
+        assert!(registries.contains("example:spell", "example:fire"));
+        // No source of ids, no refusal: a typed registry the sync did not
+        // list (the ids branch above covers the listed ones).
+        assert!(registries.contains("minecraft:some_typed", "whatever"));
     }
 
     #[test]
