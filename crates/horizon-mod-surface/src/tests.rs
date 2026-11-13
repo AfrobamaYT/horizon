@@ -463,6 +463,9 @@ fn a_structs_field_set_is_its_fields_hash_not_its_own_hash() {
         .map(|b| format!("{b:02x}"))
         .collect();
     assert_eq!(before.fields_hash.as_deref(), Some(expected.as_str()));
+    // A literal names fields in any order: moving one changes nothing.
+    let moved = plain_struct(&[("sky", "bool"), ("height", "i32")]);
+    assert_eq!(moved.fields_hash, after.fields_hash);
     // Its trait impls are a set beside the hash.
     let mut with_impl = plain_struct(&[("height", "i32")]);
     with_impl.impls = vec!["Hash".into()];

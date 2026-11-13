@@ -262,7 +262,9 @@ fn mentions(ty: &str, name: &str) -> bool {
         .any(|word| word == name)
 }
 
-/// The hash of a struct's field set: each public field's `name: type` in declaration order.
+/// The hash of a struct's field set: each public field's `name: type`, sorted. A literal or a
+/// pattern names fields in any order, so moving a field changes nothing; a tuple struct's
+/// field names are its positions, so moving one of its fields still changes the set.
 pub fn fields_hash(fields: &[Field]) -> String {
     fields_hash_of(
         fields
@@ -274,14 +276,12 @@ pub fn fields_hash(fields: &[Field]) -> String {
 /// [`fields_hash`] of `(name, type)` pairs: the exporter's, over every public field a literal
 /// must name, `#[doc(hidden)]` ones included.
 pub fn fields_hash_of<'a>(fields: impl IntoIterator<Item = (&'a str, &'a str)>) -> String {
-    let mut text = String::new();
-    for (name, ty) in fields {
-        text.push_str(name);
-        text.push_str(": ");
-        text.push_str(ty);
-        text.push('\n');
-    }
-    shape::digest(&text)
+    let mut lines: Vec<String> = fields
+        .into_iter()
+        .map(|(name, ty)| format!("{name}: {ty}\n"))
+        .collect();
+    lines.sort();
+    shape::digest(&lines.concat())
 }
 
 impl Trait {
