@@ -211,33 +211,40 @@ impl Ingredient {
         // A mod's own kind: `resolve` asked the hook once at load and left
         // the item list it matches with the occurrence; one no load
         // resolved fails the file.
-        Self::of_walked(
-            WalkedIngredient::walk(
-                v,
-                &items.item_tag_order,
-                &|tag| {
-                    Some(
-                        items
-                            .block_tag_order
-                            .get(tag)?
-                            .iter()
-                            .filter_map(|block| {
-                                let item = items
-                                    .block_items
-                                    .get(block)
-                                    .map(String::as_str)
-                                    .unwrap_or(block);
-                                (item != "minecraft:air" && items.get(item).is_some())
-                                    .then(|| item.to_owned())
-                            })
-                            .collect(),
-                    )
-                },
-                &resolved_items,
-                &|data| crate::json_nbt::json_to_compound(data).ok(),
-            )?,
-            items,
-        )
+        let walked = WalkedIngredient::walk(
+            v,
+            &items.item_tag_order,
+            &|tag| {
+                Some(
+                    items
+                        .block_tag_order
+                        .get(tag)?
+                        .iter()
+                        .filter_map(|block| {
+                            let item = items
+                                .block_items
+                                .get(block)
+                                .map(String::as_str)
+                                .unwrap_or(block);
+                            (item != "minecraft:air" && items.get(item).is_some())
+                                .then(|| item.to_owned())
+                        })
+                        .collect(),
+                )
+            },
+            &resolved_items,
+            &|data| crate::json_nbt::json_to_compound(data).ok(),
+        );
+        let Some(walked) = walked else {
+            log::error!("recipes: invalid ingredient (unresolved tag or malformed input): {v}");
+            return None;
+        };
+        if walked.order.is_empty() {
+            log::warn!(
+                "recipes: ingredient has no placement candidates; recipe cannot be placed: {v}"
+            );
+        }
+        Self::of_walked(walked, items)
     }
     /// The walk of an item ingredient's answer: NeoForge's standard shapes
     /// keep their children, and a mod's own kind keeps its kind and NBT metadata,
@@ -284,14 +291,13 @@ impl Ingredient {
                 .filter(|id| ingredient.default_matches(&ItemStack::new(id, 1)))
                 .cloned()
                 .collect(),
-            _ => return (!ingredient.order.is_empty()).then_some(ingredient),
+            _ => return Some(ingredient),
         };
         if ingredient.is_simple() {
             ingredient.items = order.iter().cloned().collect();
         }
         ingredient.order = order;
-        (!ingredient.items.is_empty() && (!ingredient.is_simple() || !ingredient.order.is_empty()))
-            .then_some(ingredient)
+        Some(ingredient)
     }
 }
 

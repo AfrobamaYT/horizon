@@ -55,7 +55,9 @@ impl Ingredient {
                 }
             }
             None => {
-                if !self.items.contains(&*stack.item) {
+                if (self.custom.is_none() || !self.items.is_empty())
+                    && !self.items.contains(&*stack.item)
+                {
                     return Some(false);
                 }
                 if self.rule.is_some() {
