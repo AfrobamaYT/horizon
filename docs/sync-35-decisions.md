@@ -4,8 +4,9 @@
 
 - Initial fork integration base: `11fadb75ddb963c01b7bb86b9931d613f2bb48f9`.
 - Authorized main refresh: `fa5ed5ab45` (rollup 63), merged once after the initial full workspace/all-target compile passed. The sole conflict retained main's direct DamageHooks shape alongside sync deferral guards.
-- Upstream: `36eb98b6f6ec4f22649cbe65bbfd32bc0dc2083f`.
-- Upstream's own main-push checks passed in run `43332621008`.
+- Upstream: `9f42064c11efe7ef3e5ed2baad7ddc2a3b36eea0`.
+- Upstream's own main-push checks passed in run `43353661596`.
+- The final own-green refresh beyond the initial `36eb98b6` pin changes only `tools/test_pet_owner_teleport_parity.py`: it distinguishes wolves that followed from those left behind using a 16-block radius, allowing subsequent random stroll. No Rust/build input changed after compile pass 7.
 - Previous upstream ancestor in this base: `f24ee1accf1c816736e6e067939d04f3853f474e`.
 - This directly integrates the pinned upstream into fork main, not through a stacked sync branch.
 
