@@ -323,6 +323,12 @@ fn sided_composter_transactions_preserve_literal_chance_and_defer_all_effects() 
                 assert!(!game.block_ticks.has_block_tick(bulk_at, block));
                 assert_quiet(game, &heard);
 
+                // Another dimension's unload must leave this cached owner intact, even
+                // after a first aborted insertion and a different seed in the level stream.
+                game.world.random.set_seed(0);
+                unrelated_world.set_seed(0);
+                game.native_chunk_unload("minecraft:the_nether", [0, 0]);
+
                 // A nested abort rewinds only this composter's chance owner. An unrelated
                 // level draw between the aborted attempt and its retry must survive.
                 let aborted = run_transaction(game, |game, tx| {
@@ -361,27 +367,21 @@ fn sided_composter_transactions_preserve_literal_chance_and_defer_all_effects() 
                 assert!(game.block_ticks.has_block_tick(bulk_at, block));
                 assert_eq!(game.world.random.next_long(), unrelated_world.next_long());
 
-                // Unloading another level's same chunk must not discard this owner's next
-                // chance (43: failure). A wrongly reset owner would draw 4: success.
-                let one = game.res.behaviours().composter_state_after_layers(empty, 1);
-                game.world
-                    .set(bulk_pos[0], bulk_pos[1], bulk_pos[2], one)
-                    .unwrap();
-                game.world.random.set_seed(3448);
-                game.native_chunk_unload("minecraft:the_nether", [0, 0]);
-                quiet(game, &heard);
-                let aborted = run_transaction(game, |game, tx| {
-                    assert_eq!(bulk.insert(game, tx, 0, &seeds, 1), 1);
-                    assert_eq!(game.composter_level(bulk_pos), Some(1));
-                    Err::<(), ()>(())
-                });
-                assert_eq!(aborted, Err(()));
-                assert_quiet(game, &heard);
-
                 // The existing unload lifecycle retires the chunk's position-local owners.
                 // Reusing a retained handler after reload starts from the new level seed,
                 // not the previous owner's already-consumed chance sequence.
                 game.native_chunk_unload("minecraft:overworld", [0, 0]);
+                // A pending outer savepoint must retire too: aborting after unload cannot
+                // resurrect the previous owner's consumed chance sequence.
+                let aborted = run_transaction(game, |game, tx| {
+                    game.world
+                        .set(bulk_pos[0], bulk_pos[1], bulk_pos[2], empty)
+                        .unwrap();
+                    assert_eq!(bulk.insert(game, tx, 0, &seeds, 1), 1);
+                    game.native_chunk_unload("minecraft:overworld", [0, 0]);
+                    Err::<(), ()>(())
+                });
+                assert_eq!(aborted, Err(()));
                 game.world
                     .set(bulk_pos[0], bulk_pos[1], bulk_pos[2], empty)
                     .unwrap();
@@ -415,6 +415,34 @@ fn sided_composter_transactions_preserve_literal_chance_and_defer_all_effects() 
                 .unwrap();
                 assert_eq!(game.composter_level(POS), None);
                 assert_eq!(input.size(game), 0);
+
+                // A reopened world gets new owners and rejects retained old-epoch handlers.
+                game.native_lifecycle_open_started();
+                let reopened = game.level("minecraft:overworld").unwrap();
+                assert_ne!(reopened.epoch(), level.epoch());
+                assert_eq!(bulk.size(game), 0);
+                assert_eq!(source.size(game), 0);
+                let source = reopened
+                    .capability(game, &mod_api::ITEMS, source_pos, None)
+                    .unwrap();
+                let bulk = reopened
+                    .capability(game, &mod_api::ITEMS, bulk_pos, None)
+                    .unwrap();
+                game.world
+                    .set(bulk_pos[0], bulk_pos[1], bulk_pos[2], empty)
+                    .unwrap();
+                game.world.random.set_seed(3448);
+                run_transaction(game, |game, tx| {
+                    assert_eq!(source.insert(game, tx, 0, &seeds, 26), 26);
+                    assert_eq!(
+                        mod_api::move_resources(game, &source, &bulk, |_| true, 64, tx),
+                        Ok(13),
+                    );
+                    Ok::<_, ()>(())
+                })
+                .unwrap();
+                assert_eq!(game.composter_level(bulk_pos), Some(7));
+                assert_eq!(source.amount(game, 0), 51);
             })
         },
     );

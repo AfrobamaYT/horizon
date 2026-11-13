@@ -25,6 +25,8 @@ use super::{
     native_panel_recipes::RecipePage,
 };
 use horizon_client::block_contact::Pending;
+#[cfg(test)]
+use horizon_client::mobs::Damage;
 use horizon_client::{
     atlas_sources::qualified,
     biome::{BiomeColors, SpawnEntry},
@@ -48,7 +50,7 @@ use horizon_client::{
     keybinds,
     lan::menu::Slots,
     merchant::MerchantOffer,
-    mobs::{Damage, Who},
+    mobs::Who,
     mod_list::{self, Installed, KeyMapping, NativePage, NativeSetting, NativeSettingValue},
     music::{Music, MusicLayer},
     particles::{ParticleOptions, ParticleType},
@@ -90,8 +92,8 @@ use mod_api::{
     ParticleGroup, PosedParts, RuntimeSprite, SkullModel, TaskId, TextureAtlasRegistration,
 };
 pub(crate) use mod_api::{
-    BlockRim, ClientPacket, ClientPayload, ColoredLight, ExplosionStart, ItemFished, LootDrops,
-    PanelEvent, PortalShape, ScreenView,
+    BlockRim, ClientPacket, ClientPayload, ColoredLight, ContainerLootFilled, ExplosionStart,
+    ItemFished, LootDrops, PanelEvent, PortalShape, ScreenView,
 };
 use mod_api::{
     CameraType, Despawn, Identifier, MobRef, PermissionLevel, RailShape, SoundPlay, SoundRef,

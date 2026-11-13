@@ -11,7 +11,12 @@ Register an item's capability with
 `r.item_capability(&ITEM_ITEMS, "mymod:backpack", |host, place| Some(Box::new(Backpack)))`.
 Your provider returns a `ResourceHandler<ItemResource>` for that place. Use
 `r.item_capability_before_game` to answer ahead of the game's provider, which handles
-`item_container` slots. `place.capability(host, &ITEM_ITEMS)` queries these providers in order.
+slots declared with `r.item_container(&item, provider)`. `place.capability(host, &ITEM_ITEMS)` queries these providers in order.
+The registered `ItemContainerProvider::slots(&dyn Host)` callback returns `Option<u32>` dynamically;
+it is not called by registration-time coverage queries. `ITEM_ITEMS` covers the declared item type
+even when that callback currently returns `None`. A closure `|host: &dyn Host| …` can be the provider.
+Declarations may target vanilla or mod items. Enabled callbacks run in registration order;
+`None` falls through to the next provider, and the first `Some` supplies the slot count.
 
 Keep the contents in the stack and use these methods to access it:
 
@@ -44,6 +49,28 @@ place's rules:
 
 An exchange inside a stack of two backpacks changes one backpack and splits it off. The other
 backpack keeps its contents.
+
+## Scratch stacks and wrapped places
+
+These correspond to NeoForge's other `ItemAccess` factories:
+
+- `host.scratch_stack(tx, stack)` (`forStack`) holds a stack outside the world, such as a
+  crafting result or a preview, and returns its `ItemPlace::Scratch`. Take it back with
+  `host.scratch_take(tx, &place)`. It lives until the outermost transaction closes. Aborting the
+  transaction that made it drops it, and aborting a later one puts it back as it was. As in
+  `StackItemAccess`, a write never changes its item, only its count and components: a bucket in
+  one can't become a water bucket.
+- `ItemPlace::Strict(place)` (`forHandlerIndexStrict`) refuses what a block entity's, entity's
+  or nested item's slot doesn't take, where the plain place would spread it to the other slots.
+- `ItemPlace::OneByOne(place)` (`oneByOne`) reads at most one item and extracts at most one, so a
+  handler that acts on the whole stack acts on one.
+- `ItemPlace::InfiniteMaterials { player, inner }` (`forInfiniteMaterials`) reaches `inner` as a
+  creative player does while `player` has infinite materials. Extracts give without taking.
+  Inserts are taken whole, and one item goes to the player only if they have none: into their
+  inventory, or dropped at the root commit when it is full. Inserting nothing gives nothing.
+
+Wrappers may nest to any depth in a native mod's own code. A place sent across the wasm
+boundary may nest at most 15 wrappers deep, and a deeper one is refused there.
 
 ## Editing the whole stack
 

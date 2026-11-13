@@ -2,7 +2,7 @@
 //! Mods in the game (`docs/modding/src/how-to/content-mods.md`): content mods' blocks, items, data and
 //! assets (`content_root`), and the Mods page's rows. Code mods are native (`native_hooks.rs`)
 //! or wasm (`horizon-mod-wasm`, loaded at startup); any other executable file is refused.
-use super::{Game, execution_role::ExecutionRole};
+use super::{Game, execution_role::ExecutionRole, registration_capability_coverage as coverage};
 mod menu_books;
 mod standalone;
 use horizon_client::{
@@ -238,8 +238,7 @@ fn builtin_registry_names(root: &Path) -> horizon_client::Result<BTreeMap<String
     Ok(registries)
 }
 
-/// Capture what registration reads (registries and settings) before the first registration
-/// hook runs, so every step sees the same values.
+/// Capture registration's stable registries, settings and stock capability type owners.
 pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<()> {
     let packages = mod_api::__private::loaded_mods();
     let directory = Game::game_dir();
@@ -262,7 +261,8 @@ pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<(
             ),
             directory,
             crate::entry::runtime_environment::get().clone(),
-        ),
+        )
+        .with_capability_coverage(coverage::builtin, coverage::block_entity),
     );
     Ok(())
 }
@@ -647,6 +647,8 @@ pub(super) struct ContentOverlay {
     pub(super) announced: Vec<horizon_protocol::mod_list::Entry>,
     /// Whether the protocol's local mod list is still unset.
     pub(super) announce: bool,
+    /// The accepted content-only mods, each with its version, for the worlds saved to record.
+    pub(super) content_mods: Vec<horizon_client::save::level_mods::ModRecord>,
 }
 
 /// Builds the content overlay: every enabled or dev content mod's files
@@ -683,6 +685,7 @@ pub(super) fn content_overlay(
 
     let mut known = None;
     let mut mods: Vec<ContentMod> = Vec::new();
+    let mut content_mods = Vec::new();
     let announce = !horizon_protocol::mod_list::is_set();
     let mut announced: Vec<_> = if announce {
         sources
@@ -778,8 +781,14 @@ pub(super) fn content_overlay(
             jars: m.jar.clone(),
         };
         match mod_content::accept_mod(&mut mods, candidate, known) {
-            Ok(_) if announce && source.content_only => {
-                announced.push(announced_entry(&m.id, &m.version, m.side))
+            Ok(_) if source.content_only => {
+                content_mods.push(horizon_client::save::level_mods::ModRecord {
+                    id: m.id.clone(),
+                    version: m.version.clone(),
+                });
+                if announce {
+                    announced.push(announced_entry(&m.id, &m.version, m.side));
+                }
             }
             Ok(_) => {}
             Err(e) => log::warn!("Horizon: mod {} content not loaded: {e}", m.id),
@@ -840,6 +849,7 @@ pub(super) fn content_overlay(
         mods,
         announced,
         announce,
+        content_mods,
     })
 }
 
@@ -943,6 +953,9 @@ pub(super) fn content_root(
     if overlay.announce {
         horizon_protocol::mod_list::set_local(overlay.announced);
     }
+    // What every level.dat saved from here on records, and what a world is checked against
+    // before it opens (`level_mods`).
+    horizon_client::save::level_mods::set_content_mods(Some(overlay.content_mods));
     if overlay.root.prepared() != root {
         log::info!(
             "Horizon: content from {} mod(s) in {}",
@@ -989,7 +1002,7 @@ pub(super) fn content_root(
 /// Publish the built-in registry orders mods iterate. The report already
 /// includes the types and menus the content overlay registered, in registration
 /// order (`BuiltInRegistries` protocol ids).
-fn register_iterated_registries(root: &std::path::Path) -> horizon_client::Result<()> {
+pub(super) fn register_iterated_registries(root: &std::path::Path) -> horizon_client::Result<()> {
     use horizon_protocol::registry::Builtin;
     let path = Builtin::find(root).ok_or("registries.json not found")?;
     let builtin = Builtin::load(&path)?;
@@ -1503,6 +1516,12 @@ impl Game<'_> {
                 }
             })
             .collect();
+        for (id, info) in &mut info {
+            info.warnings = mod_api::__private::registration_warnings(id)
+                .into_iter()
+                .map(|w| (w.key().to_owned(), w.args().to_vec()))
+                .collect();
+        }
         self.settings.mods.info = info;
         (self.mods.content_ids, self.mods.live_ids) = (content_ids, live_ids);
         if self.mods.applied.is_none() {

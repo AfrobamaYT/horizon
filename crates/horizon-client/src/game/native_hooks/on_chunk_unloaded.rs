@@ -20,8 +20,9 @@ impl Game<'_> {
     /// Server-side.
     pub(in crate::game) fn native_chunk_unload(&mut self, dimension: &str, chunk: [i32; 2]) {
         self.fire_chunk_unload(dimension, chunk);
-        let dimension = mod_api::__private::dimension_key(dimension);
-        self.forget_composter_chunk(dimension, chunk);
+        if let Some(level) = self.level(dimension) {
+            self.forget_composter_chunk(level.dimension(), chunk);
+        }
     }
     /// Chunk `chunk` of this server level `dimension` left it, after its last save: the
     /// parts of its mod block entities are told, then the mods of the chunk.
