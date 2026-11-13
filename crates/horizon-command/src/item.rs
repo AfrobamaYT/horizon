@@ -33,6 +33,7 @@ pub const DECODED_COMPONENTS: &[&str] = &[
     "minecraft:custom_name",
     "minecraft:item_name",
     "minecraft:block_entity_data",
+    "minecraft:dyed_color",
 ];
 
 /// Validate and decode a component into the value representation shared with stacks.
@@ -57,6 +58,9 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
         | "minecraft:max_damage"
         | "minecraft:max_stack_size" => {
             Tag::Int(int_of(value).expect("validated numeric component") as i32)
+        }
+        "minecraft:dyed_color" => {
+            Tag::Int(horizon_core::color::rgb_color_from_tag(value).expect("validated RGB color"))
         }
         "minecraft:enchantments" | "minecraft:stored_enchantments" => {
             let Tag::Compound(entries) = value else {
@@ -83,6 +87,9 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
 /// The codecs of the item components commands commonly set.
 pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), String> {
     match id {
+        "minecraft:dyed_color" => horizon_core::color::rgb_color_from_tag(t)
+            .map(|_| ())
+            .ok_or_else(|| "Expected a number or a list of three numeric RGB channels".into()),
         "minecraft:damage" | "minecraft:repair_cost" => {
             let v = int_of(t).ok_or("Not a number")?;
             if v < 0 {
