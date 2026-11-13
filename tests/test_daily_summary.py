@@ -194,8 +194,8 @@ class DailyWorkflowTests(unittest.TestCase):
         step = jobs["resolve"]["steps"][-1]
         self.assertEqual(step["env"]["DRY_RUN"], "${{ inputs.dry_run || github.ref != 'refs/heads/main' }}")
         self.assertEqual(jobs["summary"]["steps"][-1]["env"]["DRY_RUN"], "${{ needs.resolve.outputs.dry_run }}")
-        self.assertEqual(jobs["nightly"]["with"]["dry_run"], "${{ needs.resolve.outputs.dry_run == 'true' }}")
-        self.assertEqual(jobs["nightly"]["if"], "needs.summary.outputs.green == 'true'")
+        self.assertEqual(jobs["nightly"]["if"],
+                         "needs.summary.outputs.green == 'true' && needs.resolve.outputs.dry_run == 'false'")
         self.assertEqual(self.workflow["concurrency"]["cancel-in-progress"], "false")
 
     def test_every_leg_is_a_called_workflow_with_the_commit(self):

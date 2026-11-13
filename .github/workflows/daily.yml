@@ -138,10 +138,11 @@ jobs:
           REPORTS: ${{ runner.temp }}/reports
         run: python3 tools/ci/daily_summary.py
 
-  # The nightly: the daily-green commit, published through the release train (release.yml, kind nightly).
+  # The nightly: the daily-green commit, published through the release train (release.yml, kind nightly). A dry run
+  # moved no tag, so it stops at the summary, which says it would publish.
   nightly:
     needs: [resolve, summary]
-    if: needs.summary.outputs.green == 'true'
+    if: needs.summary.outputs.green == 'true' && needs.resolve.outputs.dry_run == 'false'
     permissions:
       contents: read
       issues: read
@@ -150,4 +151,4 @@ jobs:
     with:
       kind: nightly
       commit: ${{ needs.resolve.outputs.commit }}
-      dry_run: ${{ needs.resolve.outputs.dry_run == 'true' }}
+      dry_run: false

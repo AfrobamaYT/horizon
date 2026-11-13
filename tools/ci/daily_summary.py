@@ -214,6 +214,8 @@ def plan(commit, run_url, tests, unfinished, passed, green_legs, green, open_iss
 def render(actions, writes):
     lead = "## Daily summary" + ("" if writes else " (dry run: nothing written)")
     lines = [lead, ""]
+    if any(action[0] == "tag" for action in actions):
+        lines.append("Every leg is green: then publish the nightly of this commit (release.yml, kind nightly).")
     if not actions:
         lines.append("Nothing to do: no leg is red and no open daily issue went green.")
     for action in actions:
