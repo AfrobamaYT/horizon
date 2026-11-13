@@ -188,6 +188,13 @@ macro_rules! draws {
     )+ };
 }
 draws!(Host, Registrar);
+macro_rules! outer {
+    ($name:ident) => {
+        moves!($name, inner_from);
+        missing_inner!();
+    };
+}
+outer!(outer_to);
 unknown!(Point);
 #[cfg(feature = "extra")]
 impl Point {
@@ -389,6 +396,7 @@ fn the_fixture_exports_the_expected_document() {
             "3 items are reachable only through #[doc(hidden)] items or modules: recorded only where a recorded signature names them",
             "constant LIMIT: no record kind for constants",
             "impl Point in mod_api: compiled out of a default native build (cfg(feature = \"extra\")), not recorded",
+            "missing_inner! called in mod_api (inside another macro's expansion): not expanded, the items it writes are not recorded",
             "type:Context: no shape, because Context crosses by a hand-written Wire impl that declares no layout, or does not cross",
             "unknown! called in mod_api: not expanded, the items it writes are not recorded",
         ]
@@ -409,6 +417,8 @@ fn macro_calls_are_expanded_or_noted_and_ids_ignore_routes() {
         "handle:Point::move_from",
         "handle:Host::draw",
         "handle:Registrar::draw",
+        "handle:Point::outer_to",
+        "handle:Point::inner_from",
     ] {
         assert!(handles.contains(&id), "{id} in {handles:?}");
     }
