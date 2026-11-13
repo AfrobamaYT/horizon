@@ -1857,13 +1857,14 @@ impl Game<'_> {
     pub(super) fn drop_death_items(
         &mut self,
         dying: &DyingDrops<'_>,
-        stacks: Vec<(ItemStack, [f64; 3])>,
+        stacks: Vec<(ItemStack, [f64; 3], i32)>,
         pickup_delay: u32,
         mut velocity: impl FnMut(&mut Self) -> Option<[f64; 3]>,
     ) {
         let Some(source) = &dying.source else {
-            for (stack, position) in stacks {
-                let random = super::spill::prepare_item_random(None);
+            for (stack, position, age) in stacks {
+                let mut random = super::spill::prepare_item_random(None);
+                random.state.age = age;
                 let motion = velocity(self).unwrap_or(random.velocity);
                 self.add_item_entity_prepared(
                     stack,
@@ -1879,7 +1880,7 @@ impl Game<'_> {
         // collects the drop, before the event sees the list.
         let mut drops: Vec<super::spill::BlockItemDrop> = stacks
             .into_iter()
-            .map(|(stack, position)| {
+            .map(|(stack, position, age)| {
                 let random = super::spill::prepare_item_random(None);
                 super::spill::BlockItemDrop {
                     random: Some(random),
@@ -1887,7 +1888,10 @@ impl Game<'_> {
                     position,
                     velocity: velocity(self).unwrap_or(random.velocity),
                     pickup_delay,
-                    state: Default::default(),
+                    state: super::spill::DropState {
+                        age,
+                        ..Default::default()
+                    },
                 }
             })
             .filter(|drop| drop.stack.count > 0 && &*drop.stack.item != "minecraft:air")
@@ -3394,11 +3398,7 @@ impl Game<'_> {
                 MobEvent::DolphinTreasure { mob } => {
                     // ServerLevel.findNearestMapStructure(#dolphin_located, 50).
                     let Some(at) = self.mobs.iter().find(|m| m.id == mob).map(|m| {
-                        [
-                            m.position.x.floor() as i32,
-                            m.position.y.floor() as i32,
-                            m.position.z.floor() as i32,
-                        ]
+                        [m.position.x, m.position.y, m.position.z].map(|v| v.floor() as i32)
                     }) else {
                         continue;
                     };
@@ -3409,7 +3409,11 @@ impl Game<'_> {
                         .filter(|_| !names.is_empty())
                         .and_then(|t| t.locate(&names, at, 50));
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
-                        m.extra.home = found.map(|(_, p)| p);
+                        m.extra.home = found.as_ref().map(|(_, p)| *p);
+                    }
+                    // DolphinSwimToTreasureGoal.start: entity event 38 once it has a treasure.
+                    if found.is_some() {
+                        self.mob_event_particles(mob, 38);
                     }
                 }
                 MobEvent::EffectPlayer {
@@ -13359,6 +13363,7 @@ mod h169_glide_travel_tests {
                     .unwrap();
             }
         }
+        game.load_ticking_neighbourhood(0, 0);
         game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
         game.creative = true;
         assert!(game.run_command("fill 0 199 0 31 199 31 stone"));
