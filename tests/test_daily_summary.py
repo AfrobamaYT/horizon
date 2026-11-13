@@ -174,8 +174,8 @@ class DailySummaryTests(unittest.TestCase):
                 job("wasm-mods / fixture", "failure", ["Build tool and shared member"]),
                 job("fn-replace-check / fn-replace-check", "failure", ["Refusals by name"])] + GREEN_JOBS[6:]
         api = Api(jobs)
-        self.run_summary(api, [], results=dict(LEGS, shards={"result": "cancelled"}, linkage={"result": "skipped"}),
-                         tag=False)
+        self.run_summary(api, [], results=dict(LEGS, shards={"result": "cancelled"}, **{"wasm-mods": {"result": "failure"}},
+                                               **{"fn-replace-check": {"result": "failure"}}), tag=False)
         titles = sorted(body["title"] for method, path, body in api.writes if path == "issues")
         self.assertEqual(titles, ["Daily: fn-replace-check / fn-replace-check did not complete",
                                   "Daily: shards / ignored-tests-shards (horizon-world) did not complete",
@@ -223,11 +223,48 @@ class DailySummaryTests(unittest.TestCase):
         run_url = "https://github.com/arismoko/horizon/actions/runs/77"
         # The first attempt filed the new issue, then stopped before commenting on the old one.
         issues = [{"number": 900, "title": "Daily: horizon-world old::red", "body": "> filed earlier"},
-                  {"number": 950, "title": "Daily: horizon-world new::red", "body": f"> filed\nFirst: {run_url}"}]
+                  {"number": 950, "title": "Daily: horizon-world new::red", "body": f"> filed\nFirst daily run that saw it: {run_url} on `ccc`."}]
         api = Api(jobs, issues=issues)
         self.run_summary(api, [shard_report([failure("old::red"), failure("new::red")])],
                          results=dict(LEGS, shards={"result": "failure"}))
         self.assertEqual([(m, p) for m, p, _ in api.writes], [("POST", "issues/900/comments")])
+
+    def test_a_failed_helper_files_one_leg_issue_naming_it(self):
+        for helper, leg, skipped in (("sdk / fresh", "sdk", ["sdk / build linux"]),
+                                     ("fn-replace-check / route", "fn-replace-check", ["fn-replace-check / fn-replace-check"])):
+            with self.subTest(helper=helper):
+                jobs = [j for j in GREEN_JOBS if not j["name"].startswith(leg + " / ")]
+                jobs += [job(helper, "failure", ["Set up job"])] + [job(name, "skipped") for name in skipped]
+                api = Api(jobs)
+                _, out = self.run_summary(api, [shard_report()], results=dict(LEGS, **{leg: {"result": "failure"}}))
+                self.assertIn("green=false", out)
+                created = [body for _, path, body in api.writes if path == "issues"]
+                self.assertEqual([body["title"] for body in created], [f"Daily: {leg} did not complete"])
+                self.assertIn(f"`{helper}` failed", created[0]["body"])
+
+    def test_a_skipped_sdk_build_is_green_only_when_fresh_found_the_release(self):
+        jobs = [j for j in GREEN_JOBS if not j["name"].startswith("sdk / ")] + [
+            job("sdk / fresh", "cancelled"), job("sdk / build linux", "skipped")]
+        api = Api(jobs)
+        _, out = self.run_summary(api, [shard_report()], results=dict(LEGS, sdk={"result": "cancelled"}))
+        self.assertIn("green=false", out)
+        self.assertEqual([body["title"] for _, path, body in api.writes if path == "issues"],
+                         ["Daily: sdk did not complete"])
+
+    def test_a_rerun_that_turns_a_test_green_still_posts_its_close_comment(self):
+        red_jobs = [job("shards / ignored-tests-shards (horizon-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
+        issues = [{"number": 900, "title": "Daily: horizon-world flaky::one", "body": "> filed earlier"}]
+        api = Api(red_jobs, issues=issues)
+        self.run_summary(api, [shard_report([failure("flaky::one")])], results=dict(LEGS, shards={"result": "failure"}))
+        self.assertEqual([(m, p) for m, p, _ in api.writes], [("POST", "issues/900/comments")])
+        api.writes.clear()
+        api.jobs = GREEN_JOBS
+        self.run_summary(api, [shard_report(passed=[{"package": "horizon-world", "test": "flaky::one"}])])
+        self.assertEqual([(m, p) for m, p, _ in api.writes if p.startswith("issues/")],
+                         [("POST", "issues/900/comments"), ("PATCH", "issues/900")],
+                         "the red comment of this run does not hide its green-again comment")
+        comment = next(body for _, path, body in api.writes if path == "issues/900/comments")
+        self.assertIn("Green again in the daily run", comment["body"])
 
     def test_an_unknown_job_or_a_leg_with_no_job_is_red(self):
         for jobs, title in (
@@ -298,9 +335,9 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertEqual(jobs["sdk"]["with"], {"commit": "${{ needs.resolve.outputs.commit }}"})
         self.assertNotIn("permissions", jobs["sdk"], "the build leg publishes nothing")
         publish = jobs["sdk-publish"]
-        self.assertEqual(publish["needs"], ["resolve", "summary"])
+        self.assertEqual(publish["needs"], ["resolve", "summary", "sdk"])
         self.assertEqual(publish["if"], "needs.summary.outputs.green == 'true' && needs.resolve.outputs.dry_run == 'false'")
-        self.assertEqual(publish["env"]["TAG"], "prebuilt-${{ needs.resolve.outputs.commit }}")
+        self.assertEqual(publish["env"]["TAG"], "${{ needs.sdk.outputs.tag }}")
         self.assertEqual([step.get("name") for step in publish["steps"]][-1], "Release prebuilt-<sha>")
         self.assertIn("sdk-publish", jobs["nightly"]["needs"])
         self.assertEqual(jobs["nightly"]["with"]["daily"], "true")

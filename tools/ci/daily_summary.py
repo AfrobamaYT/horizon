@@ -40,9 +40,9 @@ LEGS = ("shards", "wasm-mods", "fn-replace-check", "linkage", "windows-runtime-l
 HELPERS = ("plan", "route", "fresh", "gate")
 # Jobs of a called workflow that the daily run does not use: launcher-windows-check's push and pull-request tests.
 NOT_DAILY = ("windows-runtime-leases / test",)
-# Legs whose skipped jobs are not missing coverage: the SDK skips its build when prebuilt-<sha> already exists, and
-# its own publish job always when called (daily.yml publishes after a green summary).
-SKIP_IS_FINE = ("sdk",)
+# The one green skip: the SDK build skips when prebuilt-<sha> already exists, which `sdk / fresh` found (it
+# succeeded). Any other skip of an expected job is red.
+FRESH = "sdk / fresh"
 # The wasm fixture step whose failures its verdict file names test by test.
 FIXTURE_TESTS_STEP = "Run the client tests that load the compiled fixture"
 MERGE = re.compile(r"^Merge pull request #(\d+) from ")
@@ -85,9 +85,19 @@ def leg_jobs(jobs):
             and job["name"].split(" / ", 1)[1] not in HELPERS and job["name"] not in NOT_DAILY]
 
 
-def job_green(job):
+def job_green(job, fresh_ok):
     return job["conclusion"] == "success" or (
-        job["conclusion"] == "skipped" and job["name"].split(" / ", 1)[0] in SKIP_IS_FINE)
+        job["conclusion"] == "skipped" and job["name"].startswith("sdk / ") and fresh_ok)
+
+
+def failed_helpers(jobs):
+    """leg -> its routing or helper jobs that did not succeed (whose failure skips the leg's real jobs)."""
+    failed = {}
+    for job in jobs:
+        leg, _, rest = job["name"].partition(" / ")
+        if leg in LEGS and rest in HELPERS and job["conclusion"] not in ("success", "skipped"):
+            failed.setdefault(leg, []).append(job["name"])
+    return failed
 
 
 def failed_steps(job):
@@ -122,13 +132,17 @@ def verdicts(jobs, reports, results):
     A failing test is a dict of package, test, kind, panic, policy and leg; an unfinished leg is (leg, conclusion,
     failed steps, reason). Green means every leg job and every called workflow concluded success."""
     tests, unfinished, passed, green_legs = [], [], set(), set()
+    fresh_ok = any(job["name"] == FRESH and job["conclusion"] == "success" for job in jobs)
+    helpers = failed_helpers(jobs)
     for job in leg_jobs(jobs):
         report = report_for(job, reports)
         if report:
             passed |= {(item["package"], item["test"]) for item in report["passed"]}
-        if job_green(job):
+        if job_green(job, fresh_ok):
             green_legs.add(job["name"])
             continue
+        if job["conclusion"] == "skipped" and job["name"].split(" / ", 1)[0] in helpers:
+            continue  # its leg's failed helper is the one item for it, below
         steps = failed_steps(job)
         problems = [dict(item, leg=job["name"]) for item in (report or {}).get("problems", ())]
         by_name = [item for item in problems if named(item)]
@@ -149,11 +163,18 @@ def verdicts(jobs, reports, results):
             unfinished.append((job["name"], job["conclusion"], [], "did not report: a job the summary does not know"))
     seen = {job["name"].split(" / ", 1)[0] for job in leg_jobs(jobs)}
     for leg in LEGS:
-        if leg not in seen:
-            unfinished.append((leg, results.get(leg, {}).get("result", "missing"), [],
-                               "did not report: no job of this leg ran, or its jobs are named differently"))
+        result = results.get(leg, {}).get("result", "missing")
+        accounted = any(item["leg"].split(" / ", 1)[0] == leg for item in tests) or any(
+            entry[0].split(" / ", 1)[0] == leg for entry in unfinished)
+        if leg in helpers:
+            unfinished.append((leg, result, [], "did not complete: " + ", ".join(f"`{name}`" for name in helpers[leg])
+                               + " failed, so its jobs did not run"))
+        elif leg not in seen:
+            unfinished.append((leg, result, [], "did not report: no job of this leg ran, or its jobs are named differently"))
+        elif result != "success" and not accounted:
+            unfinished.append((leg, result, [], "did not complete, and no job or test of it says why"))
     green = (all(results.get(leg, {}).get("result") == "success" for leg in LEGS)
-             and all(job_green(job) for job in leg_jobs(jobs)) and not tests and not unfinished)
+             and all(job_green(job, fresh_ok) for job in leg_jobs(jobs)) and not tests and not unfinished)
     failing = {(item["package"], item["test"]) for item in tests}
     return tests, unfinished, passed - failing, green_legs, green
 
@@ -214,10 +235,10 @@ def plan(commit, run_url, tests, unfinished, passed, green_legs, green, open_iss
         filed.add(title)
         if title in open_issues:
             actions.append(("comment", open_issues[title], title,
-                            f"🤖 Agent: Still red in the daily run {run_url} on `{commit[:9]}`.\n\n{text}\n\n{line}\n"))
+                            f"🤖 Agent: {red_marks(run_url)[1]} on `{commit[:9]}`.\n\n{text}\n\n{line}\n"))
         else:
             actions.append(("create", title,
-                            f"{DISCLOSURE}\n\n{text}\n\nFirst daily run that saw it: {run_url} on `{commit[:9]}`.\n\n"
+                            f"{DISCLOSURE}\n\n{text}\n\n{red_marks(run_url)[0]} on `{commit[:9]}`.\n\n"
                             f"{line}\n\nThis issue gets a comment from each later daily run that still sees it and is "
                             "closed by the first that does not.\n"))
     for title, number in sorted(open_issues.items()):
@@ -231,7 +252,7 @@ def plan(commit, run_url, tests, unfinished, passed, green_legs, green, open_iss
             back = (package, test) in passed
         if back:
             actions.append(("close", number, title,
-                            f"🤖 Agent: Green again in the daily run {run_url} on `{commit[:9]}`; closing.\n"))
+                            f"🤖 Agent: {green_mark(run_url)} on `{commit[:9]}`; closing.\n"))
     return actions
 
 
@@ -253,10 +274,21 @@ def render(actions, writes):
     return "\n".join(lines) + "\n"
 
 
-def already_said(number, run_url, call):
-    """Whether issue `number` already names this run (its body, or one of its comments)."""
-    return run_url in (call("GET", f"issues/{number}")["body"] or "") or any(
-        run_url in (comment["body"] or "") for comment in pages(call, f"issues/{number}/comments"))
+def red_marks(run_url):
+    """What a red report of this run says on an issue: its opening body, or its comment."""
+    return (f"First daily run that saw it: {run_url}", f"Still red in the daily run {run_url}")
+
+
+def green_mark(run_url):
+    return f"Green again in the daily run {run_url}"
+
+
+def already_said(number, marks, call):
+    """Whether issue `number` already carries one of `marks` (its body, or one of its comments): one comment per
+    transition and run, so a rerun that turns a test green still posts its close comment."""
+    texts = [call("GET", f"issues/{number}")["body"] or ""]
+    texts += [comment["body"] or "" for comment in pages(call, f"issues/{number}/comments")]
+    return any(mark in text for mark in marks for text in texts)
 
 
 def apply(actions, call, run_url):
@@ -270,10 +302,10 @@ def apply(actions, call, run_url):
         elif action[0] == "create":
             call("POST", "issues", {"title": action[1], "body": action[2], "labels": [LABEL]})
         elif action[0] == "comment":
-            if not already_said(action[1], run_url, call):
+            if not already_said(action[1], red_marks(run_url), call):
                 call("POST", f"issues/{action[1]}/comments", {"body": action[3]})
         else:
-            if not already_said(action[1], run_url, call):
+            if not already_said(action[1], (green_mark(run_url),), call):
                 call("POST", f"issues/{action[1]}/comments", {"body": action[3]})
             call("PATCH", f"issues/{action[1]}", {"state": "closed", "state_reason": "completed"})
 
