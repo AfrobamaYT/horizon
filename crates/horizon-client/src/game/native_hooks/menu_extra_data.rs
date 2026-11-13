@@ -36,6 +36,34 @@ impl Game<'_> {
     /// None when no mod screen is open. @API:menu_extra_data@.
     pub(in crate::game) fn screen_extra_data(&self) -> Option<Vec<u8>> {
         let screen = self.shown_native_screen()?;
-        Some(screen.extra.as_ref().map_or_else(Vec::new, |e| e.data.clone()))
+        Some(
+            screen
+                .extra
+                .as_ref()
+                .map_or_else(Vec::new, |e| e.data.clone()),
+        )
+    }
+    /// The `horizon:menu_extra` payload the server sent just before its
+    /// `OpenScreen`, in the layout its revision query in configuration chose:
+    /// the current one from a server that asked, the legacy one from a server
+    /// that never did (an older Horizon server).
+    pub(in crate::game) fn receive_menu_extra(&mut self, data: &[u8]) {
+        let revision = self
+            .remote
+            .as_ref()
+            .map_or(0, |r| r.registries.menu_extra_revision);
+        let decoded = if revision >= 1 {
+            horizon_protocol::menu_extra::decode(data)
+        } else {
+            horizon_protocol::menu_extra::decode_legacy(data)
+        };
+        match decoded {
+            Ok(extra) => {
+                if let Some(r) = self.remote.as_mut() {
+                    r.menu_extra = Some(extra);
+                }
+            }
+            Err(e) => log::debug!("Horizon: a bad menu extra payload: {e}"),
+        }
     }
 }

@@ -4,10 +4,7 @@
 //! that does not answer before it acknowledges `FinishConfiguration`, or answers another
 //! revision, is sent the legacy layout (a menu of a block, never one without).
 //! An answer the server did not ask for, or a second one, closes the connection.
-use horizon_protocol::{
-    menu_extra,
-    packets::configuration as cfg,
-};
+use horizon_protocol::{menu_extra, packets::configuration as cfg};
 
 /// One configuration phase's exchange.
 #[derive(Default)]
@@ -96,7 +93,10 @@ mod tests {
             packets::{Empty, handshake, login},
             payload_negotiation::{self as negotiation, Control, Manifest},
         };
-        use std::{sync::Arc, time::{Duration, Instant}};
+        use std::{
+            sync::Arc,
+            time::{Duration, Instant},
+        };
 
         let config = NetConfig {
             announce: false,
@@ -154,7 +154,8 @@ mod tests {
                 cfg::Clientbound::CustomPayload(p) if p.channel == menu_extra::CHANNEL => {
                     asked = Some(p.data);
                     if let Some(data) = answer {
-                        c.send(&payload(menu_extra::CHANNEL, data.to_vec())).unwrap();
+                        c.send(&payload(menu_extra::CHANNEL, data.to_vec()))
+                            .unwrap();
                     }
                 }
                 cfg::Clientbound::SelectKnownPacks(p) => {

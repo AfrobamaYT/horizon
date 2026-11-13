@@ -502,7 +502,7 @@ pub(super) struct Remote {
     pub far_terrain: Option<horizon_client::lod_net::Offer>,
     pub(super) builtin: Arc<Builtin>,
     lang: Arc<Language>,
-    pub(super) registries: Arc<Dynamic>,
+    pub(in crate::game) registries: Arc<Dynamic>,
     /// The block, item and fluid tags of `registries` by name, as native mods read them
     /// (`install_remote_tags`).
     pub(super) tags: Option<horizon_client::items::Items>,
@@ -614,7 +614,7 @@ pub(super) struct Remote {
     use_target: Option<[i32; 3]>,
     /// A mod menu's extra data, kept for the `OpenScreen` of its window that
     /// follows (`horizon:menu_extra`).
-    menu_extra: Option<horizon_protocol::menu_extra::Message>,
+    pub(in crate::game) menu_extra: Option<horizon_protocol::menu_extra::Message>,
     pub(super) entities: HashMap<i32, Tracked>,
     /// Per-tick remote entity scratch retained between frames.
     tick_fluids: Vec<Option<horizon_client::mobs::living::Fluids>>,
@@ -3592,26 +3592,9 @@ impl Game<'_> {
                 self.remote_attachment_sync(&p.data);
             }
             // A mod menu type's block and its mod's bytes, just before the
-            // menu's `OpenScreen`. A server that asked no revision query in
-            // configuration (an older Horizon server) serves the legacy layout.
+            // menu's `OpenScreen`.
             C::CustomPayload(p) if p.channel == horizon_protocol::menu_extra::CHANNEL => {
-                let revision = self
-                    .remote
-                    .as_ref()
-                    .map_or(0, |r| r.registries.menu_extra_revision);
-                let decoded = if revision >= 1 {
-                    horizon_protocol::menu_extra::decode(&p.data)
-                } else {
-                    horizon_protocol::menu_extra::decode_legacy(&p.data)
-                };
-                match decoded {
-                    Ok(extra) => {
-                        if let Some(r) = self.remote.as_mut() {
-                            r.menu_extra = Some(extra);
-                        }
-                    }
-                    Err(e) => log::debug!("Horizon: a bad menu extra payload: {e}"),
-                }
+                self.receive_menu_extra(&p.data);
             }
             C::CustomPayload(p) if horizon_client::lan::recipes::viewer_channel(&p.channel) => {
                 self.remote_recipe_viewer(&p.channel, &p.data);
