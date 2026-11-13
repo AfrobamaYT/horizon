@@ -158,6 +158,28 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mobs_set_absorption_survives_a_save_and_reload() {
+        with_game(|game| {
+            let zombie = absorbing_zombie(game);
+            game.mobs.push(zombie);
+            let living = game.living(game.entity(12).unwrap()).unwrap();
+            assert!(living.set_absorption(game, 3.0));
+            let saved = horizon_client::entity_nbt::mob_to_nbt(
+                &game.mobs[0],
+                [1, 0, 0, 1],
+                None,
+                None,
+                |_| None,
+            );
+            let loaded =
+                horizon_client::entity_nbt::mob_from_nbt(&saved, game.res.mob_types(), 13, None)
+                    .unwrap();
+            assert_eq!(loaded.absorption, 3.0);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn an_aborted_transaction_restores_the_absorption_of_a_player_and_a_mob() {
         with_game(|game| {
             let mut player = PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
