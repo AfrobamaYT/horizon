@@ -58,6 +58,24 @@ impl EntitySelectorsRegistrar for PartRegistrar {
                 return;
             }
         };
+        // Horizon's bound, below the protocol payload cap. Size the exact revision-1 wire form.
+        let varint_bytes =
+            |n: usize| ((usize::BITS - n.leading_zeros()).max(1) as usize).div_ceil(7);
+        let entry_bytes = varint_bytes(name.len())
+            + name.len()
+            + varint_bytes(base.tooltip.len())
+            + base.tooltip.len()
+            + 3
+            + if base.limit.is_some() { 4 } else { 0 };
+        let total = 1
+            + varint_bytes(self.parts.entity_selectors.len() + 1)
+            + self.parts.entity_selector_bytes
+            + entry_bytes;
+        if total > 256 * 1024 {
+            self.refused.push(format!("{} registered selector token @{name}: encoded metadata would exceed Horizon's 256 KiB total limit", self.mod_id));
+            return;
+        }
+        self.parts.entity_selector_bytes += entry_bytes;
         let index = self
             .parts
             .entity_selectors
@@ -76,6 +94,46 @@ impl EntitySelectorsRegistrar for PartRegistrar {
 /// Fixtures that tests of other crates use to install entity selector tokens.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
+    #[test]
+    fn aggregate_metadata_budget_refuses_only_the_next_token_without_mutating_prior_records() {
+        struct Large;
+        impl crate::EntitySelectorType for Large {
+            fn base(&self) -> crate::SelectorBase {
+                crate::SelectorBase::new(
+                    false,
+                    Some(1),
+                    crate::SelectorSort::Nearest,
+                    "x".repeat(32767),
+                )
+            }
+            fn matches(
+                &self,
+                _: &mut dyn crate::ServerHost,
+                _: &crate::CommandSource,
+                _: crate::EntityRef,
+            ) -> bool {
+                true
+            }
+        }
+        let mut registrar = super::PartRegistrar::new("budget");
+        for n in 0..8 {
+            registrar.add_entity_selector(&format!("t{n}"), std::sync::Arc::new(Large));
+        }
+        assert_eq!(registrar.parts.entity_selectors.len(), 7);
+        assert_eq!(registrar.parts.entity_selector_bytes, 229460);
+        assert_eq!(registrar.refused.len(), 1);
+        assert!(registrar.refused[0].contains("@t7") && registrar.refused[0].contains("256 KiB"));
+        assert_eq!(
+            registrar
+                .parts
+                .entity_selectors
+                .iter()
+                .map(|info| info.name.as_ref())
+                .collect::<Vec<_>>(),
+            ["t0", "t1", "t2", "t3", "t4", "t5", "t6"]
+        );
+    }
+
     #[test]
     pub(crate) fn registration_refuses_vanilla_invalid_and_duplicate_tokens() {
         /// A token that keeps every candidate.
