@@ -122,28 +122,67 @@ const PLACE_MACROS: &[&str] = &[
 ];
 
 /// One source module: its items, from its file or its inline `mod` block.
-struct Module {
-    items: Vec<Item>,
+pub(crate) struct Module {
+    pub(crate) items: Vec<Item>,
 }
 
 /// The game crate's modules by path, parsed lazily from the pinned source.
-struct Source {
+pub(crate) struct Source {
     root: PathBuf,
     /// The crates whose modules are in `files`.
     loaded: BTreeSet<String>,
-    files: BTreeMap<String, Vec<PathBuf>>,
+    pub(crate) files: BTreeMap<String, Vec<PathBuf>>,
     parsed: BTreeMap<String, Module>,
     /// `macro_rules!` names the crate defines without `#[macro_export]`: a body using one can't
     /// leave the crate.
     local_macros: BTreeSet<String>,
     /// Each loaded lower crate's library name (`[lib] name`), by its folder's crate name.
-    libraries: BTreeMap<String, String>,
+    pub(crate) libraries: BTreeMap<String, String>,
     /// Each crate's declared types, read when a row first targets a trait method of the crate.
     owners: BTreeMap<String, crate::replace::OwnerTypes>,
+    /// What [`replaceable`] reads once for every function it is asked about.
+    cache: Cache,
+}
+
+/// The walks [`replaceable`] would otherwise repeat per function: the index asks it about every
+/// function of the game.
+#[derive(Default)]
+struct Cache {
+    /// The traits the game's crates declare.
+    traits: Option<BTreeSet<String>>,
+    /// The macro names the modules on each path define.
+    on_path: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl Source {
-    fn new(root: &Path) -> Result<Self, String> {
+    /// The modules the function index lists, with nothing walked: each file is read when a
+    /// target's module is.
+    fn indexed(root: &Path, index: &crate::functions::FunctionIndex) -> Result<Self, String> {
+        let mut files = BTreeMap::new();
+        let mut libraries = BTreeMap::new();
+        for (krate, facts) in &index.crates {
+            for (module, paths) in &facts.modules {
+                let mut joined = Vec::new();
+                for path in paths {
+                    joined.push(crate::functions::source_path(root, path)?);
+                }
+                files.insert(module.clone(), joined);
+            }
+            libraries.insert(krate.clone(), facts.library.clone());
+        }
+        Ok(Self {
+            root: root.to_owned(),
+            loaded: index.crates.keys().cloned().collect(),
+            files,
+            parsed: BTreeMap::new(),
+            local_macros: BTreeSet::new(),
+            libraries,
+            owners: BTreeMap::new(),
+            cache: Cache::default(),
+        })
+    }
+
+    pub(crate) fn new(root: &Path) -> Result<Self, String> {
         let src = root.join("crates/horizon-client/src");
         let mut files = BTreeMap::new();
         files.insert("horizon_client".to_owned(), vec![src.join("lib.rs")]);
@@ -169,11 +208,12 @@ impl Source {
             local_macros,
             libraries: BTreeMap::new(),
             owners: BTreeMap::new(),
+            cache: Cache::default(),
         })
     }
 
     /// Adds a lower crate's modules, once: `false` when the source has no such crate.
-    fn load(&mut self, krate: &str) -> bool {
+    pub(crate) fn load(&mut self, krate: &str) -> bool {
         if self.loaded.contains(krate) {
             return true;
         }
@@ -225,7 +265,7 @@ impl Source {
     }
 
     /// Module `path`'s items: its file's, or an inline module's inside its parent's.
-    fn module(&mut self, path: &str) -> Result<&Module, String> {
+    pub(crate) fn module(&mut self, path: &str) -> Result<&Module, String> {
         if !self.parsed.contains_key(path) {
             let items = if let Some(files) = self.files.get(path) {
                 let mut items = Vec::new();
@@ -326,7 +366,7 @@ fn walk(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// A type or path without its generic arguments or spaces: `Game<'_>` is `Game`.
-fn plain(text: &str) -> String {
+pub(crate) fn plain(text: &str) -> String {
     let mut depth = 0usize;
     text.chars()
         .filter(|&c| match c {
@@ -396,14 +436,14 @@ impl<'ast> Visit<'ast> for BodyCheck<'_> {
 }
 
 /// The function a target names, found in its module.
-struct Found {
-    module: String,
-    /// The `impl` it is in: none for a free function.
-    owner: Option<syn::ItemImpl>,
-    function: syn::ImplItemFn,
+pub(crate) struct Found {
+    pub(crate) module: String,
+    /// The `impl` it is in: none for a free function. Only its header is read.
+    pub(crate) owner: Option<syn::ItemImpl>,
+    pub(crate) function: syn::ImplItemFn,
 }
 
-fn find(source: &mut Source, target: &str) -> Result<Found, (&'static str, String)> {
+pub(crate) fn find(source: &mut Source, target: &str) -> Result<Found, (&'static str, String)> {
     let (front, name) = target
         .rsplit_once("::")
         .ok_or(("E_MIXIN_TARGET_MISSING", "not a function path".to_owned()))?;
@@ -504,17 +544,28 @@ fn find(source: &mut Source, target: &str) -> Result<Found, (&'static str, Strin
     }
 }
 
-/// Whether `function` can be copied and installed through its function's replacement slot.
-fn replaceable(found: &Found, source: &mut Source, loop_generic: bool) -> Result<(), String> {
+/// Whether `function` can be copied and installed through its function's replacement slot: the
+/// verdict the function index records for it.
+pub(crate) fn replaceable(
+    found: &Found,
+    source: &mut Source,
+    loop_generic: bool,
+) -> Result<(), String> {
     // A crate-local macro defined in a module on the function's path moves with the copy (the
     // mirror repeats it); one defined elsewhere would not resolve.
-    let on_path: BTreeSet<String> = source
-        .path_macros(&found.module)
-        .iter()
-        .filter_map(|mac| mac.ident.as_ref().map(ToString::to_string))
+    if !source.cache.on_path.contains_key(&found.module) {
+        let names = source
+            .path_macros(&found.module)
+            .iter()
+            .filter_map(|mac| mac.ident.as_ref().map(ToString::to_string))
+            .collect();
+        source.cache.on_path.insert(found.module.clone(), names);
+    }
+    let local_macros: BTreeSet<String> = source
+        .local_macros
+        .difference(&source.cache.on_path[&found.module])
+        .cloned()
         .collect();
-    let local_macros: BTreeSet<String> =
-        source.local_macros.difference(&on_path).cloned().collect();
     let local_macros = &local_macros;
     let sig = &found.function.sig;
     // A published loop's function is generic over its slot alone: each mod build copies it once,
@@ -554,20 +605,23 @@ fn replaceable(found: &Found, source: &mut Source, loop_generic: bool) -> Result
         if associated.0 {
             return Err("its signature names a trait-associated constant through Self".into());
         }
-        let items = source.module(&found.module)?.items.clone();
+        let foreign = crate::replace::foreign_imports(&source.module(&found.module)?.items);
         let krate = found
             .module
             .split("::")
             .next()
             .unwrap_or_default()
             .to_owned();
-        let traits = crate::replace::declared_traits(&source.root)?;
-        let foreign = crate::replace::foreign_imports(&items);
+        if source.cache.traits.is_none() {
+            source.cache.traits = Some(crate::replace::declared_traits(&source.root)?);
+        }
+        source.owner_types(&krate)?;
+        let traits = source.cache.traits.as_ref().expect("read above");
         if let Some(why) = crate::replace::trait_refusal(
             &found.module,
             block,
-            &traits,
-            source.owner_types(&krate)?,
+            traits,
+            &source.owners[&krate],
             &foreign,
         ) {
             return Err(why);
@@ -697,20 +751,23 @@ struct Tree {
 }
 
 /// The patch crate for `targets` (as `[[native.mixin]]` rows write them), from the pinned game source
-/// at `root`. `krate` is the patch crate's name. Every target that can't be copied is refused by
-/// name; the crate is returned only when none is.
+/// at `root`, which `index` (the build's `functions.json`) describes. `krate` is the patch crate's
+/// name. A target's file and verdict come from the index, and its text is checked against it
+/// before it is copied: the source is never walked. Every target that can't be copied is refused
+/// by name; the crate is returned only when none is.
 pub fn generate(
     root: &Path,
     krate: &str,
     targets: &[String],
     extras: &Extras,
+    index: &crate::functions::FunctionIndex,
 ) -> Result<PatchCrate, Vec<Refusal>> {
     let refuse = |target: &str, code, why: String| Refusal {
         target: target.to_owned(),
         code,
         why,
     };
-    let mut source = match Source::new(root) {
+    let mut source = match Source::indexed(root, index) {
         Ok(source) => source,
         Err(why) => {
             return Err(targets
@@ -735,21 +792,9 @@ pub fn generate(
             .loops
             .iter()
             .any(|l| l.published.generic_target() == *target);
-        let refusal = if loop_generic {
-            Ok(None)
-        } else {
-            crate::replace::refusal(root, target)
-        };
-        match refusal {
-            Ok(None) => {}
-            Ok(Some(why)) => {
-                refusals.push(refuse(target, "E_MIXIN_NOT_REPLACEABLE", why));
-                continue;
-            }
-            Err(why) => {
-                refusals.push(refuse(target, "E_MIXIN_SOURCE", why));
-                continue;
-            }
+        if let Err((code, why)) = index.check(root, target) {
+            refusals.push(refuse(target, code, why));
+            continue;
         }
         let found = match find(&mut source, target) {
             Ok(found) => found,
@@ -758,10 +803,6 @@ pub fn generate(
                 continue;
             }
         };
-        if let Err(why) = replaceable(&found, &mut source, loop_generic) {
-            refusals.push(refuse(target, "E_MIXIN_NOT_REPLACEABLE", why));
-            continue;
-        }
         let name = found.function.sig.ident.clone();
         let source_crate = found.module.split("::").next().expect("a crate").to_owned();
         let patch_name = patch_crate(krate, &source_crate);
@@ -1617,6 +1658,7 @@ mod tests {
             local_macros: BTreeSet::new(),
             libraries: BTreeMap::new(),
             owners: BTreeMap::new(),
+            cache: Cache::default(),
         };
         assert!(source.load("horizon_mod_render"));
         assert_eq!(
@@ -1633,11 +1675,21 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
     }
 
+    /// [`generate`] on this checkout, with its function index for `targets`.
+    fn generate_here(targets: &[String], extras: &Extras) -> Result<PatchCrate, Vec<Refusal>> {
+        let generic = extras
+            .loops
+            .iter()
+            .map(|l| crate::functions::key(&l.published.generic_target()))
+            .collect();
+        let only = targets.iter().map(|t| crate::functions::key(t)).collect();
+        let index = crate::functions::index_of(&root(), &generic, Some(&only)).unwrap();
+        generate(&root(), "horizon_patch", targets, extras, &index)
+    }
+
     #[test]
     fn a_method_moves_into_a_trait_of_its_own_type() {
-        let crate_ = generate(
-            &root(),
-            "horizon_patch",
+        let crate_ = generate_here(
             &["horizon_client::game::autosave::Game<'_>::next_autosave_interval".into()],
             &Extras::default(),
         )
@@ -1657,9 +1709,7 @@ mod tests {
 
     #[test]
     fn refusals_are_named() {
-        let error = generate(
-            &root(),
-            "horizon_patch",
+        let error = generate_here(
             &[
                 "horizon_client::game::autosave::Game<'_>::no_such_function".into(),
                 "horizon_no_such_crate::f".into(),
@@ -1673,9 +1723,7 @@ mod tests {
 
     #[test]
     fn a_lower_crate_function_gets_a_patch_crate_of_its_own() {
-        let crate_ = generate(
-            &root(),
-            "horizon_patch",
+        let crate_ = generate_here(
             &[
                 "horizon_client::game::autosave::Game<'_>::next_autosave_interval".into(),
                 "horizon_client_lib::clock::FixedStep::advance".into(),
@@ -1713,6 +1761,7 @@ mod tests {
             local_macros: BTreeSet::new(),
             libraries: BTreeMap::new(),
             owners: BTreeMap::new(),
+            cache: Cache::default(),
         };
         let ancestor = mirror(
             &mut source,
@@ -1771,6 +1820,7 @@ mod tests {
             local_macros: BTreeSet::new(),
             libraries: BTreeMap::new(),
             owners: BTreeMap::new(),
+            cache: Cache::default(),
         };
         let used = BTreeSet::from(["Arc".to_owned()]);
         let out = mirror(&mut source, "fixture", &Tree::default(), false, Some(&used)).unwrap();
@@ -1799,6 +1849,7 @@ mod tests {
             local_macros: BTreeSet::new(),
             libraries: BTreeMap::new(),
             owners: BTreeMap::new(),
+            cache: Cache::default(),
         };
         let out = mirror(&mut source, "fixture", &Tree::default(), false, None).unwrap();
         let parsed: syn::File = syn::parse2(out).unwrap();
@@ -1830,9 +1881,7 @@ mod tests {
             idents: BTreeSet::new(),
             loops: Vec::new(),
         };
-        let crate_ = generate(
-            &root(),
-            "horizon_patch",
+        let crate_ = generate_here(
             &["horizon_client::game::autosave::Game<'_>::next_autosave_interval".into()],
             &extras,
         )
@@ -1853,9 +1902,7 @@ mod tests {
             "pubmod__fnr_bridges{pubusecrate::game::__Fnr_Bridge___horizon_mixins_m_ticks;}"
         ));
         assert!(lib.contains("usecrate::__fnr_bridges::*;"));
-        let error = generate(
-            &root(),
-            "horizon_patch",
+        let error = generate_here(
             &[],
             &Extras {
                 modules: vec![SupportModule {
@@ -1900,13 +1947,7 @@ mod tests {
             }],
             ..Extras::default()
         };
-        let crate_ = generate(
-            &root(),
-            "horizon_patch",
-            std::slice::from_ref(&published.entry),
-            &extras,
-        )
-        .unwrap();
+        let crate_ = generate_here(std::slice::from_ref(&published.entry), &extras).unwrap();
         assert_eq!(crate_.patched.len(), 1);
         let lib = crate_.libs[0].1.replace(char::is_whitespace, "");
         // First by priority outside, then the next, then the empty slot.
@@ -1936,13 +1977,7 @@ mod tests {
         // A row on the loop's function: it is copied once, with no cell of its own, and the entry's
         // copy calls the copy.
         let generic = published.generic_target();
-        let both = generate(
-            &root(),
-            "horizon_patch",
-            &[published.entry.clone(), generic.clone()],
-            &extras,
-        )
-        .unwrap();
+        let both = generate_here(&[published.entry.clone(), generic.clone()], &extras).unwrap();
         let installs: Vec<_> = both
             .patched
             .iter()
@@ -1984,13 +2019,7 @@ mod tests {
         // A helper that is not Rust is refused by name.
         let mut broken = extras.clone();
         broken.loops[0].slots[1].helper = "fn (".into();
-        let refused = generate(
-            &root(),
-            "horizon_patch",
-            std::slice::from_ref(&published.entry),
-            &broken,
-        )
-        .unwrap_err();
+        let refused = generate_here(std::slice::from_ref(&published.entry), &broken).unwrap_err();
         assert_eq!(refused[0].code, "E_LOOP_HELPER");
         assert!(
             refused[0].why.starts_with("second:row: its helper:"),
@@ -2014,7 +2043,15 @@ mod spike {
             .map(str::to_owned)
             .collect();
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        match super::generate(&root, "horizon_patch", &targets, &super::Extras::default()) {
+        let only = targets.iter().map(|t| crate::functions::key(t)).collect();
+        let index = crate::functions::index_of(&root, &Default::default(), Some(&only)).unwrap();
+        match super::generate(
+            &root,
+            "horizon_patch",
+            &targets,
+            &super::Extras::default(),
+            &index,
+        ) {
             Ok(crate_) => {
                 for (name, lib) in &crate_.libs {
                     std::fs::create_dir_all(out.join(name).join("src")).unwrap();

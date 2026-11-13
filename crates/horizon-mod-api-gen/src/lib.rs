@@ -670,6 +670,7 @@ pub(crate) fn rerun_if_changed(path: &impl std::fmt::Display) {
     }
 }
 pub use wire::generate_host as generate_wire_host;
+pub mod functions;
 pub mod internals;
 pub mod internals_view;
 pub mod loops;

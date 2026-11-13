@@ -18,7 +18,7 @@ COMMIT = "c" * 40
 
 
 def write_build_data(root: Path, identity: dict | None = None, commit: str = COMMIT) -> None:
-    """The three build-data files with their header for `commit`, and an identity naming it."""
+    """The build-data files with their header for `commit`, and an identity naming it."""
     for name in prebuilt_game.BUILD_DATA:
         (root / name).write_text(json.dumps({"schema": 1, "build": {"commit": commit}}))
     (root / prebuilt_game.IDENTITY).write_text(json.dumps({**(identity or {}), "commit": commit}))
@@ -186,7 +186,7 @@ class SdkAssetTests(unittest.TestCase):
                 names = sorted(path.name for path in dist.iterdir())
                 self.assertEqual(names, ["build-data.tar.xz", "engine-x86_64-unknown-linux-gnu-server.tar.xz", "surface.json"])
                 with tarfile.open(dist / "build-data.tar.xz") as tar:
-                    self.assertEqual(tar.getnames(), [".", "./internals.json", "./loops.json", "./points.json"])
+                    self.assertEqual(tar.getnames(), [".", "./functions.json", "./internals.json", "./loops.json", "./points.json"])
                 with lzma.open(dist / "engine-x86_64-unknown-linux-gnu-server.tar.xz") as xz, tarfile.open(fileobj=xz) as tar:
                     self.assertIn("./deps/libhorizon_mod_host.so", tar.getnames())
                     self.assertEqual({member.mtime for member in tar.getmembers()}, {0})

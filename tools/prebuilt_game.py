@@ -61,8 +61,11 @@ POINTS = "points.json"
 INTERNALS = "internals.json"
 # The published loops (`#[horizon_loop]`), which a mod's `[[native.loop]]` rows name.
 LOOPS = "loops.json"
+# The function index: where each function a mixin may target is, and whether it takes a replacement; the
+# launcher's patch step reads it instead of walking the game's source.
+FUNCTIONS = "functions.json"
 # The SDK's build data (`point_shape::build_data`): each file opens with `schema` and `build.commit`.
-BUILD_DATA = (INTERNALS, LOOPS, POINTS)
+BUILD_DATA = (FUNCTIONS, INTERNALS, LOOPS, POINTS)
 BUILD_DATA_SCHEMA = 1
 BUILD_DATA_ARCHIVE = "build-data.tar.xz"
 # The surface export (`horizon-stage surface`), an SDK asset of its own.

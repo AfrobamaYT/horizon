@@ -1,5 +1,5 @@
-//! The SDK's build-pinned data (`build-data.tar.xz`): `points.json`, `internals.json` and
-//! `loops.json`, written by the staging pass and read by the launcher and the mod tools. Each file
+//! The SDK's build-pinned data (`build-data.tar.xz`): `points.json`, `internals.json`,
+//! `loops.json` and `functions.json`, written by the staging pass and read by the launcher and the mod tools. Each file
 //! opens with the same header, `schema` and `build.commit`, so a file names the game build it
 //! describes and a reader refuses a schema it does not know, by name, before reading the rest.
 //! No compatibility promise beyond that: the data is exact to its build.
@@ -14,8 +14,11 @@ pub const POINTS: &str = "points.json";
 pub const INTERNALS: &str = "internals.json";
 /// The published loops.
 pub const LOOPS: &str = "loops.json";
-/// The three files, in the order the archive holds them.
-pub const FILES: [&str; 3] = [INTERNALS, LOOPS, POINTS];
+/// The function index: where each function a mixin may target is, and whether it can take a
+/// replacement.
+pub const FUNCTIONS: &str = "functions.json";
+/// The four files, in the order the archive holds them.
+pub const FILES: [&str; 4] = [FUNCTIONS, INTERNALS, LOOPS, POINTS];
 /// The release asset holding them.
 pub const ARCHIVE: &str = "build-data.tar.xz";
 
