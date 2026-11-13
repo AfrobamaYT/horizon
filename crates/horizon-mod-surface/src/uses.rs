@@ -385,6 +385,8 @@ struct FileFacts<'t> {
     tokens: Vec<(Token<'t>, usize)>,
     /// Each token's first byte.
     starts: Vec<usize>,
+    /// Whether each token is in a `use` statement.
+    in_use: Vec<bool>,
     /// Each token's path start ([`path_starts`]).
     path_starts: Vec<usize>,
     /// Each opening bracket's closer and whether it ends in `..` ([`brackets`]).
@@ -506,6 +508,7 @@ fn file_facts<'t>(file: &str, text: &'t str) -> Result<FileFacts<'t>, ScanError>
     Ok(FileFacts {
         tokens,
         starts,
+        in_use,
         path_starts,
         closers,
         rests,
@@ -1744,9 +1747,12 @@ impl<'s, 't> Walk<'_, '_, 's, 't> {
     }
 }
 
-/// What a macro body, which the parser does not read, builds with API struct `id` at `at`: a
-/// name followed by `{` or `(` is a build, in full unless it ends in `..`; a tuple or unit
-/// struct's name where a value starts is one too (`.map(Pos)`, `x = Marker`).
+/// What a macro body, which the parser does not read, builds with API struct `id` at `at`.
+/// Where a type alone stands (after `->`, `impl`, `for`, `dyn`, a definition keyword or `<`)
+/// or in a `use`, nothing. Elsewhere a name followed by `{` or `(` is a build, in full unless it
+/// ends in `..`, and a tuple or unit struct's name is one too (`.map(Pos)`, `{ Marker }`,
+/// `|_| Pos`, `&Marker`, `make: Pos`). Tokens cannot tell a field's type from its value, so
+/// after `:` it counts.
 fn macro_body<'s, 't>(
     found: &mut Found<'s, 't>,
     api: &Index<'s>,
@@ -1759,19 +1765,38 @@ fn macro_body<'s, 't>(
     let kind = api.kind(id);
     let start = file.path_starts[at];
     let open = at + 1;
+    let type_only = file.in_use[at]
+        || start
+            .checked_sub(1)
+            .is_some_and(|before| match tokens[before].0 {
+                Token::Ident(word) => matches!(
+                    word,
+                    "impl"
+                        | "dyn"
+                        | "struct"
+                        | "enum"
+                        | "union"
+                        | "trait"
+                        | "type"
+                        | "mod"
+                        | "fn"
+                        | "where"
+                        | "as"
+                        | "for"
+                ),
+                Token::Punct(b'<') => true,
+                Token::Punct(b'>') => before >= 1 && punct(tokens, before - 1, b'-'),
+                _ => false,
+            });
+    if type_only {
+        return;
+    }
     if punct(tokens, open, b'{') || punct(tokens, open, b'(') {
         let full = !file.rests[open] && kind != Some(TypeKind::Union);
         found.build(id, place, full, punct(tokens, open, b'{'));
     } else if matches!(kind, Some(TypeKind::TupleStruct | TypeKind::UnitStruct))
         && !(punct(tokens, open, b':') && punct(tokens, open + 1, b':'))
         && !punct(tokens, open, b'!')
-        && start >= 1
-        && match tokens[start - 1].0 {
-            Token::Punct(b'(' | b',' | b'=' | b'[') => true,
-            Token::Punct(b'>') => punct(tokens, start.saturating_sub(2), b'='),
-            Token::Ident(word) => matches!(word, "return" | "break"),
-            _ => false,
-        }
     {
         found.build(id, place, true, false);
     }

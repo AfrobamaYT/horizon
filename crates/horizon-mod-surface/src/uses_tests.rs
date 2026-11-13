@@ -2642,10 +2642,7 @@ fn a_macro_body_is_read_as_tokens() {
     let maker = "macro_rules! make { ($t:ident) => { $t(1, 2) }; }";
     assert_eq!(
         built_in(
-            &[
-                ("src/m.rs", maker),
-                ("src/lib.rs", "fn f(_: Pos) { make! { Pos } }")
-            ],
+            &[("src/m.rs", maker), ("src/lib.rs", "fn f(_: Pos) {}")],
             "type:Pos"
         ),
         Some(Built::Full)
@@ -2778,12 +2775,56 @@ fn round_six_inputs_are_not_fits() {
         "use mod_api::Pos;\npub fn ids(raw: Option<(i32, i32)>) -> Vec<Option<Pos>> { vec![raw.map(|(a, b)| Pos(a, b)), None.map(Pos)] }",
         "fn f(p: mod_api::Pos) { assert_eq!(Some(p), Some(1).map(mod_api::Pos)); }",
         "fn f() { let v = vec![mod_api::Pos, mod_api::Pos]; }",
+        "use mod_api::Pos;\nmacro_rules! m { () => { |_: u8| Pos }; }",
+        "use mod_api::Pos;\nmacro_rules! m { () => { let x = 1; x; Pos }; }",
+        "use mod_api::Pos;\npub struct Maker { pub make: fn(i32, i32) -> Pos }\npub fn makers() -> Vec<Maker> { vec![Maker { make: Pos }] }",
+        "use mod_api::Pos;\nfn f(c: bool, other: fn(i32, i32) -> Pos) { let v = vec![if c { Pos } else { other }]; }",
     ] {
         assert_eq!(
             pos(&[("src/lib.rs", source)]),
             Some(Built::Full),
             "{source}"
         );
+    }
+    // A unit struct as a block's value or behind `&` in a macro body; as a type it is none.
+    let marker = || {
+        let mut pieces = wider();
+        let mut record = api_type("type:Marker", "", true, vec![]);
+        record = Type::new(
+            record.id.clone(),
+            "",
+            None,
+            TypeContract {
+                kind: TypeKind::UnitStruct,
+                ..record.contract.clone()
+            },
+            vec![],
+            vec![],
+        );
+        pieces.types.push(record);
+        pieces
+    };
+    let marker_built = |source: &str| {
+        entry(
+            &scan_files(marker(), &[("src/lib.rs", source)]),
+            "type:Marker",
+        )
+        .built
+    };
+    for source in [
+        "use mod_api::Marker;\nmacro_rules! m { () => { Marker }; }",
+        "use mod_api::Marker;\nmacro_rules! m { () => { f(&Marker) }; }",
+    ] {
+        assert_eq!(marker_built(source), Some(Built::Full), "{source}");
+    }
+    for source in [
+        "use mod_api::Marker;\nmacro_rules! m { () => { fn f() -> Marker { make() } }; }",
+        "use mod_api::Marker;\nmacro_rules! m { () => { impl Tr for Marker {} }; }",
+        "use mod_api::Marker;\nmacro_rules! m { () => { impl Marker {} }; }",
+        "use mod_api::Marker;\nmacro_rules! m { () => { let v: Vec<Marker> = x; }; }",
+        "macro_rules! m { () => { use mod_api::{Marker, Pos}; }; }",
+    ] {
+        assert_eq!(marker_built(source), Some(Built::None), "{source}");
     }
     // A `Self` the parser cannot place: an impl of a parenthesised type, or one inside the
     // mod's own `macro_rules!` with a `where` clause.
