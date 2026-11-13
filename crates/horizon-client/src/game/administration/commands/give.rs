@@ -1,6 +1,7 @@
 //! `/give`'s handing over of one stack.
 use super::{Game, Target};
 use horizon_client::items::ItemStack;
+use horizon_core::random::RandomSource;
 
 impl Game<'_> {
     /// `GiveCommand.giveItem`'s handing over of one stack to the acting player:
