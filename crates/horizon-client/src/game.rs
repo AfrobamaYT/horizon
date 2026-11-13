@@ -2782,7 +2782,6 @@ impl Game<'_> {
             items,
             horizon_client::join_seq::RestoreOrder::SurvivorsFirst,
         );
-        self.tell_dropped_item_steps();
     }
     /// Run vanilla block behaviour against the world through `LevelAccess`.
     fn with_level<R>(
