@@ -2,7 +2,6 @@
 //! Health, sound/particle playback and network delivery remain event consumers.
 use crate::{
     Result,
-    blocks::BlockFacts,
     collisions::SceneCollisions,
     motion::{MotionEvent, MotionWorld},
 };
@@ -25,7 +24,7 @@ use horizon_world::{
     movement_properties::MovementProperties,
     registry::BlockStateId,
 };
-use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
+use std::{collections::BTreeMap, fs, path::Path};
 
 /// Called on the server before a landing converts farmland to its base block.
 #[inline(never)]
@@ -213,31 +212,6 @@ pub enum FallEvent {
     },
 }
 impl FallEvent {
-    /// The sound the landing player's fall plays (name, volume, pitch):
-    /// `causeFallDamage`'s fall or honey sound, and `playBlockFallSound`'s
-    /// block fall sound at half volume and three quarters pitch (none for air).
-    pub fn heard_fall_sound(self, facts: &BlockFacts) -> Option<(Arc<str>, f32, f32)> {
-        match self {
-            Self::Sound {
-                sound,
-                volume,
-                pitch,
-                ..
-            } => sound
-                .player_fall_sound()
-                .or_else(|| sound.honey_landing_sound())
-                .map(|name| (Arc::from(name), volume, pitch)),
-            Self::BlockFallSound { state, .. } if !facts.is_air(state) => {
-                let sounds = &facts.get(state).sounds;
-                Some((
-                    sounds.fall.clone(),
-                    sounds.volume * 0.5,
-                    sounds.pitch * 0.75,
-                ))
-            }
-            _ => None,
-        }
-    }
     /// Exact-bit diagnostic representation shared by the headless scene probe.
     pub fn trace(self) -> String {
         fn p(v: BlockPos) -> String {
