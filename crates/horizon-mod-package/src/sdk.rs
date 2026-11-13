@@ -224,6 +224,12 @@ pub struct Inputs {
     pub routes: BTreeMap<String, Route>,
     /// How to make each listed file, by its name.
     pub how: BTreeMap<String, String>,
+    /// The files each compiled slice must hold, by its kind's name, as paths in the slice:
+    /// `<folder>/@program:<name>` is that program (`.exe` on Windows), `<folder>/@dylib:<crate>`
+    /// that crate's dynamic library and `<folder>/@rmeta:<crate>` its metadata, built for the
+    /// slice's target. The packager refuses a package whose slices miss one.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub members: BTreeMap<String, Vec<String>>,
 }
 
 /// What one route needs.

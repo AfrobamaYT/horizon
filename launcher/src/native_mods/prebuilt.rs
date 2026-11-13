@@ -128,19 +128,22 @@ pub(super) fn fetch(
     target: Target,
     local: Option<&Path>,
     downloading: impl FnOnce(),
-) -> Result<Result<PathBuf, Refusal>, String> {
+) -> Result<Result<Package, Refusal>, String> {
     let Some(host) = rust_toolchain::host() else {
         return Ok(Err(Refusal::Host));
     };
+    let name = native::prebuilt_archive(host.target, matches!(target, Target::Server));
     if let Some(local) = local {
         check_identity(local, revision, host.target, target)?;
-        return Ok(Ok(local.to_owned()));
+        // Laid out afresh each build, by links: the developer's folder is never changed.
+        let build = cache_dir(revision, &format!("{name}.developer"));
+        let _ = fs::remove_dir_all(&build);
+        return Ok(Ok(lay_out(local, &build, true)?));
     }
-    let name = native::prebuilt_archive(host.target, matches!(target, Target::Server));
     let dir = cache_dir(revision, &name);
-    if dir.join(IDENTITY).is_file() {
+    if Package::at(&dir).runtime.join(IDENTITY).is_file() {
         crate::storage::mark_used(&dir).map_err(super::cache_error)?;
-        return Ok(Ok(dir));
+        return Ok(Ok(Package::at(&dir)));
     }
     let release = release_url(revision);
     let download = |why: String| Ok(Err(Refusal::Download { why }));
@@ -202,12 +205,14 @@ pub(super) fn fetch(
         }
     }
     check_identity(&unpacked, revision, host.target, target)?;
+    let laid = partial.join("build");
+    lay_out(&unpacked, &laid, false)?;
     let _ = fs::remove_dir_all(&dir);
-    fs::rename(&unpacked, &dir).map_err(|e| e.to_string())?;
+    fs::rename(&laid, &dir).map_err(|e| e.to_string())?;
     crate::run_leases::publish(&dir).map_err(super::cache_error)?;
     let _ = fs::remove_dir_all(&partial);
     crate::storage::mark_used(&dir).map_err(super::cache_error)?;
-    Ok(Ok(dir))
+    Ok(Ok(Package::at(&dir)))
 }
 
 fn release_url(revision: &str) -> String {
@@ -261,8 +266,9 @@ pub(super) fn planning_catalog(
     let host = rust_toolchain::host().ok_or(Refusal::Host)?;
     let name = native::prebuilt_archive(host.target, false);
     let game = cache_dir(revision, &name);
-    if game.join(IDENTITY).is_file() {
-        if let Ok(catalog) = internals::Catalog::read(&game) {
+    let package = Package::at(&game);
+    if package.runtime.join(IDENTITY).is_file() {
+        if let Ok(catalog) = internals::Catalog::read(&package.api) {
             crate::storage::mark_used(&game).map_err(|error| Refusal::Download {
                 why: super::cache_error(error),
             })?;
@@ -343,7 +349,7 @@ pub(super) struct Identity {
     /// The API route's mods library: its crate name and the metadata both builds of it use.
     #[serde(default)]
     pub(super) native_mods: Option<NativeMods>,
-    /// Which package files each archive holds; the API route reads only the `api` list.
+    /// Which package files the `runtime` and `api` slices hold; every other file is the `engine`'s.
     #[serde(default)]
     pub(super) slices: Option<Slices>,
 }
@@ -357,7 +363,144 @@ pub(super) struct NativeMods {
 
 #[derive(serde::Deserialize)]
 pub(super) struct Slices {
+    pub(super) runtime: Vec<String>,
     pub(super) api: Vec<String>,
+}
+
+/// The prebuilt game as the launcher keeps one build of it: each of the SDK's three compiled
+/// slices in a folder of its own under the build's folder (`runtime`, `api`, `engine`), each
+/// unpacked on its own. The API route reads `runtime` and `api`; the other routes read all three.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Package {
+    pub(super) runtime: PathBuf,
+    pub(super) api: PathBuf,
+    pub(super) engine: PathBuf,
+}
+
+impl Package {
+    /// The slices under the build folder `build`.
+    pub(super) fn at(build: &Path) -> Self {
+        Self {
+            runtime: build.join("runtime"),
+            api: build.join("api"),
+            engine: build.join("engine"),
+        }
+    }
+
+    /// The three slices as one folder at `into`, linked file by file (copied where a link can't
+    /// be made): the folder the engine and registry routes build against.
+    pub(super) fn whole(&self, into: &Path) -> Result<PathBuf, String> {
+        let _ = fs::remove_dir_all(into);
+        for slice in [&self.runtime, &self.api, &self.engine] {
+            link_tree(slice, slice, into)?;
+        }
+        Ok(into.to_owned())
+    }
+}
+
+/// Link every file under `dir` (inside the slice `slice`) into `into` at the same relative path;
+/// a file two slices both hold is refused.
+fn link_tree(slice: &Path, dir: &Path, into: &Path) -> Result<(), String> {
+    for entry in fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
+        let path = entry.map_err(|e| format!("{}: {e}", dir.display()))?.path();
+        let to = into.join(path.strip_prefix(slice).expect("under its slice"));
+        if path.is_dir() {
+            link_tree(slice, &path, into)?;
+            continue;
+        }
+        if to.exists() {
+            return Err(trf(
+                "The prebuilt game's slices both hold {file}.",
+                &[("file", &to.display().to_string())],
+            ));
+        }
+        fs::create_dir_all(to.parent().expect("a file has a folder")).map_err(|e| e.to_string())?;
+        if fs::hard_link(&path, &to).is_err() {
+            fs::copy(&path, &to).map_err(|e| format!("{}: {e}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Lay the whole prebuilt game in `whole` out as its three slices under `build` ([`Package`]),
+/// as its identity's `slices` lists them (the `runtime` and `api` files; every other file is the
+/// `engine`'s), moving or linking each file; a listed file that isn't there is refused by name.
+fn lay_out(whole: &Path, build: &Path, link: bool) -> Result<Package, String> {
+    let sdk = identity(whole)?;
+    let slices = sdk.slices.as_ref().ok_or_else(|| {
+        tr("This prebuilt game has no slices. Update Horizon and rebuild the mods against this game.")
+            .to_string()
+    })?;
+    let package = Package::at(build);
+    let mut placed = std::collections::HashMap::new();
+    for (folder, names) in [
+        (&package.runtime, &slices.runtime),
+        (&package.api, &slices.api),
+    ] {
+        for name in names {
+            if !Path::new(name)
+                .components()
+                .all(|part| matches!(part, std::path::Component::Normal(_)))
+            {
+                return Err(trf(
+                    "The prebuilt game's file list names {file}, which is not a plain path.",
+                    &[("file", name)],
+                ));
+            }
+            placed.insert(whole.join(name), folder.join(name));
+        }
+    }
+    let mut files = Vec::new();
+    every_file(whole, &mut files)?;
+    let missing: Vec<&String> = slices
+        .runtime
+        .iter()
+        .chain(&slices.api)
+        .filter(|name| !whole.join(name).is_file())
+        .collect();
+    if !missing.is_empty() {
+        return Err(trf(
+            "The prebuilt game is missing files its slices list: {files}.",
+            &[(
+                "files",
+                &missing
+                    .iter()
+                    .map(|name| name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )],
+        ));
+    }
+    for file in files {
+        let to = placed.remove(&file).unwrap_or_else(|| {
+            package
+                .engine
+                .join(file.strip_prefix(whole).expect("under the package"))
+        });
+        fs::create_dir_all(to.parent().expect("a file has a folder")).map_err(|e| e.to_string())?;
+        let moved = if link {
+            fs::hard_link(&file, &to).or_else(|_| fs::copy(&file, &to).map(drop))
+        } else {
+            fs::rename(&file, &to)
+        };
+        moved.map_err(|e| format!("{}: {e}", file.display()))?;
+    }
+    for folder in [&package.runtime, &package.api, &package.engine] {
+        fs::create_dir_all(folder).map_err(|e| e.to_string())?;
+    }
+    Ok(package)
+}
+
+fn every_file(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+    for entry in fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
+        let path = entry.map_err(|e| format!("{}: {e}", dir.display()))?.path();
+        if path.is_dir() {
+            every_file(&path, out)?;
+        } else {
+            out.push(path);
+        }
+    }
+    Ok(())
 }
 
 impl Identity {
@@ -577,14 +720,26 @@ impl Route {
             Self::Registry
         } else if projects.iter().any(|project| {
             let manifest = &project.bundle.manifest;
+            // Every row kind by name: a new one does not compile until it is routed here.
+            let rows = manifest.native.as_ref().is_some_and(|native| {
+                let horizon_mod_package::manifest::Native {
+                    game: _,
+                    horizon: _,
+                    mixins: _,
+                    mixin,
+                    module,
+                    bridge,
+                    state,
+                    r#loop,
+                } = native;
+                !(mixin.is_empty()
+                    && module.is_empty()
+                    && bridge.is_empty()
+                    && state.is_empty()
+                    && r#loop.is_empty())
+            });
             internals::needed(manifest)
-                || manifest.native.as_ref().is_some_and(|native| {
-                    !(native.mixin.is_empty()
-                        && native.module.is_empty()
-                        && native.bridge.is_empty()
-                        && native.state.is_empty()
-                        && native.r#loop.is_empty())
-                })
+                || rows
                 || project
                     .api_dependencies()
                     .iter()
@@ -627,7 +782,7 @@ fn registry_dependency(project: &api::Project<'_>) -> bool {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn compile(
     rust: &Toolchain,
-    game: &Path,
+    package: &Package,
     out: &Path,
     route: Route,
     projects: &[api::Project<'_>],
@@ -636,8 +791,17 @@ pub(super) fn compile(
     consent: Option<&dyn Fn(&super::RegistryInventory) -> bool>,
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
     if route == Route::Api {
-        return super::api_route::compile(rust, game, out, projects, declared, resolution);
+        return super::api_route::compile(
+            rust,
+            &package.runtime,
+            &package.api,
+            out,
+            projects,
+            declared,
+            resolution,
+        );
     }
+    let game = &package.whole(&out.with_file_name("prebuilt-package"))?;
     if route == Route::Registry {
         return super::registry_compile::compile(
             rust,
@@ -1122,12 +1286,77 @@ mod tests {
                 check("abc123", &rustc, this.target, "client").is_ok(),
                 this.target == host
             );
-            let local = |revision| fetch(revision, Target::Client, Some(&dir), || ());
-            assert_eq!(local("abc123"), Ok(Ok(dir.clone())));
-            assert!(local("abc124").is_err());
+            // Another build of a developer's own game is refused before anything is laid out.
+            assert!(fetch("abc124", Target::Client, Some(&dir), || ()).is_err());
         }
         fs::remove_file(dir.join(IDENTITY)).unwrap();
         assert!(check_identity(&dir, "abc123", host, Target::Client).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_package_is_laid_out_as_its_slices_and_whole_again() {
+        let dir = super::super::tests::dir("prebuilt-lay-out");
+        let whole = dir.join("whole");
+        let write = |slices: serde_json::Value| {
+            let identity = serde_json::json!({
+                "package_format": horizon_mod_package::sdk::PACKAGE_FORMAT,
+                "commit": "abc123", "rustc": "", "target": "", "side": "client", "link_args": [],
+                "slices": slices,
+            });
+            fs::write(whole.join(IDENTITY), identity.to_string()).unwrap();
+        };
+        for (name, text) in [
+            ("bin/horizon-client", "exe"),
+            ("deps/libmod_api-1.rmeta", "api"),
+            ("deps/libhorizon_client-1.rlib", "engine"),
+            ("points.json", "{}"),
+        ] {
+            fs::create_dir_all(whole.join(name).parent().unwrap()).unwrap();
+            fs::write(whole.join(name), text).unwrap();
+        }
+        let runtime = serde_json::json!([IDENTITY, "bin/horizon-client"]);
+        write(
+            serde_json::json!({"runtime": runtime, "api": ["deps/libmod_api-1.rmeta", "points.json"]}),
+        );
+        let package = lay_out(&whole, &dir.join("linked"), true).unwrap();
+        assert_eq!(package, Package::at(&dir.join("linked")));
+        let read = |path: PathBuf| fs::read_to_string(path).unwrap();
+        assert_eq!(read(package.runtime.join("bin/horizon-client")), "exe");
+        assert_eq!(read(package.api.join("deps/libmod_api-1.rmeta")), "api");
+        assert_eq!(
+            read(package.engine.join("deps/libhorizon_client-1.rlib")),
+            "engine"
+        );
+        assert!(!package.engine.join("points.json").exists());
+        // Linking leaves the developer's folder as it was.
+        assert_eq!(read(whole.join("bin/horizon-client")), "exe");
+        let union = package.whole(&dir.join("union")).unwrap();
+        for name in [
+            "bin/horizon-client",
+            "deps/libmod_api-1.rmeta",
+            "deps/libhorizon_client-1.rlib",
+            IDENTITY,
+        ] {
+            assert!(union.join(name).is_file(), "{name}");
+        }
+        // A listed file that is absent, or a name out of the package, is refused.
+        write(serde_json::json!({"runtime": runtime, "api": ["deps/gone.rmeta"]}));
+        let error = lay_out(&whole, &dir.join("absent"), true).unwrap_err();
+        assert!(error.contains("deps/gone.rmeta"), "{error}");
+        write(serde_json::json!({"runtime": runtime, "api": ["../points.json"]}));
+        // Even when that file exists, outside the package.
+        fs::write(dir.join("points.json"), "{}").unwrap();
+        let error = lay_out(&whole, &dir.join("escape"), true).unwrap_err();
+        assert!(error.contains("not a plain path"), "{error}");
+        write(serde_json::json!(null));
+        assert!(lay_out(&whole, &dir.join("none"), true).is_err());
+        // Moving (an unpacked download) leaves nothing behind.
+        write(
+            serde_json::json!({"runtime": runtime, "api": ["deps/libmod_api-1.rmeta", "points.json"]}),
+        );
+        lay_out(&whole, &dir.join("moved"), false).unwrap();
+        assert!(!whole.join("bin/horizon-client").exists());
         fs::remove_dir_all(dir).unwrap();
     }
 

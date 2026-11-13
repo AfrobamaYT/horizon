@@ -58,8 +58,10 @@ NATIVE_MODS = "horizon_native_mods"
 NATIVE_MODS_METADATA = "horizon-native-mods"
 # The API route's executable: built here once against the stub, never relinked on the player's machine.
 API_MAIN = ROOT / "crates/horizon-client/src/native_api_main.rs"
-# The folder holding that executable and the stub.
-RUNTIME = "runtime"
+# The folder holding that executable and the stub, in the `runtime` slice.
+RUNTIME = "bin"
+# The required inputs (`horizon_mod_package::sdk::Inputs`): `members` lists what each slice must hold.
+INPUTS = ROOT / "crates/horizon-mod-package/src/sdk/inputs.json"
 # The crates an API-only mod may name; their closure is the `api` archive.
 API_ROOTS = ("horizon-mod-api", "horizon-mod-points")
 # The two game libraries every executable loads, in the `runtime` archive.
@@ -217,15 +219,19 @@ def slices(metadata: dict, copied: dict[str, list[str]], api_route: list[str]) -
     template."""
     names = {package["id"]: package["name"] for package in metadata["packages"]}
     libraries = {crate.replace("_", "-") for crate in GAME_LIBRARIES}
+    closure = api_closure(metadata)
+    # Each slice unpacks to its own folder: the API route's crates must all be in `api`.
+    inside = sorted(names[package_id] for package_id in closure if names.get(package_id) in libraries)
+    if inside:
+        sys.exit(f"the API closure holds game libraries {inside}, which the api slice cannot carry")
     runtime = [IDENTITY, *api_route] + [file for package_id, files in copied.items()
                                         if names.get(package_id) in libraries for file in files]
-    api = [file for package_id in api_closure(metadata) for file in copied.get(package_id, [])
-           if file not in runtime] + [*BUILD_DATA, NATIVE_MODS_TEMPLATE]
+    api = [file for package_id in closure for file in copied.get(package_id, [])] + [*BUILD_DATA, NATIVE_MODS_TEMPLATE]
     return {"runtime": sorted(set(runtime)), "api": sorted(set(api))}
 
 
 def api_route(out: Path, link_args: list[str]) -> list[str]:
-    """The API route's executable and its stub `horizon_native_mods`, built against the package in OUT/runtime. The
+    """The API route's executable and its stub `horizon_native_mods`, built against the package in OUT/bin. The
     stub is the launcher's template with no rows, built as a dylib with the fixed metadata the launcher's library uses,
     so the executable's imports name what the launcher's library exports. Returns their paths in the package."""
     deps = out / "deps"
@@ -259,9 +265,22 @@ def api_route(out: Path, link_args: list[str]) -> list[str]:
 
 
 def api_route_files() -> set[str]:
-    """What OUT/runtime may hold: the executable and the stub, with its import library on Windows."""
+    """What OUT/bin may hold: the executable and the stub, with its import library on Windows."""
     library = f"{dylib_prefix()}{NATIVE_MODS}{dylib_suffix()}"
     return {EXECUTABLE, library, *([f"{library}.a"] if sys.platform == "win32" else [])}
+
+
+def holds(names: list[str], member: str) -> bool:
+    """Whether the slice file list `names` holds `member`, an entry of the required inputs' `members`."""
+    folder, _, name = member.rpartition("/")
+    prefix = f"{folder}/" if folder else ""
+    if name.startswith("@program:"):
+        return f"{prefix}{name[9:]}{'.exe' if sys.platform == 'win32' else ''}" in names
+    if name.startswith("@dylib:"):
+        return f"{prefix}{dylib_prefix()}{name[7:]}{dylib_suffix()}" in names
+    if name.startswith("@rmeta:"):
+        return any(re.fullmatch(re.escape(f"{prefix}lib{name[7:]}-") + r"[0-9a-f]+\.rmeta", entry) for entry in names)
+    return member in names
 
 
 def dylib_prefix() -> str:
@@ -516,8 +535,12 @@ def check(out: Path) -> None:
     sliced = identity.get("slices", {})
     listed = [name for kind in ("runtime", "api") for name in sliced.get(kind, [])]
     absent = [name for name in listed if not (out / name).is_file()]
-    if not sliced.get("runtime") or not sliced.get("api") or absent or len(listed) != len(set(listed)):
-        sys.exit(f"prebuilt slices are missing, name absent files {absent} or overlap")
+    if absent or len(listed) != len(set(listed)):
+        sys.exit(f"prebuilt slices name absent files {absent} or overlap")
+    lacking = [f"{kind}: {member}" for kind, members in json.loads(INPUTS.read_text())["members"].items()
+               for member in members if not holds(sliced.get(kind, []), member)]
+    if lacking:
+        sys.exit(f"prebuilt slices lack required members: {lacking}")
 
 
 def smoke(out: Path) -> None:

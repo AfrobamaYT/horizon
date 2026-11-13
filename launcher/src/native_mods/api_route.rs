@@ -10,37 +10,37 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-/// The template the mods library is written from, carried in the package's `api` files.
+/// The template the mods library is written from, in the `api` slice.
 pub(super) const TEMPLATE: &str = "native_mods.rs.template";
-/// The package folder holding the API executable and its stub.
-const RUNTIME: &str = "runtime";
+/// The folder of the `runtime` slice holding the API executable and its stub.
+const BIN: &str = "bin";
 
 /// Compiles the mods (`resolution`'s order) and the `horizon_native_mods` library against the
-/// package in `game`, into `out`. Returns the package's API executable and the libraries to
-/// install beside it: the game's, std, the toolchain's runtime on Windows, and the mods library.
+/// `api` slice alone, into `out`, and links the library against the `runtime` slice's game
+/// libraries. Returns the `runtime` slice's API executable and the libraries to install beside
+/// it: the game's, std, the toolchain's runtime on Windows, and the mods library.
 pub(super) fn compile(
     rust: &Toolchain,
-    game: &Path,
+    runtime: &Path,
+    api: &Path,
     out: &Path,
     projects: &[api::Project<'_>],
     declared: &[Vec<dependencies::Dependency>],
     resolution: &dependencies::Resolution,
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
-    let sdk = prebuilt::identity(game)?;
-    let (Some(native_mods), Some(slices)) = (&sdk.native_mods, &sdk.slices) else {
+    let sdk = prebuilt::identity(runtime)?;
+    let Some(native_mods) = &sdk.native_mods else {
         return Err(crate::i18n::tr(
             "This prebuilt game has no API route. Update Horizon and rebuild the mods against this game.",
         )
         .to_string());
     };
+    reserved(projects, &native_mods.krate)?;
     let _ = fs::remove_dir_all(out);
     fs::create_dir_all(out).map_err(|e| e.to_string())?;
-    // The `api` files alone, as their archive unpacks: nothing else is on the search path.
-    let slice = out.join("api");
-    stage(game, &slices.api, &slice)?;
-    let deps = slice.join("deps");
-    let search =
-        |edition: &str| prebuilt::rustc_with(rust, &[&deps, &slice.join("host"), out], edition);
+    let deps = api.join("deps");
+    let host = api.join("host");
+    let search = |edition: &str| prebuilt::rustc_with(rust, &[&deps, &host, out], edition);
     let mut libraries = HashMap::new();
     for (package, name) in api::PACKAGES {
         if package != api::INTERNALS_PACKAGE {
@@ -60,13 +60,13 @@ pub(super) fn compile(
         )?;
         rlibs.insert(project.bundle.manifest.id.as_str(), rlib);
     }
-    let catalog = internals::Catalog::read(&slice)?;
+    let catalog = internals::Catalog::read(api)?;
     let manifests: Vec<_> = resolution
         .order
         .iter()
         .map(|&i| &projects[i].bundle.manifest)
         .collect();
-    let template = api::template(&slice.join(TEMPLATE))?;
+    let template = api::template(&api.join(TEMPLATE))?;
     let source = out.join(format!("{}.rs", native_mods.krate));
     fs::write(&source, api::main_rs(&template, &manifests, &catalog)).map_err(|e| e.to_string())?;
     let rlib = out.join(format!("lib{}.rlib", native_mods.krate));
@@ -99,7 +99,7 @@ pub(super) fn compile(
     {
         members.extend(extract_objects(archive, &objects.join(n.to_string()))?);
     }
-    let runtime_deps = game.join("deps");
+    let runtime_deps = runtime.join("deps");
     let mut installed = prebuilt::runtime_libraries(rust, &runtime_deps)?;
     let library = out.join(library_name(&native_mods.krate));
     let std = installed
@@ -110,13 +110,58 @@ pub(super) fn compile(
         })
         .cloned()
         .ok_or("no dynamic standard library")?;
+    let system = native_libraries(rust, out)?;
     super::run(
-        link(rust, &library, &members, &runtime_deps, &std)?,
+        link(rust, &library, &members, &runtime_deps, &std, &system)?,
         "Linking the mods library",
         |_| {},
     )?;
     installed.push(library);
-    Ok((game.join(RUNTIME).join(crate::backend::CLIENT), installed))
+    Ok((runtime.join(BIN).join(crate::backend::CLIENT), installed))
+}
+
+/// Refuses a mod whose crate takes the mods library's own name: its rlib would be overwritten by
+/// the library's.
+fn reserved(projects: &[api::Project<'_>], krate: &str) -> Result<(), String> {
+    match projects.iter().find(|project| project.crate_name() == krate) {
+        Some(project) => Err(trf(
+            "{mod}: its crate is named {crate}, the name of the game's mods library. Rename its library.",
+            &[("mod", &project.bundle.manifest.id), ("crate", krate)],
+        )),
+        None => Ok(()),
+    }
+}
+
+/// The C libraries Rust's standard library needs on this target, as rustc itself lists them for
+/// a static library (`--print native-static-libs`): on Linux these include `-lm`, which a mod's
+/// float maths calls into.
+fn native_libraries(rust: &Toolchain, out: &Path) -> Result<Vec<String>, String> {
+    let source = out.join("native_libraries.rs");
+    fs::write(&source, "").map_err(|e| e.to_string())?;
+    let output = rust
+        .command(&rust.rustc())
+        .args([
+            "--crate-type",
+            "staticlib",
+            "--crate-name",
+            "native_libraries",
+        ])
+        .args(["--print", "native-static-libs", "-o"])
+        .arg(out.join("native_libraries.a"))
+        .arg(&source)
+        .output()
+        .map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&output.stderr).into_owned()
+        + &String::from_utf8_lossy(&output.stdout);
+    static_libs(&text).ok_or_else(|| format!("rustc listed no native libraries: {text}"))
+}
+
+/// The arguments of rustc's `native-static-libs:` note in `text`.
+fn static_libs(text: &str) -> Option<Vec<String>> {
+    text.lines().find_map(|line| {
+        line.split_once("native-static-libs:")
+            .map(|(_, libs)| libs.split_whitespace().map(str::to_owned).collect())
+    })
 }
 
 /// The mods library's file name on this OS.
@@ -137,6 +182,7 @@ fn link(
     members: &[PathBuf],
     deps: &Path,
     std: &Path,
+    system: &[String],
 ) -> Result<std::process::Command, String> {
     let game = |krate: &str| prebuilt::library(deps, krate);
     let name = library
@@ -152,18 +198,30 @@ fn link(
             cmd.arg(game("horizon_mod_host")?)
                 .arg(game("horizon_mod_wasm")?)
                 .arg(std)
+                .args(system)
                 .arg("-Wl,--no-undefined");
             cmd
         }
         "macos" => {
             let mut cmd = rust.command(Path::new("cc"));
-            cmd.arg("-dynamiclib").arg("-o").arg(library).args(members);
+            // The toolchain's architecture, not the launcher's (which may run under Rosetta).
+            let arch = match rust.host.target.split('-').next() {
+                Some("aarch64") => "arm64",
+                Some(arch) => arch,
+                None => "arm64",
+            };
+            cmd.args(["-arch", arch])
+                .arg("-dynamiclib")
+                .arg("-o")
+                .arg(library)
+                .args(members);
             // Found through the executable's rpath, where the stub sits.
             cmd.arg("-install_name")
                 .arg(format!("@rpath/{name}"))
                 .arg(game("horizon_mod_host")?)
                 .arg(game("horizon_mod_wasm")?)
-                .arg(std);
+                .arg(std)
+                .args(system);
             cmd
         }
         _ => {
@@ -184,7 +242,7 @@ fn link(
                 .arg("-L")
                 .arg(std.parent().ok_or("invalid std path")?)
                 .arg(file(std))
-                .args(["-lgcc_s", "-lc"]);
+                .args(system);
             cmd
         }
     };
@@ -206,7 +264,9 @@ fn extract_objects(rlib: &Path, into: &Path) -> Result<Vec<PathBuf>, String> {
         if !name.ends_with(".o") {
             continue;
         }
-        if !plain(&name) {
+        // A bare file name only: never a folder, `..` or an absolute path.
+        let mut parts = Path::new(&name).components();
+        if !matches!((parts.next(), parts.next()), (Some(Component::Normal(_)), None)) {
             return Err(shown(&format!("an archive member named {name}")));
         }
         let path = into.join(&name);
@@ -219,84 +279,50 @@ fn extract_objects(rlib: &Path, into: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(objects)
 }
 
-/// Copy (hard-link where it can) the package files `names` from `game` into `into`, refusing a
-/// name that is not a plain relative path and naming every missing file.
-fn stage(game: &Path, names: &[String], into: &Path) -> Result<(), String> {
-    let mut missing = Vec::new();
-    for name in names {
-        if !plain(name) {
-            return Err(trf(
-                "The prebuilt game's API file list names {file}, which is not a plain path.",
-                &[("file", name)],
-            ));
-        }
-        let from = game.join(name);
-        if !from.is_file() {
-            missing.push(name.as_str());
-            continue;
-        }
-        let to = into.join(name);
-        if let Some(parent) = to.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-        }
-        if fs::hard_link(&from, &to).is_err() {
-            fs::copy(&from, &to).map_err(|e| format!("{}: {e}", from.display()))?;
-        }
-    }
-    if missing.is_empty() {
-        Ok(())
-    } else {
-        Err(trf(
-            "The prebuilt game is missing its API files: {files}.",
-            &[("files", &missing.join(", "))],
-        ))
-    }
-}
-
-/// Whether `name` is a relative path of plain components only.
-fn plain(name: &str) -> bool {
-    !name.is_empty()
-        && Path::new(name)
-            .components()
-            .all(|part| matches!(part, Component::Normal(_)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn staging_takes_only_the_listed_files_and_names_every_missing_one() {
-        let game = super::super::tests::dir("api-route-stage-game");
-        let into = super::super::tests::dir("api-route-stage-into");
-        for name in [
-            "deps/libmod_api-1.rmeta",
-            "host/libmacros-1.so",
-            "deps/libhorizon_client-1.rmeta",
-        ] {
-            fs::create_dir_all(game.join(name).parent().unwrap()).unwrap();
-            fs::write(game.join(name), name).unwrap();
-        }
-        let listed = [
-            "deps/libmod_api-1.rmeta".to_owned(),
-            "host/libmacros-1.so".to_owned(),
+    fn the_native_libraries_are_rustcs_own_note() {
+        let note = "note: Link against the following native artifacts when linking against this static library.\n\
+                    note: native-static-libs: -lgcc_s -lutil -lrt -lpthread -lm -ldl -lc\n";
+        assert_eq!(
+            static_libs(note).unwrap(),
+            [
+                "-lgcc_s",
+                "-lutil",
+                "-lrt",
+                "-lpthread",
+                "-lm",
+                "-ldl",
+                "-lc"
+            ]
+        );
+        assert_eq!(static_libs("warning: nothing"), None);
+    }
+
+    #[test]
+    fn a_mod_crate_with_the_mods_librarys_name_is_refused() {
+        let folder = super::super::tests::dir("api-route-reserved");
+        let write = |name: &str| {
+            let dir = folder.join(name);
+            super::super::tests::write_bundle(&dir, name, "");
+            fs::write(
+                dir.join("Cargo.toml"),
+                format!("[package]\nname='{name}'\nversion='0.1.0'\n[lib]\nname='{name}'\n[dependencies]\nhorizon-mod-api='0.1'\n"),
+            )
+            .unwrap();
+            super::super::bundle_in(&dir).unwrap().unwrap()
+        };
+        let (taken, fine) = (write("horizon_native_mods"), write("other"));
+        let projects = [
+            api::Project::read(&fine).unwrap(),
+            api::Project::read(&taken).unwrap(),
         ];
-        stage(&game, &listed, &into).unwrap();
-        assert!(into.join("deps/libmod_api-1.rmeta").is_file());
-        assert!(into.join("host/libmacros-1.so").is_file());
-        assert!(!into.join("deps/libhorizon_client-1.rmeta").exists());
-        let gone = ["deps/a".to_owned(), "deps/b".to_owned()];
-        let error = stage(
-            &game,
-            &gone,
-            &super::super::tests::dir("api-route-stage-gone"),
-        )
-        .unwrap_err();
-        assert!(error.contains("deps/a, deps/b"), "{error}");
-        for bad in ["../x", "/etc/x", ""] {
-            let error = stage(&game, &[bad.to_owned()], &into).unwrap_err();
-            assert!(error.contains("not a plain path"), "{bad}: {error}");
-        }
+        let error = reserved(&projects, "horizon_native_mods").unwrap_err();
+        assert!(error.contains("horizon_native_mods"), "{error}");
+        assert!(reserved(&projects[..1], "horizon_native_mods").is_ok());
     }
 
     #[test]
@@ -331,6 +357,28 @@ mod tests {
             .collect();
         assert_eq!(names, ["a.o", "b.o"]);
         assert_eq!(fs::read(&objects[1]).unwrap(), b"obj2");
+        // A member named out of its folder (BSD names, `#1/<length>`) is refused, never written.
+        for name in ["../x.o", "a/b.o"] {
+            let mut archive = b"!<arch>\n".to_vec();
+            let data = [name.as_bytes(), b"obj"].concat();
+            archive.extend(
+                format!(
+                    "{:<16}{:<12}{:<6}{:<6}{:<8}{:<10}`\n",
+                    format!("#1/{}", name.len()),
+                    0,
+                    0,
+                    0,
+                    644,
+                    data.len()
+                )
+                .as_bytes(),
+            );
+            archive.extend(&data);
+            fs::write(&rlib, &archive).unwrap();
+            let error = extract_objects(&rlib, &folder.join("escape")).unwrap_err();
+            assert!(error.contains("an archive member named"), "{name}: {error}");
+        }
+        assert!(!folder.join("x.o").exists());
         fs::write(&rlib, b"!<arch>\n").unwrap();
         assert!(extract_objects(&rlib, &folder.join("none"))
             .unwrap_err()

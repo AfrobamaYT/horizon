@@ -1806,7 +1806,7 @@ fn pipeline(
             target,
             &binary,
             &libraries,
-            &about(route.name(), &internals::Catalog::read(game)?),
+            &about(route.name(), &internals::Catalog::read(&game.api)?),
             &ordered,
         )?;
     } else {

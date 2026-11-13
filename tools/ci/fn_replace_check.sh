@@ -47,7 +47,24 @@ host=$(rustc -vV | sed -n 's/^host: //p')
 mkdir -p "$data/native/prebuilt"
 sdk_suffix=
 if [ "$side" = server ]; then sdk_suffix=-server; fi
-cp -a "$sdk" "$data/native/prebuilt/$revision-$archive$host$sdk_suffix"
+# Laid out as the launcher unpacks one: the identity's `runtime` and `api` slices in folders of
+# their own, every other file in `engine`, hard-linked where it can.
+python3 - "$sdk" "$data/native/prebuilt/$revision-$archive$host$sdk_suffix" <<'LAYOUT'
+import json, os, shutil, sys
+from pathlib import Path
+sdk, build = Path(sys.argv[1]), Path(sys.argv[2])
+slices = json.loads((sdk / "horizon-prebuilt.json").read_text())["slices"]
+placed = {name: kind for kind in ("runtime", "api") for name in slices[kind]}
+for path in sdk.rglob("*"):
+    if path.is_file():
+        name = path.relative_to(sdk).as_posix()
+        to = build / placed.get(name, "engine") / name
+        to.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.link(path, to)
+        except OSError:
+            shutil.copy2(path, to)
+LAYOUT
 
 base=$data/versions/ci
 mkdir -p "$base/.local/horizon-client/26.3"
@@ -183,7 +200,7 @@ fill 0 100 0 9 100 9 minecraft:hopper[facing=east]{Items:[{Slot:0b,id:"minecraft
     grep -F 'Saving chunks for level' "$scratch/server.log"
   fi
   if [[ " ${FNR_MODS:-alpha beta} " == *" api_only "* ]]; then
-    grep -F 'fnr: api_only server_started' "$scratch/server.log"
+    grep -F 'fnr: api_only server_started, sin 0.479' "$scratch/server.log"
     grep -F 'fnr: api_only listener at tick_block_entities' "$scratch/server.log"
   fi
   if [[ " ${FNR_MODS:-alpha beta} " == *" fdshape "* ]]; then

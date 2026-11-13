@@ -15,7 +15,9 @@ impl Default for Mod {
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
     fn server_started(&self, _: &mut dyn ServerHost, _: &mut mod_api::ServerStartedEvent) {
-        eprintln!("fnr: api_only server_started");
+        // A libm call (`sinf`): the mods library's link must bring the C maths library.
+        let angle = std::hint::black_box(0.5f32);
+        eprintln!("fnr: api_only server_started, sin {:.3}", angle.sin());
     }
 }
 

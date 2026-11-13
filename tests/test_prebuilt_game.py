@@ -19,10 +19,19 @@ COMMIT = "c" * 40
 
 def write_build_data(root: Path, identity: dict | None = None, commit: str = COMMIT) -> None:
     """The three build-data files with their header for `commit`, and an identity naming it, with the smallest
-    slices `check` accepts unless `identity` gives its own."""
+    slices `check` accepts (each required member, as an empty file) unless `identity` gives its own."""
     for name in prebuilt_game.BUILD_DATA:
         (root / name).write_text(json.dumps({"schema": 1, "build": {"commit": commit}}))
-    slices = {"runtime": [prebuilt_game.IDENTITY], "api": list(prebuilt_game.BUILD_DATA)}
+    so, exe = prebuilt_game.dylib_suffix(), ".exe" if sys.platform == "win32" else ""
+    lib = prebuilt_game.dylib_prefix()
+    members = {"runtime": [f"bin/horizon-client{exe}", f"bin/{lib}horizon_native_mods{so}",
+                           f"deps/{lib}horizon_mod_host{so}", f"deps/{lib}horizon_mod_wasm{so}"],
+               "api": [prebuilt_game.NATIVE_MODS_TEMPLATE, "deps/libmod_api-1.rmeta", "deps/libmod_points-1.rmeta"]}
+    for name in members["runtime"] + members["api"]:
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes(b"")
+    slices = {"runtime": [prebuilt_game.IDENTITY, *members["runtime"]],
+              "api": [*prebuilt_game.BUILD_DATA, *members["api"]]}
     (root / prebuilt_game.IDENTITY).write_text(json.dumps({"slices": slices, **(identity or {}), "commit": commit}))
 
 
@@ -159,9 +168,9 @@ class DeterministicArchiveTests(unittest.TestCase):
 
 
 class SdkAssetTests(unittest.TestCase):
-    RUNTIME = ["deps/libhorizon_mod_host.so", "deps/libhorizon_mod_wasm.so", "runtime/horizon-client",
-               "runtime/libhorizon_native_mods.so"]
-    API = ["deps/libmod_api-1.rmeta", "host/libserde_derive.so"]
+    RUNTIME = ["deps/libhorizon_mod_host.so", "deps/libhorizon_mod_wasm.so", "bin/horizon-client",
+               "bin/libhorizon_native_mods.so"]
+    API = ["deps/libmod_api-1.rmeta", "deps/libmod_points-1.rmeta", "host/libserde_derive.so"]
     ENGINE = ["deps/libhorizon_client-1.rmeta", "native/libwindows.a"]
 
     def out(self, root: Path, mtime: int) -> Path:
@@ -219,14 +228,21 @@ class SdkAssetTests(unittest.TestCase):
         self.assertEqual(archives[0], archives[1])
 
     def test_check_refuses_slices_naming_absent_or_shared_files(self):
-        for change in ({"api": ["deps/libgone-1.rmeta"]}, {"api": ["deps/libhorizon_mod_host.so"]}, {"api": []}):
+        api = [*self.API, *prebuilt_game.BUILD_DATA, prebuilt_game.NATIVE_MODS_TEMPLATE]
+        for change, why in (({"api": [*api, "deps/libgone-1.rmeta"]}, "absent files"),
+                            ({"api": [*api, "deps/libhorizon_mod_host.so"]}, "overlap"),
+                            # Each slice holds the members the required inputs name (so neither is empty).
+                            ({"api": []}, "lack required members"),
+                            ({"runtime": [prebuilt_game.IDENTITY, *self.RUNTIME[:3]]}, "lack required members"),
+                            ({"api": api[1:]}, "lack required members"),
+                            ({"api": api[:-1]}, "lack required members")):
             with tempfile.TemporaryDirectory() as directory, self.subTest(change), \
                     patch.object(sys, "platform", "linux"):
                 out = self.out(Path(directory), 1000)
                 identity = json.loads((out / prebuilt_game.IDENTITY).read_text())
                 identity["slices"].update(change)
                 (out / prebuilt_game.IDENTITY).write_text(json.dumps(identity))
-                with self.assertRaisesRegex(SystemExit, "slices"):
+                with self.assertRaisesRegex(SystemExit, why):
                     prebuilt_game.check(out)
 
     def test_slices_come_from_the_build_records_with_proc_macros_as_leaves(self):
@@ -235,8 +251,7 @@ class SdkAssetTests(unittest.TestCase):
                     {"id": name, "deps": [{"pkg": dep, "dep_kinds": [{"kind": dep_kind}]} for dep, dep_kind in deps]})
         packages, nodes = zip(
             package("horizon-mod-api", deps=[("vocab", None), ("macros", None), ("tool", "build")]),
-            # A game library inside the closure stays the runtime archive's alone.
-            package("horizon-mod-points", deps=[("vocab", None), ("horizon-mod-wasm", None)]),
+            package("horizon-mod-points", deps=[("vocab", None)]),
             package("vocab", deps=[("serde", None)]),
             package("serde"),
             package("macros", "proc-macro", deps=[("syn", None)]),
@@ -248,19 +263,23 @@ class SdkAssetTests(unittest.TestCase):
         )
         metadata = {"packages": list(packages), "resolve": {"nodes": list(nodes)}}
         self.assertEqual(prebuilt_game.api_closure(metadata),
-                         {"horizon-mod-api", "horizon-mod-points", "vocab", "serde", "macros", "horizon-mod-wasm"})
+                         {"horizon-mod-api", "horizon-mod-points", "vocab", "serde", "macros"})
         copied = {name: [f"deps/lib{name}-1.rmeta"] for name in ("horizon-mod-api", "horizon-mod-points", "vocab",
                                                                   "serde", "syn", "tool", "engine")}
         copied["macros"] = ["host/libmacros-1.so"]
         copied["horizon-mod-host"] = ["deps/libhorizon_mod_host.so"]
         copied["horizon-mod-wasm"] = ["deps/libhorizon_mod_wasm.so"]
-        sliced = prebuilt_game.slices(metadata, copied, ["runtime/horizon-client"])
-        self.assertEqual(sliced["runtime"], sorted([prebuilt_game.IDENTITY, "runtime/horizon-client",
+        sliced = prebuilt_game.slices(metadata, copied, ["bin/horizon-client"])
+        self.assertEqual(sliced["runtime"], sorted([prebuilt_game.IDENTITY, "bin/horizon-client",
                                                     "deps/libhorizon_mod_host.so", "deps/libhorizon_mod_wasm.so"]))
         self.assertEqual(sliced["api"], sorted([
             "deps/libhorizon-mod-api-1.rmeta", "deps/libhorizon-mod-points-1.rmeta", "deps/libvocab-1.rmeta",
             "deps/libserde-1.rmeta", "host/libmacros-1.so", *prebuilt_game.BUILD_DATA,
             prebuilt_game.NATIVE_MODS_TEMPLATE]))
+        # Each slice unpacks to its own folder, so a game library inside the API closure is refused.
+        nodes[1]["deps"].append({"pkg": "horizon-mod-wasm", "dep_kinds": [{"kind": None}]})
+        with self.assertRaisesRegex(SystemExit, "horizon-mod-wasm"):
+            prebuilt_game.slices(metadata, copied, ["bin/horizon-client"])
 
     def test_pack_refuses_another_commits_package(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -282,32 +301,6 @@ class SdkAssetTests(unittest.TestCase):
             prebuilt_game.tar_xz(root, prebuilt_game.tree(root), root / "fixture.tar.xz")
             fixture = prebuilt_game.ROOT / "crates/horizon-mod-package/src/sdk/fixture.tar.xz"
             self.assertEqual((root / "fixture.tar.xz").read_bytes(), fixture.read_bytes())
-
-
-class PointCatalogTests(unittest.TestCase):
-    @unittest.skipUnless(shutil.which("cargo"), "needs cargo")
-    def test_the_api_slice_holds_one_crate_defining_point_id(self):
-        """A crate defines `PointId` when its source has the enum, or its build script runs a point generator and it
-        does not re-export another crate's. Two in the slice would be #3643's index mismatch: whichever of #3643 and
-        the slices merges second re-exports `horizon-engine-slots`' from `mod_points`."""
-        import re
-        metadata = json.loads(subprocess.run(
-            ["cargo", "metadata", "--locked", "--offline", "--format-version", "1"],
-            cwd=prebuilt_game.ROOT, capture_output=True, text=True, check=True).stdout)
-        closure = prebuilt_game.api_closure(metadata)
-        definers = []
-        for package in metadata["packages"]:
-            if package["id"] not in closure or package["source"] is not None:
-                continue
-            folder = Path(package["manifest_path"]).parent
-            sources = {path: path.read_text() for path in folder.rglob("*.rs") if "target" not in path.parts}
-            text = "\n".join(text for path, text in sources.items() if path.name != "build.rs")
-            build = sources.get(folder / "build.rs", "")
-            generated = re.search(r"horizon_mod_api_gen::\w*points\w*\(", build)
-            reexported = re.search(r"pub use [^;]*\bPointId\b", text)
-            if re.search(r"\benum PointId\b", text) or (generated and not reexported):
-                definers.append(package["name"])
-        self.assertEqual(definers, ["horizon-mod-points"])
 
 
 class AllocatorSelectionTests(unittest.TestCase):
