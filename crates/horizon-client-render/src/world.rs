@@ -258,7 +258,7 @@ impl World {
         self.block_entities.load_chunk(entities);
     }
     /// Queue ordinary NBT; transient transfer state is never decoded from it.
-    pub fn queue_entity_nbt(&mut self, key: (i32, i32), tags: Vec<horizon_world::nbt::Tag>) {
+    pub fn queue_entity_nbt(&mut self, key: (i32, i32), tags: Vec<horizon_core::nbt::Tag>) {
         self.loaded_entities
             .push((key, tags.into_iter().map(PendingEntity::from).collect()));
     }

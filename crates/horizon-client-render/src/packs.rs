@@ -1102,10 +1102,10 @@ fn add_sprite_renames(
             .to_string_lossy()
             .replace('\\', "/")
     };
-    let atlases: Vec<_> = ["blocks", "items"]
+    let atlases: Vec<Vec<SpriteSource>> = ["blocks", "items"]
         .into_iter()
         .filter_map(|atlas| merged.get(&format!("assets/minecraft/atlases/{atlas}.json")))
-        .filter_map(|bytes| decode(std::str::from_utf8(bytes).ok()?))
+        .filter_map(|bytes| decode(std::str::from_utf8(bytes).ok()?).ok())
         .collect();
     let renamed = |source: &SpriteSource| matches!(source, SpriteSource::Single { resource, sprite: Some(sprite) } if sprite != resource);
     if !atlases.iter().flatten().any(renamed) {
@@ -1129,7 +1129,7 @@ fn add_sprite_renames(
     // Each sprite's resource, `None` where an atlas lists it any other way.
     let mut renames: BTreeMap<String, Option<String>> = BTreeMap::new();
     for sources in &atlases {
-        for (sprite, origin) in list(sources, &textures) {
+        for (sprite, origin) in list(sources, &textures, &mut crate::atlas_sources::unasked) {
             let from = match origin {
                 SpriteOrigin::File(resource) if resource != sprite => Some(resource),
                 _ => None,

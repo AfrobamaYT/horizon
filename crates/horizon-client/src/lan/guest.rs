@@ -1234,7 +1234,6 @@ fn builtin_component(
             }
         }
         "minecraft:tool" => write_tool(value, ids, &mut w)?,
-        "minecraft:attribute_modifiers" => write_attribute_modifiers(value, ids, &mut w)?,
         _ => return None,
     }
     Some(horizon_protocol::item::Component::Raw(w.data))
@@ -1245,12 +1244,12 @@ fn builtin_component(
 /// mining speed, the wear per block and `can_destroy_blocks_in_creative`,
 /// each at its codec default when the stack leaves it out.
 fn write_tool(
-    value: &horizon_world::nbt::Tag,
+    value: &horizon_core::nbt::Tag,
     ids: &dyn Fn(&str, &str) -> Option<i32>,
     w: &mut horizon_protocol::buf::Writer,
 ) -> Option<()> {
+    use horizon_core::nbt::Tag;
     use horizon_world::datafix::dynamic::{as_bool_opt, as_number};
-    use horizon_world::nbt::Tag;
     let Tag::List(rules) = value.get("rules")? else {
         return None;
     };
@@ -1287,76 +1286,6 @@ fn write_tool(
         Some(can) => as_bool_opt(Some(can))?,
         None => true,
     });
-    Some(())
-}
-
-/// `ItemAttributeModifiers.STREAM_CODEC` from its saved list: each entry's
-/// attribute (`ByteBufCodecs.holderRegistry`, its id), modifier id, amount
-/// and operation, slot group (`any` when left out) and display (`default`).
-fn write_attribute_modifiers(
-    value: &horizon_world::nbt::Tag,
-    ids: &dyn Fn(&str, &str) -> Option<i32>,
-    w: &mut horizon_protocol::buf::Writer,
-) -> Option<()> {
-    use horizon_world::datafix::dynamic::{as_number, namespaced};
-    use horizon_world::nbt::Tag;
-    let Tag::List(entries) = value else {
-        return None;
-    };
-    let string = |tag: Option<&Tag>| match tag {
-        Some(Tag::String(s)) => s.to_string().ok(),
-        _ => None,
-    };
-    w.varint(i32::try_from(entries.len()).ok()?);
-    for entry in entries.as_slice() {
-        let attribute = ids(
-            "minecraft:attribute",
-            &namespaced(&string(entry.get("type"))?),
-        )?;
-        w.varint((attribute >= 0).then_some(attribute)?);
-        w.string(&namespaced(&string(entry.get("id"))?));
-        w.f64(as_number(entry.get("amount")?)?.double_value());
-        // AttributeModifier.Operation ids.
-        w.varint(match string(entry.get("operation"))?.as_str() {
-            "add_value" => 0,
-            "add_multiplied_base" => 1,
-            "add_multiplied_total" => 2,
-            _ => return None,
-        });
-        // EquipmentSlotGroup ids.
-        let slot = match entry.get("slot") {
-            Some(slot) => string(Some(slot))?,
-            None => "any".to_owned(),
-        };
-        w.varint(match slot.as_str() {
-            "any" => 0,
-            "mainhand" => 1,
-            "offhand" => 2,
-            "hand" => 3,
-            "feet" => 4,
-            "legs" => 5,
-            "chest" => 6,
-            "head" => 7,
-            "armor" => 8,
-            "body" => 9,
-            "saddle" => 10,
-            _ => return None,
-        });
-        // ItemAttributeModifiers.Display.Type ids; an override carries its text.
-        match entry.get("display") {
-            None => w.varint(0),
-            Some(display) => match string(display.get("type"))?.as_str() {
-                "default" => w.varint(0),
-                "hidden" => w.varint(1),
-                "override" => {
-                    let text = display.get("value")?;
-                    w.varint(2);
-                    w.bytes(&horizon_world::nbt::write_network(text, Default::default()).ok()?);
-                }
-                _ => return None,
-            },
-        }
-    }
     Some(())
 }
 
@@ -2262,7 +2191,7 @@ mod tests {
             ("minecraft:attribute", "minecraft:attack_damage") => Some(3),
             _ => None,
         };
-        let parse = |snbt: &str| horizon_world::nbt::parse_snbt(snbt).unwrap().0;
+        let parse = |snbt: &str| horizon_core::nbt::parse_snbt(snbt).unwrap().0;
         let entry = |extra: &str| {
             format!(r#"[{{type:"attack_damage",id:"x",amount:2.0d,operation:"add_value"{extra}}}]"#)
         };

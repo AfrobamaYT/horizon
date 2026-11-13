@@ -12711,57 +12711,6 @@ pub(crate) fn square_downscale(pixels: &[u8], width: u32, height: u32, size: [u3
     }
     out
 }
-/// The union of two frusta (the camera's and its water mirror's), for `Resident::visible`.
-#[derive(Clone, Copy, Debug)]
-pub struct Frusta(pub Frustum, pub Option<Frustum>);
-/// What `Resident::visible` culls with: a frustum or a union of them.
-pub trait Cull {
-    fn intersects(&self, min: Vec3, max: Vec3) -> bool;
-    fn contains(&self, min: Vec3, max: Vec3) -> bool;
-    /// Whether a section is tested by the box around its geometry, not its whole 16 blocks.
-    fn tight(&self) -> bool {
-        true
-    }
-}
-impl Cull for Frustum {
-    fn intersects(&self, min: Vec3, max: Vec3) -> bool {
-        Frustum::intersects(self, min, max)
-    }
-    fn contains(&self, min: Vec3, max: Vec3) -> bool {
-        Frustum::contains(self, min, max)
-    }
-}
-impl Cull for Frusta {
-    fn intersects(&self, min: Vec3, max: Vec3) -> bool {
-        self.0.intersects(min, max) || self.1.is_some_and(|f| f.intersects(min, max))
-    }
-    /// Entirely inside one of them is entirely inside the union.
-    fn contains(&self, min: Vec3, max: Vec3) -> bool {
-        self.0.contains(min, max) || self.1.is_some_and(|f| f.contains(min, max))
-    }
-}
-/// The block entities of `sections` whose box, a block wider on every side, comes within the
-/// 64 blocks block entities are drawn to (`Renderer::visible_block_entities_in_frustum`).
-fn block_entities_within_reach<'a>(
-    sections: impl Iterator<Item = SectionKey> + 'a,
-    block_entities: &'a FxHashMap<SectionKey, Vec<([i32; 3], u32)>>,
-    camera: DVec3,
-    min_y: i32,
-) -> impl Iterator<Item = &'a ([i32; 3], u32)> + 'a {
-    sections
-        .filter_map(move |key| {
-            let min = (DVec3::new(
-                f64::from(key.0 * 16 - 1),
-                f64::from(min_y + key.1 * 16 - 1),
-                f64::from(key.2 * 16 - 1),
-            ) - camera)
-                .as_vec3();
-            let max = min + Vec3::splat(18.0);
-            let near = Vec3::ZERO.max(min).min(max).length_squared() <= 64.0 * 64.0;
-            near.then(|| block_entities.get(&key)).flatten()
-        })
-        .flatten()
-}
 mod view_frustum;
 pub use view_frustum::Frustum;
 

@@ -227,24 +227,6 @@ pub fn max_damage(items: &Items, stack: &ItemStack) -> i32 {
 fn damage_value(items: &Items, stack: &ItemStack) -> i32 {
     (stack.damage.min(i32::MAX as u32) as i32).clamp(0, max_damage(items, stack).max(0))
 }
-/// `ItemStack.isDamageableItem`: max damage and damage components present,
-/// and not `minecraft:unbreakable`. A patched MAX_DAMAGE alone is not
-/// enough: the stack needs DAMAGE too.
-pub fn is_damageable(items: &Items, stack: &ItemStack) -> bool {
-    let data = stack.data();
-    // `has(DAMAGE)`: a non-zero value or an explicit patch (zero included),
-    // else the item's own default, which `Item.Properties.durability` sets
-    // together with MAX_DAMAGE. Horizon keeps only that value
-    // (`ItemInfo.max_damage`); the vanilla item export pairs the two on every
-    // item, so a positive default stands for both components.
-    let has_damage = data.is_none_or(|d| d.other("!minecraft:damage").is_none())
-        && (stack.damage > 0
-            || data.is_some_and(|d| d.explicit_zero_damage)
-            || items.get(&stack.item).is_some_and(|i| i.max_damage > 0));
-    max_damage(items, stack) > 0
-        && has_damage
-        && data.is_none_or(|d| d.other("minecraft:unbreakable").is_none())
-}
 /// `ItemStack.setDamageValue`: stored clamped to `[0, max_damage]`.
 fn set_damage_value(items: &Items, stack: &mut ItemStack, damage: i32) {
     stack.damage = damage.clamp(0, max_damage(items, stack).max(0)) as u32;

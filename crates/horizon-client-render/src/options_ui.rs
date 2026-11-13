@@ -4957,7 +4957,9 @@ mod tests {
     fn pack_options_leave_with_a_change_and_with_nothing_after_its_undo() {
         use crate::settings_shell::Screen as _;
         let mut s = Settings::default();
-        let atlas = HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"));
+        let atlas = HudAtlas::build(&crate::resource_source::ResourceSource::directory(
+            std::path::PathBuf::from("/nonexistent/horizon-test-assets"),
+        ));
         let atlas = atlas.unwrap();
         let mut ui = OptionsUi::default();
         let mut configs = horizon_polytone::pack::Configs::default();

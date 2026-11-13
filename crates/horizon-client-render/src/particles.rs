@@ -5253,7 +5253,11 @@ mod tests {
     /// An engine whose smoke particles stand at `positions`, camera-relative (the camera is at
     /// the origin looking down -z, like `Mat4::IDENTITY` as a view).
     fn smoke_at(positions: &[[f64; 3]]) -> ParticleEngine {
-        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         let sprite = "test:smoke".to_owned();
         engine.atlas.insert(
             sprite.clone(),

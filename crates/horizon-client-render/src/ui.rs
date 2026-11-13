@@ -1933,7 +1933,7 @@ mod tests {
              \"border\": {\"left\": 34, \"top\": 8, \"right\": 34, \"bottom\": 8}}}}\n\n// 0  10\n// 1  8\n",
         )
         .unwrap();
-        let metadata = read_metadata(&root);
+        let metadata = read_metadata(&ResourceSource::directory(root.clone()));
         std::fs::remove_dir_all(&root).unwrap();
         let slice = metadata.0["gui/sprites/widget/button_highlighted"];
         assert_eq!(

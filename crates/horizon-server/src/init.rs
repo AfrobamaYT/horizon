@@ -171,9 +171,10 @@ pub fn run(dir: &Path, answers: Answers) -> Result<(), String> {
             .parse()
             .map_err(|_| "the port must be a number from 1 to 65535".to_owned())?,
     };
-    // What `server.toml` will hold is checked as every start checks it: a port or a world name it would
-    // refuse is refused here, before anything is written, not at the first `run`.
-    cfg.check()?;
+    // Validate the prospective server.toml through the launch crate's owning parse boundary,
+    // just as a server start does, before writing it or adding players. Config's internal
+    // checks stay private to that crate rather than becoming a second public validation API.
+    cfg = Config::parse(&config::render(&cfg))?;
     if std::net::TcpListener::bind(("0.0.0.0", cfg.server.port)).is_err() {
         println!(
             "Port {} is in use right now: stop what uses it, or change server.port in server.toml.",
