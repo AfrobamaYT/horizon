@@ -13,9 +13,10 @@ in their order and pushed as nightly/build-<date>-<n>; with no set, main alone. 
 this repository's checks passed (`dyna-checks` on the fork, `checks` and `parity-main` upstream), as for a release
 (release_train.green_main_head), or NIGHTLY_BASE when the caller gives that commit. It is published as the
 `nightly` pre-release; the previous one stays a week as nightly-<date>.
-On arismoko/horizon only, the base must also be `daily-green` or an ancestor of it (the daily run passed it whole:
-release_train.daily_green), and automatic selection additionally requires a complete published v5 SDK for the
-exact SHA. Explicit bases without either fail; PR picks are disabled, and the final SHA is rechecked before pushing.
+On arismoko/horizon only, the base is the commit `daily-green` points to (the newest daily run that passed every
+leg, which also published its SDK: release_train.daily_green_commit), with a complete published v5 SDK for that
+exact SHA. An explicit base that is any other commit, or has no SDK, fails; PR picks are disabled, and the final SHA
+is rechecked before pushing.
 Its notes list what reached main since the previous nightly, then the picked pull requests. Runs from main's
 checkout with `gh`; it reads and merges the branches with git and never runs anything from them.
 
@@ -259,21 +260,20 @@ def green_base(repo: str, issue: str) -> Ref:
     if explicit:
         sha = explicit
     elif fork:
-        ready = ready_sdk_shas()
-        sha = train.green_main_head(parity=True, eligible=lambda sha: sha in ready and train.daily_green(sha))
+        sha = train.daily_green_commit()
     else:
         sha = train.green_main_head(parity=True)
     if not sha:
-        checks = ("dyna-checks and the daily run and has a complete published v5 SDK" if fork
-                  else "checks and parity-main")
+        checks = "every leg of a daily run (no `daily-green` tag yet)" if fork else "checks and parity-main"
         stop(repo, issue, f"the build stopped: no recent commit of main passed {checks}, so "
                           "none is green to build on. The next build after they pass takes it.")
     if not is_ancestor(sha, "refs/remotes/origin/main"):
         stop(repo, issue, f"the build stopped: {sha[:9]} is not on main.")
     sha = git("rev-parse", sha)
-    if fork and explicit and not train.daily_green(sha):
-        stop(repo, issue, f"the build stopped: {sha} is not `daily-green` or an ancestor of it.")
-    if fork and explicit and not sdk_ready(sha):
+    if fork and explicit and sha != train.daily_green_commit():
+        stop(repo, issue, f"the build stopped: {sha} is not the commit `daily-green` points to; a nightly builds "
+                          "only the newest fully green daily run's commit, never an older one without its own daily run.")
+    if fork and not sdk_ready(sha):
         stop(repo, issue, f"the build stopped: {sha} has no complete published v5 SDK pair.")
     return Ref("main", sha, dt.datetime.fromisoformat(git("show", "-s", "--format=%cI", sha)))
 

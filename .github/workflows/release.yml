@@ -2,8 +2,7 @@ name: release
 # Game builds (docs/release-flow.md). Two kinds go through here (CI tiers, owner 2026-11-13):
 # - nightly: the daily run (daily.yml) calls this when every leg is green, with that commit, and then publishes
 #   whenever a player-facing pull request merged since the published Nightly (no batch-size or age rule); by hand it
-#   defaults to `daily-green` and keeps the batch rules. It refuses a commit that is not `daily-green` or an
-#   ancestor of it.
+#   defaults to `daily-green` and keeps the batch rules. It refuses any commit but the one `daily-green` points to.
 # - snapshot: by hand from main's head; it needs only dyna-checks' gate (lint, verify, verify-static, launcher)
 #   green on that commit. Publishing a snapshot under its own tag and channel is not built yet: the kind checks
 #   and decides, then stops.
@@ -37,7 +36,7 @@ on:
   workflow_dispatch:
     inputs:
       kind:
-        description: snapshot (main's head, gate green) or nightly (daily-green or an ancestor of it)
+        description: snapshot (main's head, gate green) or nightly (the daily-green commit only)
         type: choice
         options: [snapshot, nightly]
         default: snapshot

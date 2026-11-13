@@ -416,9 +416,10 @@ class ReleaseTrainTests(unittest.TestCase):
             git("tag", "daily-green", commits[1])
             with mock.patch.object(train, "ROOT", Path(folder)):
                 self.assertEqual(train.channel_head("nightly", ""), commits[1], "the default is daily-green itself")
-                self.assertEqual(train.channel_head("nightly", commits[0]), commits[0], "an ancestor is green")
-                with self.assertRaisesRegex(SystemExit, "is not `daily-green` or an ancestor of it"):
-                    train.channel_head("nightly", commits[2])
+                self.assertEqual(train.channel_head("nightly", "daily-green"), commits[1])
+                for other in (commits[0], commits[2]):
+                    with self.assertRaisesRegex(SystemExit, "is not the commit `daily-green` points to"):
+                        train.channel_head("nightly", other)
                 git("tag", "-d", "daily-green")
                 with self.assertRaisesRegex(SystemExit, "no `daily-green` tag yet"):
                     train.channel_head("nightly", "")

@@ -210,7 +210,7 @@ dispatch replaces an older waiting one. The schedule stops when main's head alre
 a hand dispatch never does, so it retries a run whose tag move, issues or nightly failed. Its legs are the workflows that left main pushes:
 the ignored-tests data shards (`ignored-tests.yml`), the wasm fixture and guest stacks (`wasm-mods.yml`),
 `fn-replace-check.yml`, the native linkage probe (`native-dylib-probe.yml`) and the prebuilt SDK of the commit
-(`prebuilt-game.yml`, published as `prebuilt-<sha>` only by a real run on main, which the Nightly needs), each called
+(`prebuilt-game.yml`; its archives are published as `prebuilt-<sha>` by `sdk-publish` only after a green summary on a real run on main, before the Nightly that needs them), each called
 with the commit. Its
 summary (`tools/ci/daily_summary.py`) reads each leg's result and its sanitised verdict file, never a log:
 
@@ -222,7 +222,7 @@ summary (`tools/ci/daily_summary.py`) reads each leg's result and its sanitised 
   first run where it passes closes it. A leg that failed without a test name gets one issue per leg.
 
 Only a run on `main` with `dry_run` false moves the tag, files issues or publishes; any other run prints what it
-would do. A Nightly ships only a commit that is `daily-green` or an ancestor of it (`release.yml`, `nightly build`).
+would do. A Nightly ships only the commit `daily-green` points to, with its SDK (`release.yml`, `nightly build`).
 A snapshot (`release.yml -f kind=snapshot`) needs only dyna-checks' gate on main's head; publishing it under its own
 tag and channel is not built yet, so it checks and stops.
 

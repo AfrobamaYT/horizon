@@ -9,8 +9,8 @@
 
 The game ships only the Nightly since 2026-10-28 (Ludovic): when `decide --kind game` says so, release.yml starts
 `nightly build` on the commit it decided (tools/ci/nightly.py), and "the last release" is the published Nightly.
-On the fork (CI tiers, owner 2026-11-13) `--channel` names the kind of build: `nightly` takes `daily-green` (or
---head) and refuses a commit that is not `daily-green` or an ancestor of it; `snapshot` takes main's head (or
+On the fork (CI tiers, owner 2026-11-13) `--channel` names the kind of build: `nightly` takes `daily-green` and
+refuses any other --head (an older commit had no daily run of its own, and no SDK); `snapshot` takes main's head (or
 --head) and refuses a commit whose gate jobs (dyna-checks' main-push lint, verify, verify-static, launcher) did
 not pass.
 
@@ -549,11 +549,10 @@ FORK_GATE = {"lint", "verify", "verify-static", "launcher", "pool-watch"}
 SNAPSHOT_GATE = {"lint", "verify", "verify-static", "launcher"}
 
 
-def daily_green(sha):
-    """Whether sha is the tag `daily-green` (the newest fully green daily run) or an ancestor of it."""
+def daily_green_commit():
+    """The commit the tag `daily-green` points to (the newest fully green daily run), freshly fetched, or ""."""
     run("git", "fetch", "--quiet", "--force", "origin", f"+refs/tags/{DAILY_GREEN}:refs/tags/{DAILY_GREEN}", check=False)
-    return subprocess.run(["git", "merge-base", "--is-ancestor", sha, DAILY_GREEN], cwd=ROOT,
-                          capture_output=True).returncode == 0
+    return run("git", "rev-parse", "--verify", "--quiet", f"refs/tags/{DAILY_GREEN}^{{commit}}", check=False).strip()
 
 
 def fork_gate_passed(sha):
@@ -568,13 +567,14 @@ def fork_gate_passed(sha):
 def channel_head(channel, head):
     """The commit a fork channel builds, or exits naming the check it failed."""
     if channel == "nightly":
-        sha = head or run("git", "rev-parse", "--verify", "--quiet", f"refs/tags/{DAILY_GREEN}^{{commit}}", check=False).strip()
-        if not sha:
+        green = daily_green_commit()
+        if not green:
             raise SystemExit(f"::error::refused: no `{DAILY_GREEN}` tag yet; a nightly ships only a commit whose "
                              "daily run was fully green")
-        if not daily_green(sha):
-            raise SystemExit(f"::error::refused: {sha} is not `{DAILY_GREEN}` or an ancestor of it; "
-                             "a nightly ships only a commit whose daily run was fully green")
+        sha = run("git", "rev-parse", "--verify", "--quiet", f"{head}^{{commit}}", check=False).strip() if head else green
+        if sha != green:
+            raise SystemExit(f"::error::refused: {head} is not the commit `{DAILY_GREEN}` points to ({green}); "
+                             "a nightly ships only the commit of the newest fully green daily run, with its SDK")
         return sha
     sha = head or run("git", "rev-parse", "refs/remotes/origin/main").strip()
     if not fork_gate_passed(sha):
