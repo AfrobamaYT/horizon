@@ -702,3 +702,155 @@ impl Game<'_> {
         Ok(true)
     }
 }
+
+impl Game<'_> {
+    pub(super) fn apply_consume_effect(&mut self, effect: &horizon_client::items::ConsumeEffect) {
+        use horizon_client::items::ConsumeEffect;
+        match effect {
+            ConsumeEffect::ApplyEffects {
+                effects,
+                probability,
+            } => {
+                // ApplyStatusEffectsConsumeEffect.apply: the user's random
+                // (the level's stands in, as for every player draw) is drawn
+                // even at probability 1.
+                if self.world.random.next_float() < *probability {
+                    for eff in effects {
+                        if let Some(def) = horizon_client::brewing::effect(&eff.id) {
+                            if def.instant {
+                                if let Some(a) =
+                                    horizon_client::effects::instant(def.id, eff.amplifier, 1.0)
+                                {
+                                    self.apply_effect_action(a);
+                                }
+                            } else {
+                                let mut instance = horizon_client::effects::EffectInstance::new(
+                                    def.id,
+                                    eff.duration,
+                                    eff.amplifier,
+                                );
+                                instance.ambient = eff.ambient;
+                                instance.visible = eff.show_particles;
+                                instance.show_icon = eff.show_icon;
+                                self.add_player_effect(instance);
+                            }
+                        }
+                    }
+                }
+            }
+            ConsumeEffect::ClearAllEffects => {
+                self.potions.effects.clear();
+                self.apply_effect_status();
+            }
+            ConsumeEffect::RemoveEffects(to_remove) => {
+                for target in to_remove {
+                    let id = target.trim_start_matches("minecraft:");
+                    self.potions.effects.list.retain(|e| e.id != id);
+                }
+                self.apply_effect_status();
+            }
+            ConsumeEffect::TeleportRandomly(teleport) => self.teleport_randomly(teleport),
+            ConsumeEffect::PlaySound(sound) => {
+                // PlaySoundConsumeEffect: at the user's block position.
+                let at = self.player.as_ref().map(|p| {
+                    let b = horizon_core::position::BlockPos::containing(p.position);
+                    [b.x, b.y, b.z].map(|v| f64::from(v) + 0.5)
+                });
+                self.audio.play(sound, at, 1.0, 1.0);
+            }
+            // A mod's own kind: the owning mod's hook answers.
+            ConsumeEffect::Native { kind, data } => {
+                self.native_consume_effect(kind, data);
+            }
+        }
+    }
+    /// BowItem.releaseUsing: power from charge time, arrows at power * 3.
+    pub(super) fn release_bow(&mut self, stack: &ItemStack, ticks: u32) {
+        let ammo = self.get_projectile(stack);
+        let mut charge = i32::try_from(ticks).unwrap_or(i32::MAX);
+        let mut canceled = false;
+        self.native_arrow_loose(stack, ammo.is_some(), &mut charge, &mut canceled);
+        let power = item_use::bow_release_power(ammo.is_some(), charge, canceled);
+        let (Some(power), Some(ammo)) = (power, ammo) else {
+            return;
+        };
+        let arrow_slot = ammo.slot;
+        let weapon = Some(stack.clone());
+        let Some(eye) = self.eye_position() else {
+            return;
+        };
+        // BowItem.shootProjectile: shootFromRotation(power * 3, inaccuracy 1).
+        let p = Vec3::new(eye[0], eye[1] - 0.1, eye[2]);
+        let ammo = ammo.stack;
+        let (power_bonus, infinity) = self.bow_enchantments(&ammo.item);
+        let effect = dispenser::tipped_effect(&ammo).or_else(|| {
+            (&*ammo.item == "minecraft:spectral_arrow").then_some(("minecraft:glowing", 200))
+        });
+        let kind = horizon_client::projectiles::ProjectileKind::Arrow {
+            base_damage: 2.0 + power_bonus,
+            critical: power >= 1.0,
+            effect,
+        };
+        let mut arrow = horizon_client::projectiles::Projectile::new(
+            kind,
+            p,
+            Some(horizon_client::mobs::Who::Player),
+        );
+        // ProjectileWeaponItem.useAmmo: creative and Infinity draw without
+        // using the ammo, so the arrow is CREATIVE_ONLY; else setOwner(player)
+        // lets it be picked up.
+        if let Some(a) = arrow.arrow.as_mut() {
+            a.set_item(&horizon_client::arrows::drawn_ammo(
+                &ammo,
+                self.creative || infinity,
+            ));
+            a.set_owner(Some(horizon_client::mobs::Who::Player));
+            a.fired_from_weapon = weapon;
+        }
+        // Flame: the arrow is spawned burning (EnchantmentHelper.onProjectileSpawned).
+        self.ignite_spawned_arrow(stack, &mut arrow);
+        let (velocity, on_ground) = self.player.as_ref().map_or((Vec3::ZERO, true), |pl| {
+            (self.known_player_movement(), pl.ground.on_ground)
+        });
+        arrow.shoot_from_rotation(
+            self.pitch,
+            self.yaw,
+            0.0,
+            power * 3.0,
+            1.0,
+            velocity,
+            on_ground,
+        );
+        self.add_projectile(arrow);
+        let (player, name, projectile) = (
+            horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid()),
+            self.acting_player_name().to_owned(),
+            self.next_entity,
+        );
+        self.native_entity_shoot_bow(player, &name, projectile, power * 3.0);
+        // ArrowState posts projectile_shoot on the arrow's first tick.
+        let pitch = 1.0 / (self.world.random.next_float() * 0.4 + 1.2) + power * 0.5;
+        // BowItem.releaseUsing: `playSound(null, getX(), getY(), getZ(), ...)`, at
+        // the feet: an eye-height source a few cm from the listener pans hard.
+        let feet = self
+            .player
+            .as_ref()
+            .map_or(eye, |pl| [pl.position.x, pl.position.y, pl.position.z]);
+        self.audio
+            .play("minecraft:entity.arrow.shoot", Some(feet), 1.0, pitch);
+        self.award_stat("used", "minecraft:bow", 1);
+        if !self.creative
+            && !infinity
+            && let Some(i) = arrow_slot
+        {
+            let cell = self.stack_in_mut(i);
+            if let Some(s) = cell.as_mut() {
+                s.count -= 1;
+                if s.count == 0 {
+                    *cell = None;
+                }
+            }
+        }
+        self.damage_held(1);
+    }
+}
