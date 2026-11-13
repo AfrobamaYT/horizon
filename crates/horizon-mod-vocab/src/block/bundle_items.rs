@@ -7,6 +7,7 @@ use crate::{
 /// Writes exchange one item in the caller's transaction, so aborts restore its contents.
 /// A mod can return this helper from its own `ITEM_ITEMS` provider.
 // no wire: the handler is reached through the ResourceHandler capability proxy.
+// exhaustive: its one field is private; a mod builds it with `BundleItems::new`.
 pub struct BundleItems(ItemPlace);
 impl BundleItems {
     /// Handle the bundle-like item at `place`, carrying `minecraft:bundle_contents`.
