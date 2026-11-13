@@ -42,6 +42,12 @@ pub(crate) struct BiomeSourceInfo {
 pub fn biome_source_declarations() -> Vec<(String, Vec<String>, Arc<dyn BiomeSource>)> {
     crate::parts::installed_biome_source_list()
         .iter()
-        .map(|info| (info.id.to_string(), info.biomes.clone(), info.source.clone()))
+        .map(|info| {
+            (
+                info.id.to_string(),
+                info.biomes.clone(),
+                info.source.clone(),
+            )
+        })
         .collect()
 }

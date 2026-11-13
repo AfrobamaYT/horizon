@@ -129,7 +129,10 @@ impl DimensionsRegistrar for PartRegistrar {
                 self.mod_id
             ))
         } else if self.biome_sources.iter().any(|s| *s.id == *id) {
-            Some(format!("{} registered biome source {id} twice", self.mod_id))
+            Some(format!(
+                "{} registered biome source {id} twice",
+                self.mod_id
+            ))
         } else if biomes.is_empty() {
             Some(format!(
                 "{} registered biome source {id}, whose possible_biomes lists no biome",
