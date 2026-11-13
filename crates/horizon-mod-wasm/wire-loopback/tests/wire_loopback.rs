@@ -226,6 +226,9 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             event.stack.count = 29;
         }
         fn loot_condition(&self, event: &mut mod_api::LootConditionEvent<'_>) {
+            if loot_query::guest_condition(event) {
+                return;
+            }
             let tag = event
                 .tags
                 .key(&mod_api::Identifier::parse("test:ingredients").unwrap())

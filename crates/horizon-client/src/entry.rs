@@ -154,6 +154,8 @@ pub fn start<G>(
     crash::install(home.clone(), side);
     if horizon_world::native_load_hooks::install(
         horizon_world::native_load_hooks::NativeLoadHooks {
+            item_ability_default: horizon_items::item_abilities::vanilla_can_perform,
+            loot_ability: crate::game::api_values::loot_values::dispatch_loot_ability,
             loot_table_load: |context, id, table| {
                 if !mod_api::__private::listened(mod_api::HookId::LootTableLoad) {
                     return;
