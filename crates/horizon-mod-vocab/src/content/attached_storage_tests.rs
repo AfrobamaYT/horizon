@@ -139,8 +139,13 @@ fn extraction_takes_part_and_none_of_another_resource() {
         let none =
             host.transaction(|host, tx| Ok::<_, ()>(slots.extract(host, tx, 4, &cobble, 30)));
         assert_eq!(none, Ok(0), "none of another resource");
-        let came = host.transaction(|host, tx| Ok::<_, ()>(slots.extract(host, tx, 4, &dirt, 50)));
-        assert_eq!(came, Ok(30), "at most what is held");
+        let came = host.transaction(|host, tx| Ok::<_, ()>(slots.extract(host, tx, 4, &dirt, 12)));
+        assert_eq!(came, Ok(12));
+        assert_eq!(slots.amount(&mut host, 4), 18);
+        let rest = host.transaction(|host, tx| Ok::<_, ()>(slots.extract(host, tx, 4, &dirt, 50)));
+        assert_eq!(rest, Ok(18), "at most what remains");
+        let empty = host.transaction(|host, tx| Ok::<_, ()>(slots.extract(host, tx, 4, &dirt, 1)));
+        assert_eq!(empty, Ok(0));
         assert_eq!(slots.amount(&mut host, 4), 0);
     });
 }
