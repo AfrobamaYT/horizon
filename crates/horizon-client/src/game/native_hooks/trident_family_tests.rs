@@ -245,7 +245,7 @@ fn accepted_player_and_mob_tridents_keep_type_entities_position_and_full_weapon(
                     } else {
                         throw_mob(game)
                     };
-                    let expected = (&stack).try_into_api().unwrap();
+                    let expected = stack.try_into_api().unwrap();
                     game.inventory[game.selected] = Some(ItemStack::new("minecraft:stick", 1));
                     step(game, player);
                     assert!(game.mobs.iter().find(|m| m.id == 41).unwrap().health <= 0.0);
@@ -415,7 +415,7 @@ fn explicit_damage_by_trident_retains_its_weapon_with_independent_causing_entity
                 victim(game, "minecraft:cow");
                 game.mobs[0].health = 1.0;
                 let (id, stack) = throw_player(game);
-                let expected = (&stack).try_into_api().unwrap();
+                let expected = stack.try_into_api().unwrap();
                 game.inventory[game.selected] = Some(ItemStack::new("minecraft:stick", 1));
                 assert!(game.run_command(
                 "damage @e[type=cow,limit=1] 2 minecraft:generic by @e[type=trident,limit=1] from @p",

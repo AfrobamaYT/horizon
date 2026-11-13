@@ -79,10 +79,10 @@ impl Game<'_> {
     }
 
     pub(super) fn forget_entity_initialization(&mut self, holder: Holder) {
-        if let Holder::Entity(id) = holder {
-            if let Some(mob) = self.mobs.iter_mut().find(|mob| mob.id == id) {
-                mob.accepted_hit = None;
-            }
+        if let Holder::Entity(id) = holder
+            && let Some(mob) = self.mobs.iter_mut().find(|mob| mob.id == id)
+        {
+            mob.accepted_hit = None;
         }
         self.entity_initialization.initialized.remove(&holder);
     }

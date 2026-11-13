@@ -204,7 +204,7 @@ fn player_bow_death_retains_the_incoming_source_and_full_weapon() {
                 mob(game, 41, "minecraft:zombie", Vec3::new(6.0, 80.0, 4.5));
                 game.mobs[0].health = 1.0;
                 let weapon = bow();
-                let expected = (&weapon).try_into_api().unwrap();
+                let expected = weapon.try_into_api().unwrap();
                 let arrow = player_arrow(game, &weapon);
                 // Death must not reconstruct the bow from the shooter's current hand.
                 game.inventory[game.selected] = Some(ItemStack::new("minecraft:stick", 1));
@@ -270,10 +270,7 @@ fn skeleton_arrow_death_credits_the_skeleton_not_the_player() {
                     (seen.deaths[0].causing, seen.deaths[0].direct),
                     (42, arrow as i32)
                 );
-                assert_eq!(
-                    seen.deaths[0].weapon,
-                    Some((&weapon).try_into_api().unwrap())
-                );
+                assert_eq!(seen.deaths[0].weapon, Some(weapon.try_into_api().unwrap()));
             })
         },
     );
@@ -486,7 +483,7 @@ fn guest_player_bow_death_keeps_the_connected_shooter_without_a_local_player() {
                 mob(game, 41, "minecraft:zombie", Vec3::new(6.0, 80.0, 4.5));
                 game.mobs[0].health = 1.0;
                 let weapon = bow();
-                let expected = (&weapon).try_into_api().unwrap();
+                let expected = weapon.try_into_api().unwrap();
                 let arrow = game
                     .as_guest(1, |game| player_arrow(game, &weapon))
                     .unwrap();
@@ -741,7 +738,7 @@ fn later_cancelled_player_revival_is_transactional_and_a_second_kill_drops_inven
                     game.dropped
                         .iter()
                         .filter(|drop| &*drop.stack.item == "minecraft:diamond")
-                        .map(|drop| drop.stack.count as u32)
+                        .map(|drop| drop.stack.count)
                         .sum::<u32>(),
                     5
                 );
