@@ -21,6 +21,8 @@ environment it sets, and is skipped here; one marked `needs` reads an input only
 shard, and with it, it runs and must pass; one marked `gpu` needs a graphics adapter and runs only where
 the runner has a Vulkan driver (an ICD file), and must pass there.
 
+`needs-plain` is like `needs`, but selects a plain test without `--ignored`.
+
 `--needs VARIABLE --one-process-each` runs the tests marked `needs VARIABLE`, each alone in its own process
 (`--list` prints those commands instead), and fails unless every run reports exactly one test passed: a
 renamed test would otherwise match nothing and pass. Every test runs, then the step fails if any did.
@@ -186,8 +188,8 @@ def listed_entries():
             line = line.split(" # ", 1)[0].split()
             if not line or line[0].startswith("#"):
                 continue
-            if len(line) < 3 or line[3:] not in ([], ["flaky"], ["harness"], ["gpu"], ["needs"]):
-                sys.exit(f"{file}:{number}: expected `PACKAGE TEST REFERENCE [flaky|harness|gpu|needs]`")
+            if len(line) < 3 or line[3:] not in ([], ["flaky"], ["harness"], ["gpu"], ["needs"], ["needs-plain"]):
+                sys.exit(f"{file}:{number}: expected `PACKAGE TEST REFERENCE [flaky|harness|gpu|needs|needs-plain]`")
             if (line[0], line[1]) in seen:
                 sys.exit(f"{file}:{number}: {line[0]} {line[1]} is already listed in {seen[line[0], line[1]]}; "
                          "a test belongs to one file")
@@ -200,19 +202,19 @@ def listed_entries():
 
 def known_failures():
     """(package, test) -> its mark (None, "flaky", "harness" or "gpu"), from the policy files."""
-    return {(row.package, row.test): row.mark for row in listed_entries() if row.mark != "needs"}
+    return {(row.package, row.test): row.mark for row in listed_entries() if row.mark not in {"needs", "needs-plain"}}
 
 
 def harness_inputs():
     """(package, test) -> the environment variable it reads that only its parity harness provides."""
-    return {(row.package, row.test): row.reference for row in listed_entries() if row.mark == "needs"}
+    return {(row.package, row.test): row.reference for row in listed_entries() if row.mark in {"needs", "needs-plain"}}
 
 
 def needs_commands(variable, jobs=None):
     """One `cargo test` command per test marked `needs variable`, each selecting exactly that test."""
     commands = [
-        ["cargo", "test", *([f"-j{jobs}"] if jobs else []), "-p", row.package, "--lib", "--", "--ignored", "--exact", row.test]
-        for row in listed_entries() if row.mark == "needs" and row.reference == variable
+        ["cargo", "test", *([f"-j{jobs}"] if jobs else []), "-p", row.package, "--lib", "--", *(["--ignored"] if row.mark == "needs" else []), "--exact", row.test]
+        for row in listed_entries() if row.mark in {"needs", "needs-plain"} and row.reference == variable
     ]
     if not commands:
         sys.exit(f"no `needs` row in {POLICY_PATH}/ names {variable}")

@@ -78,15 +78,14 @@ use {
 mod abilities;
 mod chat_received;
 use chat_received::QueuedChat;
-mod client_level_tick;
+pub(in crate::game) mod client_level_tick;
 mod item_use;
 mod remote_attributes;
 mod tables;
 
 pub(super) use super::villager_client::builtin_registries;
 
-/// `ChatType`'s two decorations: how a message shows in the chat, and what
-/// the narrator says of it.
+/// `ChatType`'s two decorations: how a message shows in the chat, and what the narrator says of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Decoration {
     Chat,
@@ -685,8 +684,7 @@ pub(super) struct Remote {
     /// completions this server sent (ClientboundCustomChatCompletionsPacket).
     custom_completions: std::collections::BTreeSet<String>,
     players: HashMap<u128, String>,
-    /// `ClientPacketListener.playerInfoMap` as player-list entries, and
-    /// which of them are listed.
+    /// `ClientPacketListener.playerInfoMap` as player-list entries, and which of them are listed.
     tab_players: HashMap<u128, horizon_client::tab_list::TabPlayer>,
     /// Each listed profile's unpacked `textures` property.
     skin_textures: HashMap<u128, horizon_client::skins::Textures>,
@@ -733,8 +731,8 @@ pub(super) struct Remote {
     /// `MultiPlayerGameMode.destroyBlockPos`, `.destroyProgress` and the face last sent: the block
     /// the break targets, which outlives the break itself.
     destroying: Option<([i32; 3], u8, f32)>,
-    /// `MultiPlayerGameMode.destroyingItem`: the held item key the break began with.
-    destroying_item: String,
+    /// `MultiPlayerGameMode.destroyingItem`: the main-hand stack the break began with.
+    destroying_item: Option<ItemStack>,
     /// `MultiPlayerGameMode.isDestroying`: a break is running. `destroying` keeps the target after
     /// one ends (`destroyBlockPos` is written only when a break starts), so a dig resumed on the
     /// same block and item sends no new START and the server keeps its clock (#4124).
@@ -783,8 +781,7 @@ pub(super) struct Remote {
     /// `ClientCommonPacketListenerImpl.serverLinks`: the links "Server
     /// Links..." in the pause menu lists (only `http`/`https` URIs kept).
     pub(super) server_links: Vec<horizon_protocol::packets::configuration::ServerLink>,
-    /// `ClientPacketListener.getDebugQueryHandler`: the F3+I query waiting
-    /// for the server's data.
+    /// `ClientPacketListener.getDebugQueryHandler`: the F3+I query waiting for the server's data.
     pub(super) debug_query: super::debug_keys::DebugQuery,
 }
 
@@ -1244,7 +1241,7 @@ impl Game<'_> {
             profile: 0,
             profile_name: String::new(),
             destroying: None,
-            destroying_item: String::new(),
+            destroying_item: None,
             is_destroying: false,
             interaction_swing: [true; 2],
             destroy_delay: 0,
@@ -1484,7 +1481,7 @@ impl Game<'_> {
             profile: 0,
             profile_name: String::new(),
             destroying: None,
-            destroying_item: String::new(),
+            destroying_item: None,
             is_destroying: false,
             interaction_swing: [true; 2],
             destroy_delay: 0,
@@ -1665,13 +1662,13 @@ impl Game<'_> {
         }
     }
     /// `Connection.send` for the game's play packets: a mod may cancel one
-    /// (`client_packet_send`), and the server never hears of it.
-    fn send_play(&self, packet: S) {
-        if let Some(r) = &self.remote
-            && !self.client_packet_send_canceled(&packet)
-        {
+    /// (`client_packet_send`), and the server never hears of it. True when queued.
+    pub(super) fn send_play(&self, packet: S) -> bool {
+        let queued = self.remote.is_some() && !self.client_packet_send_canceled(&packet);
+        if let (true, Some(r)) = (queued, &self.remote) {
             r.session.send(packet);
         }
+        queued
     }
     fn send_action(&self, action: i32) {
         self.send(S::PlayerAction(play::PlayerAction {
@@ -2064,8 +2061,7 @@ impl Game<'_> {
         shown
     }
 
-    /// `ChatListener.messageDelay`: Chat Delay in milliseconds, as Java
-    /// truncates it.
+    /// `ChatListener.messageDelay`: Chat Delay in milliseconds, as Java truncates it.
     fn chat_delay_ms(&self) -> i64 {
         (self.settings.chat_delay * 1000.0) as i64
     }
@@ -3051,16 +3047,7 @@ impl Game<'_> {
             && self.world.set(pos[0], pos[1], pos[2], state).is_ok()
         {
             self.sync_block_entity((pos[0], pos[1], pos[2]), Some(previous), state);
-            // LevelChunk.setBlockState removes the block entity of a block
-            // that changes: the moving piston the client's moveBlocks made
-            // stops when the server places what it moved (#3002).
-            let facts = self.res.facts();
-            let moving = |s: BlockStateId| &*facts.get(s).name == "minecraft:moving_piston";
-            if moving(previous) && !moving(state) {
-                let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
-                self.forget_moving_piston(at);
-                self.moving_pistons_stale = true;
-            }
+            self.client_block_written(pos, previous, state);
         }
         // A block we just placed: play its place sound (the server skips the placer).
         if let Some((target, _)) = self.remote.as_ref().and_then(|r| r.placing)
@@ -6374,6 +6361,8 @@ impl Game<'_> {
         if let Some(r) = self.remote.as_mut() {
             r.last_teleport_sequence = r.sequence;
         }
+        // The server's answer to a passage crossed (`cross_passage`), or any other.
+        self.passages.crossing = None;
         // handleMovePlayer: a passenger keeps its own position and look (its vehicle
         // carries it), so a vehicle a datapack teleports every tick doesn't snap the
         // rider's view; the teleport is still accepted, with where the player is.
@@ -8116,9 +8105,9 @@ impl Game<'_> {
             return true;
         }
         // sameDestroyTarget: the same block and still the item the break began with.
-        let held = self.main_hand_key();
         let same = self.remote.as_ref().is_some_and(|r| {
-            r.destroying.is_some_and(|(p, _, _)| p == hit.pos) && r.destroying_item == held
+            r.destroying.is_some_and(|(p, _, _)| p == hit.pos)
+                && self.same_destroying_item(&r.destroying_item)
         });
         // startDestroyBlock leaves only a break that is still running alone (`isDestroying &&
         // sameDestroyTarget`); a click on the block a stopped break still names starts it again,
@@ -8173,9 +8162,9 @@ impl Game<'_> {
                 }
                 return true;
             }
+            let held = self.main_hand_key();
             if let Some(r) = self.remote.as_mut() {
-                r.destroying = Some((hit.pos, face, 0.0));
-                r.destroying_item = held;
+                (r.destroying, r.destroying_item) = (Some((hit.pos, face, 0.0)), held);
                 r.is_destroying = true;
             }
             // startDestroyBlock plays the first hit and crack itself; the
@@ -10816,10 +10805,7 @@ impl Game<'_> {
         let delta = self.world.game_time - r.clock_game_time;
         r.clock_game_time = self.world.game_time;
         for clock in r.clocks.values_mut() {
-            let partial = f64::from(clock.partial_tick) + delta as f64 * f64::from(clock.rate);
-            let full = partial.floor();
-            clock.partial_tick = (partial - full) as f32;
-            clock.total_ticks += full as i64;
+            let _ = client_level_tick::advance_clock(clock, delta);
         }
         self.world.day_time = r.clock_time(r.default_clock);
     }
@@ -11720,6 +11706,8 @@ mod level_sound_tests;
 
 #[cfg(test)]
 mod attachment_query_tests;
+#[cfg(test)]
+mod passage_cross_tests;
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::api_values::TryIntoApi;

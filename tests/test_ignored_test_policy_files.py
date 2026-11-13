@@ -60,6 +60,16 @@ class PolicyFiles(unittest.TestCase):
         self.write("issue-3000.text", "pkg b::test #3000\n")
         self.assertIn("not read: issue-3000.text", self.exit_message(ignored_tests.listed_entries))
 
+    def test_plain_fixture_rows_are_inputs_not_known_failures(self):
+        self.write("fixture.txt", "pkg a::ignored VAR needs\npkg b::plain VAR needs-plain\n")
+        self.assertEqual(ignored_tests.known_failures(), {})
+        self.assertEqual(ignored_tests.harness_inputs(), {
+            ("pkg", "a::ignored"): "VAR", ("pkg", "b::plain"): "VAR"})
+        self.assertEqual(ignored_tests.needs_commands("VAR", 2), [
+            ["cargo", "test", "-j2", "-p", "pkg", "--lib", "--", "--ignored", "--exact", "a::ignored"],
+            ["cargo", "test", "-j2", "-p", "pkg", "--lib", "--", "--exact", "b::plain"],
+        ])
+
     def test_an_unset_variable_runs_nothing(self):
         self.write("wasm-fixture.txt", "pkg a::one VAR needs\n")
         with patch.dict(os.environ), patch.object(ignored_tests.subprocess, "Popen") as popen:
@@ -69,7 +79,7 @@ class PolicyFiles(unittest.TestCase):
 
     def test_each_needs_test_runs_alone_and_must_report_one_pass(self):
         self.write("wasm-fixture.txt",
-                   "pkg a::one VAR needs\npkg-lib b::two VAR needs\npkg c::three VAR needs\npkg d::other OTHER needs\n")
+                   "pkg a::one VAR needs\npkg-lib b::two VAR needs-plain\npkg c::three VAR needs\npkg d::other OTHER needs\n")
         one_pass = "test result: ok. 1 passed; 0 failed; 0 ignored;\n"
         # Passes; matches nothing; reports its pass but the process exits non-zero (a crash after the summary).
         runs = iter([(one_pass, 0), ("test result: ok. 0 passed; 0 failed; 0 ignored;\n", 0), (one_pass, 101)])
@@ -89,12 +99,12 @@ class PolicyFiles(unittest.TestCase):
             self.assertEqual(ignored_tests.run_one_process_each("VAR", jobs=3), 1)
         self.assertEqual(commands, [
             ["cargo", "test", "-j3", "-p", "pkg", "--lib", "--", "--ignored", "--exact", "a::one"],
-            ["cargo", "test", "-j3", "-p", "pkg-lib", "--lib", "--", "--ignored", "--exact", "b::two"],
+            ["cargo", "test", "-j3", "-p", "pkg-lib", "--lib", "--", "--exact", "b::two"],
             ["cargo", "test", "-j3", "-p", "pkg", "--lib", "--", "--ignored", "--exact", "c::three"],
         ])
         errors = [line for line in log.getvalue().splitlines() if line.startswith("::error::")]
         self.assertEqual(errors, [
-            "::error::expected 1 passing test from: cargo test -j3 -p pkg-lib --lib -- --ignored --exact b::two",
+            "::error::expected 1 passing test from: cargo test -j3 -p pkg-lib --lib -- --exact b::two",
             "::error::expected 1 passing test from: cargo test -j3 -p pkg --lib -- --ignored --exact c::three",
         ])
 

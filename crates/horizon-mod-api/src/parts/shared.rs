@@ -43,6 +43,8 @@ pub struct PartRegistrar {
     pub(crate) datapack_registries: Vec<crate::DatapackRegistryDeclaration>,
     pub(crate) menu_recipe_books: HashMap<String, MenuBookDeclaration>,
     pub(crate) self_refusal: Option<String>,
+    /// Loading warnings, by owning mod id, in registration order.
+    pub(crate) warnings: Vec<(String, crate::LoadingMessage)>,
     pub(crate) recipe_book_types: HashMap<String, String>,
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,
@@ -80,6 +82,7 @@ impl PartRegistrar {
         Self {
             menu_recipe_books: HashMap::new(),
             self_refusal: None,
+            warnings: Vec::new(),
             biome_modifiers: Vec::new(),
             biome_regions: Vec::new(),
             datapack_registries: Vec::new(),
@@ -208,6 +211,9 @@ pub(crate) fn register_all(
         let context = crate::RegistrationContext::new();
         let rollback = registrar.registration_checkpoint();
         hooks.register(&mut registrar, &context);
+        for warning in mod_vocab::__private::take_registration_warnings(&context) {
+            RegistrationRefusalRegistrar::registration_warning(&mut registrar, warning);
+        }
         let reason = mod_vocab::__private::take_registration_refusal(&context)
             .or_else(|| registrar.self_refusal.take());
         if let Some(reason) = reason {
@@ -240,6 +246,13 @@ pub(crate) fn install_registrar(
     let slots = schema.validate(&registrar.game_rule_categories, &registrar.game_rules);
     if let Err(errors) = &slots {
         registrar.refused.extend(errors.iter().cloned());
+    }
+    for (id, warning) in &registrar.warnings {
+        log::warn!(
+            "mod {id} loading warning: {} {:?}",
+            warning.key(),
+            warning.args()
+        );
     }
     if !registrar.refused.is_empty() {
         return Err(registrar.refused);
@@ -286,6 +299,7 @@ pub(crate) fn install_registrar(
         dimensions: registrar.dimensions,
         chunk_generators: registrar.chunk_generators,
         biome_sources: registrar.biome_sources,
+        warnings: registrar.warnings,
     };
     mod_vocab::__private::parts_installation::install(installed);
 

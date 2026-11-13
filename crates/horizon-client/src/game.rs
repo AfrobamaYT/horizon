@@ -1752,7 +1752,7 @@ struct Game<'a> {
     hands_replaced: [bool; 2],
     /// `Minecraft`'s attack handling, attack clicks since the last tick and
     /// the attack strength tickers the hand reads.
-    clicks: horizon_client::first_person::Clicks,
+    clicks: horizon_client::first_person::Clicks<Option<ItemStack>>,
     attack_clicks: u32,
     /// Use clicks since the last tick; `handleKeybinds` consumes them after the attack clicks.
     use_clicks: u32,
@@ -2026,7 +2026,7 @@ struct Game<'a> {
     panel: native_panel::Panel,
     /// Horizon's own shader pack, while one is picked (`game/modding/native_shaders.rs`).
     native_shaders: native_shaders::NativeShaders,
-    /// The items native client mods claim and the events they haven't polled (game/modding/native_claimed_items.rs).
+    /// Native client mods' claimed items, unpolled events and key mappings (game/modding/native_claimed_items.rs).
     native_input: native_claimed_items::ModInput,
     /// The native lifecycle bookkeeping.
     native_lifecycle: native_lifecycle::NativeLifecycle,

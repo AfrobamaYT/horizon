@@ -87,9 +87,12 @@ fn place(game: &mut Game<'_>, pos: (i32, i32, i32), table: &str, seed: i64) {
         "setblock {} {} {} minecraft:chest{{LootTable:\"{table}\",LootTableSeed:{seed}L}}",
         pos.0, pos.1, pos.2
     )));
-    pending(game, pos);
+    pending_seed(game, pos, &[seed]);
 }
 fn pending(game: &Game<'_>, pos: (i32, i32, i32)) {
+    pending_seed(game, pos, &[37, 91]);
+}
+fn pending_seed(game: &Game<'_>, pos: (i32, i32, i32), seeds: &[i64]) {
     let pending = game.world.chunks[&(pos.0 >> 4, pos.2 >> 4)]
         .saved
         .as_ref()
@@ -97,7 +100,11 @@ fn pending(game: &Game<'_>, pos: (i32, i32, i32)) {
         .pending_loot
         .get(&pos)
         .unwrap();
-    assert!(matches!(pending.seed, Some(Tag::Long(37 | 91))));
+    assert!(
+        matches!(pending.seed, Some(Tag::Long(seed)) if seeds.contains(&seed)),
+        "{:?}",
+        pending.seed
+    );
     assert!(
         game.world
             .block_entities

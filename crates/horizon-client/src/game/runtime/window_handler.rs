@@ -155,6 +155,11 @@ impl Game<'_> {
                 return;
             }
         }
+        if mouse.is_some()
+            && let WindowEvent::MouseInput { state, button, .. } = &event
+        {
+            self.mod_mappings_button(*button, *state == ElementState::Pressed);
+        }
         let resized = matches!(event, WindowEvent::Resized(_));
         self.handle_window_event_inner(event_loop, event);
         if resized {
@@ -1382,6 +1387,11 @@ impl Game<'_> {
                                     t.arrow_key(key, (w, h), shift);
                                 }
                             }
+                            PhysicalKey::Code(key)
+                                if self
+                                    .title
+                                    .as_mut()
+                                    .is_some_and(|t| t.page_missing_mods(key, (w, h))) => {}
                             PhysicalKey::Code(KeyCode::Backspace) => self.title_edit(None, true),
                             PhysicalKey::Code(KeyCode::Tab) => {
                                 let shift = self.has_shift_down();
@@ -1909,13 +1919,7 @@ impl ApplicationHandler for Game<'_> {
             };
             // Still the key's handling: a mod's key hook may reach the clipboard.
             self.with_user_input(true, |game| {
-                game.native_input_key(
-                    name.unwrap_or("key.keyboard.unknown"),
-                    layout_key,
-                    raw_code,
-                    action,
-                    modifiers,
-                );
+                game.key_input(name, layout_key, raw_code, action, modifiers);
             });
         }
     }
