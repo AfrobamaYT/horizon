@@ -13,6 +13,7 @@ pub(super) struct GuestPlay {
     mining: Option<Mining>,
     destroy_delay: u32,
     using: Option<(usize, u32)>,
+    use_item: Option<ItemStack>,
     use_duration: i32,
     use_ticks_set: bool,
     use_delay: u32,
@@ -176,6 +177,7 @@ pub(super) struct GuestSwap {
     mining: Option<Mining>,
     destroy_delay: u32,
     using: Option<(usize, u32)>,
+    use_item: Option<ItemStack>,
     use_duration: i32,
     use_ticks_set: bool,
     use_delay: u32,
@@ -1447,6 +1449,7 @@ mod tests {
                             ticks: 0,
                             playing: false,
                             song_clock_present: false,
+                            loaded_clock: false,
                         },
                     ),
                 );

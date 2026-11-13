@@ -97,6 +97,12 @@ the return value; a collection hook's list is a field (`event.lines`). One event
 sees the changes before it. To exercise dispatch behavior, use the hook's dispatch function
 ([Testing a mod](testing.md)).
 
+The generator validates edited stack-list outputs inside each listener's owning scope. A refused stack
+output retains the immediately preceding accepted value, not the event's initial value. Scalar
+outputs and cancellation still commit; later listeners see the accepted stacks and run independently
+under the usual cancellation rules. Each refused output logs one warning naming the mod, hook,
+output and conversion error. This policy is identical for native and wasm listeners.
+
 Hook methods take `&self` and require `Send + Sync`. The process-wide mod list is installed once, like mixin module statics. One mod instance serves both
 the window's game and the server-thread game. A hook can also fire again inside
 the same mod: for example, `LevelRef::set_block` fires `block_changed`. Mods keep mutable

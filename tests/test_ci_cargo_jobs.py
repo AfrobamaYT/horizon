@@ -1,6 +1,7 @@
 """Build parallelism: a Dyna runner's CPU quota within its memory, fixed elsewhere."""
 import importlib.util
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -66,14 +67,14 @@ class CargoJobsTests(unittest.TestCase):
                                env=dict(PATH=f"{stubs}:/usr/bin:/bin", GITHUB_ENV=str(receipt), ARGS=str(args), **env))
                 return receipt.read_text(), args.read_text().strip()
 
-            for job in ("lint", "verify"):
+            for job, mib in (("lint", 3072), ("verify", 4096)):
                 script = steps("dyna-ci.yml", job)["Choose build parallelism"]["run"]
                 for kind, expected in (("dyna", "JOBS=-j6\n"), ("boat", "JOBS=-j4\n"),
                                        ("github", "JOBS=\n"), ("other", "JOBS=\n")):
                     with self.subTest(job=job, kind=kind):
                         written, called = run(script, RUNNER_KIND=kind)
                         self.assertEqual(written, expected)
-                        self.assertEqual(called, "tools/ci/cargo_jobs.py --job-mib 3072" if kind == "dyna" else "")
+                        self.assertEqual(called, f"tools/ci/cargo_jobs.py --job-mib {mib}" if kind == "dyna" else "")
 
             script = steps("fn-replace-check.yml", "fn-replace-check")["Choose build parallelism"]["run"]
             for environment, expected in (("github-hosted", "CARGO_BUILD_JOBS=2\n"), ("self-hosted", "CARGO_BUILD_JOBS=6\n")):
@@ -82,6 +83,34 @@ class CargoJobsTests(unittest.TestCase):
                     self.assertEqual(written, expected)
                     self.assertEqual(called, "tools/ci/cargo_jobs.py --job-mib 4096" if environment == "self-hosted" else "")
 
+
+    def test_cap_bounds_every_cargo_run_and_test_harness_of_the_job(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory) / "work/repo"
+            workspace.mkdir(parents=True)
+            env = Path(directory) / "env"
+            env.write_text("")
+            cargo_jobs.cap(5, 8, workspace, env)
+            config = (workspace.parent / ".cargo/config.toml").read_text()
+            self.assertIn("[build]\njobs = 5\n", config)
+            self.assertEqual(env.read_text(), "RUST_TEST_THREADS=8\nCI_JOBS=5\nCI_CPUS=8\n")
+
+    def test_every_dyna_job_that_builds_caps_its_parallelism_first(self):
+        # A runner's nproc reports the whole host: an uncapped build there starts one compiler per
+        # host core inside the runner's CPU quota.
+        builds = re.compile(r"\bcargo (build|test|check|clippy|rustc|run|doc)\b|vanilla-data\.sh|"
+                            r"prebuilt_game\.py|ignored_tests\.py|run_test_binaries\.py|test_\w+_parity\.py")
+        for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            for name, job in (yaml.safe_load(path.read_text()).get("jobs") or {}).items():
+                if "dyna" not in str(job.get("runs-on", "")):
+                    continue
+                runs = [step.get("run") or "" for step in job.get("steps", [])]
+                first = next((i for i, run in enumerate(runs) if builds.search(run)), None)
+                if first is None:
+                    continue
+                with self.subTest(workflow=path.name, job=name):
+                    capped = [i for i, run in enumerate(runs) if "tools/ci/cargo_jobs.py" in run and "--cap" in run]
+                    self.assertTrue(capped and capped[0] < first, "cap parallelism before the first build step")
 
 if __name__ == "__main__":
     unittest.main()
