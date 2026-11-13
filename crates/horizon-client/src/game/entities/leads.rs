@@ -834,7 +834,8 @@ impl Game<'_> {
             .to_radians()
         };
         let mut ropes: Vec<Rope> = Vec::new();
-        for m in &self.mobs {
+        // A mob a mod's pre hook canceled draws no lead (it is part of the mob's own render).
+        for m in self.drawn_mobs() {
             if let Some(holder) = m.extra.leash {
                 ropes.push(Rope {
                     holder,

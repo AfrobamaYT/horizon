@@ -7968,34 +7968,20 @@ impl Game<'_> {
                 let block = horizon_client::mobs::aquatic::glow_squid_block_light(mob, lit);
                 packed = (packed & 0xFF) | ((block * 16) << 8);
             }
-            // A native mod's own model in place of the vanilla one
-            // (`native_mob_submit`), before any of the vanilla model's parts
-            // (a sulfur cube's swallowed block) are drawn.
-            // A player's own hook (`native_player_submit`) is asked for the
-            // other players in view.
+            // The mods' pre hooks (a player's `render_player_pre`, then `render_living_pre`),
+            // before any of the vanilla model's parts (a sulfur cube's swallowed block) are
+            // drawn. A cancel skips the rest of the entity's drawing and its post hooks; the
+            // frame's later passes (flames, name tag, shadow, leash) leave it out too.
             let who = is_player
                 .then(|| self.remote_player_name(mob.id))
                 .flatten()
                 .map(|name| PlayerRender { name, local: false });
-            let (modded, hidden) = match who {
-                _ if layers_only => (false, mod_api::HiddenParts::default()),
-                Some(who) => self.mod_player_geometry(mob, who, alpha as f32, camera, packed, out),
-                None if is_player => (false, mod_api::HiddenParts::default()),
-                None => self.mod_mob_geometry(mob, alpha as f32, camera, packed, out),
-            };
-            if modded {
-                if let Some(rgb) = outline {
-                    self.mark_outline(&out[entity_start..], rgb);
-                    if mob.invisible {
-                        out.truncate(entity_start);
-                        continue;
-                    }
-                }
-                if outline.is_none() {
-                    self.cull_entity_vertices(out, entity_start);
-                }
+            let pre = self.mod_render_pre(mob, who, listened, alpha as f32, camera, packed, out);
+            let Some(hidden) = pre else {
+                // What the mods drew in its place is culled as the entity's own would be.
+                self.cull_entity_vertices(out, entity_start);
                 continue;
-            }
+            };
             if mob.species() == Species::SulfurCube && !mob.is_invisible() {
                 self.sulfur_cube_body_geometry(
                     mob,
@@ -8130,7 +8116,7 @@ impl Game<'_> {
                 // Held items join the GPU path's draws, their silhouette too.
                 let skin = (skinning && silhouette_on_gpu).then_some(&mut skinned);
                 self.mob_block_geometry(mob, camera, alpha, packed, skin, out);
-                // Mods' layers (`register_entity_layers`, `native_mob_layer`), over vanilla's.
+                // Mods' layers (`register_entity_layers`), then the post hooks, over vanilla's.
                 self.mod_layer_geometry(mob, who, parts, added, alpha as f32, camera, packed, out);
             }
             if let Some(rgb) = outline {
