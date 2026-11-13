@@ -2339,9 +2339,9 @@ mod tests {
     }
 
     /// #3716: a client asked about viewed levels answers in configuration, before its
-    /// acknowledgement, that it views none.
+    /// acknowledgement, that it views two levels besides its own.
     #[test]
-    fn configuration_answers_the_viewed_levels_query_with_none() {
+    fn configuration_answers_the_viewed_levels_query_with_its_cap() {
         let (root, data) = empty_item_data("viewed-levels");
         let (client, server) = horizon_protocol::connection::Pipe::pair();
         let (mut reader, writer) = Connection::local(client).split();
@@ -2373,7 +2373,7 @@ mod tests {
         for expected in [
             cfg::Serverbound::CustomPayload(cfg::CustomPayload {
                 channel: "horizon:levels".into(),
-                data: vec![1, 1, 0],
+                data: vec![1, 1, 2],
             }),
             cfg::Serverbound::FinishConfiguration(Empty),
         ] {

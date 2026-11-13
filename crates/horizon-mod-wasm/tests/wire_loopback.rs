@@ -360,25 +360,45 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             event.add_exhaustion(0.5);
             event.keep = false;
         }
-        fn mob_submit(
+        fn render_living_pre(
             &self,
             _: &dyn mod_api::ClientHost,
-            event: &mut mod_api::MobSubmitEvent<'_>,
+            event: &mut mod_api::RenderLivingPreEvent<'_>,
         ) -> mod_api::Flow {
             assert!(event.hidden.contains_named("nose"));
             event.hidden.hide_named("hat_rim").unwrap();
             event.hidden.hide(mod_api::HumanoidPart::Head);
             mod_api::Flow::Continue
         }
-        fn mob_layer(&self, _: &dyn mod_api::ClientHost, event: &mut mod_api::MobLayerEvent<'_>) {
-            assert_eq!(event.mob.kind, "test:mob");
-            assert_eq!(event.mob.custom_name, Some("custom"));
-            if let Some(who) = event.who {
-                assert_eq!((who.name, who.local), ("test:player", true));
-                event.draw.set_light(42);
-            } else {
-                event.draw.set_light(7);
-            }
+        fn render_player_pre(
+            &self,
+            _: &dyn mod_api::ClientHost,
+            event: &mut mod_api::RenderPlayerPreEvent<'_>,
+        ) -> mod_api::Flow {
+            // This window's own player is drawn by the mod: every other one isn't.
+            assert_eq!(event.player.kind, "minecraft:player");
+            event.cancelled = event.who.local;
+            event.draw.set_light(event.who.name.len() as u32);
+            mod_api::Flow::Continue
+        }
+        fn render_living_post(
+            &self,
+            _: &dyn mod_api::ClientHost,
+            event: &mut mod_api::RenderLivingPostEvent<'_>,
+        ) {
+            assert_eq!(event.entity.kind, "test:mob");
+            assert_eq!(event.entity.custom_name, Some("custom"));
+            event
+                .draw
+                .set_light(if event.parts.is_some() { 9 } else { 7 });
+        }
+        fn render_player_post(
+            &self,
+            _: &dyn mod_api::ClientHost,
+            event: &mut mod_api::RenderPlayerPostEvent<'_>,
+        ) {
+            assert_eq!((event.who.name, event.who.local), ("test:player", true));
+            event.draw.set_light(42);
         }
         fn item_picked_up_post(
             &self,
@@ -1122,19 +1142,31 @@ fn wire_loopback_optional_borrowed_render_record() {
         name: "test:player",
         local: true,
     };
-    for who in [None, Some(&player)] {
+    let still = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    let parts = mod_api::PosedParts::new(|_| Some((still, true))).unwrap();
+    for (parts, light) in [(None, 7), (Some(&parts), 9)] {
         let mut draw = Draw(0);
-        module.mob_layer(
+        module.render_living_post(
             &Client,
-            &mut mod_api::MobLayerEvent {
-                mob: &mob,
-                who,
+            &mut mod_api::RenderLivingPostEvent {
+                entity: &mob,
+                parts,
                 draw: &mut draw,
-                parts: None,
             },
         );
-        assert_eq!(draw.0, if who.is_some() { 42 } else { 7 });
+        assert_eq!(draw.0, light);
     }
+    let mut draw = Draw(0);
+    module.render_player_post(
+        &Client,
+        &mut mod_api::RenderPlayerPostEvent {
+            player: &mob,
+            who: &player,
+            parts: None,
+            draw: &mut draw,
+        },
+    );
+    assert_eq!(draw.0, 42);
 }
 #[test]
 fn wire_loopback_optional_borrowed_record() {
@@ -2326,7 +2358,7 @@ fn listener_metadata_and_cancellation_cross_the_real_guest() {
 mod arm_pose_registration;
 
 #[test]
-fn wire_loopback_mob_submit_hidden_parts_write_back() {
+fn wire_loopback_render_living_pre_hidden_parts_write_back() {
     mod_api::__private::initialize().unwrap();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     struct Client;
@@ -2366,18 +2398,40 @@ fn wire_loopback_mob_submit_hidden_parts_write_back() {
     let mut hidden = mod_api::HiddenParts::default();
     hidden.hide_named("nose").unwrap();
     let mut draw = Draw(0);
-    module.mob_submit(
-        &Client,
-        &mut mod_api::MobSubmitEvent {
-            mob: &mob,
-            draw: &mut draw,
-            hidden: &mut hidden,
-            cancelled: false,
-        },
-    );
+    let mut event = mod_api::RenderLivingPreEvent {
+        entity: &mob,
+        draw: &mut draw,
+        hidden: &mut hidden,
+        cancelled: false,
+    };
+    module.render_living_pre(&Client, &mut event);
+    assert!(!event.cancelled);
     assert!(hidden.contains_named("nose"));
     assert!(hidden.contains_named("hat_rim"));
     assert!(hidden.contains(mod_api::HumanoidPart::Head));
+    // The player pre hook cancels this window's own player and lets another be drawn.
+    let player = mod_api::MobRender {
+        kind: "minecraft:player",
+        ..mob.clone()
+    };
+    for (who, cancelled) in [("own", true), ("other", false)] {
+        let who = mod_api::PlayerRender {
+            name: who,
+            local: cancelled,
+        };
+        let mut hidden = mod_api::HiddenParts::default();
+        let mut draw = Draw(0);
+        let mut event = mod_api::RenderPlayerPreEvent {
+            player: &player,
+            who: &who,
+            draw: &mut draw,
+            hidden: &mut hidden,
+            cancelled: false,
+        };
+        module.render_player_pre(&Client, &mut event);
+        assert_eq!(event.cancelled, cancelled);
+        assert_eq!(draw.0, who.name.len() as u32);
+    }
 }
 
 #[test]
