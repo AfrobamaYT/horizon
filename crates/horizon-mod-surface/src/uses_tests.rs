@@ -2262,6 +2262,14 @@ fn aliases_resolve_to_every_api_item_they_may_name() {
         )]),
         Some(Built::None)
     );
+    // An associated type of the name is no alias of the file's own struct.
+    assert_eq!(
+        settings(&[(
+            "src/a.rs",
+            "struct Settings { mine: u8 }\nimpl It for X { type Settings = mod_api::Settings; }\nfn f() -> Settings { Settings { mine: 1 } }"
+        )]),
+        Some(Built::None)
+    );
     // Aliases are followed transitively.
     assert_eq!(
         settings(&[(
@@ -2283,6 +2291,8 @@ fn a_path_through_an_imported_api_module_records_the_public_path() {
         "use mod_api::prelude as p;\nfn f(_: p::Biome) {}",
         "use mod_api::prelude;\nfn f(_: prelude::Biome) {}",
         "use mod_api::prelude as p;\nuse p::Biome;\nfn f(_: Biome) {}",
+        "use mod_api::prelude::{self};\nfn f(_: prelude::Biome) {}",
+        "use mod_api::{self as api};\nfn f(_: api::prelude::Biome) {}",
     ] {
         let mut made_for = wider();
         made_for
