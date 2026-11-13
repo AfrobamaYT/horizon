@@ -78,10 +78,11 @@ the mod's own only in the file that defines it outside any `#[cfg]`, when nothin
 an inline module, a macro or attribute that is not standard or the API's) could change what the name means and
 the mod has no `include!`. What the parser cannot see counts as doubt, which refuses rather than guesses:
 - inside a macro body, an API struct name followed by `{` or `(` is a build, in full unless it ends in `..`,
-  and so is a tuple or unit struct's name where a value starts (`.map(Pos)`). A literal the scan cannot place
-  there counts every buildable API struct the mod names as built in full;
-- a `Self { … }` the scan cannot tie to an impl, and a literal of a `type` alias whose target is not a plain
-  path, count the same way;
+  and so is a tuple or unit struct's name anywhere but where only a type stands (`.map(Pos)`, `{ Marker }`,
+  `make: Pos`). A literal the scan cannot place there counts every buildable API struct the mod names as built
+  in full;
+- a `Self { … }` inside a macro body or one the scan cannot tie to an impl, and a literal of a `type` alias
+  whose target is not a plain path, count the same way;
 - a file that uses a macro, derive or attribute from outside the mod and the API counts every buildable API
   struct it names as built in full, because the expansion may build it.
 
@@ -96,6 +97,10 @@ the player's machine is always the final check, and it catches those. Some sourc
 - a symbolic link;
 - a `#[path]` or `include!` that leaves the mod's folder or is computed, or an `include!` renamed by a `use`;
 - any source when the scan runs where it cannot give the parser a stack of its own (on wasm).
+
+The parser runs first in a separate process, the same program started again with the mod's source on its
+input, never on its command line. If that process runs out of stack or memory, or takes longer than 15 seconds,
+the source cannot be judged, and the program that asked carries on.
 
 A mod with a `[native.*]` table or internals is made for exactly one build, and this check does not apply to
 it. A mod that fits is still compiled against the target build, and the binary built is exact to that build.
