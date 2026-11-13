@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Make every test that reruns its own test executable select the test whatever its ignore state (#4022).
 
-A test that reruns the test executable as a child (`Command::new(std::env::current_exe()...)` with `--exact NAME`)
+A test that reruns a test executable as a child (any `Command::new(...)` passing libtest's `--exact NAME`: its own,
+from `current_exe()`, or a copy of it)
 and passes neither `--ignored` nor `--include-ignored` runs nothing in the child once NAME is `#[ignore]`d: libtest
 reports the test ignored, exits 0, and the parent passes having checked nothing. That is every such test the daily
 tier moved. This script inserts `"--include-ignored"` before the first `"--exact"` of each such rerun (in an
 `.args([...])` list, or `.arg("--include-ignored")` before `.arg("--exact")`), so the child runs the named test as
-before when it is not ignored and runs it too when it is. A rerun is read from its `Command::new(...current_exe...)`
+before when it is not ignored and runs it too when it is. A rerun is read from its `Command::new(`
 to the `.status()`, `.output()` or `.spawn()` that runs it, or to the end of the helper that returns it built (at
 most 40 lines). Running it again changes nothing.
 
@@ -18,7 +19,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-START = re.compile(r"Command::new\(\s*(?:std::env::)?current_exe\(\)")
+START = re.compile(r"Command::new\(")
 END = re.compile(r"\.\s*(?:status|output|spawn)\s*\(\s*\)")
 SELECTS = re.compile(r'"--(?:include-)?ignored"')
 EXACT = '"--exact"'

@@ -119,7 +119,7 @@ fn selects_a_compatible_compiler_and_runtime() {
     for (scenario, home, path) in scenarios {
         let mut child = Command::new(env::current_exe().unwrap());
         child
-            .args(["--exact", TEST, "--nocapture"])
+            .args(["--include-ignored", "--exact", TEST, "--nocapture"])
             .env(CHILD, scenario)
             .env(ROOT, &root)
             .env(

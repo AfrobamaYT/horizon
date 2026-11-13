@@ -273,6 +273,7 @@ mod tests {
         let run = |mode| {
             Command::new(&executable)
                 .args([
+                    "--include-ignored",
                     "--exact",
                     "holder::game_entry::tests::missing_registration_is_displayed_and_information_does_not_register",
                     "--nocapture",
