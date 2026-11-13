@@ -515,7 +515,7 @@ impl Biomes {
     }
     /// Refuse writes after any saved name could not be represented. This is sticky for
     /// the world table: subsequent loads cannot make a destructive save safe again.
-    pub fn ensure_saveable(&self) -> Result<(), BiomeIdExhausted> {
+    pub fn ensure_saveable(&self) -> std::result::Result<(), BiomeIdExhausted> {
         if self.exhausted.load(std::sync::atomic::Ordering::Acquire) {
             Err(BiomeIdExhausted)
         } else {
