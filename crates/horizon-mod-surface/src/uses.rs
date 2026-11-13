@@ -369,9 +369,8 @@ struct FileFacts<'t> {
     /// `type X = …Y<…>;` items: (X, Y), and whether it is an item of its own (not an associated
     /// type of an impl or trait).
     type_aliases: Vec<(&'t str, &'t str, bool)>,
-    /// Each `impl` or `trait` body's token range, the type or trait it is for, and the first
-    /// segment of the path it is written by when that path has more than one
-    /// (`impl Make for mod_api::Settings` gives `mod_api`).
+    /// Each `impl` or `trait` body's token range, the type or trait it is for, and the path it
+    /// is written by (`impl Make for mod_api::Settings` gives `mod_api`, `Settings`).
     bodies: Vec<Body<'t>>,
     /// The structs, enums, unions and type aliases the file defines at its top level.
     defines: BTreeSet<&'t str>,
@@ -379,9 +378,8 @@ struct FileFacts<'t> {
     inline_modules: bool,
 }
 
-/// An `impl` or `trait` body: its token range, its target's last name and that path's first
-/// segment when it has more than one.
-type Body<'t> = (usize, usize, &'t str, Option<&'t str>);
+/// An `impl` or `trait` body: its token range, its target's last name and the whole path.
+type Body<'t> = (usize, usize, &'t str, Vec<&'t str>);
 
 fn file_facts(text: &str) -> FileFacts<'_> {
     let tokens: Vec<(Token<'_>, usize)> = scan::tokens(text).collect();
@@ -435,11 +433,10 @@ fn file_facts(text: &str) -> FileFacts<'_> {
                     ) =>
             {
                 // The type is the last name at angle depth 0 before the body or `where`, with
-                // the first segment of the path it ends.
+                // the path it ends.
                 let mut i = at + 1;
                 let mut target = None;
-                let mut first = None;
-                let mut qualified = false;
+                let mut path = Vec::new();
                 while i < tokens.len() {
                     match tokens[i].0 {
                         Token::Punct(b'<') => match after_angles(&tokens, i) {
@@ -456,13 +453,13 @@ fn file_facts(text: &str) -> FileFacts<'_> {
                         }
                         Token::Punct(b':') if keyword == "trait" => break,
                         Token::Ident(name) if name != "for" && name != "dyn" => {
-                            if i >= 2 && punct(&tokens, i - 1, b':') && punct(&tokens, i - 2, b':')
+                            if !(i >= 2
+                                && punct(&tokens, i - 1, b':')
+                                && punct(&tokens, i - 2, b':'))
                             {
-                                qualified = true;
-                            } else {
-                                first = Some(name);
-                                qualified = false;
+                                path.clear();
                             }
+                            path.push(name);
                             target = Some(name);
                         }
                         _ => {}
@@ -473,7 +470,7 @@ fn file_facts(text: &str) -> FileFacts<'_> {
                 if let (Some(target), Some(open)) = (target, open)
                     && let Some(close) = closing(&tokens, open)
                 {
-                    bodies.push((open, close, target, first.filter(|_| qualified)));
+                    bodies.push((open, close, target, path));
                 }
             }
             Token::Ident(first)
@@ -550,6 +547,11 @@ struct ModFacts<'t> {
     item_aliases: BTreeMap<&'t str, Vec<&'t str>>,
     /// Every other name the mod defines: traits, enum variants, associated types.
     others: BTreeSet<&'t str>,
+    /// The modules the mod declares, `mod x;` or `mod x { … }`.
+    modules: BTreeSet<&'t str>,
+    /// The names some file brings in from the API: the local name of every `use` that starts at
+    /// an API root, and the roots themselves.
+    api_names: BTreeSet<&'t str>,
 }
 
 fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
@@ -578,13 +580,19 @@ fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
         types: BTreeSet::new(),
         item_aliases: BTreeMap::new(),
         others: BTreeSet::new(),
+        modules: BTreeSet::new(),
+        api_names: BTreeSet::new(),
     };
+    facts.api_names.extend(facts.roots.iter().copied());
     for file in files {
         for (path, name) in &file.imports {
             if path.len() < 2 || !facts.roots.contains(path[0]) {
                 continue;
             }
             let last = path[path.len() - 1];
+            if *name != "*" {
+                facts.api_names.insert(name);
+            }
             if *name == "*" {
                 facts.globs.insert(path[1..path.len() - 1].join("::"));
                 continue;
@@ -607,6 +615,12 @@ fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
             let Some(keyword) = ident(tokens, at) else {
                 continue;
             };
+            if keyword == "mod"
+                && let Some(name) = ident(tokens, at + 1)
+                && (punct(tokens, at + 2, b';') || punct(tokens, at + 2, b'{'))
+            {
+                facts.modules.insert(name);
+            }
             if !matches!(keyword, "struct" | "enum" | "union" | "trait") {
                 continue;
             }
@@ -798,12 +812,35 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
             })
         })
     };
-    // Whether a name reached through a path inside the mod (`crate::`, `super::`, `self::`)
-    // certainly means the mod's own type: the mod defines it (an alias that may lead to the API's
-    // is no definition), no file imports the API's of that name and no API glob may export it.
-    let own_by_path = |name: &str| {
-        (module.types.contains(name)
-            || (module.item_aliases.contains_key(name) && !api_alias(name)))
+    // Every public path of the API, to tell which modules an API glob may hand over.
+    let api_paths: BTreeSet<&str> = public_paths
+        .values()
+        .flat_map(|paths| paths.iter().map(String::as_str))
+        .collect();
+    // Whether a segment between `crate::` (or `super::`, `self::`) and the name certainly leads
+    // through the mod's own modules: a module the mod declares that no API import, renamed crate
+    // or API glob may stand for.
+    let own_segment = |segment: &str| {
+        matches!(segment, "super" | "self")
+            || (module.modules.contains(segment)
+                && !module.api_names.contains(segment)
+                && !module.globs.iter().any(|glob| {
+                    let module = if glob.is_empty() {
+                        format!("{segment}::")
+                    } else {
+                        format!("{glob}::{segment}::")
+                    };
+                    api_paths.iter().any(|path| path.starts_with(&module))
+                }))
+    };
+    // Whether a name reached through a path inside the mod (`crate::`, `super::`, `self::`, then
+    // `middle`) certainly means the mod's own type: every middle segment is the mod's own module,
+    // the mod defines the name (an alias that may lead to the API's is no definition), no file
+    // imports the API's of that name and no API glob may export it.
+    let own_by_path = |name: &str, middle: &[&str]| {
+        middle.iter().all(|segment| own_segment(segment))
+            && (module.types.contains(name)
+                || (module.item_aliases.contains_key(name) && !api_alias(name)))
             && !module.imported.contains(name)
             && !glob_may_export(name)
     };
@@ -823,7 +860,7 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                 || file.imports.iter().any(|(path, local)| {
                     *local == name
                         && matches!(path.first(), Some(&("crate" | "super" | "self")))
-                        && own_by_path(name)
+                        && own_by_path(name, &path[1..path.len() - 1])
                 }))
     };
 
@@ -860,13 +897,15 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                     .filter(|(open, close, _, _)| *open < at && at < *close)
                     .min_by_key(|(open, close, _, _)| close - open)
                 {
-                    Some((_, _, target, qualifier)) => {
+                    Some((_, _, target, path)) => {
                         let name = *module.aliases.get(target).unwrap_or(target);
-                        self_own = Some(match qualifier {
+                        self_own = Some(match &path[..] {
                             _ if name != *target => false,
-                            Some("crate" | "super" | "self") => own_by_path(name),
-                            Some(_) => false,
-                            None => own_in(file, name),
+                            [_] => own_in(file, name),
+                            ["crate" | "super" | "self", middle @ .., _] => {
+                                own_by_path(name, middle)
+                            }
+                            _ => false,
                         });
                         (name, true)
                     }
@@ -936,8 +975,12 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                 } else if local {
                     false
                 } else if start < at {
+                    let middle: Vec<&str> = (start + 3..at)
+                        .step_by(3)
+                        .filter_map(|i| ident(tokens, i))
+                        .collect();
                     matches!(ident(tokens, start), Some("crate" | "super" | "self"))
-                        && own_by_path(name)
+                        && own_by_path(name, &middle)
                 } else {
                     own_in(file, name)
                 };
@@ -1087,13 +1130,30 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
         counted.extend(more);
     }
 
-    // A trait's member names every counted called trait that leads to its owner through
-    // supertraits, whether or not the mod also names the owner: the scan cannot see which one a
-    // call goes through (`host.player(id)` on `&mut dyn ServerHost` in a mod that also counts
-    // `ClientHost`, or `show(host)` upcasting to a named `&dyn PlayersHost`), so the target must
-    // still lead from each.
-    let called: Vec<&str> = counted
-        .iter()
+    // The list: what counts and what its signatures reference, each reached record naming the
+    // counted record it was first reached from. A called trait's supertraits are not in it.
+    let refs = surface.refs(false);
+    let mut origins: BTreeMap<&str, Origin> =
+        counted.iter().map(|id| (*id, direct[id].clone())).collect();
+    for start in &counted {
+        let mut pending = vec![*start];
+        while let Some(id) = pending.pop() {
+            for next in refs.get(id).into_iter().flatten() {
+                if hashes.contains_key(next) && !origins.contains_key(next) {
+                    origins.insert(next, Origin::Via((*start).to_owned()));
+                    pending.push(next);
+                }
+            }
+        }
+    }
+    // A trait's member names every called trait in the list that leads to its owner through
+    // supertraits, whether or not the mod also names the owner or the called trait: the scan
+    // cannot see which one a call goes through (`host.player(id)` on `&mut dyn ServerHost` in a
+    // mod that also counts `ClientHost`, `show(host)` upcasting to a named `&dyn PlayersHost`, or
+    // a closure's host typed by an API method's signature), so the target must still lead from
+    // each.
+    let called: Vec<&str> = origins
+        .keys()
         .copied()
         .filter(|id| roles.get(id) == Some(&Role::Call))
         .collect();
@@ -1114,22 +1174,6 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
         })
         .collect();
 
-    // The list: what counts and what its signatures reference, each reached record naming the
-    // counted record it was first reached from. A called trait's supertraits are not in it.
-    let refs = surface.refs(false);
-    let mut origins: BTreeMap<&str, Origin> =
-        counted.iter().map(|id| (*id, direct[id].clone())).collect();
-    for start in &counted {
-        let mut pending = vec![*start];
-        while let Some(id) = pending.pop() {
-            for next in refs.get(id).into_iter().flatten() {
-                if hashes.contains_key(next) && !origins.contains_key(next) {
-                    origins.insert(next, Origin::Via((*start).to_owned()));
-                    pending.push(next);
-                }
-            }
-        }
-    }
     let at = |(file, line): &Place| format!("{file}:{line}");
     let hook_versions = &manifest.hook_versions;
     Uses {

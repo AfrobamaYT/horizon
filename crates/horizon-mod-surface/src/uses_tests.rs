@@ -1460,7 +1460,8 @@ fn whether_a_name_is_the_mods_own_follows_each_files_scope() {
         "src/third.rs",
         "use crate::widget::Settings;\nfn g() { let s = Settings { mine: 1 }; }",
     );
-    assert_eq!(built_in(&[own, imported], "type:Settings"), none);
+    let declared = ("src/lib.rs", "mod widget;\nmod third;");
+    assert_eq!(built_in(&[declared, own, imported], "type:Settings"), none);
     // An explicit import of the API's, while the mod defines its own elsewhere: the API's.
     let api_import = (
         "src/third.rs",
@@ -1472,9 +1473,9 @@ fn whether_a_name_is_the_mods_own_follows_each_files_scope() {
         "src/third.rs",
         "fn g() { let s = crate::widget::Settings { mine: 1 }; }",
     );
-    assert_eq!(built_in(&[own, qualified], "type:Settings"), none);
+    assert_eq!(built_in(&[declared, own, qualified], "type:Settings"), none);
     // A path inside the mod that leads to an associated type, which may stand for the API's: the
-    // API's. One that leads to a variant: the mod's own.
+    // API's. So does one through an enum, which is no module the mod declares.
     let associated = (
         "src/third.rs",
         "impl It for X { type Settings = mod_api::Settings; }\nfn g() { let s = crate::X::Settings { height: 1 }; }",
@@ -1484,7 +1485,7 @@ fn whether_a_name_is_the_mods_own_follows_each_files_scope() {
         "src/third.rs",
         "enum Kind { Settings { mine: u8 } }\nuse crate::Kind::Settings;\nfn g() { let s = Settings { mine: 1 }; }",
     );
-    assert_eq!(built_in(&[variant], "type:Settings"), none);
+    assert_eq!(built_in(&[variant], "type:Settings"), full);
     // A file with an API glob and no definition of its own: the API's.
     let api_glob = (
         "src/third.rs",
@@ -1645,7 +1646,14 @@ fn a_type_alias_of_an_api_struct_is_not_the_mods_own() {
         "src/world.rs",
         "use crate::types::DimensionSettings;\nfn f() { let d = DimensionSettings { a: 1 }; }",
     );
-    assert_eq!(fits_a_new_dims_field(&[own_types, own_world]), Fit::Fits);
+    assert_eq!(
+        fits_a_new_dims_field(&[
+            ("src/lib.rs", "mod types;\nmod world;"),
+            own_types,
+            own_world
+        ]),
+        Fit::Fits
+    );
     let own_alias = String::from(
         "struct Mine { a: u8 }\ntype DimensionSettings = Mine;\nfn f() { let d = DimensionSettings { a: 1 }; }",
     );
@@ -1720,7 +1728,101 @@ fn a_path_inside_the_mod_to_an_imported_api_struct_is_the_apis() {
         "src/world/gen.rs",
         "fn f() { let d = crate::own::DimensionSettings { mine: 1 }; }",
     );
-    assert_eq!(fits_a_new_dims_field(&[own, own_built]), Fit::Fits);
+    assert_eq!(
+        fits_a_new_dims_field(&[("src/lib.rs", "mod own;\nmod world;"), own, own_built]),
+        Fit::Fits
+    );
+}
+
+#[test]
+fn a_path_inside_the_mod_is_its_own_only_through_modules_it_declares() {
+    let own = (
+        "src/own.rs",
+        "pub struct DimensionSettings { pub mine: u8 }",
+    );
+    // `world` is declared somewhere, so only what else stands for it decides.
+    let declared = ("src/other/mod.rs", "mod world;\nmod api;");
+    let written = format!("fn f() {{ let d = crate::world::{DIMS_LITERAL}; }}");
+    let imported =
+        format!("use crate::world::DimensionSettings;\nfn f() {{ let d = {DIMS_LITERAL}; }}");
+    // An API module imported by name.
+    for source in [&written, &imported] {
+        refused_for_the_new_field(fits_a_new_dims_field(&[
+            ("src/lib.rs", "use mod_api::world;\nmod terrain;"),
+            declared,
+            own,
+            ("src/terrain.rs", source),
+        ]));
+    }
+    // The renamed crate.
+    let through_api = format!("fn f() {{ let d = crate::api::{DIMS_LITERAL}; }}");
+    refused_for_the_new_field(fits_a_new_dims_field(&[
+        ("src/lib.rs", "use mod_api as api;\nmod terrain;"),
+        declared,
+        own,
+        ("src/terrain.rs", &through_api),
+    ]));
+    // An API glob that hands over the module `world`, where the API exports the struct only.
+    let mut made_for = base();
+    let mut record = dims(&[]);
+    record.paths = vec!["world::DimensionSettings".into()];
+    made_for.types.push(record);
+    let uses = scan_files(
+        made_for,
+        &[
+            ("src/lib.rs", "pub use mod_api::*;\nmod terrain;"),
+            declared,
+            own,
+            ("src/terrain.rs", &written),
+        ],
+    );
+    assert_eq!(
+        entry(&uses, "type:DimensionSettings").built,
+        Some(Built::Full)
+    );
+    // `Self` in an impl for such a path.
+    let make = "trait Make { fn make() -> Self; }\nimpl Make for crate::world::DimensionSettings { fn make() -> Self { Self { min_y: 0, height: 256, logical_height: 256 } } }";
+    refused_for_the_new_field(fits_a_new_dims_field(&[
+        ("src/lib.rs", "use mod_api::world;\nmod terrain;"),
+        declared,
+        own,
+        ("src/terrain.rs", make),
+    ]));
+    // A segment the mod never declares as a module.
+    let undeclared = format!("fn f() {{ let d = crate::util::{DIMS_LITERAL}; }}");
+    refused_for_the_new_field(fits_a_new_dims_field(&[
+        own,
+        ("src/terrain.rs", &undeclared),
+    ]));
+}
+
+#[test]
+fn a_host_reached_through_an_api_signature_records_its_route() {
+    // `register` only: the closure's host is typed by `item_capability`'s signature.
+    let registrar = |client_only: bool| {
+        let mut pieces = two_sides(client_only);
+        pieces.traits.push(api_trait(
+            "trait:Registrar",
+            Role::Call,
+            &[],
+            vec![method(
+                "method:Registrar::item_capability",
+                "fn item_capability(&mut self, _: &str, _: Box<dyn Fn(&mut dyn ServerHost) -> Option<u8>>)",
+                &["trait:Registrar", "trait:ServerHost"],
+            )],
+        ));
+        pieces
+    };
+    let source = "fn register(&self, r: &mut Registrar) {\n    r.item_capability(\"mymod:backpack\", Box::new(|host| { let _ = host.player(id); None }));\n}";
+    let uses = scan_on(registrar(false), source);
+    assert_eq!(
+        entry(&uses, "method:PlayersHost::player").reached_from,
+        ["trait:ServerHost"]
+    );
+    assert_eq!(
+        words(fits(uses.entries(), &registrar(true).build())),
+        ["`ServerHost` no longer includes `PlayersHost`, which this mod calls `player` on"]
+    );
 }
 
 #[test]
