@@ -1865,8 +1865,19 @@ impl Game<'_> {
     /// `entity_run_command` for the player `uuid` in place: their own source,
     /// its lines sent to them and its `broadcastToAdmins` to the other operators.
     fn run_command_as_player(&mut self, uuid: u128, line: &str, permission: u8) -> bool {
+        use super::commands::Target;
+        // `ServerPlayer.createCommandSourceStack`: the player's own position and
+        // rotation, never an outer command's (`player_source` reads those).
+        let Some(pos) = self.target_position(Target::Player) else {
+            return false;
+        };
+        let source = execute::Source {
+            pos,
+            rot: self.target_rotation(Target::Player),
+            ..self.player_source()
+        };
         let outer_admins = std::mem::take(&mut self.admin_feedback);
-        let (ok, lines) = self.run_command_from(self.player_source(), line, permission);
+        let (ok, lines) = self.run_command_from(source, line, permission);
         for line in &lines {
             self.native_send(uuid, system_chat(line));
         }

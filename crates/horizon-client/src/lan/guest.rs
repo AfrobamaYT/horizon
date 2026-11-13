@@ -333,6 +333,9 @@ pub struct Guest {
     pub max_unacknowledged: u32,
     pub chunks_per_tick: f32,
     pub batch_quota: f32,
+    /// A mod's boxes of its level in which the level's blocks don't stop it (#3717): its moves
+    /// are checked through them, and its body takes them at each turn. Not saved.
+    pub collision_exclusions: horizon_world::collision_exclusions::CollisionExclusions,
     // Entities.
     pub tracker: Tracker,
     // Player state the gameplay code reads and writes.
@@ -719,6 +722,7 @@ impl Guest {
             max_unacknowledged: 1,
             chunks_per_tick: 9.0,
             batch_quota: 0.0,
+            collision_exclusions: Default::default(),
             tracker: Tracker::default(),
             motion: None,
             loaded_body: None,

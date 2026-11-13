@@ -281,7 +281,7 @@ class DynaRoutingTests(unittest.TestCase):
         script = textwrap.dedent(setup.split("        run: |\n", 1)[1])
         restore = runtime.split("- name: Restore unchanged source timestamps\n", 1)[1].split("\n      - ", 1)[0]
         self.assertIn("if: needs.changes.outputs.rust_required != 'false'", restore)
-        self.assertIn("python3 tools/ci/source_mtimes.py target/ci-source-mtimes.json", restore)
+        self.assertIn("python3 tools/ci/source_mtimes.py target/ci-source-mtimes-v2.json", restore)
         self.assertLess(runtime.index("- name: Use persistent verify build artifacts"),
                         runtime.index("- name: Restore unchanged source timestamps"))
         self.assertLess(runtime.index("- name: Restore unchanged source timestamps"),

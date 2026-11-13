@@ -4,12 +4,12 @@
 //! start the supervisor writes them into `server.properties`, which the game reads exactly as vanilla's
 //! server does; what the game changes there itself (`/whitelist on`) is copied back afterwards.
 
+use horizon_platform::java_properties::{Properties, date_string, now_millis};
 use horizon_platform::server_files::biome_regions::BiomeRegions;
 #[cfg(test)]
 use horizon_platform::server_files::biome_regions::MissingRegions;
-use horizon_platform::server_files::{
-    java_properties::{Properties, date_string, now_millis},
-    properties::{DIFFICULTIES, GAME_MODES, ServerProperties, SystemEntropy},
+use horizon_platform::server_files::properties::{
+    DIFFICULTIES, GAME_MODES, ServerProperties, SystemEntropy,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path};
