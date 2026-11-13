@@ -15,10 +15,11 @@ impl Game<'_> {
         let power: f32 = bookshelf_offsets()
             .into_iter()
             .filter(|o| {
-                self.enchant_transmits(
-                    self.world
-                        .block(pos[0] + o[0] / 2, pos[1] + o[1], pos[2] + o[2] / 2),
-                )
+                self.enchant_transmits(self.world.block(
+                    pos[0] + o[0] / 2,
+                    pos[1] + o[1],
+                    pos[2] + o[2] / 2,
+                ))
             })
             .map(|o| {
                 let at = BlockPos::new(pos[0] + o[0], pos[1] + o[1], pos[2] + o[2]);
@@ -45,7 +46,9 @@ impl Game<'_> {
         pos: BlockPos,
         table: BlockPos,
     ) -> f32 {
-        let own = self.items().default_enchant_power(&self.res.facts().get(state).name);
+        let own = self
+            .items()
+            .default_enchant_power(&self.res.facts().get(state).name);
         if !super::api_values::block_state::block_listens(mod_api::HookId::EnchantPowerBonus, state)
         {
             return own;

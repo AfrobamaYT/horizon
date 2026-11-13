@@ -249,10 +249,13 @@ mod tests {
         UpdateTags {
             registries: vec![RegistryTags {
                 registry: "minecraft:block".into(),
-                tags: tags.iter().map(|(name, members)| TagEntry {
-                    name: (*name).into(),
-                    ids: members.iter().map(|id| blocks.id(id).unwrap()).collect(),
-                }).collect(),
+                tags: tags
+                    .iter()
+                    .map(|(name, members)| TagEntry {
+                        name: (*name).into(),
+                        ids: members.iter().map(|id| blocks.id(id).unwrap()).collect(),
+                    })
+                    .collect(),
             }],
         }
     }
@@ -266,21 +269,31 @@ mod tests {
                 let (pipe, _server) = horizon_protocol::connection::Pipe::pair();
                 game.connect_local(pipe, "PowerTags").unwrap();
                 game.handle_packet(login()).unwrap();
-                game.world.chunks.insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
                 place(game, [0, 0, 0], "minecraft:enchanting_table");
                 place(game, [-2, 0, -1], "minecraft:bookshelf");
                 let builtin = game.remote.as_ref().unwrap().builtin.clone();
                 let mut send = |providers: &[&str], transmitters: &[&str]| {
-                    game.handle_packet(C::UpdateTags(power_update(&builtin, &[
-                        ("minecraft:enchantment_power_provider", providers),
-                        ("minecraft:enchantment_power_transmitter", transmitters),
-                    ]))).unwrap();
+                    game.handle_packet(C::UpdateTags(power_update(
+                        &builtin,
+                        &[
+                            ("minecraft:enchantment_power_provider", providers),
+                            ("minecraft:enchantment_power_transmitter", transmitters),
+                        ],
+                    )))
+                    .unwrap();
                     enchant_particles(game)
                 };
                 assert!(send(&["minecraft:bookshelf"], &["minecraft:air"]) > 0);
                 assert_eq!(send(&[], &["minecraft:air"]), 0, "provider tag removed");
                 assert!(send(&["minecraft:bookshelf"], &["minecraft:air"]) > 0);
-                assert_eq!(send(&["minecraft:bookshelf"], &[]), 0, "transmitter tag removed");
+                assert_eq!(
+                    send(&["minecraft:bookshelf"], &[]),
+                    0,
+                    "transmitter tag removed"
+                );
                 assert!(send(&["minecraft:bookshelf"], &["minecraft:air"]) > 0);
             });
         });
@@ -303,8 +316,13 @@ mod tests {
                 event: &mut mod_api::EnchantPowerBonusEvent,
             ) {
                 CALLS.fetch_add(1, Ordering::Relaxed);
-                let received = host.block_in_tag(event.state.block(), "power_test:providers") == Some(true);
-                event.power = if received && ENABLED.load(Ordering::Relaxed) { 2.0 } else { 0.0 };
+                let received =
+                    host.block_in_tag(event.state.block(), "power_test:providers") == Some(true);
+                event.power = if received && ENABLED.load(Ordering::Relaxed) {
+                    2.0
+                } else {
+                    0.0
+                };
             }
         }
         struct PowerMod;
@@ -317,7 +335,8 @@ mod tests {
             fn tags_updated(&self, host: HostSide<'_>, _: &mut TagsUpdatedEvent) {
                 let HostSide::Client(host) = host else { return };
                 ENABLED.store(
-                    host.block_in_tag(block_key("minecraft:glass"), "power_test:enabled") == Some(true),
+                    host.block_in_tag(block_key("minecraft:glass"), "power_test:enabled")
+                        == Some(true),
                     Ordering::Relaxed,
                 );
                 NOTICES.fetch_add(1, Ordering::Relaxed);
@@ -331,31 +350,63 @@ mod tests {
                 let (pipe, _server) = horizon_protocol::connection::Pipe::pair();
                 game.connect_local(pipe, "PowerCallbacks").unwrap();
                 game.handle_packet(login()).unwrap();
-                game.world.chunks.insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
                 place(game, [0, 0, 0], "minecraft:enchanting_table");
                 place(game, [-2, 0, -1], "minecraft:glass");
                 let builtin = game.remote.as_ref().unwrap().builtin.clone();
                 let mut send = |attached: bool, enabled: bool| {
                     let calls = CALLS.load(Ordering::Relaxed);
                     let notices = NOTICES.load(Ordering::Relaxed);
-                    game.handle_packet(C::UpdateTags(power_update(&builtin, &[
-                        ("minecraft:enchantment_power_provider", &[]),
-                        ("minecraft:enchantment_power_transmitter", &["minecraft:air"]),
-                        ("power_test:providers", if attached { &["minecraft:glass"] } else { &[] }),
-                        ("power_test:enabled", if enabled { &["minecraft:glass"] } else { &[] }),
-                    ]))).unwrap();
+                    game.handle_packet(C::UpdateTags(power_update(
+                        &builtin,
+                        &[
+                            ("minecraft:enchantment_power_provider", &[]),
+                            (
+                                "minecraft:enchantment_power_transmitter",
+                                &["minecraft:air"],
+                            ),
+                            (
+                                "power_test:providers",
+                                if attached { &["minecraft:glass"] } else { &[] },
+                            ),
+                            (
+                                "power_test:enabled",
+                                if enabled { &["minecraft:glass"] } else { &[] },
+                            ),
+                        ],
+                    )))
+                    .unwrap();
                     assert_eq!(NOTICES.load(Ordering::Relaxed), notices + 1);
-                    assert_eq!(CALLS.load(Ordering::Relaxed), calls + usize::from(attached),
-                        "one snapshot after publication, never before the callback");
+                    assert_eq!(
+                        CALLS.load(Ordering::Relaxed),
+                        calls + usize::from(attached),
+                        "one snapshot after publication, never before the callback"
+                    );
                     let particles = enchant_particles(game);
-                    assert_eq!(CALLS.load(Ordering::Relaxed), calls + usize::from(attached),
-                        "particle frames must not query parts");
+                    assert_eq!(
+                        CALLS.load(Ordering::Relaxed),
+                        calls + usize::from(attached),
+                        "particle frames must not query parts"
+                    );
                     particles
                 };
-                assert!(send(true, true) > 0, "new tags visible to both callback and part");
-                assert_eq!(send(true, false), 0, "callback answer changed before snapshot");
+                assert!(
+                    send(true, true) > 0,
+                    "new tags visible to both callback and part"
+                );
+                assert_eq!(
+                    send(true, false),
+                    0,
+                    "callback answer changed before snapshot"
+                );
                 assert!(send(true, true) > 0);
-                assert_eq!(send(false, true), 0, "tag-bound part detached before snapshot");
+                assert_eq!(
+                    send(false, true),
+                    0,
+                    "tag-bound part detached before snapshot"
+                );
             });
         });
     }

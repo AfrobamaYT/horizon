@@ -241,13 +241,21 @@ fn portal_arrival_effects_mod_items_merge_immediately() {
         game.dropped[0].age = 41;
         let waiting = game.dropped[0].id;
         game.enter_level(Dim::Overworld).unwrap();
-        assert!(game.entity_teleport_to_level(item, "minecraft:the_nether", [3.5, 70.0, -2.5], None));
+        assert!(game.entity_teleport_to_level(
+            item,
+            "minecraft:the_nether",
+            [3.5, 70.0, -2.5],
+            None
+        ));
         assert!(game.dropped.is_empty());
         game.enter_level(Dim::Nether).unwrap();
         assert_eq!(game.dropped.len(), 1);
         let survivor = &game.dropped[0];
         assert_eq!(survivor.id, waiting);
-        assert_eq!((survivor.stack.count, survivor.age, survivor.ticks), (8, 7, 0));
+        assert_eq!(
+            (survivor.stack.count, survivor.age, survivor.ticks),
+            (8, 7, 0)
+        );
     });
 }
 

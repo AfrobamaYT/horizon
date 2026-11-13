@@ -8,14 +8,21 @@ fn prepare(game: &mut Game<'_>) {
     game.set_allow_commands(true);
     game.options.dedicated = Some(Vec::new());
     game.native_lifecycle.world_open_ready().unwrap();
-    game.world.chunks.insert((0, 0), std::sync::Arc::new(Chunk::empty(0, 0)));
+    game.world
+        .chunks
+        .insert((0, 0), std::sync::Arc::new(Chunk::empty(0, 0)));
 }
 
 /// Capture a real portal traveller, open its destination, and light its arrival
 /// area. A restarted waiting arrival has only its saved payload, not a live token.
 fn depart(game: &mut Game<'_>, id: u32, restart_waiting: bool) -> Vec3 {
     let entry = BlockPos::new(8, 70, 8);
-    let portal = game.pack.assets.registry.default_state("minecraft:nether_portal").unwrap();
+    let portal = game
+        .pack
+        .assets
+        .registry
+        .default_state("minecraft:nether_portal")
+        .unwrap();
     game.world.set(entry.x, entry.y, entry.z, portal).unwrap();
     game.send_through_portal(id, entry);
     assert_eq!(game.portals.arrivals.len(), 1);
@@ -29,7 +36,8 @@ fn depart(game: &mut Game<'_>, id: u32, restart_waiting: bool) -> Vec3 {
     let (cx, cz) = (plan.approximate.x >> 4, plan.approximate.z >> 4);
     for z in cz - 1..=cz + 1 {
         for x in cx - 1..=cx + 1 {
-            game.streaming.insert_remote(&mut game.world, Chunk::empty(x, z));
+            game.streaming
+                .insert_remote(&mut game.world, Chunk::empty(x, z));
         }
     }
     let exit = game.nether_exit_portal(&plan).expect("exit portal built");
@@ -47,12 +55,20 @@ fn portal_arrival_effects_merge_items_before_their_first_tick() {
     ] {
         with_game(|game| {
             prepare(game);
-            game.spawn_item_own(ItemStack::new("minecraft:stick", incoming), [8.5, 70.0, 8.5], 0);
+            game.spawn_item_own(
+                ItemStack::new("minecraft:stick", incoming),
+                [8.5, 70.0, 8.5],
+                0,
+            );
             game.dropped[0].age = incoming_age;
             let id = game.dropped[0].id;
             let at = depart(game, id, restart);
             assert!(game.dropped.is_empty());
-            game.spawn_item_own(ItemStack::new("minecraft:stick", waiting), [at.x, at.y, at.z], 0);
+            game.spawn_item_own(
+                ItemStack::new("minecraft:stick", waiting),
+                [at.x, at.y, at.z],
+                0,
+            );
             game.dropped[0].age = waiting_age;
             game.resolve_arrivals();
             assert!(game.portals.arrivals.is_empty());
@@ -73,7 +89,11 @@ fn portal_arrival_effects_merge_items_before_their_first_tick() {
 pub(in crate::game) fn assert_tnt_blast(game: &mut Game<'_>, protected: bool) {
     assert_eq!(game.tnts.len(), 1);
     let at = game.tnts[0].position;
-    let (x, y, z) = (at.x.floor() as i32, at.y.floor() as i32, at.z.floor() as i32);
+    let (x, y, z) = (
+        at.x.floor() as i32,
+        at.y.floor() as i32,
+        at.z.floor() as i32,
+    );
     let registry = game.pack.assets.registry;
     let portal = registry.default_state("minecraft:nether_portal").unwrap();
     let obsidian = registry.default_state("minecraft:obsidian").unwrap();
@@ -90,20 +110,34 @@ pub(in crate::game) fn assert_tnt_blast(game: &mut Game<'_>, protected: bool) {
     }
     for yy in y - 1..=y + 3 {
         for xx in x - 1..=x + 2 {
-            let state = if yy == y - 1 || yy == y + 3 || xx == x - 1 || xx == x + 2 { obsidian } else { portal };
+            let state = if yy == y - 1 || yy == y + 3 || xx == x - 1 || xx == x + 2 {
+                obsidian
+            } else {
+                portal
+            };
             game.world.set(xx, yy, z, state).unwrap();
         }
     }
     game.world.set(x, y, z + 1, dirt).unwrap();
     let id = game.tnts[0].id;
-    game.portals.entities.insert(id, PortalState { cooldown: if protected { 0 } else { 300 }, process: None });
+    game.portals.entities.insert(
+        id,
+        PortalState {
+            cooldown: if protected { 0 } else { 300 },
+            process: None,
+        },
+    );
     game.tnts[0].velocity = Vec3::ZERO;
     game.tnts[0].no_gravity = true;
     game.tnts[0].fuse = 1;
     game.tick_one_tnt(0, &[]).unwrap();
     assert!(game.tnts.is_empty());
     assert_eq!(game.world.block(x, y, z) == portal, protected);
-    assert_ne!(game.world.block(x, y, z + 1), dirt, "ordinary blocks still explode");
+    assert_ne!(
+        game.world.block(x, y, z + 1),
+        dirt,
+        "ordinary blocks still explode"
+    );
     assert_eq!(game.world.block(x - 1, y, z), obsidian);
 }
 
@@ -113,7 +147,12 @@ fn portal_arrival_effects_tnt_protection_is_live_but_not_saved() {
     for restart_waiting in [false, true] {
         with_game(|game| {
             prepare(game);
-            game.summon_with_nbt("minecraft:tnt", [8.5, 70.0, 8.5], "{fuse:200s,NoGravity:1b}").unwrap();
+            game.summon_with_nbt(
+                "minecraft:tnt",
+                [8.5, 70.0, 8.5],
+                "{fuse:200s,NoGravity:1b}",
+            )
+            .unwrap();
             let old = game.tnts[0].id;
             assert!(!game.tnts[0].used_portal);
             depart(game, old, restart_waiting);
@@ -127,15 +166,27 @@ fn portal_arrival_effects_tnt_protection_is_live_but_not_saved() {
                 assert!(saved.get(key).is_none());
             }
             let id = game.tnts[0].id;
-            game.apply_entity_nbt(super::super::commands::Target::Tnt(id), saved.clone()).unwrap();
-            assert!(game.tnts[0].used_portal, "loading data into the live instance does not reset it");
+            game.apply_entity_nbt(super::super::commands::Target::Tnt(id), saved.clone())
+                .unwrap();
+            assert!(
+                game.tnts[0].used_portal,
+                "loading data into the live instance does not reset it"
+            );
             assert_tnt_blast(game, true);
             game.forget_entity(id);
             let uuid = horizon_client::entity_nbt::uuid(&saved);
             game.load_tnt(saved, uuid);
-            assert!(!game.tnts[0].used_portal, "a disk recreation starts with the constructor default");
+            assert!(
+                !game.tnts[0].used_portal,
+                "a disk recreation starts with the constructor default"
+            );
             assert_tnt_blast(game, false);
-            game.summon_with_nbt("minecraft:tnt", [8.5, 70.0, 8.5], "{fuse:200s,NoGravity:1b}").unwrap();
+            game.summon_with_nbt(
+                "minecraft:tnt",
+                [8.5, 70.0, 8.5],
+                "{fuse:200s,NoGravity:1b}",
+            )
+            .unwrap();
             assert!(!game.tnts[0].used_portal);
             assert_tnt_blast(game, false);
         });
@@ -219,11 +270,7 @@ fn portal_arrival_effects_join_removals_cannot_consume_live_stacks() {
             mod_platform::testing::with_mods(mods.into(), || {
                 with_game(|game| {
                     prepare(game);
-                    game.spawn_item_own(
-                        ItemStack::new("minecraft:stick", 3),
-                        [8.5, 70.0, 8.5],
-                        0,
-                    );
+                    game.spawn_item_own(ItemStack::new("minecraft:stick", 3), [8.5, 70.0, 8.5], 0);
                     let id = game.dropped[0].id;
                     let incoming_uuid = game.uuid_for(id);
                     let at = callback_destination(game, id, portal, false);
@@ -245,7 +292,11 @@ fn portal_arrival_effects_join_removals_cannot_consume_live_stacks() {
                     assert_eq!(survivor.stack.count, if remove_incoming { 5 } else { 3 });
                     assert_eq!(
                         game.persist.uuids.get(&survivor.id),
-                        Some(&if remove_incoming { waiting_uuid } else { incoming_uuid }),
+                        Some(&if remove_incoming {
+                            waiting_uuid
+                        } else {
+                            incoming_uuid
+                        }),
                     );
                     assert_eq!(survivor.ticks, 0);
                 });
@@ -273,15 +324,18 @@ impl SpawnDuringArrival {
                 ("count", Tag::Int(1)),
             ]),
         )]);
-        let Tag::Compound(nbt) = nbt else { unreachable!() };
-        assert!(host
-            .summon(
+        let Tag::Compound(nbt) = nbt else {
+            unreachable!()
+        };
+        assert!(
+            host.summon(
                 "minecraft:the_nether",
                 "minecraft:item",
                 *self.at.lock().unwrap(),
                 nbt,
             )
-            .is_some());
+            .is_some()
+        );
         self.calls.fetch_add(1, Ordering::SeqCst);
     }
 }
@@ -289,7 +343,8 @@ impl SpawnDuringArrival {
 #[mod_api::__subscriptions]
 impl Hooks for SpawnDuringArrival {
     fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
-        if self.constructing && event.kind == "minecraft:item"
+        if self.constructing
+            && event.kind == "minecraft:item"
             && let HostSide::Server(host) = host
         {
             self.spawn(host);
@@ -327,18 +382,10 @@ fn portal_arrival_effects_nested_spawns_do_not_hide_the_real_arrival() {
         mod_platform::testing::with_mods(mods.into(), || {
             with_game(|game| {
                 prepare(game);
-                game.spawn_item_own(
-                    ItemStack::new("minecraft:stick", 3),
-                    [8.5, 70.0, 8.5],
-                    0,
-                );
+                game.spawn_item_own(ItemStack::new("minecraft:stick", 3), [8.5, 70.0, 8.5], 0);
                 let id = game.dropped[0].id;
                 let at = callback_destination(game, id, portal, true);
-                game.spawn_item_own(
-                    ItemStack::new("minecraft:stick", 5),
-                    [at.x, at.y, at.z],
-                    0,
-                );
+                game.spawn_item_own(ItemStack::new("minecraft:stick", 5), [at.x, at.y, at.z], 0);
                 let waiting = game.dropped[0].id;
                 game.native_joins_flush(false, 0);
                 *nested_at.lock().unwrap() = [at.x, at.y, at.z];
@@ -349,7 +396,11 @@ fn portal_arrival_effects_nested_spawns_do_not_hide_the_real_arrival() {
                 let survivor = game.dropped.iter().find(|item| item.id == waiting).unwrap();
                 assert_eq!(survivor.stack.count, 8);
                 assert_eq!(survivor.ticks, 0);
-                let nested = game.dropped.iter().find(|item| &*item.stack.item == "minecraft:dirt").unwrap();
+                let nested = game
+                    .dropped
+                    .iter()
+                    .find(|item| &*item.stack.item == "minecraft:dirt")
+                    .unwrap();
                 assert_eq!(nested.stack.count, 1);
             });
         });

@@ -80,7 +80,11 @@ pub(in crate::game) fn enchant_particles(game: &Game<'_>) -> usize {
     for _ in 0..4096 {
         animate_tick(game.res.animate(), &mut engine, &ctx, TABLE);
     }
-    engine.created_requests.take().unwrap().iter()
+    engine
+        .created_requests
+        .take()
+        .unwrap()
+        .iter()
         .filter(|(options, ..)| options.ty == ParticleType::Enchant)
         .count()
 }
@@ -136,7 +140,9 @@ fn enchant_particles_share_native_power_and_rebuild_only_on_parts_reload() {
             r.block_part(bookshelf, Suppressed);
         }
         fn blocks(&self, _: &mod_api::RegistrationContext, event: &mut mod_api::BlocksEvent<'_>) {
-            event.blocks.push(mod_api::Block::new(CUSTOM, "minecraft:glass"));
+            event
+                .blocks
+                .push(mod_api::Block::new(CUSTOM, "minecraft:glass"));
         }
     }
     let parts = std::env::var(CHILD).unwrap() == "parts";
@@ -150,40 +156,67 @@ fn enchant_particles_share_native_power_and_rebuild_only_on_parts_reload() {
     crate::entry::install_client_hooks();
     let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let root = crate::game::mods::content_root(&base, &Default::default())
-        .unwrap().prepared().to_path_buf();
-    with_game_role(root, crate::game::execution_role::ExecutionRole::Client, |game| {
-        game.native_lifecycle.begin_open(mod_api::Authority::RemoteClient);
-        game.resolve_parts().unwrap();
-        game.world.chunks.insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-        place(game, [0, 0, 0], "minecraft:enchanting_table");
-        place(game, [-2, 0, -1], "minecraft:bookshelf");
-        let shelves = enchant_particles(game);
-        assert_eq!(shelves > 0, !parts, "bookshelf default or explicit zero");
-        assert_eq!(game.count_bookshelves(TABLE), i32::from(!parts));
-        if !parts {
+        .unwrap()
+        .prepared()
+        .to_path_buf();
+    with_game_role(
+        root,
+        crate::game::execution_role::ExecutionRole::Client,
+        |game| {
+            game.native_lifecycle
+                .begin_open(mod_api::Authority::RemoteClient);
+            game.resolve_parts().unwrap();
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            place(game, [0, 0, 0], "minecraft:enchanting_table");
+            place(game, [-2, 0, -1], "minecraft:bookshelf");
+            let shelves = enchant_particles(game);
+            assert_eq!(shelves > 0, !parts, "bookshelf default or explicit zero");
+            assert_eq!(game.count_bookshelves(TABLE), i32::from(!parts));
+            if !parts {
+                place(game, [-1, 0, 0], "minecraft:stone");
+                assert_eq!(enchant_particles(game), 0);
+                assert_eq!(game.count_bookshelves(TABLE), 0);
+                return;
+            }
+            place(game, [-2, 0, -1], CUSTOM);
+            assert_eq!(game.count_bookshelves(TABLE), 2);
+            let calls = CALLS.load(Ordering::Relaxed);
+            assert!(enchant_particles(game) > 0, "custom non-tagged provider");
+            assert_eq!(
+                CALLS.load(Ordering::Relaxed),
+                calls,
+                "no per-frame dispatch"
+            );
             place(game, [-1, 0, 0], "minecraft:stone");
             assert_eq!(enchant_particles(game), 0);
             assert_eq!(game.count_bookshelves(TABLE), 0);
-            return;
-        }
-        place(game, [-2, 0, -1], CUSTOM);
-        assert_eq!(game.count_bookshelves(TABLE), 2);
-        let calls = CALLS.load(Ordering::Relaxed);
-        assert!(enchant_particles(game) > 0, "custom non-tagged provider");
-        assert_eq!(CALLS.load(Ordering::Relaxed), calls, "no per-frame dispatch");
-        place(game, [-1, 0, 0], "minecraft:stone");
-        assert_eq!(enchant_particles(game), 0);
-        assert_eq!(game.count_bookshelves(TABLE), 0);
-        place(game, [-1, 0, 0], "minecraft:air");
-        POWER.store(0.0f32.to_bits(), Ordering::Relaxed);
-        assert!(enchant_particles(game) > 0, "old snapshot until parts reload");
-        assert_eq!(CALLS.load(Ordering::Relaxed), calls);
-        game.resolve_parts().unwrap();
-        assert_eq!(CALLS.load(Ordering::Relaxed), calls + 1, "one query per custom state");
-        assert_eq!(enchant_particles(game), 0, "reloaded answer suppresses particles");
-        assert_eq!(CALLS.load(Ordering::Relaxed), calls + 1);
-        POWER.store((-0.5f32).to_bits(), Ordering::Relaxed);
-        game.resolve_parts().unwrap();
-        assert!(enchant_particles(game) > 0, "any nonzero power, not only positive");
-    });
+            place(game, [-1, 0, 0], "minecraft:air");
+            POWER.store(0.0f32.to_bits(), Ordering::Relaxed);
+            assert!(
+                enchant_particles(game) > 0,
+                "old snapshot until parts reload"
+            );
+            assert_eq!(CALLS.load(Ordering::Relaxed), calls);
+            game.resolve_parts().unwrap();
+            assert_eq!(
+                CALLS.load(Ordering::Relaxed),
+                calls + 1,
+                "one query per custom state"
+            );
+            assert_eq!(
+                enchant_particles(game),
+                0,
+                "reloaded answer suppresses particles"
+            );
+            assert_eq!(CALLS.load(Ordering::Relaxed), calls + 1);
+            POWER.store((-0.5f32).to_bits(), Ordering::Relaxed);
+            game.resolve_parts().unwrap();
+            assert!(
+                enchant_particles(game) > 0,
+                "any nonzero power, not only positive"
+            );
+        },
+    );
 }

@@ -8,7 +8,10 @@ pub(super) fn load_animate_tables(
     registry: &horizon_world::registry::BlockRegistry,
     draws: bool,
     biomes: &Biomes,
-) -> Result<(horizon_client::animate_tick::AnimateTables, horizon_client::fog::FogTables)> {
+) -> Result<(
+    horizon_client::animate_tick::AnimateTables,
+    horizon_client::fog::FogTables,
+)> {
     let _step = startup::step("rest.animate_fog");
     let animate = if draws {
         horizon_client::animate_tick::AnimateTables::load(root, registry)?

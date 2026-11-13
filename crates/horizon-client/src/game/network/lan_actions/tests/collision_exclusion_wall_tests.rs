@@ -39,10 +39,23 @@ fn a_block_in_a_players_exclusions_does_not_suffocate_it() {
     crate::game::native_guest_turn_tests::with_guests(|game| {
         walled(game);
         let at = [3.5, 64.0, 5.5];
-        let body = game.lan.as_ref().unwrap().hub.guest(12).unwrap().dimensions();
-        assert!(game.in_wall(12, at, body), "its eyes are in the stone at y 65");
+        let body = game
+            .lan
+            .as_ref()
+            .unwrap()
+            .hub
+            .guest(12)
+            .unwrap()
+            .dimensions();
+        assert!(
+            game.in_wall(12, at, body),
+            "its eyes are in the stone at y 65"
+        );
         exclude(game, &[[10.0, 64.0, 10.0, 11.0, 66.0, 11.0]]);
-        assert!(game.in_wall(12, at, body), "a box elsewhere changes nothing");
+        assert!(
+            game.in_wall(12, at, body),
+            "a box elsewhere changes nothing"
+        );
         exclude(game, &OPENING);
         assert!(!game.in_wall(12, at, body));
     });

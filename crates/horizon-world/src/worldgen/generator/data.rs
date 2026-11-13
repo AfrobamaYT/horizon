@@ -72,7 +72,10 @@ struct OldChunkFacts {
     ground: Vec<bool>,
     surface: Vec<bool>,
 }
-type RingCacheEntry = ((i64, String), Arc<OnceLock<super::super::structure::start::Rings>>);
+type RingCacheEntry = (
+    (i64, String),
+    Arc<OnceLock<super::super::structure::start::Rings>>,
+);
 /// Generators whose ring positions are kept: the dimensions of a few worlds.
 pub(super) const RING_CACHE_LIMIT: usize = 8;
 type DecorationSlot =
@@ -197,7 +200,9 @@ impl GeneratorData {
         // wait for all of it, with the chunk workers idle.
         let blocks = loading({
             let (dir, tags, fluids) = (dir.join("blocks"), block_tags.clone(), fluid_tags.clone());
-            move || super::super::generator_blocks::BlockBehavior::load(&dir, registry, &tags, &fluids)
+            move || {
+                super::super::generator_blocks::BlockBehavior::load(&dir, registry, &tags, &fluids)
+            }
         })?;
         let structures = loading({
             let (dir, tags, ov) = (dir.to_owned(), block_tags.clone(), ov.clone());
