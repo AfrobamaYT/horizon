@@ -433,6 +433,18 @@ pub trait PlayersBackendMut {
         footer: &Text,
     ) -> Result<bool, TextFormError>;
     /// Side: server.
+    /// Disconnects that player with `reason`, as `/kick` does
+    /// (`ServerGamePacketListenerImpl.disconnect`): their client shows it, the log's "lost
+    /// connection" line names it, `player_kicked` hears it and a dedicated server records a
+    /// `kick` event. The connection closes when the server next polls it, so the calling hook
+    /// finishes first; works for the acting player inside their own hook, and without the
+    /// world published. False for a stale or unavailable player, a fake player and the
+    /// single-player owner (`/kick` refuses the owner).
+    #[access(WorldOnly)]
+    /// Refuses text deeper than 512 component nodes before applying any changes.
+    fn player_disconnect(&mut self, player: PlayerRef, reason: Text)
+    -> Result<bool, TextFormError>;
+    /// Side: server.
     /// Whether that player counts for `players_sleeping_percentage`: an
     /// ignored player who isn't in bed is left out of the players the night
     /// needs asleep, as a spectator is (an away-from-keyboard mod). Kept

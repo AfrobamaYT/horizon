@@ -60,6 +60,7 @@ identities.
 |---|---|
 | `set_nickname(host, nickname)` | Changes the name shown in chat and the Tab list; `None` restores the account name. Commands, selectors, logs and events use the real name. Validate the nickname's length, filtering and conflicts yourself. |
 | `set_sleep_ignored(host, ignored)` | Controls exclusion from the sleep count. |
+| `disconnect(host, reason)` | Disconnects the player with a `Text` reason, as `/kick` does, also inside their own hook (the connection closes after it). Answers `false` for a fake player and the single-player owner. |
 | `hide(host, permission)` | Hides the player from players below the supplied permission level, starting next tick; `None` restores visibility. Hidden players disappear from the world and Tab list, and their join and leave messages are suppressed for those viewers. |
 
 Nickname and sleep settings require an online player. These settings survive
