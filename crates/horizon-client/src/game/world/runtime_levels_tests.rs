@@ -995,6 +995,15 @@ fn make_link(to: &std::path::Path, at: &std::path::Path) {
     made.expect("this machine cannot create a symbolic link or a junction");
 }
 
+/// Remove the link `link` made by `make_link`, not what it leads to: a folder link on Windows, a
+/// file-like symbolic link on Unix.
+fn remove_link(link: &std::path::Path) {
+    #[cfg(windows)]
+    std::fs::remove_dir(link).unwrap();
+    #[cfg(not(windows))]
+    std::fs::remove_file(link).unwrap();
+}
+
 /// A link under `dimensions` or `data`, or one of the two being a link, is never followed out of
 /// the world, and nothing is removed first.
 #[test]
@@ -1012,7 +1021,7 @@ fn a_removal_does_not_follow_links_out_of_the_world() {
     make_link(&outside, &world.join("dimensions/lnk"));
     assert!(erase(&world, "lnk:x").is_err());
     // The level's own folder is a link.
-    std::fs::remove_dir(world.join("dimensions/lnk")).unwrap();
+    remove_link(&world.join("dimensions/lnk"));
     make_link(&outside, &world.join("dimensions/ns/x"));
     assert!(erase(&world, "ns:x").is_err());
     // The folder of the references file is a link; nothing of the level's own is removed first.
