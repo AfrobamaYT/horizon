@@ -41,6 +41,7 @@ pub fn removed(stack: &ItemStack, id: &str) -> bool {
 pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
     match id {
         "minecraft:damage" => a.damage == b.damage,
+        "minecraft:map_id" => map_id(a) == map_id(b),
         "minecraft:repair_cost" => {
             a.data().map_or(0, |d| d.repair_cost) == b.data().map_or(0, |d| d.repair_cost)
         }
@@ -64,6 +65,18 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
                     .and_then(|d| d.other(id))
                     .and_then(crate::properties::component_int)
         }
+        // Enchantable.CODEC ignores other record fields and converts boxed numbers.
+        "minecraft:enchantable" => {
+            let value = |stack: &ItemStack| {
+                stack
+                    .data()
+                    .and_then(|data| data.other(id))
+                    .and_then(|tag| tag.get("value"))
+                    .and_then(crate::properties::component_int)
+                    .filter(|value| *value > 0)
+            };
+            value(a) == value(b)
+        }
         "minecraft:block_entity_data" => block_entity_equal(
             a.data().and_then(|d| d.other(id)),
             b.data().and_then(|d| d.other(id)),
@@ -71,6 +84,15 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
         "minecraft:item_name" => item_name_equal(a, b),
         "minecraft:rarity" => rarity(a) == rarity(b),
         _ => stored_component_equal(id, a, b),
+    }
+}
+
+/// `MapId.CODEC`: compare the borrowed boxed-number value or the modelled id.
+fn map_id(stack: &ItemStack) -> Option<i32> {
+    let data = stack.data()?;
+    match data.other("minecraft:map_id") {
+        Some(value) => crate::properties::component_int(value),
+        None => data.map_id,
     }
 }
 
