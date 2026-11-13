@@ -35,7 +35,7 @@
 //! entries. [`UsesTable::read`] refuses an unknown schema, malformed JSON, repeated ids and
 //! documents over [`MAX_USES_BYTES`] with a typed [`UsesError`].
 use crate::scan::{self, Token};
-use crate::{Role, Surface, Type, TypeKind, leaf};
+use crate::{MacroKind, Role, Surface, Type, TypeKind, leaf};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -376,6 +376,14 @@ struct FileFacts<'t> {
     defines: BTreeSet<&'t str>,
     /// The file holds an inline `mod name { … }`, so it is more than one scope.
     inline_modules: bool,
+    /// Some `use` holds a macro metavariable (`use mod_api::$m;`): what it binds is unknown.
+    use_metavariable: bool,
+    /// Macro calls in item position outside function bodies: each macro's path.
+    item_macros: Vec<Vec<&'t str>>,
+    /// Outer attributes in item position outside function bodies: each attribute's path.
+    item_attributes: Vec<Vec<&'t str>>,
+    /// Each `macro_rules!` definition: its name and the token range of its body.
+    macro_rules: Vec<(&'t str, usize, usize)>,
 }
 
 /// An `impl` or `trait` body: its token range, its target's last name and the whole path.
@@ -413,6 +421,7 @@ fn file_facts(text: &str) -> Result<FileFacts<'_>, usize> {
     let mut chains = Vec::new();
     let mut type_aliases = Vec::new();
     let mut bodies: Vec<Body<'_>> = Vec::new();
+    let mut use_metavariable = false;
     let mut at = 0;
     while at < tokens.len() {
         match tokens[at].0 {
@@ -421,6 +430,9 @@ fn file_facts(text: &str) -> Result<FileFacts<'_>, usize> {
                     .find(|i| punct(&tokens, *i, b';'))
                     .unwrap_or(tokens.len());
                 in_use[at..end].iter_mut().for_each(|t| *t = true);
+                use_metavariable |= tokens[at..end]
+                    .iter()
+                    .any(|(token, _)| *token == Token::Punct(b'$'));
                 // [`use_tree`] recurses once per group: bound it before it reads one.
                 let mut nesting = 0usize;
                 for (token, _) in &tokens[at..end] {
@@ -546,10 +558,91 @@ fn file_facts(text: &str) -> Result<FileFacts<'_>, usize> {
     let mut defines = BTreeSet::new();
     let mut inline_modules = false;
     let mut depth = 0usize;
+    // Item position outside function bodies: every open brace is a `mod name {` body, and the
+    // token starts an item (the file's start, or after `;`, `}`, `{` or an attribute's `]`).
+    let mut braces: Vec<bool> = Vec::new();
+    let mut item_macros = Vec::new();
+    let mut item_attributes = Vec::new();
+    let mut macro_rules = Vec::new();
+    // The path written backwards from `last`: `a::b::c` gives `[a, b, c]`.
+    let path_to = |last: usize| {
+        let mut first = last;
+        while first >= 3
+            && punct(&tokens, first - 1, b':')
+            && punct(&tokens, first - 2, b':')
+            && ident(&tokens, first - 3).is_some()
+        {
+            first -= 3;
+        }
+        (
+            first,
+            (first..=last)
+                .step_by(3)
+                .filter_map(|i| ident(&tokens, i))
+                .collect::<Vec<_>>(),
+        )
+    };
+    let starts_item = |at: usize| {
+        at == 0
+            || matches!(
+                tokens[at - 1].0,
+                Token::Punct(b';' | b'}' | b'{' | b']') | Token::Ident("pub")
+            )
+            || (at >= 4
+                && punct(&tokens, at - 1, b')')
+                && ident(&tokens, at - 2) == Some("crate")
+                && punct(&tokens, at - 3, b'(')
+                && ident(&tokens, at - 4) == Some("pub"))
+    };
     for at in 0..tokens.len() {
+        let item_level = braces.iter().all(|module| *module);
         match tokens[at].0 {
-            Token::Punct(b'{') => depth += 1,
-            Token::Punct(b'}') => depth = depth.saturating_sub(1),
+            Token::Punct(b'!')
+                if item_level
+                    && at > 0
+                    && ident(&tokens, at - 1).is_some()
+                    && matches!(
+                        tokens.get(at + 1).map(|(t, _)| *t),
+                        Some(Token::Punct(b'(' | b'[' | b'{') | Token::Ident(_))
+                    ) =>
+            {
+                let (first, path) = path_to(at - 1);
+                if path == ["macro_rules"] {
+                    if let Some(name) = ident(&tokens, at + 1)
+                        && let Some(open) = (at + 2..tokens.len())
+                            .find(|i| !matches!(tokens[*i].0, Token::Ident(_)))
+                        && let Some(close) = closing(&tokens, open)
+                    {
+                        macro_rules.push((name, open, close));
+                    }
+                } else if starts_item(first) {
+                    item_macros.push(path);
+                }
+            }
+            Token::Punct(b'#') if item_level && punct(&tokens, at + 1, b'[') && starts_item(at) => {
+                let mut last = at + 2;
+                while punct(&tokens, last + 1, b':') && punct(&tokens, last + 2, b':') {
+                    last += 3;
+                }
+                if ident(&tokens, last).is_some() {
+                    item_attributes.push(path_to(last).1);
+                }
+            }
+            _ => {}
+        }
+        match tokens[at].0 {
+            Token::Punct(b'{') => {
+                depth += 1;
+                braces.push(
+                    at >= 2
+                        && ident(&tokens, at - 1).is_some()
+                        && ident(&tokens, at - 2) == Some("mod"),
+                );
+            }
+            Token::Punct(b'}') => {
+                depth = depth.saturating_sub(1);
+                braces.pop();
+            }
             Token::Ident("mod")
                 if ident(&tokens, at + 1).is_some() && punct(&tokens, at + 2, b'{') =>
             {
@@ -572,6 +665,10 @@ fn file_facts(text: &str) -> Result<FileFacts<'_>, usize> {
         bodies,
         defines,
         inline_modules,
+        use_metavariable,
+        item_macros,
+        item_attributes,
+        macro_rules,
     })
 }
 
@@ -726,6 +823,158 @@ fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
         }
     }
     facts
+}
+
+/// Standard macros that cannot bring a name into scope: they expand to an expression, a string
+/// or an error, never to a `use` or a `mod`.
+const STD_MACROS: &[&str] = &[
+    "include_str",
+    "include_bytes",
+    "compile_error",
+    "concat",
+    "env",
+    "option_env",
+    "stringify",
+    "line",
+    "column",
+    "file",
+    "module_path",
+    "cfg",
+    "assert",
+    "assert_eq",
+    "assert_ne",
+    "debug_assert",
+    "debug_assert_eq",
+    "debug_assert_ne",
+    "format",
+    "format_args",
+    "vec",
+    "matches",
+    "panic",
+    "unreachable",
+    "todo",
+    "unimplemented",
+    "print",
+    "println",
+    "eprint",
+    "eprintln",
+    "write",
+    "writeln",
+    "dbg",
+];
+
+/// Attributes the compiler itself reads: none of them expands to items.
+const BUILTIN_ATTRIBUTES: &[&str] = &[
+    "derive",
+    "cfg",
+    "cfg_attr",
+    "test",
+    "allow",
+    "warn",
+    "deny",
+    "forbid",
+    "expect",
+    "doc",
+    "inline",
+    "must_use",
+    "repr",
+    "non_exhaustive",
+    "path",
+    "deprecated",
+    "cold",
+    "no_mangle",
+    "export_name",
+    "link_section",
+    "used",
+    "track_caller",
+    "ignore",
+    "should_panic",
+    "macro_export",
+    "macro_use",
+    "automatically_derived",
+    "rustfmt",
+    "clippy",
+    "diagnostic",
+    "unsafe",
+    "target_feature",
+    "link",
+];
+
+/// Whether a macro the scan cannot expand may bring names into the mod's scope: a `use` that
+/// holds a metavariable, a macro called in item position outside function bodies (other than the
+/// standard ones in [`STD_MACROS`] and the mod's own `macro_rules!` whose bodies write no `use`,
+/// no `mod` and call only such macros), or an attribute on an item that is neither one the
+/// compiler reads ([`BUILTIN_ATTRIBUTES`]) nor one of the API's own attribute or derive macros
+/// (and their helper attributes) in the surface.
+fn macro_doubt(files: &[FileFacts<'_>], module: &ModFacts<'_>, surface: &Surface) -> bool {
+    if files.iter().any(|file| file.use_metavariable) {
+        return true;
+    }
+    // The mod's own `macro_rules!` that cannot emit a `use` or a `mod`, as a least fixpoint over
+    // the macros their bodies call.
+    let mut definitions: BTreeMap<&str, Vec<(&FileFacts<'_>, usize, usize)>> = BTreeMap::new();
+    for file in files {
+        for (name, open, close) in &file.macro_rules {
+            definitions
+                .entry(name)
+                .or_default()
+                .push((file, *open, *close));
+        }
+    }
+    let mut safe: BTreeSet<&str> = BTreeSet::new();
+    loop {
+        let more: Vec<&str> = definitions
+            .iter()
+            .filter(|(name, _)| !safe.contains(*name))
+            .filter(|(_, bodies)| {
+                bodies.iter().all(|(file, open, close)| {
+                    let tokens = &file.tokens;
+                    (*open..*close).all(|at| match tokens[at].0 {
+                        Token::Ident("use" | "mod") => false,
+                        Token::Punct(b'!') => match ident(tokens, at.wrapping_sub(1)) {
+                            Some(called) => {
+                                !(at >= 3
+                                    && punct(tokens, at - 2, b':')
+                                    && punct(tokens, at - 3, b':'))
+                                    && !(at >= 2 && punct(tokens, at - 2, b'$'))
+                                    && (STD_MACROS.contains(&called) || safe.contains(called))
+                            }
+                            None => true,
+                        },
+                        _ => true,
+                    })
+                })
+            })
+            .map(|(name, _)| *name)
+            .collect();
+        if more.is_empty() {
+            break;
+        }
+        safe.extend(more);
+    }
+    let api_attributes: BTreeSet<&str> = surface
+        .macros
+        .iter()
+        .filter(|m| matches!(m.contract.kind, MacroKind::Attribute | MacroKind::Derive))
+        .flat_map(|m| {
+            std::iter::once(leaf(&m.id)).chain(m.contract.attributes.iter().map(String::as_str))
+        })
+        .collect();
+    files.iter().any(|file| {
+        file.item_macros.iter().any(|path| match &path[..] {
+            [name] => !STD_MACROS.contains(name) && !safe.contains(name),
+            _ => true,
+        }) || file.item_attributes.iter().any(|path| {
+            let builtin = path.len() == 1 && BUILTIN_ATTRIBUTES.contains(&path[0])
+                || matches!(path.first(), Some(&("rustfmt" | "clippy" | "diagnostic")));
+            let api = match &path[..] {
+                [name] => api_attributes.contains(name),
+                [root, .., name] => module.roots.contains(root) && api_attributes.contains(name),
+                [] => false,
+            };
+            !builtin && !api
+        })
+    })
 }
 
 /// The bracket that encloses the token at `at`, as its index, if any.
@@ -950,7 +1199,7 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                     .iter()
                     .all(|segment| segment_keyword(segment) || own_modules.contains(segment)))
     });
-    if !globs_certain {
+    if !globs_certain || macro_doubt(&files, &module, surface) {
         own_modules.clear();
     }
     let own_segment =

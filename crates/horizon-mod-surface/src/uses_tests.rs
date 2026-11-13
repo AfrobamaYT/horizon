@@ -159,7 +159,15 @@ impl Pieces {
             self.traits,
             self.handles,
             vec![],
-            vec![],
+            // The API's own attribute macro, which a mod may put on its items.
+            vec![Macro::new(
+                "macro:horizon_mod",
+                "",
+                MacroContract {
+                    kind: MacroKind::Attribute,
+                    attributes: vec![],
+                },
+            )],
             self.types,
             vec![],
             self.capabilities,
@@ -1906,6 +1914,39 @@ fn a_path_inside_the_mod_is_its_own_only_through_modules_it_declares() {
             ("src/terrain.rs", &source),
         ]));
     }
+    // A macro the scan cannot expand may bind `world` to the API's module: a `use` with a
+    // metavariable, an item-position call of a macro that may emit one, or an attribute macro
+    // from a dependency. Then no module is the mod's own.
+    for lib in [
+        "macro_rules! api { ($m:ident) => { pub use mod_api::$m; }; }\napi!(world);\nmod terrain;",
+        "macro_rules! reexport { ($($p:tt)*) => { pub use $($p)*; }; }\nreexport!(mod_api::world);\nmod terrain;",
+        "some_dep::bind!(world);\nmod terrain;",
+        "#[some_dep::reexport(world)]\nmod terrain;",
+        "#[reexport]\nmod terrain;",
+    ] {
+        refused_for_the_new_field(fits_a_new_dims_field(&[
+            ("src/lib.rs", lib),
+            client,
+            own,
+            ("src/terrain.rs", &written),
+        ]));
+    }
+    // The mod's own `macro_rules!` with no `use` or `mod`, standard macros, built-in attributes,
+    // the API's own attribute macros and macros called inside function bodies keep its own
+    // modules trusted.
+    assert_eq!(
+        mine(
+            "macro_rules! double { ($e:expr) => { $e * 2 }; }\nmacro_rules! quad { ($e:expr) => { double!(double!($e)) }; }\nquad!(1);\ncompile_error!(\"x\");\n#[derive(Clone)]\n#[cfg(test)]\n#[mod_api::horizon_mod]\nstruct S;\nfn f() { some_dep::bind!(world); }\nmod world;\nmod terrain;"
+        ),
+        Some(Built::None)
+    );
+    // A mod's own macro whose body writes a `use`, or calls a macro that may, is doubt.
+    assert_eq!(
+        mine(
+            "macro_rules! inner { () => { use crate::world; }; }\nmacro_rules! outer { () => { inner!(); }; }\nouter!();\nmod world;\nmod terrain;"
+        ),
+        Some(Built::Full)
+    );
     // A cycle of bindings is not certain.
     assert_eq!(
         mine(
