@@ -15,11 +15,6 @@
 
 include!(concat!(env!("OUT_DIR"), "/points_generated.rs"));
 
-/// One point catalog: when `horizon-engine-slots` has a `PointId` (#3643), it is this crate's,
-/// re-exported, never a second generation, or this does not compile (`build.rs`).
-#[cfg(all(test, engine_slots_point_id))]
-const _: fn(horizon_engine_slots::PointId) -> PointId = |id| id;
-
 mod registry;
 #[cfg(target_arch = "wasm32")]
 pub use guest::register;

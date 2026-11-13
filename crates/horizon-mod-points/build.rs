@@ -5,7 +5,7 @@ fn main() {
     horizon_mod_api_gen::generate_points(&root, &out_dir).expect("generating the points");
     // One point catalog (#3643): once `horizon-engine-slots` names a `PointId` of its own, this
     // crate's tests check at compile time that it is the very type this crate exports
-    // (`lib.rs`), so the two halves of a dispatch can never disagree index for index.
+    // (`tests/one_point_catalog.rs`), so the two halves of a dispatch can never disagree index for index.
     println!("cargo::rustc-check-cfg=cfg(engine_slots_point_id)");
     let slots = root.join("crates/horizon-engine-slots");
     println!("cargo::rerun-if-changed={}", slots.display());

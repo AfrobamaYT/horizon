@@ -118,6 +118,7 @@ impl std::error::Error for RuntimeError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Side;
 
     const BUILT: &[BuiltMod] = &[
         BuiltMod {
