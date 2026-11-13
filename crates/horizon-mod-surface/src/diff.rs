@@ -11,7 +11,8 @@
 //!   A removed record; a changed contract (a hook's side or kind, a retyped field or argument, a
 //!   signature, a method no longer on wasm); a variant added to an exhaustive enum or a required
 //!   item added to a trait mods implement (the container's own hash covers those sets); an impl
-//!   a type no longer has; a supertrait a trait mods call no longer has.
+//!   a type no longer has; a supertrait a trait mods call no longer has, or gains when the new
+//!   one is not known to keep `dyn Trait` valid (`Clone`, `Sized`, a trait with generic methods).
 //! - **Conditional**: it breaks only some mods, which the fit test finds from each mod's source.
 //!   A field added to a struct mods can build, or an argument added to a hook (only a mod that
 //!   builds the value with a full literal or matches it with an exhaustive pattern, without
@@ -19,13 +20,14 @@
 //!   `fields_hash`); a struct that is no longer
 //!   constructible (only a mod that builds it with a literal); a public path that goes (only a
 //!   mod that names the item by it); a hook's `version` (only a mod whose manifest names it); a
-//!   type's wire form or wire layout (`shape`; wasm mods only).
+//!   type's wire form or wire layout (`shape`; wasm mods only); a method of a trait mods only call
+//!   that moved unchanged to a supertrait it still has (only a call written by trait path).
 //! - **Additive**: a new record (a field of a struct mods cannot build, a variant of a
 //!   `#[non_exhaustive]` enum, a defaulted method), and changes that only widen an item: now on
 //!   wasm, now crossing the wasm boundary, now constructible, an impl gained, a new public path,
-//!   a supertrait gained by a trait mods only call, an item no longer required, an enum no
-//!   longer `#[non_exhaustive]`, a method of a trait mods only call that moved unchanged to one
-//!   of its supertraits.
+//!   a marker or object-safe API supertrait gained by a trait mods only call (`Send`, `Sync`,
+//!   `'static`, `Debug`, `Any`), an item no longer required, an enum no longer
+//!   `#[non_exhaustive]`.
 //!
 //! A container's members are reported with it once: when a type, trait or hook is added or
 //! removed, or its hashed member set (`members`, `required`, whether a hook has an output)
@@ -226,7 +228,8 @@ fn container(id: &str) -> Option<String> {
 }
 
 /// For a method gone from a trait mods only call: the trait and the supertrait it moved to
-/// unchanged, when the trait still has that supertrait in `new`, so every call still compiles.
+/// unchanged, when the trait still has that supertrait in `new`, so a method call still compiles
+/// and only a call written by trait path (`ServerHost::spawn(host)`) breaks.
 fn moved_to(
     id: &str,
     old: &Entry,
@@ -267,6 +270,47 @@ fn moved_to(
     None
 }
 
+/// Supertraits a trait mods only call can gain without breaking a caller: they keep `dyn Trait`
+/// valid and ask nothing of the caller. The marker traits, and every API trait in `surface`
+/// whose own record shows it is object safe (methods on `self` with no generics and no `Self`,
+/// no associated items) and whose supertraits are free too. Anything the record cannot show is
+/// left out.
+fn free_bounds(surface: &Surface) -> BTreeSet<String> {
+    let mut free: BTreeSet<String> = ["Send", "Sync", "'static", "Debug", "Any"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    let safe_method = |signature: &str| {
+        let after_name = signature.strip_prefix("fn ").and_then(|rest| {
+            rest.find(|c: char| !(c.is_alphanumeric() || c == '_'))
+                .map(|i| &rest[i..])
+        });
+        after_name.is_some_and(|rest| {
+            (rest.starts_with("(&self") || rest.starts_with("(&mut self"))
+                && !rest.contains("Self")
+                && !rest.contains("impl ")
+        })
+    };
+    loop {
+        let before = free.len();
+        for t in &surface.traits {
+            let path = t.id.strip_prefix("trait:").unwrap_or(&t.id);
+            if free.contains(path)
+                || !t.contract.generics.is_empty()
+                || !t.associated.is_empty()
+                || !t.methods.iter().all(|m| safe_method(&m.contract.signature))
+                || !t.contract.bounds.iter().all(|b| free.contains(b.as_str()))
+            {
+                continue;
+            }
+            free.insert(path.to_owned());
+        }
+        if free.len() == before {
+            return free;
+        }
+    }
+}
+
 /// The containers in both surfaces whose new members a mod's full literal must name: every
 /// hook (its event) and every struct mods can build.
 fn literal_owners(old: &Surface, new: &Surface) -> BTreeSet<String> {
@@ -290,6 +334,7 @@ pub fn diff(old: &Surface, new: &Surface) -> Diff {
     let before = entries(old);
     let after = entries(new);
     let owners = literal_owners(old, new);
+    let free = free_bounds(new);
     let ids: BTreeSet<&String> = before.keys().chain(after.keys()).collect();
     let mut changes: BTreeMap<String, Change> = BTreeMap::new();
     for id in ids {
@@ -298,9 +343,10 @@ pub fn diff(old: &Surface, new: &Surface) -> Diff {
                 let line = match moved_to(id, a, new, &after) {
                     Some((from, to)) => (
                         format!(
-                            "moved to the supertrait `{to}`: a call through `{from}` still compiles"
+                            "moved to the supertrait `{to}`: breaks only calls written by trait path (`{from}::{}(host)`)",
+                            crate::leaf(id)
                         ),
-                        Class::Additive,
+                        Class::Conditional,
                     ),
                     None => ("removed".into(), Class::Breaking),
                 };
@@ -319,7 +365,7 @@ pub fn diff(old: &Surface, new: &Surface) -> Diff {
                 } else {
                     describe(id, &a.view, &b.view)
                 };
-                lines.extend(extras(id, &a.extra, &b.extra));
+                lines.extend(extras(id, &a.extra, &b.extra, &free));
                 if a.hash != b.hash && lines.is_empty() {
                     lines.push((
                         "its contract changed in a field this tool does not know".into(),
@@ -451,7 +497,12 @@ fn literal_added(id: &str, owner: &str, view: &Value) -> String {
 
 /// What changed outside the hash: impls, public paths, whether a struct is constructible, a
 /// hook's version, the wire form.
-fn extras(id: &str, old: &Map<String, Value>, new: &Map<String, Value>) -> Vec<(String, Class)> {
+fn extras(
+    id: &str,
+    old: &Map<String, Value>,
+    new: &Map<String, Value>,
+    free: &BTreeSet<String>,
+) -> Vec<(String, Class)> {
     let name = crate::leaf(id);
     let get = |map: &Map<String, Value>, key: &str| map.get(key).cloned().unwrap_or(Value::Null);
     let mut lines = Vec::new();
@@ -489,7 +540,14 @@ fn extras(id: &str, old: &Map<String, Value>, new: &Map<String, Value>) -> Vec<(
     if let (Some(Value::Array(_)), Some(Value::Array(_))) = (old.get("bounds"), new.get("bounds")) {
         let (x, y) = (strings(old, "bounds"), strings(new, "bounds"));
         for gained in y.iter().filter(|b| !x.contains(b)) {
-            lines.push((format!("now also requires `{gained}`"), Class::Additive));
+            lines.push(if free.contains(gained.as_str()) {
+                (format!("now also requires `{gained}`"), Class::Additive)
+            } else {
+                (
+                    format!("now also requires `{gained}`: `dyn {name}` stops compiling"),
+                    Class::Breaking,
+                )
+            });
         }
         for lost in x.iter().filter(|b| !y.contains(b)) {
             lines.push((
