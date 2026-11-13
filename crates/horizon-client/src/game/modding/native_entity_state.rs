@@ -1078,6 +1078,72 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn portal_cooldown_write_reaches_an_item() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::items::ItemStack;
+
+        with_game(|game| {
+            game.spawn_item(
+                ItemStack {
+                    item: "minecraft:stone".into(),
+                    count: 1,
+                    damage: 0,
+                    extra: None,
+                },
+                [0.0; 3],
+                [0.0; 3],
+                0,
+            );
+            let item = game.entity(game.dropped[0].id).unwrap();
+            assert!(item.set_portal_cooldown(game, 40));
+            assert_eq!(item.portal_cooldown(game), Some(40));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn portal_cooldown_write_reaches_an_arrow() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::projectiles::{Projectile, ProjectileKind};
+        use horizon_core::geometry::Vec3;
+
+        with_game(|game| {
+            game.add_projectile(Projectile::new(
+                ProjectileKind::Arrow {
+                    base_damage: 2.0,
+                    critical: false,
+                    effect: None,
+                },
+                Vec3::ZERO,
+                None,
+            ));
+            let arrow = game.entity(game.creatures.projectiles[0].id).unwrap();
+            assert!(arrow.set_portal_cooldown(game, 40));
+            assert_eq!(arrow.portal_cooldown(game), Some(40));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn portal_cooldown_write_is_refused_for_a_non_portal_projectile() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::projectiles::{Projectile, ProjectileKind};
+        use horizon_core::geometry::Vec3;
+
+        with_game(|game| {
+            game.add_projectile(Projectile::new(
+                ProjectileKind::WindCharge,
+                Vec3::ZERO,
+                None,
+            ));
+            let charge = game.entity(game.creatures.projectiles[0].id).unwrap();
+            assert!(!charge.set_portal_cooldown(game, 40));
+            assert_eq!(charge.portal_cooldown(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn player_invisibility_write_is_refused() {
         with_player(|game, player| assert!(!player.set_invisible(game, true)));
     }
