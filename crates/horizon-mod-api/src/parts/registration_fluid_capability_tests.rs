@@ -89,7 +89,10 @@ mod tests {
             serde_json::json!({"type":"neoforge:compound","children":[
                 "minecraft:water", {"type":"neoforge:compound","children":["#fixture:empty"]}]}),
         ] {
-            assert!(matches!(FluidIngredient::from_json(&json, &context), Err(FluidIngredientError::Invalid)));
+            assert!(matches!(
+                FluidIngredient::from_json(&json, &context),
+                Err(FluidIngredientError::Invalid)
+            ));
         }
     }
 

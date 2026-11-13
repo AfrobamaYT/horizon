@@ -142,9 +142,10 @@ impl WalkedIngredient {
     fn allows_empty(&self) -> bool {
         self.custom.is_some()
             || (self.order.is_empty() && self.children.is_none())
-            || self.children.as_ref().is_some_and(|(_, children)| {
-                children.iter().any(Self::allows_empty)
-            })
+            || self
+                .children
+                .as_ref()
+                .is_some_and(|(_, children)| children.iter().any(Self::allows_empty))
     }
 
     /// NeoForge's ingredient types (`NeoForgeRegistries.Keys.INGREDIENT_TYPES`),
@@ -231,7 +232,9 @@ impl WalkedIngredient {
             _ => return None,
         };
         (!kept.is_empty()
-            || nested.as_ref().is_some_and(|(_, children)| children.iter().any(Self::allows_empty)))
+            || nested
+                .as_ref()
+                .is_some_and(|(_, children)| children.iter().any(Self::allows_empty)))
         .then(|| Self {
             set: kept.iter().cloned().collect(),
             order: kept,

@@ -242,7 +242,8 @@ mod empty_candidate_tests {
         ingredient.custom = Some((
             "fixture:predicate".into(),
             [("required_damage".into(), horizon_core::nbt::Tag::Int(7))]
-                .into_iter().collect(),
+                .into_iter()
+                .collect(),
         ));
         let mut writer = Writer::default();
         ingredient.put(&mut writer);

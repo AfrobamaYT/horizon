@@ -57,7 +57,8 @@ impl Game<'_> {
         }
         let creative = self.creative(player);
         let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        let write = self.with_level(|b, level, ticks| b.plan_fluid_pickup(level, ticks, at, creative))?;
+        let write =
+            self.with_level(|b, level, ticks| b.plan_fluid_pickup(level, ticks, at, creative))?;
         let key = mod_api::__private::fluid_key(write.fluid.name())?;
         self.journal_fluid_write(level, write, true, player);
         Some(FluidStack::new(key, BUCKET))

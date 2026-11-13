@@ -83,5 +83,6 @@ pub fn block_capability_proxyable(host: &dyn Host, name: &str) -> bool {
 
 /// An owned snapshot of the known published capabilities safe to forward to another block.
 pub fn block_capability_proxyable_names(host: &dyn Host) -> Vec<String> {
-    host.capability_providers().block_capability_proxyable_names()
+    host.capability_providers()
+        .block_capability_proxyable_names()
 }

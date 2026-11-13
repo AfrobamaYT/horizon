@@ -121,8 +121,10 @@ pub fn item_key_by_identifier(id: &crate::Identifier) -> Option<ItemKey> {
 }
 
 /// Entity types use the same requested-slot and immutable resolved-table lifecycle as items.
-fn resolved_entity_types() -> &'static std::sync::OnceLock<horizon_mod_runtime::registry_keys::Names> {
-    static EMPTY: std::sync::OnceLock<horizon_mod_runtime::registry_keys::Names> = std::sync::OnceLock::new();
+fn resolved_entity_types() -> &'static std::sync::OnceLock<horizon_mod_runtime::registry_keys::Names>
+{
+    static EMPTY: std::sync::OnceLock<horizon_mod_runtime::registry_keys::Names> =
+        std::sync::OnceLock::new();
     crate::parts::installed().map_or(&EMPTY, |installed| &installed.resolved_entity_types)
 }
 static MENUS: std::sync::LazyLock<
@@ -187,9 +189,11 @@ fn ordered_slot_is_live(
 
 /// Complete the built-in entity-type registry in `ids`' registration order.
 pub fn resolve_entity_types<'a>(ids: impl IntoIterator<Item = &'a str>) -> Result<(), Vec<String>> {
-    let names = crate::parts::requested_keys().entity_types.complete(ids, |mod_id, id| {
-        format!("mod {mod_id} requested unknown entity type {id}")
-    })?;
+    let names = crate::parts::requested_keys()
+        .entity_types
+        .complete(ids, |mod_id, id| {
+            format!("mod {mod_id} requested unknown entity type {id}")
+        })?;
     let _ = resolved_entity_types().set(names);
     Ok(())
 }
@@ -224,9 +228,15 @@ pub fn item_keys() -> Vec<ItemKey> {
 
 /// Every built-in entity-type key in registry order.
 pub fn entity_type_keys() -> Vec<EntityTypeKey> {
-    resolved_entity_types().get().map_or_else(Vec::new, |names| {
-        names.order.iter().map(|slot| EntityTypeKey(*slot)).collect()
-    })
+    resolved_entity_types()
+        .get()
+        .map_or_else(Vec::new, |names| {
+            names
+                .order
+                .iter()
+                .map(|slot| EntityTypeKey(*slot))
+                .collect()
+        })
 }
 
 /// Every built-in menu key in registry order.
@@ -244,7 +254,11 @@ impl EntityTypeKey {
     #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
         crate::parts::registration_membership(crate::parts::RegistrationKeyKind::EntityType, slot)
-            .unwrap_or_else(|| resolved_entity_types().get().is_some_and(|names| names.id(slot).is_some()))
+            .unwrap_or_else(|| {
+                resolved_entity_types()
+                    .get()
+                    .is_some_and(|names| names.id(slot).is_some())
+            })
             .then_some(Self(slot))
             .ok_or("unknown EntityTypeKey slot")
     }

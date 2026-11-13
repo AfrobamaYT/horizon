@@ -1,8 +1,14 @@
 //! Native behavioral coverage of the explicit default-provider domain cutover.
 #[cfg(test)]
 mod tests {
-    use crate::{Hooks, ModEntry, Registrar, RegistrationContext, Host, ITEMS, STORAGE, FLUIDS, ENERGY, ITEM_ITEMS, ITEM_FLUIDS};
-    use std::sync::{Arc, atomic::{AtomicU32, AtomicUsize, Ordering}};
+    use crate::{
+        ENERGY, FLUIDS, Hooks, Host, ITEM_FLUIDS, ITEM_ITEMS, ITEMS, ModEntry, Registrar,
+        RegistrationContext, STORAGE,
+    };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU32, AtomicUsize, Ordering},
+    };
 
     struct Defaults {
         slots: Arc<AtomicU32>,
@@ -65,21 +71,52 @@ mod tests {
         let slots = Arc::new(AtomicU32::new(0));
         let calls = Arc::new(AtomicUsize::new(0));
         crate::__private::part_tests::install_parts_fixture(&[
-            ModEntry::new("defaults", Box::new(Defaults {
-                slots: slots.clone(), calls: calls.clone(),
-            })),
+            ModEntry::new(
+                "defaults",
+                Box::new(Defaults {
+                    slots: slots.clone(),
+                    calls: calls.clone(),
+                }),
+            ),
             ModEntry::new("later", Box::new(LaterDefaults)),
-        ]).unwrap();
+        ])
+        .unwrap();
         let host = crate::testing::FakeHost::new();
         assert_eq!(calls.load(Ordering::SeqCst), 0);
-        assert_eq!(mod_vocab::__private::parts_installation::item_container_slots(&host, "defaults:backpack"), None);
+        assert_eq!(
+            mod_vocab::__private::parts_installation::item_container_slots(
+                &host,
+                "defaults:backpack"
+            ),
+            None
+        );
         slots.store(7, Ordering::SeqCst);
-        assert_eq!(mod_vocab::__private::parts_installation::item_container_slots(&host, "defaults:backpack"), Some(7));
+        assert_eq!(
+            mod_vocab::__private::parts_installation::item_container_slots(
+                &host,
+                "defaults:backpack"
+            ),
+            Some(7)
+        );
         assert_eq!(calls.load(Ordering::SeqCst), 2);
-        assert_eq!(mod_vocab::__private::parts_installation::block_container("defaults:machine").unwrap().slots, 0);
-        assert_eq!(mod_vocab::__private::parts_installation::block_container("later:machine").unwrap().slots, 9);
-        assert!(mod_vocab::__private::parts_installation::block_fluids("defaults:machine").is_some());
-        assert!(mod_vocab::__private::parts_installation::block_energy("defaults:machine").is_some());
+        assert_eq!(
+            mod_vocab::__private::parts_installation::block_container("defaults:machine")
+                .unwrap()
+                .slots,
+            0
+        );
+        assert_eq!(
+            mod_vocab::__private::parts_installation::block_container("later:machine")
+                .unwrap()
+                .slots,
+            9
+        );
+        assert!(
+            mod_vocab::__private::parts_installation::block_fluids("defaults:machine").is_some()
+        );
+        assert!(
+            mod_vocab::__private::parts_installation::block_energy("defaults:machine").is_some()
+        );
     }
 
     #[test]
@@ -89,13 +126,26 @@ mod tests {
         let zombie = registrar_api.entity_type_key("minecraft:zombie");
         let pig = registrar_api.entity_type_key("minecraft:pig");
         assert_ne!(zombie, pig);
-        super::super::install_registrar(registrar, &crate::__private::part_tests::rule_schema()).unwrap();
+        super::super::install_registrar(registrar, &crate::__private::part_tests::rule_schema())
+            .unwrap();
         mod_vocab::__private::resolve_entity_types(["minecraft:pig", "minecraft:zombie"]).unwrap();
-        assert_eq!(mod_vocab::__private::entity_type_key_id(zombie).as_deref(), Some("minecraft:zombie"));
-        assert_eq!(mod_vocab::__private::entity_type_key_id(pig).as_deref(), Some("minecraft:pig"));
+        assert_eq!(
+            mod_vocab::__private::entity_type_key_id(zombie).as_deref(),
+            Some("minecraft:zombie")
+        );
+        assert_eq!(
+            mod_vocab::__private::entity_type_key_id(pig).as_deref(),
+            Some("minecraft:pig")
+        );
         assert_eq!(mod_vocab::__private::entity_type_keys(), [pig, zombie]);
         let errors = mod_vocab::__private::resolve_entity_types(["minecraft:pig"]).unwrap_err();
-        assert_eq!(errors, ["mod requester requested unknown entity type minecraft:zombie"]);
-        assert_eq!(mod_vocab::__private::entity_type_key_id(zombie).as_deref(), Some("minecraft:zombie"));
+        assert_eq!(
+            errors,
+            ["mod requester requested unknown entity type minecraft:zombie"]
+        );
+        assert_eq!(
+            mod_vocab::__private::entity_type_key_id(zombie).as_deref(),
+            Some("minecraft:zombie")
+        );
     }
 }

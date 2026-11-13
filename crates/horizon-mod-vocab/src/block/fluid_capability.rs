@@ -156,9 +156,11 @@ impl FluidIngredient {
             Some(canonical)
         });
         fn nonempty_tree(source: &WalkedIngredient) -> bool {
-            !source.order.is_empty() && source.children.as_ref().is_none_or(|(_, children)| {
-                children.iter().all(nonempty_tree)
-            })
+            !source.order.is_empty()
+                && source
+                    .children
+                    .as_ref()
+                    .is_none_or(|(_, children)| children.iter().all(nonempty_tree))
         }
         let source = source.filter(nonempty_tree).ok_or_else(|| {
             unknown.into_inner().map_or(
@@ -332,8 +334,7 @@ static BUCKET_IDS: std::sync::LazyLock<[crate::Identifier; 3]> = std::sync::Lazy
 
 /// Type-only coverage uses the very identifiers resolved by the default bucket provider.
 pub(crate) fn builtin_bucket(item: &str) -> bool {
-    crate::Identifier::parse_namespaced(item)
-        .is_some_and(|item| BUCKET_IDS.contains(&item))
+    crate::Identifier::parse_namespaced(item).is_some_and(|item| BUCKET_IDS.contains(&item))
 }
 
 /// A bucket holds this much, all or nothing.

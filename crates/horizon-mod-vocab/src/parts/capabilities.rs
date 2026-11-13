@@ -183,8 +183,16 @@ impl CapabilitiesCapabilityProviders for InstalledProviders {
     }
     fn block_capability_names(&self) -> Vec<String> {
         match installed() {
-            Some(installed) => installed.keys.block_capability_order.iter().map(|name| (*name).to_owned()).collect(),
-            None => providers_of::builtin_block_capabilities().into_iter().map(|(name, _)| name.to_owned()).collect(),
+            Some(installed) => installed
+                .keys
+                .block_capability_order
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect(),
+            None => providers_of::builtin_block_capabilities()
+                .into_iter()
+                .map(|(name, _)| name.to_owned())
+                .collect(),
         }
     }
     fn block_capability_proxyable(&self, name: &str) -> bool {
@@ -193,8 +201,13 @@ impl CapabilitiesCapabilityProviders for InstalledProviders {
             .is_some_and(|(_, proxyable)| *proxyable == Some(true))
     }
     fn block_capability_proxyable_names(&self) -> Vec<String> {
-        let Some(installed) = installed() else { return Vec::new() };
-        installed.keys.block_capability_order.iter()
+        let Some(installed) = installed() else {
+            return Vec::new();
+        };
+        installed
+            .keys
+            .block_capability_order
+            .iter()
             .filter(|name| self.block_capability_proxyable(name))
             .map(|name| (*name).to_owned())
             .collect()

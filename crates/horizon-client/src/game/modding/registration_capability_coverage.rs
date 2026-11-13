@@ -36,7 +36,9 @@ pub(super) fn builtin(by: ProvidedBy, capability: &str, kind: &str) -> bool {
                 mod_api::__private::parts_installation::builtin_player_inventory_type(kind)
                     || kind == armor_stands::TYPE_ID
                     || kind.strip_prefix("minecraft:").is_some_and(|name| {
-                        species::ALL.iter().any(|definition| definition.name == name)
+                        species::ALL
+                            .iter()
+                            .any(|definition| definition.name == name)
                     })
                     || automation_container(kind)
             } else {
@@ -118,7 +120,10 @@ mod tests {
                 "minecraft:chiseled_bookshelf",
                 "minecraft:oak_shelf",
             ] {
-                assert!(builtin(ProvidedBy::Block, capability, kind), "{capability} {kind}");
+                assert!(
+                    builtin(ProvidedBy::Block, capability, kind),
+                    "{capability} {kind}"
+                );
             }
             for kind in [
                 "minecraft:stone",
@@ -130,7 +135,10 @@ mod tests {
                 "minecraft:suspicious_sand",
                 "test:chest",
             ] {
-                assert!(!builtin(ProvidedBy::Block, capability, kind), "{capability} {kind}");
+                assert!(
+                    !builtin(ProvidedBy::Block, capability, kind),
+                    "{capability} {kind}"
+                );
             }
         }
     }
@@ -146,8 +154,14 @@ mod tests {
             "minecraft:llama",
             "minecraft:trader_llama",
         ] {
-            assert!(builtin(ProvidedBy::Entity, mod_api::ENTITY_ITEMS.name, kind), "{kind}");
-            assert!(!builtin(ProvidedBy::Entity, mod_api::ENTITY_AUTOMATION.name, kind), "{kind}");
+            assert!(
+                builtin(ProvidedBy::Entity, mod_api::ENTITY_ITEMS.name, kind),
+                "{kind}"
+            );
+            assert!(
+                !builtin(ProvidedBy::Entity, mod_api::ENTITY_AUTOMATION.name, kind),
+                "{kind}"
+            );
         }
         for kind in [
             "minecraft:chest_minecart",
@@ -156,7 +170,10 @@ mod tests {
             "minecraft:bamboo_chest_raft",
         ] {
             for capability in [mod_api::ENTITY_ITEMS.name, mod_api::ENTITY_AUTOMATION.name] {
-                assert!(builtin(ProvidedBy::Entity, capability, kind), "{capability} {kind}");
+                assert!(
+                    builtin(ProvidedBy::Entity, capability, kind),
+                    "{capability} {kind}"
+                );
             }
         }
         for kind in [
@@ -167,30 +184,95 @@ mod tests {
             "test:zombie",
         ] {
             for capability in [mod_api::ENTITY_ITEMS.name, mod_api::ENTITY_AUTOMATION.name] {
-                assert!(!builtin(ProvidedBy::Entity, capability, kind), "{capability} {kind}");
+                assert!(
+                    !builtin(ProvidedBy::Entity, capability, kind),
+                    "{capability} {kind}"
+                );
             }
         }
     }
 
     #[test]
     fn every_builtin_capability_routes_to_its_actual_default() {
-        assert!(builtin(ProvidedBy::Block, mod_api::FLUIDS.name, "minecraft:cauldron"));
-        assert!(builtin(ProvidedBy::Block, mod_api::FLUIDS.name, "minecraft:water_cauldron"));
-        assert!(builtin(ProvidedBy::Block, mod_api::FLUIDS.name, "minecraft:lava_cauldron"));
-        assert!(!builtin(ProvidedBy::Block, mod_api::FLUIDS.name, "minecraft:powder_snow_cauldron"));
-        assert!(!builtin(ProvidedBy::Block, mod_api::ENERGY.name, "minecraft:chest"));
-        assert!(!builtin(ProvidedBy::Entity, mod_api::ENTITY_ENERGY.name, "minecraft:player"));
-        assert!(!builtin(ProvidedBy::Entity, mod_api::ENTITY_FLUIDS.name, "minecraft:player"));
-        for kind in ["minecraft:bucket", "minecraft:water_bucket", "minecraft:lava_bucket"] {
-            assert!(builtin(ProvidedBy::Item, mod_api::ITEM_FLUIDS.name, kind), "{kind}");
+        assert!(builtin(
+            ProvidedBy::Block,
+            mod_api::FLUIDS.name,
+            "minecraft:cauldron"
+        ));
+        assert!(builtin(
+            ProvidedBy::Block,
+            mod_api::FLUIDS.name,
+            "minecraft:water_cauldron"
+        ));
+        assert!(builtin(
+            ProvidedBy::Block,
+            mod_api::FLUIDS.name,
+            "minecraft:lava_cauldron"
+        ));
+        assert!(!builtin(
+            ProvidedBy::Block,
+            mod_api::FLUIDS.name,
+            "minecraft:powder_snow_cauldron"
+        ));
+        assert!(!builtin(
+            ProvidedBy::Block,
+            mod_api::ENERGY.name,
+            "minecraft:chest"
+        ));
+        assert!(!builtin(
+            ProvidedBy::Entity,
+            mod_api::ENTITY_ENERGY.name,
+            "minecraft:player"
+        ));
+        assert!(!builtin(
+            ProvidedBy::Entity,
+            mod_api::ENTITY_FLUIDS.name,
+            "minecraft:player"
+        ));
+        for kind in [
+            "minecraft:bucket",
+            "minecraft:water_bucket",
+            "minecraft:lava_bucket",
+        ] {
+            assert!(
+                builtin(ProvidedBy::Item, mod_api::ITEM_FLUIDS.name, kind),
+                "{kind}"
+            );
         }
-        for kind in ["minecraft:milk_bucket", "minecraft:powder_snow_bucket", "minecraft:cod_bucket"] {
-            assert!(!builtin(ProvidedBy::Item, mod_api::ITEM_FLUIDS.name, kind), "{kind}");
+        for kind in [
+            "minecraft:milk_bucket",
+            "minecraft:powder_snow_bucket",
+            "minecraft:cod_bucket",
+        ] {
+            assert!(
+                !builtin(ProvidedBy::Item, mod_api::ITEM_FLUIDS.name, kind),
+                "{kind}"
+            );
         }
-        assert!(!builtin(ProvidedBy::Item, mod_api::ITEM_ITEMS.name, "minecraft:shulker_box"));
-        assert!(!builtin(ProvidedBy::Item, mod_api::ITEM_ENERGY.name, "minecraft:bucket"));
-        assert!(!builtin(ProvidedBy::Block, "test:capability", "minecraft:chest"));
-        assert!(!builtin(ProvidedBy::Item, "test:capability", "minecraft:bucket"));
-        assert!(!builtin(ProvidedBy::Entity, "test:capability", "minecraft:player"));
+        assert!(!builtin(
+            ProvidedBy::Item,
+            mod_api::ITEM_ITEMS.name,
+            "minecraft:shulker_box"
+        ));
+        assert!(!builtin(
+            ProvidedBy::Item,
+            mod_api::ITEM_ENERGY.name,
+            "minecraft:bucket"
+        ));
+        assert!(!builtin(
+            ProvidedBy::Block,
+            "test:capability",
+            "minecraft:chest"
+        ));
+        assert!(!builtin(
+            ProvidedBy::Item,
+            "test:capability",
+            "minecraft:bucket"
+        ));
+        assert!(!builtin(
+            ProvidedBy::Entity,
+            "test:capability",
+            "minecraft:player"
+        ));
     }
 }

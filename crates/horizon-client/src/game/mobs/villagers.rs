@@ -777,10 +777,9 @@ mod birth_tests {
 
     fn parents(game: &mut Game<'_>) -> (u32, u32) {
         game.mobs.clear();
-        game.world.chunks.insert(
-            (0, 0),
-            Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-        );
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
         let bed = game
             .pack
             .assets
@@ -797,7 +796,12 @@ mod birth_tests {
             })
             .unwrap();
         game.world.set(BED[0], BED[1], BED[2], bed).unwrap();
-        let kind = game.res.mob_types().get("minecraft:villager").unwrap().clone();
+        let kind = game
+            .res
+            .mob_types()
+            .get("minecraft:villager")
+            .unwrap()
+            .clone();
         let parent = game.next_entity + 1;
         let partner = parent + 1;
         game.next_entity = partner;
@@ -827,7 +831,10 @@ mod birth_tests {
         }])
         .unwrap();
         for id in [parent, partner] {
-            assert_eq!(game.mobs.iter().find(|m| m.id == id).unwrap().extra.age, 6000);
+            assert_eq!(
+                game.mobs.iter().find(|m| m.id == id).unwrap().extra.age,
+                6000
+            );
         }
     }
 
@@ -879,7 +886,11 @@ mod birth_tests {
 
     fn assert_baby(game: &Game<'_>, parent: u32, partner: u32) {
         assert_eq!(game.mobs.len(), 3);
-        let baby = game.mobs.iter().find(|m| m.id != parent && m.id != partner).unwrap();
+        let baby = game
+            .mobs
+            .iter()
+            .find(|m| m.id != parent && m.id != partner)
+            .unwrap();
         assert_eq!(baby.extra.age, -24000);
         assert_eq!(baby.extra.variant, 2);
         assert_eq!(baby.extra.bed, Some(BED));

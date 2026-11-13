@@ -10,7 +10,11 @@ pub(in crate::game) const EMPTY_CAULDRON: &str = "minecraft:cauldron";
 
 /// The same vanilla content definitions seed runtime tables and registration coverage.
 const VANILLA_CONTENTS: [(&str, &str, Option<(&str, u32)>); 2] = [
-    ("minecraft:water_cauldron", "minecraft:water", Some(("level", 3))),
+    (
+        "minecraft:water_cauldron",
+        "minecraft:water",
+        Some(("level", 3)),
+    ),
     ("minecraft:lava_cauldron", "minecraft:lava", None),
 ];
 

@@ -19,7 +19,11 @@ impl<F: Fn(&dyn Host) -> Option<u32> + Send + Sync> ItemContainerProvider for F 
 
 impl dyn Registrar + '_ {
     /// Register the dynamic default item-container provider for this item type.
-    pub fn item_container(&mut self, item: &crate::ItemKey, provider: impl ItemContainerProvider + 'static) {
+    pub fn item_container(
+        &mut self,
+        item: &crate::ItemKey,
+        provider: impl ItemContainerProvider + 'static,
+    ) {
         self.register_item_container(item, Arc::new(provider));
     }
 }
@@ -35,7 +39,11 @@ pub trait DefaultCapabilitiesRegistrar {
     /// Declare this block's energy buffer, validated by the normal game table builder.
     fn block_energy(&mut self, block: &crate::BlockKey, energy: crate::ModEnergyBuffer);
     /// Register the type-bound callback used by `item_container`.
-    fn register_item_container(&mut self, item: &crate::ItemKey, provider: Arc<dyn ItemContainerProvider>);
+    fn register_item_container(
+        &mut self,
+        item: &crate::ItemKey,
+        provider: Arc<dyn ItemContainerProvider>,
+    );
 }
 
 /// Default-provider operations available to both native and portable hosts.
@@ -49,7 +57,11 @@ pub trait DefaultCapabilitiesCapabilityProviders {
     /// First enabled declaration of this block's energy buffer.
     fn block_energy(&self, block: &str) -> Option<crate::ModEnergyBuffer>;
     /// Registered item callbacks in registration order, without a global mod scan.
-    fn item_container_provider(&self, item: &str, index: &mut u32) -> Option<Arc<dyn ItemContainerProvider>>;
+    fn item_container_provider(
+        &self,
+        item: &str,
+        index: &mut u32,
+    ) -> Option<Arc<dyn ItemContainerProvider>>;
 }
 
 impl DefaultCapabilitiesCapabilityProviders for InstalledProviders {
@@ -62,7 +74,11 @@ impl DefaultCapabilitiesCapabilityProviders for InstalledProviders {
     fn block_energy(&self, block: &str) -> Option<crate::ModEnergyBuffer> {
         first_enabled(installed()?.keys.default_block_energy.get(block)?)
     }
-    fn item_container_provider(&self, item: &str, index: &mut u32) -> Option<Arc<dyn ItemContainerProvider>> {
+    fn item_container_provider(
+        &self,
+        item: &str,
+        index: &mut u32,
+    ) -> Option<Arc<dyn ItemContainerProvider>> {
         let providers = installed()?.keys.default_item_containers.get(item)?;
         while (*index as usize) < providers.len() {
             let at = *index as usize;
@@ -77,5 +93,8 @@ impl DefaultCapabilitiesCapabilityProviders for InstalledProviders {
 }
 
 fn first_enabled<T: Clone>(declarations: &[(usize, T)]) -> Option<T> {
-    declarations.iter().find(|(index, _)| crate::mod_index_on(*index)).map(|(_, declaration)| declaration.clone())
+    declarations
+        .iter()
+        .find(|(index, _)| crate::mod_index_on(*index))
+        .map(|(_, declaration)| declaration.clone())
 }

@@ -57,7 +57,8 @@ fn run() {
     mods::install_registration_data(&root).unwrap();
     let entries = std::mem::take(&mut loaded.mods);
     mod_platform::testing::with_mods(entries.into(), || {
-        mod_platform::__private::part_tests::install_parts_fixture(mod_api::__private::mods()).unwrap();
+        mod_platform::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
+            .unwrap();
         let host = mod_platform::testing::FakeHost::new();
         // Written only after the guest's assertions finish. A swallowed guest trap
         // or a skipped marker branch cannot satisfy this observation.

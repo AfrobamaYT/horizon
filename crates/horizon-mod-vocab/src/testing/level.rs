@@ -94,15 +94,17 @@ impl FakeLevel {
     /// The fluid source block at `pos` taken away: its fluid (never `minecraft:empty`, which has
     /// no world form).
     pub(super) fn take_source(&mut self, level: LevelRef, pos: [i32; 3]) -> Option<FluidKey> {
-        let id = self.block_at(level, pos).filter(|id| *id != "minecraft:empty")?;
+        let id = self
+            .block_at(level, pos)
+            .filter(|id| *id != "minecraft:empty")?;
         let fluid = crate::content::registry_keys::fluid_key(id)?;
         self.blocks.remove(&pos);
         Some(fluid)
     }
     /// A source of `fluid` put at `pos`, where no block or block entity is: whether it went.
     pub(super) fn put_source(&mut self, level: LevelRef, pos: [i32; 3], fluid: FluidKey) -> bool {
-        let Some(id) = crate::content::registry_keys::fluid_id(fluid)
-            .filter(|id| *id != "minecraft:empty")
+        let Some(id) =
+            crate::content::registry_keys::fluid_id(fluid).filter(|id| *id != "minecraft:empty")
         else {
             return false;
         };

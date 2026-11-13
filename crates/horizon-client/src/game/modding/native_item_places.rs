@@ -3,8 +3,8 @@
 //! menu slot shows (ender chest, crafting grid, a mod's chest menu). Mods read and write
 //! them through `ItemPlace`'s `stack`, `insert` and `extract`, which come here for these places; a block entity's slots,
 //! a stack inside an item and a mod's own places go through their handlers.
-use super::transactions::After;
 use super::Game;
+use super::transactions::After;
 use horizon_client::{first_person::Hand, items::ItemStack};
 use mod_api::__private::game::*;
 use mod_api::{EquipmentSlot, ItemPlace, LivingRef, Transaction};
@@ -33,9 +33,7 @@ impl Game<'_> {
     ) -> Option<R> {
         let key = (i32::MAX - 15, super::minecarts::CART_KEY_Y, id as i32);
         let at = |p: &horizon_core::geometry::Vec3| [p.x, p.y, p.z];
-        let container = |c: &super::minecarts::Minecart| {
-            c.id == id && c.kind.slots() > 0
-        };
+        let container = |c: &super::minecarts::Minecart| c.id == id && c.kind.slots() > 0;
         let position = if let Some(c) = self.carts.iter().find(|c| container(c)) {
             at(&c.position)
         } else if let Some(b) = self.boats.iter().find(|b| b.id == id && b.chest) {
