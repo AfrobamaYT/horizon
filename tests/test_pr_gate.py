@@ -30,6 +30,11 @@ class GateTests(unittest.TestCase):
             (True, [], "fork-review-rollup-42", "true"),
             (True, ["sync"], "work", "true"),
             (True, [], "sync-28-35", "true"),
+            (True, [], "rollup-76", "true"),
+            (True, [], "rollup-77", "true"),
+            (True, [], "rollupx", "false"),
+            (True, [], "cfix-hooks-rollup-76", "false"),
+            (False, [], "rollup-76", "false"),
             (True, ["bug"], "ci-gate", "false"),
             (False, ["rollup", "sync"], "fork-review-rollup-42", "false"),
         ]
