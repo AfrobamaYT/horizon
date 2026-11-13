@@ -3332,6 +3332,7 @@ mod tests {
 
         let model = Arc::new(Part::parse("root", &json!({"children": {"head": {}}})));
         let kind = Arc::new(MobType {
+            shadow: None,
             id: "minecraft:player".into(),
             species: Species::Zombie,
             width: 0.6,
