@@ -1,7 +1,8 @@
 //! The SDK's build-pinned data (`build-data.tar.xz`): `points.json`, `internals.json`,
-//! `loops.json` and `functions.json`, written by the staging pass and read by the launcher and the mod tools. Each file
-//! opens with the same header, `schema` and `build.commit`, so a file names the game build it
-//! describes and a reader refuses a schema it does not know, by name, before reading the rest.
+//! `loops.json` and `functions.json`, written by the staging pass and read by the launcher and the
+//! mod tools. Each file opens with the same header, `schema` and `build.commit`, so a file names
+//! the game build it describes and a reader refuses a schema it does not know, by name, before
+//! reading the rest.
 //! No compatibility promise beyond that: the data is exact to its build.
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
