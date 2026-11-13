@@ -1,6 +1,4 @@
-//! GPU renderer for streamed terrain sections, sky, block outline and HUD.
-//! Section origins are supplied relative to the camera each frame so large
-//! world coordinates keep full precision.
+//! GPU renderer: terrain, sky, block outline and HUD. Camera-relative section origins keep world coordinates precise.
 use crate::{
     Result,
     block_entity_render::{StaticCacheFrameStats, StaticSectionRevision, StaticSectionSnapshot},
