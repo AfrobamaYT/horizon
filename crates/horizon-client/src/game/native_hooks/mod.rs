@@ -73,12 +73,12 @@ use mod_api::{
     CauldronInteractions, ClientAudioOptions, ClientChatOptions, ClientGraphicsOptions,
     ClientGuiOptions, ClientInputOptions, ClientMiningPrediction, ClientModifiers,
     ClientReloadListeners, ColorResolvers, CommandInvocation, EnchantmentDamageEffects,
-    EnchantmentInfo, EntityRef, EntityRenderers, GameRuleActor, HandRender, InsideEffects,
-    InteractionAttempt, InteractionKey, ItemEntityRef, JsonAnimationType, LayerDefinition,
-    LifecycleContext, LivingRef, LoadConditions, NoteBlockChange, ParticleProviders,
-    PathComputationType, Placement, PlayerRef, PoiTypeExtensions, RecipeBookCategory, ScreenId,
-    ScreenOpening, ScreenshotImage, ServerReloadListeners, ServerTickPhase, TicketController,
-    ToolUse, VillagerProfessions, WorldPhase,
+    EnchantmentInfo, EntityLayers, EntityRef, EntityRenderers, GameRuleActor, HandRender,
+    InsideEffects, InteractionAttempt, InteractionKey, ItemEntityRef, JsonAnimationType,
+    LayerDefinition, LifecycleContext, LivingRef, LoadConditions, NoteBlockChange,
+    ParticleProviders, PathComputationType, Placement, PlayerRef, PoiTypeExtensions,
+    RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage, ServerReloadListeners,
+    ServerTickPhase, TicketController, ToolUse, VillagerProfessions, WorldPhase,
 };
 use mod_api::{
     ActiveEffect, AttachmentStore, BlockClick, BlockUpdateFlags, BonemealSource, ChunkRef,
