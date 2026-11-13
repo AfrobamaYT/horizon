@@ -92,10 +92,12 @@ jobs:
           shared-key: launcher-windows-check
           # One cache from main, read by every pull request: per-PR caches filled the 10 GB budget and evicted main's.
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: "cargo test --no-fail-fast --release --locked -p horizon-mod-package --features runtime-process --lib output::"
+      # Debug builds: no launcher test depends on a release-only path (cfg!(debug_assertions) gates only the
+      # self-update switch and development overrides, which no test reaches), and debug adds overflow checks.
+      - run: "cargo test --no-fail-fast --locked -p horizon-mod-package --features runtime-process --lib output::"
         working-directory: .
       # Every test target (the library, the binary, tests/), as launcher.yml runs them.
-      - run: cargo test --no-fail-fast --release --locked
+      - run: cargo test --no-fail-fast --locked
 
   runtime-leases:
     # The daily run's call (and a hand dispatch): it starts child processes, so it is a daily test.
