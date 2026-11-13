@@ -6,10 +6,11 @@ mod rust;
 #[cfg(test)]
 mod tests;
 mod walk;
+mod wire_forms;
 
 use crate::catalog::{self, Catalog};
 use crate::index::{Found, Index, ItemId};
-use mod_surface::shape::Shapes;
+use mod_surface::shape::{ShapeError, Shapes};
 use mod_surface::*;
 use quote::ToTokens;
 use rust::{Layouts, Paths, param_names, print};
@@ -18,45 +19,42 @@ use std::path::Path;
 use syn::visit_mut::VisitMut;
 use syn::{Item, Visibility};
 use walk::{attrs, compiled, hidden};
+use wire_forms::WireForm;
 
-/// What the wire index says about the traits that cross the boundary.
+/// What the wire index says about the traits that cross the boundary, by trait path as the
+/// index writes it below `mod_api` (`Hooks`, `item::menu::SlotView`,
+/// `ResourceHandler<ItemResource>`); [`build`] resolves each to its trait.
 #[derive(Default)]
 pub(crate) struct Boundary {
-    /// By trait name.
-    roles: BTreeMap<String, Role>,
-    sides: BTreeMap<String, Side>,
-    /// (trait, method) → why it cannot cross.
-    unbound: BTreeMap<(String, String), String>,
-    /// An area trait → the union trait it is part of.
-    unions: BTreeMap<String, String>,
-}
-
-/// A trait's name without its path or arguments (`ResourceHandler<ItemResource>` → `ResourceHandler`).
-fn trait_name(owner: &str) -> String {
-    let bare = owner.split('<').next().unwrap_or(owner);
-    bare.rsplit("::").next().unwrap_or(bare).to_owned()
+    roles: Vec<(String, Role)>,
+    sides: Vec<(String, Side)>,
+    /// (trait, method, why it cannot cross).
+    unbound: Vec<(String, String, String)>,
+    /// (union trait, area trait that is part of it).
+    unions: Vec<(String, String)>,
 }
 
 impl Boundary {
     fn from_wire(surface: &crate::wire::Surface<'_>) -> Self {
         let mut boundary = Self::default();
         for owner in crate::wire::imports() {
-            boundary.roles.insert(trait_name(owner), Role::Call);
+            boundary.roles.push(((*owner).to_owned(), Role::Call));
         }
         for owner in crate::wire::exports() {
-            boundary.roles.insert(trait_name(owner), Role::Implement);
+            boundary.roles.push(((*owner).to_owned(), Role::Implement));
         }
         for (owner, area) in &surface.parts {
-            boundary.unions.insert(trait_name(area), trait_name(owner));
+            boundary.unions.push(((*owner).to_owned(), area.clone()));
         }
         for unbound in &surface.unbound {
-            boundary.unbound.insert(
-                (trait_name(unbound.owner), unbound.name.clone()),
+            boundary.unbound.push((
+                unbound.owner.to_owned(),
+                unbound.name.clone(),
                 unbound.why.clone(),
-            );
+            ));
         }
-        boundary.sides.insert("ServerHost".into(), Side::Server);
-        boundary.sides.insert("ClientHost".into(), Side::Client);
+        boundary.sides.push(("ServerHost".into(), Side::Server));
+        boundary.sides.push(("ClientHost".into(), Side::Client));
         for (owner, accessor, _) in crate::wire::REACHED {
             let side = if accessor.starts_with("server_host") {
                 Side::Server
@@ -65,38 +63,90 @@ impl Boundary {
             } else {
                 continue;
             };
-            boundary.sides.insert(trait_name(owner), side);
+            boundary.sides.push(((*owner).to_owned(), side));
         }
         boundary
     }
+}
 
-    fn find<'b, T>(&'b self, map: &'b BTreeMap<String, T>, name: &str) -> Option<&'b T> {
-        map.get(name)
-            .or_else(|| self.unions.get(name).and_then(|union| map.get(union)))
+/// [`Boundary`] resolved to the traits themselves.
+#[derive(Default)]
+struct Roles {
+    role: HashMap<ItemId, Role>,
+    side: HashMap<ItemId, Side>,
+    unbound: HashMap<(ItemId, String), String>,
+    /// An area trait → the union trait it is part of.
+    union_of: HashMap<ItemId, ItemId>,
+}
+
+impl Roles {
+    fn resolve(index: &mut Index<'_>, boundary: &Boundary, notes: &mut Vec<String>) -> Self {
+        let mut roles = Self::default();
+        let Ok(api) = index.module("mod_api", &[]) else {
+            return roles;
+        };
+        let mut find = |owner: &str, notes: &mut Vec<String>| {
+            let bare = owner.split('<').next().unwrap_or(owner);
+            let segments: Vec<String> = bare.split("::").map(str::to_owned).collect();
+            match index.resolve_path(api, &segments) {
+                Ok(Found::Item(id)) => Some(id),
+                _ => {
+                    notes.push(format!(
+                        "boundary trait {owner}: not found in mod_api, its role is not recorded"
+                    ));
+                    None
+                }
+            }
+        };
+        for (owner, role) in &boundary.roles {
+            if let Some(id) = find(owner, notes) {
+                roles.role.insert(id, *role);
+            }
+        }
+        for (owner, side) in &boundary.sides {
+            if let Some(id) = find(owner, notes) {
+                roles.side.insert(id, *side);
+            }
+        }
+        for (owner, area) in &boundary.unions {
+            if let (Some(owner), Some(area)) = (find(owner, notes), find(area, notes)) {
+                roles.union_of.insert(area, owner);
+            }
+        }
+        for (owner, method, why) in &boundary.unbound {
+            if let Some(id) = find(owner, notes) {
+                roles.unbound.insert((id, method.clone()), why.clone());
+            }
+        }
+        roles
     }
 
-    fn role(&self, name: &str) -> Role {
-        self.find(&self.roles, name).copied().unwrap_or(Role::None)
+    fn find<'r, T>(&'r self, map: &'r HashMap<ItemId, T>, id: ItemId) -> Option<&'r T> {
+        map.get(&id)
+            .or_else(|| self.union_of.get(&id).and_then(|union| map.get(union)))
     }
 
-    fn side(&self, name: &str) -> Side {
-        self.find(&self.sides, name).copied().unwrap_or(Side::Both)
+    fn role(&self, id: ItemId) -> Role {
+        self.find(&self.role, id).copied().unwrap_or(Role::None)
     }
 
-    fn unbound(&self, name: &str, method: &str) -> Option<&String> {
-        self.unbound
-            .get(&(name.to_owned(), method.to_owned()))
-            .or_else(|| {
-                let union = self.unions.get(name)?;
-                self.unbound.get(&(union.clone(), method.to_owned()))
-            })
+    fn side(&self, id: ItemId) -> Side {
+        self.find(&self.side, id).copied().unwrap_or(Side::Both)
+    }
+
+    fn unbound(&self, id: ItemId, method: &str) -> Option<&String> {
+        self.unbound.get(&(id, method.to_owned())).or_else(|| {
+            let union = self.union_of.get(&id)?;
+            self.unbound.get(&(*union, method.to_owned()))
+        })
     }
 }
 
 /// The export, with what it could not classify.
 pub struct Export {
     pub surface: Surface,
-    /// One line per public item or declaration the export has no record kind for.
+    /// One line per public item or declaration the export has no record kind for, and the
+    /// counts of what it skips by rule.
     pub notes: Vec<String>,
 }
 
@@ -104,10 +154,25 @@ impl Export {
     /// How many records of each kind, members included.
     pub fn counts(&self) -> Vec<(&'static str, usize)> {
         let s = &self.surface;
+        let form = |name: &str| {
+            s.types
+                .iter()
+                .filter(|t| {
+                    t.contract
+                        .wire_form
+                        .as_deref()
+                        .is_some_and(|f| f.split(':').next() == Some(name))
+                })
+                .count()
+        };
         vec![
             ("hooks", s.hooks.len()),
             ("traits", s.traits.len()),
             ("methods", s.traits.iter().map(|t| t.methods.len()).sum()),
+            (
+                "associated",
+                s.traits.iter().map(|t| t.associated.len()).sum(),
+            ),
             ("handles", s.handles.len()),
             ("functions", s.functions.len()),
             ("macros", s.macros.len()),
@@ -116,6 +181,18 @@ impl Export {
             ("variants", s.types.iter().map(|t| t.variants.len()).sum()),
             ("parts", s.parts.len()),
             ("capabilities", s.capabilities.len()),
+            ("wire", s.types.iter().filter(|t| t.contract.wire).count()),
+            ("wire_derive", form("derive")),
+            ("wire_fields", form("fields")),
+            ("wire_via", form("via")),
+            ("wire_manual", form("manual")),
+            (
+                "wire_without_shape",
+                s.types
+                    .iter()
+                    .filter(|t| t.contract.wire && t.shape.is_none())
+                    .count(),
+            ),
         ]
     }
 }
@@ -185,15 +262,12 @@ fn not_on_wasm(attrs: &[syn::Attribute]) -> Option<String> {
     Some(why.join(" ").trim().to_owned()).filter(|why| why.len() > 1)
 }
 
-fn wasm(attrs: &[syn::Attribute]) -> Wasm {
-    not_on_wasm(attrs).map_or(Wasm::Yes, Wasm::No)
-}
-
 fn has_attr(attrs: &[syn::Attribute], name: &str) -> bool {
     attrs.iter().any(|attr| attr.path().is_ident(name))
 }
 
-fn derives(attrs: &[syn::Attribute]) -> Vec<String> {
+/// The traits of `attrs`' `#[derive(…)]` lists, by last path segment, sorted.
+pub(super) fn derives(attrs: &[syn::Attribute]) -> Vec<String> {
     let mut out = BTreeSet::new();
     for attr in attrs.iter().filter(|a| a.path().is_ident("derive")) {
         if let Ok(paths) = attr.parse_args_with(
@@ -236,6 +310,19 @@ impl<'a> Writer<'_, 'a> {
         )
     }
 
+    fn path(
+        &mut self,
+        module: usize,
+        params: &[String],
+        path: &syn::Path,
+    ) -> (String, Vec<String>) {
+        let ty = syn::Type::Path(syn::TypePath {
+            qself: None,
+            path: path.clone(),
+        });
+        self.ty(module, params, &ty)
+    }
+
     fn signature(
         &mut self,
         module: usize,
@@ -275,6 +362,47 @@ impl<'a> Writer<'_, 'a> {
         }
         (text.trim().to_owned(), paths.refs.into_iter().collect())
     }
+
+    /// A trait item written without its default (`type Entry: DataMapEntry`,
+    /// `const MAX: u32`), and its references.
+    fn associated(
+        &mut self,
+        module: usize,
+        params: &[String],
+        item: &syn::TraitItem,
+    ) -> Option<(String, AssociatedKind, bool, Vec<String>)> {
+        let (mut written, kind, required) = match item {
+            syn::TraitItem::Type(ty) => {
+                let mut ty = ty.clone();
+                let required = ty.default.is_none();
+                ty.default = None;
+                ty.attrs.clear();
+                (syn::TraitItem::Type(ty), AssociatedKind::Type, required)
+            }
+            syn::TraitItem::Const(constant) => {
+                let mut constant = constant.clone();
+                let required = constant.default.is_none();
+                constant.default = None;
+                constant.attrs.clear();
+                (
+                    syn::TraitItem::Const(constant),
+                    AssociatedKind::Const,
+                    required,
+                )
+            }
+            _ => return None,
+        };
+        let mut paths = self.paths(module, params);
+        paths.visit_trait_item_mut(&mut written);
+        let refs = paths.refs.into_iter().collect();
+        let text = print(written.to_token_stream());
+        Some((
+            text.trim_end_matches(';').trim().to_owned(),
+            kind,
+            required,
+            refs,
+        ))
+    }
 }
 
 fn merge(into: &mut Vec<String>, refs: Vec<String>) {
@@ -283,12 +411,108 @@ fn merge(into: &mut Vec<String>, refs: Vec<String>) {
     into.dedup();
 }
 
+/// An item's public inherent members: methods and consts of `impl Type` and `impl dyn Trait`
+/// blocks, with the block's module, generic parameter names (and `Self`) and generics text.
+struct Inherent {
+    module: usize,
+    params: Vec<String>,
+    generics: syn::Generics,
+    item: syn::ImplItem,
+}
+
+/// What [`inherent_items`] and [`trait_impls`] found.
+struct Impls {
+    inherent: HashMap<ItemId, Vec<Inherent>>,
+    /// The traits implemented for each nameable type, by trait path as written in its module.
+    traits: HashMap<ItemId, Vec<(usize, Vec<String>, syn::Path)>>,
+    /// Impl blocks whose self type the export does not record, by kind.
+    skipped: BTreeMap<&'static str, usize>,
+}
+
+fn impls(
+    index: &mut Index<'_>,
+    modules: &[usize],
+    nameable: &HashMap<ItemId, Vec<String>>,
+) -> Impls {
+    let mut out = Impls {
+        inherent: HashMap::new(),
+        traits: HashMap::new(),
+        skipped: BTreeMap::new(),
+    };
+    for &module in modules {
+        let module_items = index.modules[module].items.clone();
+        for item in module_items {
+            let Item::Impl(block) = item else { continue };
+            if !compiled(&block.attrs) {
+                continue;
+            }
+            let path = match &*block.self_ty {
+                syn::Type::Path(self_ty) if self_ty.qself.is_none() => self_ty.path.clone(),
+                // `impl dyn Trait + '_`: inherent items of the trait object.
+                syn::Type::TraitObject(object) if block.trait_.is_none() => {
+                    match object.bounds.iter().find_map(|bound| match bound {
+                        syn::TypeParamBound::Trait(t) => Some(t.path.clone()),
+                        _ => None,
+                    }) {
+                        Some(path) => path,
+                        None => continue,
+                    }
+                }
+                other => {
+                    let kind = match other {
+                        syn::Type::Reference(_) => "a reference",
+                        syn::Type::TraitObject(_) => "a trait object (trait impl)",
+                        syn::Type::Tuple(_) => "a tuple",
+                        syn::Type::Slice(_) | syn::Type::Array(_) => "a slice or array",
+                        syn::Type::Path(_) => "a qualified path",
+                        _ => "another type form",
+                    };
+                    *out.skipped.entry(kind).or_default() += 1;
+                    continue;
+                }
+            };
+            let segments: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+            let Ok(Found::Item(owner)) = index.resolve_path(module, &segments) else {
+                continue;
+            };
+            if !nameable.contains_key(&owner) {
+                continue;
+            }
+            let mut params = param_names(&block.generics);
+            if let Some((_, trait_path, _)) = &block.trait_ {
+                out.traits
+                    .entry(owner)
+                    .or_default()
+                    .push((module, params, trait_path.clone()));
+                continue;
+            }
+            params.push("Self".into());
+            for impl_item in &block.items {
+                let (vis, attrs) = match impl_item {
+                    syn::ImplItem::Fn(f) => (&f.vis, &f.attrs),
+                    syn::ImplItem::Const(c) => (&c.vis, &c.attrs),
+                    _ => continue,
+                };
+                if matches!(vis, Visibility::Public(_)) && compiled(attrs) && !hidden(attrs) {
+                    out.inherent.entry(owner).or_default().push(Inherent {
+                        module,
+                        params: params.clone(),
+                        generics: block.generics.clone(),
+                        item: impl_item.clone(),
+                    });
+                }
+            }
+        }
+    }
+    out
+}
+
 /// A type before its shape is known.
 struct Pending {
     id: String,
     item: ItemId,
     doc: String,
-    shaped: bool,
+    paths: Vec<String>,
     contract: TypeContract,
     fields: Vec<Field>,
     variants: Vec<Variant>,
@@ -301,11 +525,13 @@ pub(crate) fn build(
     hooks: &[catalog::Hook],
     boundary: &Boundary,
 ) -> Result<Export, String> {
+    // The facade crate is indexed for this walk only.
+    index.add_crate("horizon_mod_api", "crates/horizon-mod-api/src");
     let mut walker = walk::Walker::new(index);
     let public = walker.public()?;
     let mut notes = public.notes.clone();
-    // Inherent methods live in any module of the crate that defines the type.
-    let mut crates: BTreeSet<&'static str> = BTreeSet::from(["mod_api"]);
+    // Inherent items and impls live in any module of the crate that defines the type.
+    let mut crates: BTreeSet<&'static str> = BTreeSet::from(["mod_api", "horizon_mod_api"]);
     for id in public.items.keys() {
         crates.insert(walker.index.modules[id.module].krate);
     }
@@ -314,6 +540,7 @@ pub(crate) fn build(
         modules.extend(walker.all_modules(krate)?);
     }
     notes.extend(walker.take_notes());
+    let roles = Roles::resolve(index, boundary, &mut notes);
     // Every name a mod can write; what is behind `#[doc(hidden)]` is recorded once a recorded
     // signature names it.
     let mut nameable = public.items.clone();
@@ -322,11 +549,17 @@ pub(crate) fn build(
         .iter()
         .map(|(id, path)| (path.join("::"), *id))
         .collect();
+    let forms = wire_forms::wire_forms(index, &modules);
+    let found = impls(index, &modules, &nameable);
+    for (kind, count) in &found.skipped {
+        notes.push(format!(
+            "{count} impl blocks on {kind}: no record kind for their items"
+        ));
+    }
     let mut writer = Writer {
         index,
         public: &nameable,
     };
-    let inherent = inherent_methods(&mut writer, &modules, &nameable);
     let mut queue: Vec<(ItemId, Vec<String>)> = public
         .items
         .iter()
@@ -348,7 +581,6 @@ pub(crate) fn build(
     hidden_events.sort_by(|a, b| b.1.cmp(&a.1));
     queue.extend(hidden_events);
     let mut recorded: std::collections::HashSet<ItemId> = queue.iter().map(|(id, _)| *id).collect();
-    let mut layouts = Layouts::new();
     let mut traits = Vec::new();
     let mut functions = Vec::new();
     let mut pending = Vec::new();
@@ -356,12 +588,19 @@ pub(crate) fn build(
     let mut handles: BTreeMap<String, Function> = BTreeMap::new();
     while let Some((id, path)) = queue.pop() {
         let path = path.join("::");
+        let paths = public.paths.get(&id).cloned().unwrap_or_default();
         let module = id.module;
         let item = writer.index.item(id).clone();
         let mut named: Vec<String> = Vec::new();
+        let owner = match &item {
+            Item::Trait(_) => format!("trait:{path}"),
+            _ => format!("type:{path}"),
+        };
         match &item {
             Item::Struct(_) | Item::Enum(_) | Item::Union(_) | Item::Type(_) => {
-                let record = type_record(&mut writer, id, &path, &item);
+                let impls = found.traits.get(&id).map(Vec::as_slice).unwrap_or_default();
+                let mut record = type_record(&mut writer, id, &path, &item, impls, &forms);
+                record.paths = paths;
                 named.extend(record.contract.refs.iter().cloned());
                 for field in &record.fields {
                     named.extend(field.contract.refs.iter().cloned());
@@ -370,50 +609,35 @@ pub(crate) fn build(
                     named.extend(variant.contract.refs.iter().cloned());
                 }
                 pending.push(record);
-                for (impl_module, params, method) in inherent.get(&id).into_iter().flatten() {
-                    let handle_id = format!("handle:{path}::{}", method.sig.ident);
-                    if handles.contains_key(&handle_id) {
-                        notes.push(format!(
-                            "{handle_id}: a second inherent method of that name (another impl block), not recorded"
-                        ));
-                        continue;
-                    }
-                    let (signature, refs) = writer.signature(*impl_module, params, &method.sig);
-                    named.extend(refs.iter().cloned());
-                    handles.insert(
-                        handle_id.clone(),
-                        Function::new(
-                            handle_id,
-                            doc(&method.attrs),
-                            FunctionContract {
-                                signature,
-                                wasm: wasm(&method.attrs),
-                                refs,
-                            },
-                        ),
-                    );
-                }
             }
             Item::Trait(item) => {
-                let record = trait_record(&mut writer, boundary, module, &path, item);
+                let mut record = trait_record(&mut writer, &roles, id, &path, item);
+                record.paths = paths;
                 named.extend(record.contract.refs.iter().cloned());
                 for method in &record.methods {
                     named.extend(method.contract.refs.iter().cloned());
+                }
+                for associated in &record.associated {
+                    named.extend(associated.contract.refs.iter().cloned());
                 }
                 traits.push(record);
             }
             Item::Fn(function) => {
                 let (signature, refs) = writer.signature(module, &[], &function.sig);
                 named.extend(refs.iter().cloned());
-                functions.push(Function::new(
+                let mut record = Function::new(
                     format!("fn:{path}"),
                     doc(&function.attrs),
                     FunctionContract {
                         signature,
-                        wasm: wasm(&function.attrs),
+                        impl_generics: String::new(),
+                        wasm: not_on_wasm(&function.attrs).is_none(),
                         refs,
                     },
-                ));
+                );
+                record.wasm_reason = not_on_wasm(&function.attrs);
+                record.paths = paths;
+                functions.push(record);
             }
             Item::Const(constant) => match capability_key(&mut writer, module, &path, constant) {
                 Some(capability) => {
@@ -424,6 +648,48 @@ pub(crate) fn build(
             },
             Item::Static(_) => notes.push(format!("static {path}: no record kind for statics")),
             _ => notes.push(format!("{path}: not a kind the surface records")),
+        }
+        for member in found.inherent.get(&id).into_iter().flatten() {
+            let (name, attrs, written) = match &member.item {
+                syn::ImplItem::Fn(method) => (
+                    method.sig.ident.to_string(),
+                    &method.attrs,
+                    writer.signature(member.module, &member.params, &method.sig),
+                ),
+                syn::ImplItem::Const(constant) => {
+                    let (ty, refs) = writer.ty(member.module, &member.params, &constant.ty);
+                    (
+                        constant.ident.to_string(),
+                        &constant.attrs,
+                        (format!("const {}: {ty}", constant.ident), refs),
+                    )
+                }
+                _ => continue,
+            };
+            let handle_id = format!("handle:{path}::{name}");
+            if handles.contains_key(&handle_id) {
+                notes.push(format!(
+                    "{handle_id}: a second inherent item of that name (another impl block), not recorded"
+                ));
+                continue;
+            }
+            let (impl_generics, generic_refs) = writer.generics(member.module, &member.generics);
+            let (signature, mut refs) = written;
+            merge(&mut refs, generic_refs);
+            merge(&mut refs, vec![owner.clone()]);
+            named.extend(refs.iter().cloned());
+            let mut record = Function::new(
+                handle_id.clone(),
+                doc(attrs),
+                FunctionContract {
+                    signature,
+                    impl_generics,
+                    wasm: not_on_wasm(attrs).is_none(),
+                    refs,
+                },
+            );
+            record.wasm_reason = not_on_wasm(attrs);
+            handles.insert(handle_id, record);
         }
         for reference in named {
             let Some((_, target)) = reference.split_once(':') else {
@@ -439,12 +705,12 @@ pub(crate) fn build(
 
     let macros = macros(root, writer.index, &public.macros, &mut notes)?;
 
-    // Shapes, over every type the public types contain.
+    // Shapes, over every type the crossing types contain.
+    let mut layouts = Layouts::new(&forms, &nameable);
     let keys: Vec<Option<String>> = pending
         .iter()
         .map(|record| {
-            record
-                .shaped
+            (record.contract.wire && record.contract.kind != TypeKind::Alias)
                 .then(|| layouts.key(writer.index, record.item))
         })
         .collect();
@@ -453,19 +719,33 @@ pub(crate) fn build(
     let mut types = Vec::new();
     for (record, key) in pending.into_iter().zip(keys) {
         let shape = match key {
-            Some(key) => shapes
-                .shape(&key)
-                .map_err(|e| format!("{}: {e}", record.id))?,
-            None => String::new(),
+            Some(key) => match shapes.shape(&key) {
+                Ok(shape) => Some(shape),
+                Err(ShapeError::Undefined(missing)) => {
+                    notes.push(format!(
+                        "{}: no shape, because {} crosses by a hand-written Wire impl that declares no layout, or does not cross",
+                        record.id,
+                        layouts.named(&missing)
+                    ));
+                    None
+                }
+                Err(error) => {
+                    notes.push(format!("{}: no shape: {error}", record.id));
+                    None
+                }
+            },
+            None => None,
         };
-        types.push(Type::new(
+        let mut built = Type::new(
             record.id,
             record.doc,
             shape,
             record.contract,
             record.fields,
             record.variants,
-        ));
+        );
+        built.paths = record.paths;
+        types.push(built);
     }
 
     let hooks = hook_records(hooks, &types, &mut notes);
@@ -488,67 +768,16 @@ pub(crate) fn build(
     })
 }
 
-/// The public inherent methods of every nameable type, by type: the impl's module, its
-/// generic parameter names (and `Self`), and the method.
-type Inherent = HashMap<ItemId, Vec<(usize, Vec<String>, syn::ImplItemFn)>>;
-
-fn inherent_methods(
-    writer: &mut Writer<'_, '_>,
-    modules: &[usize],
-    nameable: &HashMap<ItemId, Vec<String>>,
-) -> Inherent {
-    let mut out: Inherent = HashMap::new();
-    for &module in modules {
-        let module_items = writer.index.modules[module].items.clone();
-        for item in module_items {
-            let Item::Impl(block) = item else { continue };
-            if block.trait_.is_some() || !compiled(&block.attrs) {
-                continue;
-            }
-            let syn::Type::Path(self_ty) = &*block.self_ty else {
-                continue;
-            };
-            let segments: Vec<String> = self_ty
-                .path
-                .segments
-                .iter()
-                .map(|s| s.ident.to_string())
-                .collect();
-            let Ok(Found::Item(owner)) = writer.index.resolve_path(module, &segments) else {
-                continue;
-            };
-            if !nameable.contains_key(&owner) {
-                continue;
-            }
-            let mut params = param_names(&block.generics);
-            params.push("Self".into());
-            for impl_item in &block.items {
-                let syn::ImplItem::Fn(method) = impl_item else {
-                    continue;
-                };
-                if matches!(method.vis, Visibility::Public(_))
-                    && compiled(&method.attrs)
-                    && !hidden(&method.attrs)
-                {
-                    out.entry(owner)
-                        .or_default()
-                        .push((module, params.clone(), method.clone()));
-                }
-            }
-        }
-    }
-    out
-}
-
 fn trait_record(
     writer: &mut Writer<'_, '_>,
-    boundary: &Boundary,
-    module: usize,
+    roles: &Roles,
+    id: ItemId,
     path: &str,
     item: &syn::ItemTrait,
 ) -> Trait {
-    let name = item.ident.to_string();
-    let role = boundary.role(&name);
+    let module = id.module;
+    let owner = format!("trait:{path}");
+    let role = roles.role(id);
     let (generics, mut refs) = writer.generics(module, &item.generics);
     let mut params = param_names(&item.generics);
     params.push("Self".into());
@@ -562,22 +791,55 @@ fn trait_record(
         bounds.push(print(bound.to_token_stream()));
     }
     let mut methods = Vec::new();
+    let mut associated = Vec::new();
     let mut required = Vec::new();
     for member in &item.items {
+        let attrs = match member {
+            syn::TraitItem::Fn(f) => &f.attrs,
+            syn::TraitItem::Type(t) => &t.attrs,
+            syn::TraitItem::Const(c) => &c.attrs,
+            _ => continue,
+        };
+        if hidden(attrs) || !compiled(attrs) {
+            continue;
+        }
+        if let Some((signature, kind, is_required, mut member_refs)) =
+            writer.associated(module, &params, member)
+        {
+            let name = match member {
+                syn::TraitItem::Type(t) => t.ident.to_string(),
+                syn::TraitItem::Const(c) => c.ident.to_string(),
+                _ => unreachable!("associated items only"),
+            };
+            if is_required && role == Role::Implement {
+                required.push(Required {
+                    name: name.clone(),
+                    signature: signature.clone(),
+                });
+            }
+            merge(&mut member_refs, vec![owner.clone()]);
+            associated.push(Associated::new(
+                format!("assoc:{path}::{name}"),
+                doc(attrs),
+                AssociatedContract {
+                    kind,
+                    signature,
+                    required: is_required,
+                    refs: member_refs,
+                },
+            ));
+            continue;
+        }
         let syn::TraitItem::Fn(method) = member else {
             continue;
         };
-        if hidden(&method.attrs) || !compiled(&method.attrs) {
-            continue;
-        }
         let method_name = method.sig.ident.to_string();
-        let (signature, method_refs) = writer.signature(module, &params, &method.sig);
-        let wasm = match not_on_wasm(&method.attrs) {
-            Some(why) => Wasm::No(why),
-            None => match boundary.unbound(&name, &method_name) {
-                Some(why) if role != Role::None => Wasm::No(why.clone()),
-                _ => Wasm::Yes,
-            },
+        let (signature, mut method_refs) = writer.signature(module, &params, &method.sig);
+        merge(&mut method_refs, vec![owner.clone()]);
+        let reason = match not_on_wasm(&method.attrs) {
+            Some(why) => Some(why),
+            None if role != Role::None => roles.unbound(id, &method_name).cloned(),
+            None => None,
         };
         let is_required = method.default.is_none();
         if is_required && role == Role::Implement {
@@ -586,33 +848,43 @@ fn trait_record(
                 signature: signature.clone(),
             });
         }
-        methods.push(Method::new(
+        let mut record = Method::new(
             format!("method:{path}::{method_name}"),
             doc(&method.attrs),
             MethodContract {
                 signature,
                 required: is_required,
-                wasm,
+                wasm: reason.is_none(),
                 refs: method_refs,
             },
-        ));
+        );
+        record.wasm_reason = reason;
+        methods.push(record);
     }
     Trait::new(
-        format!("trait:{path}"),
+        owner,
         doc(&item.attrs),
         TraitContract {
             role,
-            side: boundary.side(&name),
+            side: roles.side(id),
             generics,
             bounds,
             required,
             refs,
         },
         methods,
+        associated,
     )
 }
 
-fn type_record(writer: &mut Writer<'_, '_>, item_id: ItemId, path: &str, item: &Item) -> Pending {
+fn type_record(
+    writer: &mut Writer<'_, '_>,
+    item_id: ItemId,
+    path: &str,
+    item: &Item,
+    trait_impls: &[(usize, Vec<String>, syn::Path)],
+    forms: &HashMap<ItemId, WireForm>,
+) -> Pending {
     let module = item_id.module;
     let id = format!("type:{path}");
     let attrs = attrs(item).to_vec();
@@ -621,7 +893,6 @@ fn type_record(writer: &mut Writer<'_, '_>, item_id: ItemId, path: &str, item: &
     let mut fields = Vec::new();
     let mut variants = Vec::new();
     let mut members = Vec::new();
-    let mut alias_refs = Vec::new();
     let mut target = None;
     let empty = syn::Generics::default();
     let item_generics = match item {
@@ -631,14 +902,15 @@ fn type_record(writer: &mut Writer<'_, '_>, item_id: ItemId, path: &str, item: &
         Item::Type(t) => &t.generics,
         _ => &empty,
     };
-    let (generics, _) = writer.generics(module, item_generics);
+    let (generics, mut contract_refs) = writer.generics(module, item_generics);
     let params = param_names(item_generics);
+    let owner = id.clone();
     let mut field_records =
         |writer: &mut Writer<'_, '_>, list: &syn::Fields| -> (bool, Vec<String>) {
             let mut all_public = true;
             let mut written = Vec::new();
             for (position, field) in list.iter().enumerate() {
-                let (ty, refs) = writer.ty(module, &params, &field.ty);
+                let (ty, mut refs) = writer.ty(module, &params, &field.ty);
                 let name = field
                     .ident
                     .as_ref()
@@ -654,6 +926,7 @@ fn type_record(writer: &mut Writer<'_, '_>, item_id: ItemId, path: &str, item: &
                 if hidden(&field.attrs) {
                     continue;
                 }
+                merge(&mut refs, vec![owner.clone()]);
                 fields.push(Field::new(
                     format!("{id}.{name}"),
                     doc(&field.attrs),
@@ -662,7 +935,7 @@ fn type_record(writer: &mut Writer<'_, '_>, item_id: ItemId, path: &str, item: &
             }
             (all_public, written)
         };
-    let (kind, constructible, shaped) = match item {
+    let (kind, constructible) = match item {
         Item::Struct(s) => {
             let kind = match &s.fields {
                 syn::Fields::Named(_) => TypeKind::Struct,
@@ -674,7 +947,7 @@ fn type_record(writer: &mut Writer<'_, '_>, item_id: ItemId, path: &str, item: &
             if constructible {
                 members = written;
             }
-            (kind, constructible, true)
+            (kind, constructible)
         }
         Item::Union(u) => {
             let (all_public, written) =
@@ -683,12 +956,12 @@ fn type_record(writer: &mut Writer<'_, '_>, item_id: ItemId, path: &str, item: &
             if constructible {
                 members = written;
             }
-            (TypeKind::Union, constructible, true)
+            (TypeKind::Union, constructible)
         }
         Item::Enum(e) => {
             for variant in &e.variants {
                 let mut arguments = Vec::new();
-                let mut refs = Vec::new();
+                let mut refs = vec![owner.clone()];
                 for (position, field) in variant.fields.iter().enumerate() {
                     let (ty, found) = writer.ty(module, &params, &field.ty);
                     merge(&mut refs, found);
@@ -737,31 +1010,46 @@ fn type_record(writer: &mut Writer<'_, '_>, item_id: ItemId, path: &str, item: &
             if non_exhaustive {
                 members.clear();
             }
-            (TypeKind::Enum, !non_exhaustive, true)
+            (TypeKind::Enum, !non_exhaustive)
         }
         Item::Type(alias) => {
             let (written, refs) = writer.ty(module, &params, &alias.ty);
             target = Some(written);
-            alias_refs = refs;
-            (TypeKind::Alias, false, false)
+            merge(&mut contract_refs, refs);
+            (TypeKind::Alias, false)
         }
         _ => unreachable!("only types reach here"),
     };
+    let mut impls = BTreeSet::new();
+    for (impl_module, impl_params, trait_path) in trait_impls {
+        let (written, refs) = writer.path(*impl_module, impl_params, trait_path);
+        merge(&mut contract_refs, refs);
+        impls.insert(written);
+    }
+    let form = wire_forms::form_of(item_id, &attrs, &derives, forms);
+    let wire_form = form.map(|form| {
+        form.name(|ty, module| {
+            let params = params.clone();
+            writer.ty(module, &params, ty).0
+        })
+    });
     Pending {
         id,
         item: item_id,
         doc: doc(&attrs),
-        shaped,
+        paths: Vec::new(),
         contract: TypeContract {
             kind,
             generics,
-            wire: derives.iter().any(|d| d == "Wire"),
             derives,
+            impls: impls.into_iter().collect(),
+            wire: wire_form.is_some(),
+            wire_form,
             constructible,
             non_exhaustive,
             target,
             members,
-            refs: alias_refs,
+            refs: contract_refs,
         },
         fields,
         variants,
@@ -852,12 +1140,41 @@ fn manifest_capabilities(root: &Path, notes: &mut Vec<String>) -> Vec<Capability
         notes.push("manifest capabilities: no Capability enum in the manifest".into());
         return Vec::new();
     };
+    // The key a manifest writes: serde's `rename` or `rename_all` on the enum.
+    let serde_value = |attrs: &[syn::Attribute], name: &str| {
+        let mut found = None;
+        for attr in attrs.iter().filter(|a| a.path().is_ident("serde")) {
+            let _ = attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident(name) {
+                    found = Some(meta.value()?.parse::<syn::LitStr>()?.value());
+                } else if meta.input.peek(syn::Token![=]) {
+                    let _: syn::Expr = meta.value()?.parse()?;
+                }
+                Ok(())
+            });
+        }
+        found
+    };
+    let rename_all = serde_value(&capability.attrs, "rename_all");
     capability
         .variants
         .iter()
-        .map(|variant| {
-            let key = heck::ToKebabCase::to_kebab_case(variant.ident.to_string().as_str());
-            Capability::new(
+        .filter_map(|variant| {
+            let ident = variant.ident.to_string();
+            let key = match (serde_value(&variant.attrs, "rename"), rename_all.as_deref()) {
+                (Some(key), _) => key,
+                (None, Some("kebab-case")) => heck::ToKebabCase::to_kebab_case(ident.as_str()),
+                (None, Some("snake_case")) => heck::ToSnakeCase::to_snake_case(ident.as_str()),
+                (None, Some("lowercase")) => ident.to_lowercase(),
+                (None, None) => ident.clone(),
+                (None, Some(other)) => {
+                    notes.push(format!(
+                        "manifest capability {ident}: serde rename_all {other:?} is not read, not recorded"
+                    ));
+                    return None;
+                }
+            };
+            Some(Capability::new(
                 format!("capability:{key}"),
                 doc(&variant.attrs),
                 CapabilityContract {
@@ -867,7 +1184,7 @@ fn manifest_capabilities(root: &Path, notes: &mut Vec<String>) -> Vec<Capability
                     context: None,
                     refs: Vec::new(),
                 },
-            )
+            ))
         })
         .collect()
 }
@@ -976,12 +1293,23 @@ fn macros(
 }
 
 fn hook_records(hooks: &[catalog::Hook], types: &[Type], notes: &mut Vec<String>) -> Vec<Hook> {
-    let events: BTreeMap<&str, &Type> = types.iter().map(|t| (leaf(&t.id), t)).collect();
+    let mut events: BTreeMap<&str, Vec<&Type>> = BTreeMap::new();
+    for t in types {
+        events.entry(leaf(&t.id)).or_default().push(t);
+    }
     let mut out = Vec::new();
     for hook in hooks {
         let event = format!("{}Event", crate::hook_id(&hook.name));
-        let fields = match events.get(event.as_str()) {
-            Some(event_type) => event_type.fields.as_slice(),
+        let fields = match events.get(event.as_str()).map(Vec::as_slice) {
+            Some([event_type]) => event_type.fields.as_slice(),
+            Some(several) => {
+                notes.push(format!(
+                    "hook {}: {} types are named {event}, so its arguments are not recorded",
+                    hook.name,
+                    several.len()
+                ));
+                &[]
+            }
             None => {
                 notes.push(format!(
                     "hook {}: its event {event} is not a mod_api type, so its arguments are not recorded",
@@ -1022,6 +1350,13 @@ fn hook_records(hooks: &[catalog::Hook], types: &[Type], notes: &mut Vec<String>
             hook.doc.clone(),
             HookEngine {
                 target: hook.target.clone(),
+            },
+            Counterparts {
+                neoforge: hook.counterparts.neoforge.clone(),
+                fabric: hook.counterparts.fabric.clone(),
+                paper: hook.counterparts.paper.clone(),
+            },
+            HookContract {
                 context: hook.context.map(|context| {
                     match context {
                         catalog::PhaseContext::Registration => "registration",
@@ -1031,13 +1366,6 @@ fn hook_records(hooks: &[catalog::Hook], types: &[Type], notes: &mut Vec<String>
                     }
                     .to_owned()
                 }),
-            },
-            Counterparts {
-                neoforge: hook.counterparts.neoforge.clone(),
-                fabric: hook.counterparts.fabric.clone(),
-                paper: hook.counterparts.paper.clone(),
-            },
-            HookContract {
                 version: hook.version,
                 side: match hook.side {
                     catalog::Side::Server => Side::Server,

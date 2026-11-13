@@ -2,7 +2,7 @@
 //! through public modules and `pub use`s (globs included), skipping `#[doc(hidden)]`, `__`
 //! names and items compiled out of a mod's default native build.
 use crate::index::{Found, Index, ItemId, uses};
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use syn::{Item, Visibility};
 
 /// The facade crate a mod depends on, and the crate its root re-exports.
@@ -32,8 +32,11 @@ struct Name {
 /// The walk's result.
 #[derive(Default)]
 pub(super) struct Public {
-    /// Each public item with the path a mod writes, below `mod_api`.
+    /// Each public item with its id path, below `mod_api`: the path of the module that defines
+    /// it when that is public, otherwise its shortest public path.
     pub(super) items: HashMap<ItemId, Vec<String>>,
+    /// Every public path of each public item, sorted.
+    pub(super) paths: HashMap<ItemId, Vec<String>>,
     /// Items a mod can name only through a `#[doc(hidden)]` item or route: part of the surface
     /// only when a public signature names them.
     pub(super) hidden: HashMap<ItemId, Vec<String>>,
@@ -137,6 +140,21 @@ pub(super) struct Walker<'i, 'a> {
     names: HashMap<usize, Vec<Name>>,
     open: HashSet<usize>,
     notes: Vec<String>,
+    /// Public items compiled out only under `cfg(test)`.
+    test_only: usize,
+}
+
+/// How many paths through re-exports one module is visited by.
+const PATHS_PER_MODULE: usize = 16;
+
+/// The `cfg` attributes of `attrs`, as written.
+fn cfg_text(attrs: &[syn::Attribute]) -> String {
+    attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident("cfg"))
+        .map(|attr| super::rust::print(quote::ToTokens::to_token_stream(&attr.meta)))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 impl<'i, 'a> Walker<'i, 'a> {
@@ -146,6 +164,7 @@ impl<'i, 'a> Walker<'i, 'a> {
             names: HashMap::new(),
             open: HashSet::new(),
             notes: Vec::new(),
+            test_only: 0,
         }
     }
 
@@ -211,6 +230,35 @@ impl<'i, 'a> Walker<'i, 'a> {
         for (position, item) in items.iter().enumerate() {
             let attrs = attrs(item);
             if !compiled(attrs) {
+                let public = match item {
+                    Item::Use(i) => matches!(i.vis, Visibility::Public(_)),
+                    Item::Mod(i) => matches!(i.vis, Visibility::Public(_)),
+                    item => {
+                        defined(item).is_some_and(|(vis, _)| matches!(vis, Visibility::Public(_)))
+                    }
+                };
+                if public {
+                    let gate = cfg_text(attrs);
+                    if gate.contains("test")
+                        && !gate.contains("feature")
+                        && !gate.contains("target")
+                    {
+                        self.test_only += 1;
+                    } else {
+                        let what = match item {
+                            Item::Mod(child) => format!("mod {}", child.ident),
+                            Item::Use(item) => format!(
+                                "use {}",
+                                super::rust::print(quote::ToTokens::to_token_stream(&item.tree))
+                            ),
+                            item => defined(item).map_or_else(String::new, |(_, name)| name),
+                        };
+                        self.notes.push(format!(
+                            "{}::{what}: compiled out of a default native build ({gate}), not recorded",
+                            self.module_name(module)
+                        ));
+                    }
+                }
                 continue;
             }
             let hidden = hidden(attrs);
@@ -289,15 +337,18 @@ impl<'i, 'a> Walker<'i, 'a> {
         Ok(own)
     }
 
-    /// Every public item from the facade's root, breadth first, each under its shortest path
-    /// (the first in byte order among equals). Names starting `__` are never followed.
+    /// Every public item from the facade's root, breadth first, with every public path to it
+    /// (each module through at most [`PATHS_PER_MODULE`] paths, never through itself). Names
+    /// starting `__` are never followed.
     pub(super) fn public(&mut self) -> Result<Public, String> {
         let root = self.index.module(FACADE, &[])?;
         let mut public = Public::default();
-        let mut queue = VecDeque::from([(root, Vec::<String>::new(), false)]);
-        let mut seen = HashSet::from([(root, false)]);
+        let mut all: HashMap<ItemId, BTreeSet<Vec<String>>> = HashMap::new();
+        let mut queue = VecDeque::from([(root, Vec::<String>::new(), false, vec![root])]);
+        let mut visits: HashMap<(usize, bool), usize> = HashMap::new();
         let mut macros: BTreeMap<Vec<String>, String> = BTreeMap::new();
-        while let Some((module, prefix, behind)) = queue.pop_front() {
+        let mut hidden_items: HashSet<ItemId> = HashSet::new();
+        while let Some((module, prefix, behind, ancestors)) = queue.pop_front() {
             let mut names = self.names(module)?;
             names.sort_by(|a, b| a.name.cmp(&b.name));
             for name in names {
@@ -309,23 +360,26 @@ impl<'i, 'a> Walker<'i, 'a> {
                 path.push(name.name.clone());
                 match name.target {
                     Target::Module(target) => {
-                        if seen.insert((target, behind)) {
-                            queue.push_back((target, path, behind));
+                        let count = visits.entry((target, behind)).or_default();
+                        if !ancestors.contains(&target) && *count < PATHS_PER_MODULE {
+                            *count += 1;
+                            let mut next = ancestors.clone();
+                            next.push(target);
+                            queue.push_back((target, path, behind, next));
                         }
                     }
                     Target::Item(id) => {
-                        let behind = behind || hidden(attrs(self.index.item(id)));
-                        let map = if behind {
-                            &mut public.hidden
-                        } else {
-                            &mut public.items
-                        };
-                        let better = |old: &Vec<String>| (path.len(), &path) < (old.len(), old);
-                        match map.get(&id) {
-                            Some(old) if !better(old) => {}
-                            _ => {
-                                map.insert(id, path);
+                        if behind || hidden(attrs(self.index.item(id))) {
+                            hidden_items.insert(id);
+                            let better = |old: &Vec<String>| (path.len(), &path) < (old.len(), old);
+                            match public.hidden.get(&id) {
+                                Some(old) if !better(old) => {}
+                                _ => {
+                                    public.hidden.insert(id, path);
+                                }
                             }
+                        } else {
+                            all.entry(id).or_default().insert(path);
                         }
                     }
                     Target::External(_) if behind => {}
@@ -345,11 +399,56 @@ impl<'i, 'a> Walker<'i, 'a> {
                 }
             }
         }
+        let mut aliased = 0;
+        for (id, paths) in all {
+            let definition = self.definition_path(id);
+            let chosen = match definition.filter(|path| paths.contains(path)) {
+                Some(path) => path,
+                None => {
+                    aliased += 1;
+                    paths
+                        .iter()
+                        .min_by(|a, b| (a.len(), *a).cmp(&(b.len(), *b)))
+                        .cloned()
+                        .expect("an item reached has a path")
+                }
+            };
+            public.items.insert(id, chosen);
+            public
+                .paths
+                .insert(id, paths.into_iter().map(|p| p.join("::")).collect());
+        }
         let shown = &public.items;
         public.hidden.retain(|id, _| !shown.contains_key(id));
+        hidden_items.retain(|id| !shown.contains_key(id));
+        public.notes.push(format!(
+            "{aliased} public items are not public at their definition path: their id is their shortest public path, which a shorter re-export added later would change"
+        ));
+        public.notes.push(format!(
+            "{} items are reachable only through #[doc(hidden)] items or modules: recorded only where a recorded signature names them",
+            hidden_items.len()
+        ));
+        if self.test_only > 0 {
+            public.notes.push(format!(
+                "{} public items compiled only under cfg(test), not recorded",
+                self.test_only
+            ));
+        }
         public.macros = macros.into_iter().collect();
         public.notes.append(&mut self.notes);
         Ok(public)
+    }
+
+    /// Where `id` is defined, as a path below `mod_api`, when it is defined in the API's crates.
+    fn definition_path(&self, id: ItemId) -> Option<Vec<String>> {
+        let module = &self.index.modules[id.module];
+        if module.krate != VOCAB && module.krate != FACADE {
+            return None;
+        }
+        let (_, name) = defined(self.index.item(id))?;
+        let mut path = module.path.clone();
+        path.push(name);
+        Some(path)
     }
 
     /// Every module of `krate` a default native build compiles, private ones included.

@@ -1,6 +1,7 @@
 //! Rust as the surface writes it: one normalising function for types and signatures (paths
 //! relative to `mod_api`, lifetimes kept, one spacing), and each type's wire layout description
 //! for the shape function.
+use super::wire_forms::WireForm;
 use crate::index::{Found, Index, ItemId};
 use mod_surface::shape::{Body, Definition, Scalar, Shape};
 use proc_macro2::{Delimiter, Spacing, TokenStream, TokenTree};
@@ -212,19 +213,28 @@ pub(super) fn param_names(generics: &syn::Generics) -> Vec<String> {
 }
 
 /// Builds wire layout descriptions of the types the API's types contain, keyed by their
-/// defining path, which never enters a shape.
-pub(super) struct Layouts {
+/// defining path, which never enters a shape. A type is described by how it crosses
+/// ([`WireForm`]); one that does not cross, or crosses by a hand-written impl that declares no
+/// layout, gets no definition, so every shape that contains it is refused.
+pub(super) struct Layouts<'f> {
     pub(super) table: BTreeMap<String, Definition>,
     keys: HashMap<ItemId, String>,
     pending: Vec<ItemId>,
+    forms: &'f HashMap<ItemId, WireForm>,
+    ids: &'f HashMap<ItemId, Vec<String>>,
 }
 
-impl Layouts {
-    pub(super) fn new() -> Self {
+impl<'f> Layouts<'f> {
+    pub(super) fn new(
+        forms: &'f HashMap<ItemId, WireForm>,
+        ids: &'f HashMap<ItemId, Vec<String>>,
+    ) -> Self {
         Self {
             table: BTreeMap::new(),
             keys: HashMap::new(),
             pending: Vec::new(),
+            forms,
+            ids,
         }
     }
 
@@ -250,54 +260,82 @@ impl Layouts {
         key
     }
 
+    /// The type a key names, for a note.
+    pub(super) fn named(&self, key: &str) -> String {
+        let name = key.rsplit_once("::#").map_or(key, |(name, _)| name);
+        self.keys
+            .iter()
+            .find(|(_, k)| k.as_str() == key)
+            .and_then(|(id, _)| self.ids.get(id))
+            .map_or_else(|| name.to_owned(), |path| path.join("::"))
+    }
+
     /// Describes every scheduled type and those they contain.
     pub(super) fn finish(&mut self, index: &mut Index<'_>) {
         while let Some(id) = self.pending.pop() {
             let key = self.keys[&id].clone();
             let item = index.item(id).clone();
-            let (generics, body) = match &item {
-                Item::Struct(s) => {
-                    let names = param_names(&s.generics);
-                    let body = match via(&s.attrs) {
-                        Some(ty) => Body::Via(self.shape(index, id.module, &ty, &names, 0)),
-                        None => self.fields(index, id.module, &s.fields, &names),
-                    };
-                    (names, body)
+            let (attrs, generics) = match &item {
+                Item::Struct(s) => (&s.attrs, &s.generics),
+                Item::Enum(e) => (&e.attrs, &e.generics),
+                Item::Union(u) => (&u.attrs, &u.generics),
+                _ => continue,
+            };
+            let names = param_names(generics);
+            let derives = super::derives(attrs);
+            let body = match super::wire_forms::form_of(id, attrs, &derives, self.forms) {
+                None | Some(WireForm::Manual) => continue,
+                Some(WireForm::Via(ty, module)) => {
+                    Body::Via(self.shape(index, module, &ty, &names, 0))
                 }
-                Item::Enum(e) => {
-                    let names = param_names(&e.generics);
-                    let body = match via(&e.attrs) {
-                        Some(ty) => Body::Via(self.shape(index, id.module, &ty, &names, 0)),
-                        None => Body::Enum(
-                            e.variants
-                                .iter()
-                                .map(|v| {
-                                    (
-                                        v.ident.to_string(),
-                                        self.fields(index, id.module, &v.fields, &names),
-                                    )
-                                })
-                                .collect(),
-                        ),
-                    };
-                    (names, body)
-                }
-                Item::Union(u) => {
-                    let names = param_names(&u.generics);
-                    let fields = syn::Fields::Named(u.fields.clone());
-                    let body = self.fields(index, id.module, &fields, &names);
-                    (names, body)
-                }
-                _ => (Vec::new(), Body::Unit),
+                Some(WireForm::Fields(fields, module)) => Body::Record(
+                    fields
+                        .iter()
+                        .map(|(name, ty)| (name.clone(), self.shape(index, module, ty, &names, 0)))
+                        .collect(),
+                ),
+                Some(WireForm::Derive) => match &item {
+                    Item::Struct(s) => self.fields(index, id.module, &s.fields, &names),
+                    Item::Enum(e) => Body::Enum(
+                        e.variants
+                            .iter()
+                            .map(|v| {
+                                (
+                                    v.ident.to_string(),
+                                    self.fields(index, id.module, &v.fields, &names),
+                                )
+                            })
+                            .collect(),
+                    ),
+                    Item::Union(u) => {
+                        let fields = syn::Fields::Named(u.fields.clone());
+                        self.fields(index, id.module, &fields, &names)
+                    }
+                    _ => continue,
+                },
             };
             self.table.insert(
                 key,
                 Definition {
-                    params: generics.len(),
+                    params: names.len(),
                     body,
                 },
             );
         }
+    }
+
+    /// A type the description does not look into, as the surface writes it.
+    fn opaque(&self, index: &mut Index<'_>, module: usize, ty: &Type, params: &[String]) -> Shape {
+        let mut ty = ty.clone();
+        let mut paths = Paths {
+            index,
+            public: self.ids,
+            module,
+            params: params.to_vec(),
+            refs: BTreeSet::new(),
+        };
+        paths.visit_type_mut(&mut ty);
+        Shape::Opaque(print(ty.to_token_stream()))
     }
 
     fn fields(
@@ -344,7 +382,6 @@ impl Layouts {
         params: &[String],
         depth: usize,
     ) -> Shape {
-        let opaque = |ty: &Type| Shape::Opaque(print(ty.to_token_stream()));
         let boxed = |s: Shape| Box::new(s);
         match ty {
             Type::Paren(inner) => self.shape(index, module, &inner.elem, params, depth),
@@ -362,9 +399,9 @@ impl Layouts {
                     Ok(n) => {
                         Shape::Array(boxed(self.shape(index, module, &a.elem, params, depth)), n)
                     }
-                    Err(_) => opaque(ty),
+                    Err(_) => self.opaque(index, module, ty, params),
                 },
-                _ => opaque(ty),
+                _ => self.opaque(index, module, ty, params),
             },
             Type::Tuple(t) if t.elems.is_empty() => Shape::Scalar(Scalar::Unit),
             Type::Tuple(t) => Shape::Tuple(
@@ -376,7 +413,7 @@ impl Layouts {
             Type::Path(p) if p.qself.is_none() => {
                 self.path(index, module, ty, &p.path, params, depth)
             }
-            _ => opaque(ty),
+            _ => self.opaque(index, module, ty, params),
         }
     }
 
@@ -389,7 +426,7 @@ impl Layouts {
         params: &[String],
         depth: usize,
     ) -> Shape {
-        let opaque = Shape::Opaque(print(ty.to_token_stream()));
+        let opaque = self.opaque(index, module, ty, params);
         let Some(last) = path.segments.last() else {
             return opaque;
         };
@@ -492,22 +529,6 @@ impl Layouts {
             _ => opaque,
         }
     }
-}
-
-/// The type a `#[wire(via = T)]` attribute names.
-fn via(attrs: &[syn::Attribute]) -> Option<Type> {
-    let mut found = None;
-    for attr in attrs.iter().filter(|a| a.path().is_ident("wire")) {
-        let _ = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("via") {
-                found = Some(meta.value()?.parse::<Type>()?);
-            } else if meta.input.peek(syn::Token![=]) {
-                let _: syn::Expr = meta.value()?.parse()?;
-            }
-            Ok(())
-        });
-    }
-    found
 }
 
 /// Replaces an alias's type parameters by its arguments.
