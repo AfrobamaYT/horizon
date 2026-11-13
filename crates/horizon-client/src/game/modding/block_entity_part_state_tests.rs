@@ -63,8 +63,15 @@ struct StateMod;
 #[mod_api::__subscriptions]
 impl Hooks for StateMod {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-        let kind = r.block_entity_type("press").blocks(&[]).build();
+        let kind = r
+            .block_entity_type("press")
+            .blocks(&["part_state:press"])
+            .build();
         r.block_entity_part_with_state(&kind, Press).unwrap();
+    }
+    fn blocks(&self, _: &mod_api::RegistrationContext, e: &mut mod_api::BlocksEvent<'_>) {
+        e.blocks
+            .push(mod_api::Block::new("part_state:press", "minecraft:barrel").with_item(false));
     }
 }
 
@@ -98,13 +105,13 @@ fn with_state_mod(name: &str, test: impl FnOnce(&mut Game<'_>)) {
 
 /// A fresh press at `pos` in the level the game is in, and its handle.
 fn press(game: &mut Game<'_>, pos: (i32, i32, i32)) -> BlockEntityRef {
-    let stone = game
+    let block = game
         .pack
         .assets
         .registry
-        .default_state("minecraft:stone")
+        .default_state("part_state:press")
         .unwrap();
-    game.world.set(pos.0, pos.1, pos.2, stone).unwrap();
+    game.world.set(pos.0, pos.1, pos.2, block).unwrap();
     let entity = ModBlockEntity::new("part_state:press".into(), Default::default());
     game.world
         .block_entities
@@ -139,7 +146,9 @@ fn part_state_is_per_block_entity_through_ticks_transactions_and_replacement() {
         assert_eq!(stored(game, a), Some(9));
         assert_eq!(Press::state(game, b), Ok(0));
 
-        // An inner edit commits into the outer transaction, which then aborts.
+        // An inner edit commits into the outer transaction, which then aborts: the value and
+        // the chunk's unsaved mark go back, so a chunk that was clean is clean again.
+        game.world.modified.clear();
         let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, _| {
             assert_eq!(Press::edit_state(host, a, |_, n| *n = 11), Ok(()));
             assert_eq!(Press::state(host, a), Ok(11), "later steps see it");
@@ -151,6 +160,7 @@ fn part_state_is_per_block_entity_through_ticks_transactions_and_replacement() {
         });
         assert_eq!(aborted, Err(()));
         assert_eq!(stored(game, a), Some(9));
+        assert!(!game.world.modified.contains(&(0, 0)), "clean after the abort");
 
         // A panic inside an edit leaves no default behind.
         let host: &mut dyn ServerHost = game;
@@ -211,8 +221,10 @@ fn part_state_is_per_block_entity_through_ticks_transactions_and_replacement() {
         };
         assert_eq!(Press::state(game, b), Err(decode));
         let mut ran = false;
+        game.world.modified.clear();
         assert_eq!(Press::edit_state(game, b, |_, _| ran = true), Err(decode));
         assert!(!ran);
+        assert!(!game.world.modified.contains(&(0, 0)), "a refused edit marks nothing");
         assert_eq!(
             game.world
                 .block_entities
@@ -253,42 +265,183 @@ fn part_state_is_per_block_entity_through_ticks_transactions_and_replacement() {
 fn part_state_saves_with_its_chunk_and_reloads_under_a_fresh_handle() {
     const NAME: &str = "game::block_entity_part_state_tests::part_state_saves_with_its_chunk_and_reloads_under_a_fresh_handle";
     with_state_mod(NAME, |game| {
-        let pos = (1, 64, 1);
+        // A column far from the player, kept by a forced ticket while it is edited.
+        let key = (80, 80);
+        let pos = (1283, 100, 1283);
+        // The test game starts with streaming paused, which never unloads.
+        game.streaming.paused = false;
+        assert!(game.streaming.set_forced(key.0, key.1, true));
+        game.world
+            .chunks
+            .insert(key, Arc::new(Chunk::empty(key.0, key.1)));
+        game.update_world();
         let entity = press(game, pos);
         game.world.modified.clear();
         assert_eq!(Press::edit_state(game, entity, |_, n| *n = 7), Ok(()));
         assert!(
-            game.world.modified.remove(&(0, 0)),
+            game.world.modified.contains(&key),
             "an edit marks its chunk for the unload's save"
         );
         assert_eq!(edit_part_state(game, entity, &SCRATCH, |_, n| *n = 4), Ok(()));
-        // The chunk's save snapshot, taken before the unload drops its block entities, as
-        // the streaming unload does it; then the saved form as it goes to disk.
-        let mut chunk = (*game.world.chunks[&(0, 0)]).clone();
-        game.attach_save_data(&mut chunk);
-        let saved: Vec<_> = chunk
-            .saved
-            .as_ref()
-            .unwrap()
-            .block_entity_attachments
-            .iter()
-            .map(|(pos, map)| (*pos, map.to_nbt()))
-            .collect();
-        game.world
-            .block_entities
-            .unload(|p| (p.0 >> 4, p.2 >> 4) == (0, 0));
+
+        // The ticket goes and the residency owner (`update_world`) unloads the column: it
+        // saves it, then drops its block entities and their live bindings. Its sweep runs every
+        // eighth update.
+        assert!(game.streaming.set_forced(key.0, key.1, false));
+        for _ in 0..9 {
+            game.update_world();
+        }
+        assert!(!game.world.chunks.contains_key(&key), "unloaded");
+        assert!(game.world.block_entities.attachments(pos).is_none());
         assert_eq!(Press::state(game, entity), Err(PartStateError::Stale));
 
-        // The chunk loads again: a new block entity, given its saved attachments.
-        let reloaded = press(game, pos);
-        for (at, raw) in saved {
-            game.world
-                .block_entities
-                .restore_attachments(at, Attachments::from_nbt(raw));
-        }
+        // Loaded back from the region file it was saved to, as streaming installs a column.
+        game.save_level(true).unwrap();
+        let mut chunk = game
+            .save
+            .load(key.0, key.1, game.pack.assets.registry, world_biomes!(game))
+            .unwrap();
+        game.world.install_chunk_block_entities(&mut chunk);
+        game.world.chunks.insert(key, Arc::new(chunk));
+        let level = game.level(game.dim.id()).unwrap();
+        let reloaded = game.block_entity(level, [pos.0, pos.1, pos.2]).unwrap();
         assert_ne!(reloaded, entity);
         assert_eq!(Press::state(game, entity), Err(PartStateError::Stale));
         assert_eq!(stored(game, reloaded), Some(7));
         assert_eq!(read_state(game, reloaded, &SCRATCH), Ok(None), "session only");
+    });
+}
+
+/// What the attachment index answers for `entity`'s `PROGRESS`, without the handle check.
+fn indexed(game: &Game<'_>, entity: BlockEntityRef) -> Option<i32> {
+    use mod_api::AttachmentQueries;
+    let host: &dyn mod_api::Host = game;
+    host.query(&PROGRESS)
+        .unwrap()
+        .get(mod_api::AttachmentHolder::BlockEntity(entity))
+        .ok()
+        .flatten()
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
+fn a_removal_retires_its_state_only_at_the_root_commit() {
+    const NAME: &str = "game::block_entity_part_state_tests::a_removal_retires_its_state_only_at_the_root_commit";
+    with_state_mod(NAME, |game| {
+        let pos = (1, 64, 1);
+        let a = press(game, pos);
+        assert_eq!(Press::edit_state(game, a, |_, n| *n = 7), Ok(()));
+
+        // Removed and replaced inside a transaction that then aborts: the handle is stale
+        // while it is open, but the index keeps the map bound; the abort brings the very
+        // binding back, and the tentative block entity's handle stays stale.
+        let seal = game.transaction_open();
+        game.journal_remove_block_entity(pos);
+        assert_eq!(Press::state(game, a), Err(PartStateError::Stale));
+        assert_eq!(indexed(game, a), Some(7), "still bound until the root commits");
+        let tentative = press(game, pos);
+        assert_eq!(Press::edit_state(game, tentative, |_, n| *n = 5), Ok(()));
+        game.transaction_close(&seal, false);
+        assert_eq!(Press::state(game, a), Ok(7));
+        assert_eq!(indexed(game, a), Some(7));
+        assert_eq!(Press::state(game, tentative), Err(PartStateError::Stale));
+        assert_eq!(indexed(game, tentative), None);
+
+        // A nested removal committed into its parent is still not published.
+        let outer = game.transaction_open();
+        let inner = game.transaction_open();
+        game.journal_remove_block_entity(pos);
+        game.transaction_close(&inner, true);
+        assert_eq!(indexed(game, a), Some(7));
+        // The root commit retires it.
+        game.transaction_close(&outer, true);
+        assert_eq!(Press::state(game, a), Err(PartStateError::Stale));
+        assert_eq!(indexed(game, a), None);
+        assert!(game.world.block_entities.attachments(pos).is_none());
+    });
+}
+
+#[path = "../../../../horizon-mod-wasm/tests/fixture/src/part_state.rs"]
+mod fixture;
+
+struct NativeFixture;
+#[mod_api::__subscriptions]
+impl Hooks for NativeFixture {
+    fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+        fixture::register(r);
+    }
+}
+
+/// The fixture's Part counts its ticks natively and compiled to wasm alike: each tick's aborted
+/// edit leaves nothing, its recursive edit is refused, and its own edit commits. The game reads
+/// the count from the saved form, which a wasm value has on the host.
+#[test]
+#[ignore = "needs prepared resources and compiled HORIZON_WASM_FIXTURE/HORIZON_WASM_STD"]
+fn native_and_compiled_wasm_part_state_count_ticks() {
+    const NAME: &str =
+        "game::block_entity_part_state_tests::native_and_compiled_wasm_part_state_count_ticks";
+    if super::native_entity_refs::tests::run_fresh_cases(
+        NAME,
+        "PART_STATE_TARGET",
+        &["native", "wasm"],
+    ) {
+        return;
+    }
+    horizon_guest_stack::run_on_guest_stack(|| {
+        let mods: mod_api::Mods = if std::env::var("PART_STATE_TARGET").unwrap() == "wasm" {
+            super::block_entity_tick_reply_tests::wasm_mods()
+        } else {
+            vec![mod_api::ModEntry::new("wasm_fixture", Box::new(NativeFixture))]
+        }
+        .into();
+        mod_platform::testing::with_mods(mods.clone(), || {
+            crate::game::api_values::install_parts(&mods).unwrap();
+            mod_api::__private::mark_game_thread();
+            let base =
+                std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+            let root = super::mods::content_root(&base, &Default::default()).unwrap();
+            super::native_entity_refs::tests::with_game_at(root.prepared().to_owned(), |game| {
+                game.options.dedicated = Some(Vec::new());
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                game.world.set(1, 64, 1, stone).unwrap();
+                let entity =
+                    ModBlockEntity::new("wasm_fixture:part_state".into(), Default::default());
+                game.world
+                    .block_entities
+                    .insert((1, 64, 1), BlockEntity::Mod(Box::new(entity)));
+                for _ in 0..3 {
+                    game.tick_mod_block_entity((1, 64, 1));
+                }
+                assert!(game.transactions.is_empty());
+                let saved = game
+                    .world
+                    .block_entities
+                    .attachments((1, 64, 1))
+                    .unwrap()
+                    .to_nbt();
+                let count = saved
+                    .get(&"wasm_fixture".into())
+                    .and_then(|names| match names {
+                        Tag::Compound(names) => names.get(&"part_state_count".into()),
+                        _ => None,
+                    })
+                    .and_then(|entry| match entry {
+                        Tag::Compound(entry) => entry.get(&"value".into()),
+                        _ => None,
+                    });
+                assert_eq!(
+                    count,
+                    Some(&Tag::Compound([("n".into(), Tag::Int(3))].into()))
+                );
+            });
+        });
     });
 }

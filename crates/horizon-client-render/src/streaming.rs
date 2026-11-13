@@ -1525,14 +1525,7 @@ impl Streaming {
         if chunk.fresh {
             world.modified.insert(key);
         }
-        world.load_chunk_block_entities(key, std::mem::take(&mut chunk.block_entities));
-        if let Some(extras) = &chunk.saved {
-            for (pos, attachments) in &extras.block_entity_attachments {
-                world
-                    .block_entities
-                    .restore_attachments(*pos, attachments.clone());
-            }
-        }
+        world.install_chunk_block_entities(&mut chunk);
         world
             .block_names
             .extend(std::mem::take(&mut chunk.block_names));

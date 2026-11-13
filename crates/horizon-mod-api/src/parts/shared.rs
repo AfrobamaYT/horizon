@@ -72,7 +72,7 @@ pub struct PartRegistrar {
     pub(crate) chunk_generators: Vec<ChunkGeneratorInfo>,
     pub(crate) biome_sources: Vec<BiomeSourceInfo>,
     pub(crate) refused: Vec<String>,
-    /// The Part state keys this mod declared, with their Rust types.
+    /// The Part state keys this mod declared, with their types' Wire layouts and names.
     pub(crate) part_states: HashMap<(&'static str, &'static str), (u64, &'static str)>,
 }
 

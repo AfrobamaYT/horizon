@@ -68,12 +68,24 @@ let done = Press::edit_state(host, entity, |_, progress| {
 - Every call checks the handle first. A handle from another level gives `PartStateError::OtherLevel`.
   A removed, replaced or unloaded block entity gives `Stale`. After a reload the saved value is read
   under the new handle.
-- An edit stores nothing, and its transaction aborts, in these cases:
-  - the closure panics;
+- An edit stores nothing, and its transaction aborts with everything the closure wrote, in these
+  cases:
+  - the closure panics and the panic unwinds (a wasm trap counts the same). A panic that aborts
+    the process cannot be rolled back;
   - the value was replaced while the closure ran (`Changed`);
-  - the value does not encode;
-  - the closure starts an edit of the same block entity and key (`Reentrant`).
+  - the value does not encode.
+- An edit of the same block entity and key started inside the closure is refused with `Reentrant`
+  and stores nothing. Only that inner edit is refused: the outer edit goes on and commits. An edit
+  of another key is allowed.
 - An undecodable saved value refuses before the closure runs and keeps its bytes.
+- A transaction that aborts puts back the values, the chunk's unsaved mark and any block entity it
+  removed, with its attachment map still bound. Handles of block entities made inside it stay
+  `Stale`. Removed block entities retire only when the outermost transaction commits, and no save
+  runs while a value may still be tentative.
+- No size or depth limit of its own applies to a value. A saved value follows the chunk's NBT rules:
+  vanilla 26.3 reads region files with `NbtAccounter.unlimitedHeap`, an unbounded byte budget and
+  depth 512. The 2 MiB quota of a chunk packet's block entity data is a network limit and does not
+  cap saved state.
 - Registration refuses a declaration that syncs, copies on death, lies outside the mod's namespaces
   or reuses a key with another type. It also refuses a wasm mod's declaration without a codec. The
   refusal names the Part, the key, the type and the reason.

@@ -425,7 +425,7 @@ impl BlockEntitiesRegistrar for PartRegistrar {
                     .map_err(|_| crate::PartStateRefusal::UnownedNamespace)
             })
             .and_then(|()| match self.part_states.get(&key) {
-                Some(&(data, declared)) if data != declaration.data => {
+                Some(&(layout, declared)) if layout != declaration.layout => {
                     Err(crate::PartStateRefusal::Incompatible { declared })
                 }
                 _ => Ok(()),
@@ -433,7 +433,7 @@ impl BlockEntitiesRegistrar for PartRegistrar {
         match checked {
             Ok(()) => {
                 self.part_states
-                    .insert(key, (declaration.data, declaration.data_name));
+                    .insert(key, (declaration.layout, declaration.data_name));
                 Ok(())
             }
             Err(reason) => {

@@ -13,6 +13,7 @@ pub mod interaction;
 pub mod lending;
 pub mod matrix;
 pub mod movement;
+pub mod part_state;
 pub mod projectile_owner;
 pub mod replace;
 pub mod runtime_environment;
@@ -267,6 +268,7 @@ impl Hooks for Mod {
         interaction::register(registrar);
         cauldron::register(registrar);
         tick_reply::register(registrar);
+        part_state::register(registrar);
         registrar.register_custom_stat("steps").unwrap();
         registrar
             .declare_datapack_registry(

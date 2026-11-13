@@ -6,7 +6,7 @@
 //! unloaded. The Part object is shared behaviour and owns no instance's value.
 
 use crate::*;
-use std::{any::TypeId, cell::RefCell, fmt, sync::Arc};
+use std::{cell::RefCell, fmt, sync::Arc};
 
 /// A block entity Part's typed state: one value per block entity of the Part's type,
 /// owned by the game, not by the Part or a mod's statics.
@@ -129,7 +129,7 @@ pub enum PartStateRefusal {
     NoCodecOnWasm,
     /// `DATA`'s namespace is not one this mod owns.
     UnownedNamespace,
-    /// The same key is already declared with another Rust type, named here.
+    /// The same key is already declared with a type of another Wire layout, named here.
     Incompatible {
         /// The type the key was first declared with.
         declared: &'static str,
@@ -174,7 +174,10 @@ impl fmt::Display for BlockEntityStateError {
             };
             return error.fmt(f);
         };
-        write!(f, "part {part}: state {namespace}:{name} of type {data} refused: ")?;
+        write!(
+            f,
+            "part {part}: state {namespace}:{name} of type {data} refused: "
+        )?;
         match reason {
             PartStateRefusal::Sync => f.write_str("sync is not supported for part state yet"),
             PartStateRefusal::CopyOnDeath => {
@@ -187,7 +190,10 @@ impl fmt::Display for BlockEntityStateError {
                 f.write_str("the namespace is not one this mod owns")
             }
             PartStateRefusal::Incompatible { declared } => {
-                write!(f, "the key is already declared with type {declared}")
+                write!(
+                    f,
+                    "the key is already declared with type {declared}, whose Wire layout differs"
+                )
             }
         }
     }
@@ -211,8 +217,9 @@ pub struct PartStateDeclaration {
     pub namespace: &'static str,
     /// The state's name.
     pub name: &'static str,
-    /// A hash of the state's Rust type, which two declarations of one key must share.
-    pub data: u64,
+    /// The state type's Wire layout: its schema across the native and wasm boundary, which two
+    /// declarations of one key must share.
+    pub layout: u64,
     /// Its name, for a refusal.
     pub data_name: &'static str,
     sync: bool,
@@ -223,17 +230,13 @@ pub struct PartStateDeclaration {
 }
 
 impl PartStateDeclaration {
-    /// The declaration of `key`.
-    pub fn of<T: 'static>(key: &AttachmentType<T>) -> Self {
+    /// The declaration of `key`: what the typed declaration is erased to, the same on both
+    /// targets.
+    pub fn of<T: crate::wire::Wire + 'static>(key: &AttachmentType<T>) -> Self {
         Self {
             namespace: key.namespace,
             name: key.name,
-            data: {
-                use std::hash::{Hash, Hasher};
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                TypeId::of::<T>().hash(&mut hasher);
-                hasher.finish()
-            },
+            layout: T::layout(&mut Vec::new()),
             data_name: std::any::type_name::<T>(),
             sync: key.sync,
             copy_on_death: key.copy_on_death,

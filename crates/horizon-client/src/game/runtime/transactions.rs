@@ -116,6 +116,10 @@ pub(super) struct Level {
     /// admission gate (`passes_settled`) refuses a save while a map may hold tentative
     /// values, which only the root commit makes saveable.
     save_gate: Option<horizon_client::join_seq::visibility::PassLease>,
+    /// Each chunk's unsaved mark and save queue entry before this transaction first reached an
+    /// attachment map in it: an abort puts them back, so a chunk only a tentative write marked
+    /// is clean again.
+    chunk_marks: HashMap<(i32, i32), horizon_client::world::ChunkMark>,
     /// What the root commit does, in order.
     after: Vec<After>,
     /// Internal decide/fire/apply state. No menu route uses this yet.
@@ -300,6 +304,9 @@ impl Game<'_> {
             scope.open_transaction();
         }
         let (token, close_token) = (frame_token(), frame_token());
+        if self.transactions.is_empty() {
+            self.world.block_entities.defer_retirement();
+        }
         self.transactions.push(Level {
             token,
             close_token,
@@ -377,8 +384,14 @@ impl Game<'_> {
         // end the root's phase early. The guard puts it back on a panic too, so a listener
         // that panics leaves the phase as it was.
         let outer = self.transactions.closing.replace(closing);
+        // The root's own close, not one a root-commit listener opened: what the transactions
+        // removed is final now, so it retires (`defer_retirement`).
+        let root = self.transactions.is_empty() && outer.is_none();
         let guard = ClosingPhase { game: self, outer };
         guard.game.close_level(level, commit);
+        if root {
+            guard.game.world.block_entities.publish_retirement();
+        }
     }
     /// What closing `level` does, with the closing phase already set.
     fn close_level(&mut self, level: Level, commit: bool) {
@@ -444,6 +457,9 @@ impl Game<'_> {
                     outer.attachments.entry(holder).or_insert(kept);
                 }
                 outer.save_gate = outer.save_gate.take().or(level.save_gate);
+                for (chunk, mark) in level.chunk_marks {
+                    outer.chunk_marks.entry(chunk).or_insert(mark);
+                }
                 outer.after.extend(level.after);
             }
             (true, None) => self.root_commit(level),
@@ -457,6 +473,7 @@ impl Game<'_> {
         while !self.transactions.is_empty() {
             self.close_storage_transaction(false);
         }
+        self.world.block_entities.publish_retirement();
     }
     /// Keeps the block entity at `pos` as it is, with its attachments and a hopper's
     /// cooldown, if a transaction is open and hasn't yet.
@@ -483,6 +500,7 @@ impl Game<'_> {
             self.world
                 .block_entities
                 .restore_generation(pos, generation);
+            self.world.block_entities.reattach_retired(pos, generation);
         }
     }
     /// Removes the block entity at `pos`, kept whole by the open transaction, which puts it back
@@ -545,6 +563,19 @@ impl Game<'_> {
             level
                 .save_gate
                 .get_or_insert_with(horizon_client::join_seq::visibility::PassLease::enter);
+            // The chunk that a block entity's or chunk's map marks unsaved (`world_attachments`).
+            let chunk = match holder {
+                Holder::BlockEntity([x, _, z]) => Some((x >> 4, z >> 4)),
+                Holder::Chunk(chunk) => Some((chunk[0], chunk[1])),
+                _ => None,
+            };
+            if let Some(chunk) = chunk {
+                let modified = &self.world.modified;
+                level
+                    .chunk_marks
+                    .entry(chunk)
+                    .or_insert_with(|| modified.mark(chunk));
+            }
         }
         if let Holder::BlockEntity([x, y, z]) = holder {
             return self.journal_block_entity((x, y, z));
@@ -906,7 +937,7 @@ impl Game<'_> {
             }
             self.world
                 .block_entities
-                .set_attachments(pos, kept.attachments);
+                .put_back_attachments(pos, kept.generation, kept.attachments);
             match kept.name {
                 Some(name) => self.world.block_names.insert(pos, name),
                 None => self.world.block_names.remove(&pos),
@@ -988,6 +1019,10 @@ impl Game<'_> {
                     *slot = Default::default();
                 });
             }
+        }
+        // After the maps: putting a chunk's map back marks it again.
+        for (chunk, mark) in level.chunk_marks {
+            self.world.modified.restore(chunk, mark);
         }
         for (id, kept) in level.mob_health {
             if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) {
@@ -1822,15 +1857,30 @@ mod tests {
 
         // An attachment map a write made inside an aborted transaction is gone with it.
         let chest_holder = mod_api::Holder::BlockEntity([0, 64, 0]);
+        // So is the unsaved mark it put on a clean chunk, through a committed child too.
         assert!(game.world.block_entities.attachments((0, 64, 0)).is_none());
+        game.world.modified.clear();
+        game.open_storage_transaction();
         game.open_storage_transaction();
         assert!(
             game.attachment_map_quiet(chest_holder, mod_api::AttachmentAccess::Existing)
                 .is_ok()
         );
+        assert!(game.world.modified.contains(&(0, 0)));
+        game.close_storage_transaction(true);
         assert!(game.world.block_entities.attachments((0, 64, 0)).is_some());
         game.close_storage_transaction(false);
         assert!(game.world.block_entities.attachments((0, 64, 0)).is_none());
+        assert!(!game.world.modified.contains(&(0, 0)), "clean again");
+        // A committed one keeps it.
+        game.open_storage_transaction();
+        assert!(
+            game.attachment_map_quiet(chest_holder, mod_api::AttachmentAccess::Existing)
+                .is_ok()
+        );
+        game.close_storage_transaction(true);
+        assert!(game.world.modified.contains(&(0, 0)));
+        game.world.block_entities.set_attachments((0, 64, 0), None);
 
         // An aborted cauldron change leaves no write behind in the world's queues.
         assert_eq!(

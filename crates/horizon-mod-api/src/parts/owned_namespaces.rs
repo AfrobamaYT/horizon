@@ -47,7 +47,11 @@ mod tests {
             };
             let progress = PartStateDeclaration::of(&key("legacy", || 0_u32));
             assert_eq!(declare(&mut r, progress), Ok(()));
-            assert_eq!(declare(&mut r, progress), Ok(()), "one key, one type, two parts");
+            assert_eq!(
+                declare(&mut r, progress),
+                Ok(()),
+                "one key, one type, two parts"
+            );
             let wider = PartStateDeclaration::of(&key("legacy", || 0_i64));
             assert_eq!(
                 declare(&mut r, wider),
@@ -57,11 +61,18 @@ mod tests {
                 ))
             );
             assert_eq!(
-                declare(&mut r, PartStateDeclaration::of(&key("minecraft", || 0_u32))),
+                declare(
+                    &mut r,
+                    PartStateDeclaration::of(&key("minecraft", || 0_u32))
+                ),
                 Err(PartStateDeclaration::of(&key("minecraft", || 0_u32))
                     .refused("porter::Press", PartStateRefusal::UnownedNamespace))
             );
-            assert_eq!(r.refused.len(), 2, "each refusal is the mod's registration refusal");
+            assert_eq!(
+                r.refused.len(),
+                2,
+                "each refusal is the mod's registration refusal"
+            );
             assert!(r.refused[1].contains("minecraft:progress"));
         });
     }
