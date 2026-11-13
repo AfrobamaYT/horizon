@@ -34,7 +34,8 @@
 //!
 //! A record's `hash` is [`contract_hash`] of its contract: every field except `id`, `hash`,
 //! `doc`, `wasm_reason`, `paths`, a hook's `engine` and `counterparts`, a type's `shape` and
-//! `impls`, and its member records. Each
+//! `impls`, its `wire` and `wire_form` (how it crosses to wasm, which `shape` and the build's
+//! wasm layout cover), and its member records. Each
 //! member (a method, field or variant) has its own hash, so adding a method to `Host`, adding a
 //! hook or adding a field to a type mods cannot build changes no existing record's hash. A
 //! container's hash covers its members only where a new member breaks users: the fields of a
@@ -311,9 +312,16 @@ impl Type {
         fields: Vec<Field>,
         variants: Vec<Variant>,
     ) -> Self {
+        // How a type crosses to wasm is its `shape`'s and the build's wasm layout's: a native mod
+        // cannot observe it, so `wire` and `wire_form` stay out of the hash.
+        let hash = contract_hash(&TypeContract {
+            wire: false,
+            wire_form: None,
+            ..contract.clone()
+        });
         Self {
             id: id.into(),
-            hash: contract_hash(&contract),
+            hash,
             doc: doc.into(),
             shape,
             paths: Vec::new(),

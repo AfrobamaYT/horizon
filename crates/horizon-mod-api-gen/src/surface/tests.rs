@@ -866,3 +866,38 @@ fn a_derive_and_a_hand_written_impl_are_the_same_impl() {
     assert_eq!(derived.impls, before.impls);
     assert_eq!(derived.hash, before.hash);
 }
+
+#[test]
+fn how_a_type_crosses_changes_its_shape_and_not_its_hash() {
+    let text = |export: &Export| {
+        export
+            .surface
+            .types
+            .iter()
+            .find(|t| t.id == "type:Text")
+            .cloned()
+            .unwrap()
+    };
+    let before = text(&export_fixture(&[], HOOKS));
+    // From a derive to crossing as a string.
+    let via = text(&export_fixture(
+        &[
+            (
+                LIB,
+                "#[derive(Clone, Debug, Wire)]\npub struct Text",
+                "#[derive(Clone, Debug)]\npub struct Text",
+            ),
+            (
+                LIB,
+                "/// A name that crosses as a string.",
+                "impl Wire for Text {\n    fn layout(visiting: &mut Vec<&'static str>) -> u64 {\n        String::layout(visiting)\n    }\n}\n/// A name that crosses as a string.",
+            ),
+        ],
+        HOOKS,
+    ));
+    assert_eq!(before.contract.wire_form.as_deref(), Some("derive"));
+    assert_eq!(via.contract.wire_form.as_deref(), Some("via:String"));
+    assert_eq!(via.hash, before.hash);
+    assert!(before.shape.is_some() && via.shape.is_some());
+    assert_ne!(via.shape, before.shape);
+}
