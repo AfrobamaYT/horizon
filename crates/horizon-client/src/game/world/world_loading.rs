@@ -1396,6 +1396,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// The pack biome the saved-biome test enables: the fields the generator reads of every
+    /// biome (climate, `carvers`; `features` is optional).
+    const PACK_BIOME: &str =
+        r#"{"temperature":0.8,"downfall":0.4,"has_precipitation":true,"effects":{},"carvers":[]}"#;
+
+    #[test]
+    fn the_saved_biome_tests_pack_biome_decodes() {
+        let climate =
+            horizon_world::worldgen::biome_temperature::BiomeTemperatureSettings::from_json(
+                PACK_BIOME,
+            )
+            .unwrap();
+        assert!(climate.has_precipitation);
+        assert_eq!(climate.base_temperature, 0.8);
+        assert_eq!(climate.downfall, 0.4);
+        let value: serde_json::Value = serde_json::from_str(PACK_BIOME).unwrap();
+        assert_eq!(value["carvers"], serde_json::json!([]));
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_loaded_missing_biome_survives_a_game_save_with_an_enabled_biome_pack() {
@@ -1416,11 +1435,7 @@ mod tests {
             r#"{"pack":{"description":"Biome fixture","min_format":[121,0],"max_format":[121,0]}}"#,
         )
         .unwrap();
-        std::fs::write(
-            entries.join("present.json"),
-            r#"{"temperature":0.8,"downfall":0.4,"has_precipitation":true,"effects":{}}"#,
-        )
-        .unwrap();
+        std::fs::write(entries.join("present.json"), PACK_BIOME).unwrap();
         Level {
             data_packs: Some((vec!["vanilla".into(), "file/biomes".into()], vec![])),
             ..Level::default()
