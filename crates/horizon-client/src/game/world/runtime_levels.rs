@@ -112,7 +112,8 @@ impl RuntimeTable {
         }
     }
 
-    /// Whether `id` is open: a level waiting to open is not, one waiting to close still is.
+    /// Whether `id` is open: a level waiting to open is not, one waiting to close still is, and so
+    /// is one the idle close dropped from memory (it opens again when entered).
     pub(in crate::game) fn is_open(&self, id: &str) -> bool {
         self.entries
             .get(id)
@@ -321,7 +322,10 @@ impl Game<'_> {
             _ => return Err(RuntimeLevelError::UnknownGenerator),
         }
         let generation = self.levels.runtime.queue_open(id, level)?;
-        let epoch = self.native_lifecycle.epoch().expect("checked by the caller");
+        let epoch = self
+            .native_lifecycle
+            .epoch()
+            .expect("checked by the caller");
         Ok(LevelRef::with_generation(
             epoch,
             mod_api::__private::dimension_key(id),
@@ -450,11 +454,16 @@ impl Game<'_> {
         if self.dim == dim {
             self.enter_level(Dim::Overworld)?;
         }
-        self.close_parked_level(dim)
+        // A level the idle close already saved and dropped is only forgotten.
+        if self.levels.parked.contains_key(&dim) {
+            self.close_parked_level(dim)?;
+        }
+        self.forget_runtime_level(dim);
+        Ok(())
     }
 
-    /// The level `dim` has closed: a runtime level leaves every table it was added to.
-    pub(in crate::game) fn forget_runtime_level(&mut self, dim: Dim) {
+    /// The runtime level `dim` was unloaded: it leaves every table it was added to.
+    fn forget_runtime_level(&mut self, dim: Dim) {
         let id = dim.id();
         if !self.levels.runtime.holds(id) {
             return;

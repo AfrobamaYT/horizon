@@ -276,7 +276,7 @@ with `CapReached`. Set another number under `[properties]` in `server.toml`:
 horizon-max-runtime-levels = 128
 ```
 
-A level closes when its mod unloads it or after 300 ticks with nobody in it, and frees its place then.
+A level frees its place when its mod unloads it. After 300 ticks with nobody in it, it leaves memory, as any level does, but keeps its place: it opens again when someone enters it.
 
 Already have a vanilla server? Run `horizon-server init` in its folder, or `horizon-server import
 server.properties` to write `server.toml` from it. The world, `ops.json`, `whitelist.json` and the ban lists

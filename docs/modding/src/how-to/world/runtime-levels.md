@@ -59,15 +59,16 @@ fallback.
 while a player, or an arrival that has not landed, is in the level, both when it is called and
 when it is applied: move the players out first with `entity.teleport_to_level`. `NotOpen` is the
 answer for a level that is not open (or still waiting to open). The idle close the game gives
-every level without players applies too: a runtime level nobody is in and no forced chunk holds
-closes after 300 ticks, `level_unload` fires and `is_open` says false, so hold a level you want
-kept with a [forced chunk](level-events.md).
+every level without players applies too, as to any other level: a runtime level nobody is in and
+no forced chunk holds is saved and dropped from memory after 300 ticks (`level_unload` fires), but
+it stays open: `is_open` still says true, and the level opens again from its folder, with
+`level_load`, when a player or a mod enters it. Only `unload` closes it for good.
 
 ## The cap
 
 A server keeps at most 64 runtime levels open or waiting, whichever mods opened them: the
 65th `open` is `CapReached`. A server sets another number with `horizon-max-runtime-levels` in
 `server.properties`; a server run by `horizon-server` sets it under `[properties]` in `server.toml`
-([hosting](../../../../hosting.md)). A closed level frees its place when the close is applied.
+([hosting](../../../../hosting.md)). An unloaded level frees its place when the unload is applied; the idle close does not free it.
 
 Every refusal is also logged with the name of the mod that asked.

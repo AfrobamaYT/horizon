@@ -59,13 +59,25 @@ fn a_level_is_open_after_its_request_is_applied_and_until_its_close_is() {
     let mut table = RuntimeTable::default();
     table.queue_open("state:a", flat()).unwrap();
     assert!(!table.is_open("state:a"));
-    assert_eq!(table.queue_unload("state:a"), Err(RuntimeLevelError::NotOpen));
+    assert_eq!(
+        table.queue_unload("state:a"),
+        Err(RuntimeLevelError::NotOpen)
+    );
     table.mark_open("state:a");
     assert!(table.is_open("state:a"));
     assert_eq!(table.queue_unload("state:a"), Ok(()));
-    assert!(table.is_open("state:a"), "still open until the close is applied");
-    assert_eq!(table.queue_unload("state:a"), Err(RuntimeLevelError::NotOpen));
-    assert_eq!(table.queue_unload("state:none"), Err(RuntimeLevelError::NotOpen));
+    assert!(
+        table.is_open("state:a"),
+        "still open until the close is applied"
+    );
+    assert_eq!(
+        table.queue_unload("state:a"),
+        Err(RuntimeLevelError::NotOpen)
+    );
+    assert_eq!(
+        table.queue_unload("state:none"),
+        Err(RuntimeLevelError::NotOpen)
+    );
 }
 
 type Seen<T> = Arc<Mutex<Vec<T>>>;
@@ -95,7 +107,10 @@ impl Hooks for Opener {
         self.loads.lock().unwrap().push(event.dimension.to_owned());
     }
     fn level_unload(&self, _: &mut dyn mod_api::ServerHost, event: &mut LevelUnloadEvent<'_>) {
-        self.unloads.lock().unwrap().push(event.dimension.to_owned());
+        self.unloads
+            .lock()
+            .unwrap()
+            .push(event.dimension.to_owned());
     }
 }
 
@@ -162,7 +177,10 @@ fn a_mod_opens_only_ids_in_its_own_namespace() {
         ("other:x", Err(RuntimeLevelError::OutsideNamespace)),
         ("mymod:../x", Err(RuntimeLevelError::InvalidId)),
         ("mymod:a//b", Err(RuntimeLevelError::InvalidId)),
-        ("minecraft:overworld", Err(RuntimeLevelError::OutsideNamespace)),
+        (
+            "minecraft:overworld",
+            Err(RuntimeLevelError::OutsideNamespace),
+        ),
         ("mymod:instance/ab", Ok(())),
     ] {
         with_opener("mymod", id, flat(), |game, seen| {
@@ -215,6 +233,36 @@ fn a_handle_from_before_an_unload_never_names_the_reopened_level() {
     });
 }
 
+/// The idle close drops a runtime level from memory as any level, but it stays open: entering
+/// it opens it again with the same handle, and only `unload` closes it for good.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn the_idle_close_keeps_a_runtime_level_open_until_its_unload() {
+    with_opener("idle", "idle:a", flat(), |game, seen| {
+        // The test game saves under its working directory: start and end without a folder.
+        let folder = game.world_root.join("dimensions/idle");
+        let _ = std::fs::remove_dir_all(&folder);
+        tick_post(game);
+        game.apply_runtime_levels();
+        let handle = seen.answers.lock().unwrap()[0].unwrap();
+        let dim = super::Dim::extra("idle:a").unwrap();
+        // What the idle close does to a level nobody is in.
+        game.close_parked_level(dim).unwrap();
+        assert_eq!(*seen.unloads.lock().unwrap(), ["idle:a"]);
+        assert!(game.runtime_level_is_open("idle:a"));
+        assert!(game.level_handle_current(handle));
+        game.enter_level(dim).unwrap();
+        assert_eq!(*seen.loads.lock().unwrap(), ["idle:a", "idle:a"]);
+        game.enter_level(super::Dim::Overworld).unwrap();
+        assert_eq!(unload_as(game, "idle", "idle:a"), Ok(()));
+        game.apply_runtime_levels();
+        assert!(!game.runtime_level_is_open("idle:a"));
+        assert!(super::Dim::extra("idle:a").is_none());
+        assert_eq!(*seen.unloads.lock().unwrap(), ["idle:a", "idle:a"]);
+        let _ = std::fs::remove_dir_all(&folder);
+    });
+}
+
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_level_with_a_player_in_it_is_not_unloaded() {
@@ -250,7 +298,12 @@ fn a_reopened_level_comes_back_from_its_folder_with_its_block() {
         // The test game saves under its working directory: start and end without a folder.
         let folder = game.world_root.join("dimensions/keep");
         let _ = std::fs::remove_dir_all(&folder);
-        let stone = game.pack.assets.registry.default_state("minecraft:stone").unwrap();
+        let stone = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:stone")
+            .unwrap();
         tick_post(game);
         game.apply_runtime_levels();
         let dim = super::Dim::extra("keep:a").unwrap();
@@ -263,12 +316,18 @@ fn a_reopened_level_comes_back_from_its_folder_with_its_block() {
             }
             game.streaming.wait(std::time::Duration::from_millis(5));
         }
-        assert!(game.world.chunks.contains_key(&(0, 0)), "the chunk generated");
+        assert!(
+            game.world.chunks.contains_key(&(0, 0)),
+            "the chunk generated"
+        );
         game.world.set(1, -50, 1, stone).unwrap();
         game.enter_level(super::Dim::Overworld).unwrap();
         unload_as(game, "keep", "keep:a").unwrap();
         game.apply_runtime_levels();
-        assert!(game.world_root.join("dimensions/keep/a").is_dir(), "the folder stays");
+        assert!(
+            game.world_root.join("dimensions/keep/a").is_dir(),
+            "the folder stays"
+        );
 
         seen.answers.lock().unwrap().clear();
         tick_post(game);

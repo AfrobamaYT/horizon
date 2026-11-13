@@ -1467,7 +1467,7 @@ impl Game<'_> {
     }
 
     /// Save the parked level `dim` and drop it: the mods hear its chunks and the level unload. A
-    /// level a mod opened at run time leaves the game's tables too, its folder kept.
+    /// level a mod opened at run time stays known, and opens again when entered, as any other.
     pub(super) fn close_parked_level(&mut self, dim: Dim) -> Result<()> {
         let back = self.dim;
         self.enter_level(dim)?;
@@ -1483,7 +1483,6 @@ impl Game<'_> {
         self.enter_level(back)?;
         self.levels.parked.remove(&dim);
         self.native_level_closed(dim);
-        self.forget_runtime_level(dim);
         Ok(())
     }
 
