@@ -68,6 +68,30 @@ fn written_index_reads_back_and_unknown_fields_are_ignored() {
 }
 
 #[test]
+fn a_game_releases_copy_names_its_build_before_the_build_is_known() {
+    let mut value = json(&index(&[(ENGINE, b"engine")]));
+    value["build"]["nightly"] = serde_json::json!("nightly-2026-11-13");
+    let bytes = serde_json::to_vec(&value).unwrap();
+    let build = Index::build_of(&bytes).unwrap();
+    assert_eq!(build.commit, COMMIT);
+    assert_eq!(build.nightly.as_deref(), Some("nightly-2026-11-13"));
+    value["schema"] = serde_json::json!(SCHEMA + 1);
+    let newer = serde_json::to_vec(&value).unwrap();
+    assert_eq!(
+        Index::build_of(&newer),
+        Err(Refusal::Schema(u64::from(SCHEMA) + 1))
+    );
+    assert!(matches!(
+        Index::build_of(b"{\"schema\": 1}"),
+        Err(Refusal::Malformed(_))
+    ));
+    assert!(matches!(
+        Index::build_of(b"not json"),
+        Err(Refusal::Malformed(_))
+    ));
+}
+
+#[test]
 fn each_bad_index_is_refused_by_name() {
     let good = json(&index(&[(ENGINE, b"engine")]));
     let cases: [(&str, fn(&mut serde_json::Value), Refusal); 8] = [
