@@ -312,7 +312,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`potion_splash(item, pos)`**: a thrown splash or lingering potion finished applying its hit effects at `pos`. Experience bottles are excluded.
 - **`entity_enter_love_mode(entity, kind, player)`**: a mob entered love mode after a player interaction; `player` is the feeder UUID when known.
 - **`teleport_command(dimension, entity, from, to, cancel)`**: a server entity is about to be teleported by `/tp` or `/teleport`. `dimension` is the level it arrives in, `entity` its network id, `from` its feet now and `to` where the command sends it; move `to` to redirect it, or set `cancel` to keep it where it is (the command still reports success).
-- **`player_passage_cross(player, passage, from, cancel)`**: `player`'s client crossed `passage` from `from` (its feet before), the move there passed and both ends are tracked; the server has not worked out where the player comes out yet. Set `cancel` and the crossing is refused (`PassageCrossRefusal::Vetoed`), the player put back at `from`. Everything checked before is checked again after the listeners, so one that removes the passage or moves the player refuses it too.
 - **`entity_teleport(dimension, entity, from, to)`**: a server entity completed a same-level teleport command. `entity` is its network id; `from` and `to` are coordinates in `dimension`. This reports the move after it happens.
 - **`entity_breed(parent, partner, child)`**: two mobs completed a breeding action. `child` is absent when the vanilla action lays an egg instead of creating a baby.
 - **`entity_tame(entity, kind, owner)`**: a mob became tamed after its owner and persistent state were set. `owner` is the server player's UUID when known.
@@ -1173,21 +1172,7 @@ it moves only what the player sees, not where they are or aim.
   cut to 4 either way; an upward push lifts the player off the ground. A spectator, no player, or a value that isn't
   a number is left alone. A server mod that wants a client pushed sends its client half a message.
 
-### Passages within a level
-
-`crates/horizon-client/src/game/modding/native_passages.rs` and `native_passage_cross.rs`, with the hub's half in
-`crates/horizon-client/src/lan/hub/passage_cross.rs` (#3775, docs/modding/src/how-to/passages.md).
-
-- `cross_passage(passage)` (client) moves the window's player through a passage its server told it of (feet, last
-  tick's place, velocity, look, turned) and sends `horizon:passage_cross` (the number, the feet before). Refused with
-  nothing moved or sent as a `PassageCrossError`; a payload a mod's `client_packet_send` cancels is `Cancelled`. `last_passage_refusal()` (client) is the server's
-  `PassageCrossRefusal` of the last crossing, until the next.
-- On the server the move to where it crossed from is checked as any move; the crossing then holds the guest's
-  other packets until the game has decided it from its own `from`. The game checks eligibility, the passage, the
-  20-block reach and the opening's and destination's chunks, fires `player_passage_cross`, checks all of it again,
-  and only then works out where the player comes out (that chunk must be held too). Accepted with an all-relative,
-  zero position packet; refused by name (`horizon:passage_sync`) and put back with an absolute one.
-
+### Values for a mod's shader pack
 
 `shader_params(partial, params)` (client) asks every frame, while a Horizon shader pack is on, for eight
 `[f32; 4]` that every stage of the pack reads as `frame.mods` (`array<vec4<f32>, 8>`, docs/api/shaders-reference.md). What
