@@ -3082,8 +3082,6 @@ impl Minecart {
         c.ticks_frozen = super::boats::saved_ticks_frozen(tag);
         c.flipped = flag("FlippedRotation", false);
         c.first_tick = flag("HasTicked", false);
-        // AbstractMinecartContainer.readAdditionalSaveData: only container carts read a loot
-        // table; any other cart neither keeps nor saves one.
         if kind.slots() > 0 {
             c.loot = horizon_client::save::PendingContainerLoot::from_tag(tag);
             c.items = if c.loot.is_some() {
