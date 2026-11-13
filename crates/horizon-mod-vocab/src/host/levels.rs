@@ -249,7 +249,7 @@ pub trait LevelsBackend {
     /// to the end of that section. Zero runtime IDs fall back to stable storage
     /// join order, not runtime admission order. Unregistered entity kinds have
     /// no authoritative lookup handle and are omitted. These limitations mean
-    /// saved-world and whole-level ordering parity is not yet complete (#2703).
+    /// saved-world and whole-level ordering parity is not guaranteed.
     /// Allocates a result buffer, not one allocation per entity; sorting is
     /// O(n log n), followed by one authoritative handle lookup per candidate.
     #[access(WorldOnly)]
@@ -263,12 +263,12 @@ pub trait LevelsBackend {
     /// with the two swapped, as vanilla's `AABB`. On a client (`ClientLevel`),
     /// the entities the server tracks to it and the window's own player, with
     /// the same walk; other players are left out, as their handles do not
-    /// resolve there (tracked in arismoko/horizon#3033).
+    /// resolve there .
     /// None there before login and for a level it does not show. The walk
     /// is in entity-list order followed by players. Every entity list is walked
     /// once per call: O(entities) regardless of the box. Each overlapping mob
-    /// resolves through a mob-list scan: O(K*N) for K overlapping mobs and N mobs. Tridents cannot
-    /// yet resolve; frames, paintings and other special entities
+    /// resolves through a mob-list scan: O(K*N) for K overlapping mobs and N mobs. Tridents do not
+    /// resolve; frames, paintings and other special entities
     /// are not on the entity-list walk. The dragon follows ordinary entities;
     /// its eight intersecting parts follow players in vanilla hash-table order (`Level.getEntities`).
     /// During `hears_projectile_impacts`, the projectile list is taken out of
@@ -1177,7 +1177,7 @@ pub trait LevelsBackendMut {
     /// default pickup delay of 10 ticks. None, with nothing spawned, for an
     /// empty stack or an unknown item, with the `block_drops` rule off, on a
     /// client, for a stale handle, a level not in place, or an item a mod
-    /// kept out (`native_entity_join_level`).
+    /// kept out (`entity_join_level`).
     #[access(WorldOnly)]
     fn level_pop_resource(
         &mut self,
@@ -1194,7 +1194,7 @@ pub trait LevelsBackendMut {
     /// never). None, with nothing
     /// spawned, for an empty stack or an unknown item, a value that isn't
     /// finite, on a client, for a stale handle, a level not in place, or an
-    /// item a mod kept out (`native_entity_join_level`).
+    /// item a mod kept out (`entity_join_level`).
     #[access(WorldOnly)]
     fn level_spawn_item(
         &mut self,
@@ -1230,7 +1230,7 @@ pub trait LevelsBackendMut {
     /// around `x y z`, or else a new orb with its own random motion. The
     /// `block_drops` rule doesn't apply (vanilla's blocks check it before
     /// they award). True once the orbs are awarded, even if a mod keeps a new
-    /// one out (`native_entity_join_level`). False, with no orbs, for 0, a
+    /// one out (`entity_join_level`). False, with no orbs, for 0, a
     /// value that isn't finite, on a client, for a stale handle or a level
     /// not in place.
     #[access(WorldOnly)]
