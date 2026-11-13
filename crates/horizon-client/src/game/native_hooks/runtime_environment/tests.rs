@@ -140,7 +140,7 @@ fn run(wasm: bool) {
             } else if case.ends_with("env_false") {
                 command.env("HORIZON_GAME_TESTS", "false");
             }
-            (case, command.output().unwrap())
+            command.output().unwrap()
         };
         // The wasm case runs alone in the fixture job: four cases at a time there, each still in its
         // own process. The native case shares the slow shards' memory, so one at a time.
@@ -156,7 +156,7 @@ fn run(wasm: bool) {
                     .map(|child| child.join().unwrap())
                     .collect()
             });
-            for (case, output) in outputs {
+            for (case, output) in group.iter().zip(outputs) {
                 assert!(
                     output.status.success(),
                     "{case}: {}\n{}",
