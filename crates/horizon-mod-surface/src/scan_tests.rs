@@ -131,3 +131,11 @@ fn a_tuple_fields_position_after_a_single_dot_is_a_name() {
     let found: Vec<(Token<'_>, usize)> = crate::scan::tokens("1.25").collect();
     assert_eq!(found, [(Token::Literal("1.25"), 1)]);
 }
+
+#[test]
+fn a_tuple_position_after_a_dot_and_spaces_or_a_comment_is_a_name() {
+    let names: Vec<&str> = identifiers("p. 0 + p./**/1 + p.\n2 + 0..3 + 1.5")
+        .map(|(n, _)| n)
+        .collect();
+    assert_eq!(names, ["p", "0", "p", "1", "p", "2"]);
+}

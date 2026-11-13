@@ -4,7 +4,7 @@
 //! whitespace, reads string, byte, C and raw string literals, char and byte literals and number
 //! literals with their suffixes (a float's fraction included) as one [`Token::Literal`] each,
 //! lifetimes and labels as [`Token::Lifetime`], `r#` raw identifiers by their name, a tuple
-//! field's position after a single `.` (`pair.0`) as the identifier it names, and every other
+//! field's position after a single `.` token (`pair.0`, `pair. 0`) as the identifier it names, and every other
 //! ASCII character as [`Token::Punct`]. Macro bodies are tokens like any other, so a name used only inside
 //! `vec![…]` or `format!(…)` is seen. Any text scans: an unterminated literal or comment ends the
 //! scan, never a panic.
@@ -27,6 +27,7 @@ pub fn tokens(text: &str) -> Tokens<'_> {
         bytes: text.as_bytes(),
         at: 0,
         line: 1,
+        dots: (false, false),
     }
 }
 
@@ -44,6 +45,8 @@ pub struct Tokens<'a> {
     bytes: &'a [u8],
     at: usize,
     line: usize,
+    /// Whether the last token was a `.`, and whether the one before it was.
+    dots: (bool, bool),
 }
 
 /// An identifier byte: ASCII letters, digits and `_`, and every byte of a non-ASCII character
@@ -179,6 +182,15 @@ impl<'a> Iterator for Tokens<'a> {
     type Item = (Token<'a>, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
+        let item = self.token()?;
+        self.dots = (item.0 == Token::Punct(b'.'), self.dots.0);
+        Some(item)
+    }
+}
+
+impl<'a> Tokens<'a> {
+    /// The next token, comments and whitespace skipped.
+    fn token(&mut self) -> Option<(Token<'a>, usize)> {
         while let Some(byte) = self.peek(0) {
             let line = self.line;
             let start = self.at;
@@ -206,10 +218,9 @@ impl<'a> Iterator for Tokens<'a> {
                     return Some((quoted(self, is_literal), line));
                 }
                 b'0'..=b'9' => {
-                    // After a single `.` (`pair.0`, `nested.0.1`): a tuple field's position.
-                    let field = start >= 1
-                        && self.bytes[start - 1] == b'.'
-                        && (start < 2 || self.bytes[start - 2] != b'.');
+                    // After a single `.` token (`pair.0`, `nested.0.1`, `pair. 0`, `pair./**/0`):
+                    // a tuple field's position.
+                    let field = self.dots == (true, false);
                     if field {
                         while self.peek(0).is_some_and(|b| b.is_ascii_digit()) {
                             self.at += 1;

@@ -12,13 +12,22 @@
 //!   (`TextHover::Item` is the variant, not a type `Item`).
 //!
 //! For each struct the source names it also records how the mod builds it: [`Built::Full`] when a
-//! literal or pattern lists its fields with no `..` (`Name { … }`, `Name::<T> { … }`, `Self { … }`
-//! in an impl for it, a local alias or renamed import of it, `Name(…)` or a tuple struct's
-//! constructor passed as a function), [`Built::Base`] when every one ends in `..` (and for a
-//! union, whose literal names one field), [`Built::None`] otherwise. A file with a struct literal
-//! of a name the scan cannot place (a macro's `$t { … }`) builds every API struct it names in
-//! full: when unsure, the scan says full, because a refusal is safe and a wrong "fits" is not.
-//! It records the public paths the mod writes each item by, too.
+//! literal or pattern lists its fields with no `..` (`Name { … }`, `Name::<T> { … }`, `Name(…)`,
+//! `Self { … }` in an impl for it, a local alias or renamed import of it, or a tuple or unit
+//! struct's name used as a value), [`Built::Base`] when every one ends in `..` (and for a union,
+//! whose literal names one field), [`Built::None`] otherwise. A name counts as built anywhere
+//! but where only a type can stand. Which struct a name means is decided by two rules, with no
+//! module resolution:
+//! - a name written with a path (`a::b::Name`) is every API struct of that name;
+//! - an unqualified name (or `Self` in an impl for one) is the mod's own type only in a file
+//!   that defines it at its top level, binds it with no `use`, has no glob, no inline module, no
+//!   `use` with a metavariable, and only standard or API macros and attributes whose names
+//!   nothing in the mod rebinds. Otherwise it is every API struct of that name.
+//!
+//! A struct literal of a name the scan cannot place (a macro's `$t { … }`) builds every API
+//! struct the mod names in full: when unsure, the scan says full, because a refusal is safe and
+//! a wrong "fits" is not. It records the public paths the mod writes each item by, too,
+//! through renamed or imported API modules as well.
 //!
 //! [`fits`] compares such a list with a target build's surface. The mod fits when every entry
 //! exists there with an equal hash and under every path the mod writes, every type keeps the
@@ -29,7 +38,8 @@
 //! new trait impl changes nothing for the mod.
 //!
 //! Whether a mod is exact by nature (a `[native.*]` table, internals) is the caller's to decide
-//! from its manifest before asking: this crate does not read manifests.
+//! from its manifest before asking, and such a mod gets no table: this crate does not read
+//! manifests.
 //!
 //! A [`UsesTable`] is the list a package carries: schema, the build it was made for, and its
 //! entries. [`UsesTable::read`] refuses an unknown schema, malformed JSON, repeated ids and
@@ -197,6 +207,19 @@ fn ident<'t>(tokens: &Tokens<'t>, at: usize) -> Option<&'t str> {
         Some((Token::Ident(name), _)) => Some(name),
         _ => None,
     }
+}
+
+/// The first token of the path that ends at `last`: `a::b::c` from `c`'s index.
+fn path_start(tokens: &Tokens<'_>, last: usize) -> usize {
+    let mut first = last;
+    while first >= 3
+        && punct(tokens, first - 1, b':')
+        && punct(tokens, first - 2, b':')
+        && ident(tokens, first - 3).is_some()
+    {
+        first -= 3;
+    }
+    first
 }
 
 /// The index of the token that closes the bracket opened at `open`, if it closes.
@@ -378,12 +401,14 @@ struct FileFacts<'t> {
     inline_modules: bool,
     /// Some `use` holds a macro metavariable (`use mod_api::$m;`): what it binds is unknown.
     use_metavariable: bool,
-    /// Macro calls in item position outside function bodies: each macro's path.
-    item_macros: Vec<Vec<&'t str>>,
-    /// Outer attributes in item position outside function bodies: each attribute's path.
-    item_attributes: Vec<Vec<&'t str>>,
-    /// Each `macro_rules!` definition: its name and the token range of its body.
-    macro_rules: Vec<(&'t str, usize, usize)>,
+    /// Every macro call anywhere in the file, function bodies and macro bodies included: the
+    /// macro's path, or `["$"]` for one named by a metavariable.
+    macro_calls: Vec<Vec<&'t str>>,
+    /// Every attribute anywhere in the file, `#[…]` or `#![…]`: the token range inside its
+    /// brackets.
+    attributes: Vec<(usize, usize)>,
+    /// The name of each `macro_rules!` definition.
+    macro_rules: Vec<&'t str>,
 }
 
 /// An `impl` or `trait` body: its token range, its target's last name and the whole path.
@@ -558,91 +583,47 @@ fn file_facts(text: &str) -> Result<FileFacts<'_>, usize> {
     let mut defines = BTreeSet::new();
     let mut inline_modules = false;
     let mut depth = 0usize;
-    // Item position outside function bodies: every open brace is a `mod name {` body, and the
-    // token starts an item (the file's start, or after `;`, `}`, `{` or an attribute's `]`).
-    let mut braces: Vec<bool> = Vec::new();
-    let mut item_macros = Vec::new();
-    let mut item_attributes = Vec::new();
+    let mut macro_calls = Vec::new();
+    let mut attributes = Vec::new();
     let mut macro_rules = Vec::new();
-    // The path written backwards from `last`: `a::b::c` gives `[a, b, c]`.
-    let path_to = |last: usize| {
-        let mut first = last;
-        while first >= 3
-            && punct(&tokens, first - 1, b':')
-            && punct(&tokens, first - 2, b':')
-            && ident(&tokens, first - 3).is_some()
-        {
-            first -= 3;
-        }
-        (
-            first,
-            (first..=last)
-                .step_by(3)
-                .filter_map(|i| ident(&tokens, i))
-                .collect::<Vec<_>>(),
-        )
-    };
-    let starts_item = |at: usize| {
-        at == 0
-            || matches!(
-                tokens[at - 1].0,
-                Token::Punct(b';' | b'}' | b'{' | b']') | Token::Ident("pub")
-            )
-            || (at >= 4
-                && punct(&tokens, at - 1, b')')
-                && ident(&tokens, at - 2) == Some("crate")
-                && punct(&tokens, at - 3, b'(')
-                && ident(&tokens, at - 4) == Some("pub"))
-    };
     for at in 0..tokens.len() {
-        let item_level = braces.iter().all(|module| *module);
         match tokens[at].0 {
             Token::Punct(b'!')
-                if item_level
-                    && at > 0
+                if at > 0
                     && ident(&tokens, at - 1).is_some()
                     && matches!(
                         tokens.get(at + 1).map(|(t, _)| *t),
                         Some(Token::Punct(b'(' | b'[' | b'{') | Token::Ident(_))
                     ) =>
             {
-                let (first, path) = path_to(at - 1);
-                if path == ["macro_rules"] {
-                    if let Some(name) = ident(&tokens, at + 1)
-                        && let Some(open) = (at + 2..tokens.len())
-                            .find(|i| !matches!(tokens[*i].0, Token::Ident(_)))
-                        && let Some(close) = closing(&tokens, open)
-                    {
-                        macro_rules.push((name, open, close));
-                    }
-                } else if starts_item(first) {
-                    item_macros.push(path);
+                let first = path_start(&tokens, at - 1);
+                if first >= 1 && punct(&tokens, first - 1, b'$') {
+                    macro_calls.push(vec!["$"]);
+                    continue;
+                }
+                let path: Vec<&str> = (first..at)
+                    .step_by(3)
+                    .filter_map(|i| ident(&tokens, i))
+                    .collect();
+                if path == ["macro_rules"]
+                    && let Some(name) = ident(&tokens, at + 1)
+                {
+                    macro_rules.push(name);
+                }
+                macro_calls.push(path);
+            }
+            Token::Punct(b'#') => {
+                let open = if punct(&tokens, at + 1, b'!') {
+                    at + 2
+                } else {
+                    at + 1
+                };
+                if punct(&tokens, open, b'[') {
+                    attributes.push((open, closing(&tokens, open).unwrap_or(tokens.len())));
                 }
             }
-            Token::Punct(b'#') if item_level && punct(&tokens, at + 1, b'[') && starts_item(at) => {
-                let mut last = at + 2;
-                while punct(&tokens, last + 1, b':') && punct(&tokens, last + 2, b':') {
-                    last += 3;
-                }
-                if ident(&tokens, last).is_some() {
-                    item_attributes.push(path_to(last).1);
-                }
-            }
-            _ => {}
-        }
-        match tokens[at].0 {
-            Token::Punct(b'{') => {
-                depth += 1;
-                braces.push(
-                    at >= 2
-                        && ident(&tokens, at - 1).is_some()
-                        && ident(&tokens, at - 2) == Some("mod"),
-                );
-            }
-            Token::Punct(b'}') => {
-                depth = depth.saturating_sub(1);
-                braces.pop();
-            }
+            Token::Punct(b'{') => depth += 1,
+            Token::Punct(b'}') => depth = depth.saturating_sub(1),
             Token::Ident("mod")
                 if ident(&tokens, at + 1).is_some() && punct(&tokens, at + 2, b'{') =>
             {
@@ -666,8 +647,8 @@ fn file_facts(text: &str) -> Result<FileFacts<'_>, usize> {
         defines,
         inline_modules,
         use_metavariable,
-        item_macros,
-        item_attributes,
+        macro_calls,
+        attributes,
         macro_rules,
     })
 }
@@ -677,35 +658,32 @@ struct ModFacts<'t> {
     /// The names the API crate is known by: `mod_api`, and any `use mod_api as x` or
     /// `extern crate mod_api as x`.
     roots: BTreeSet<&'t str>,
-    /// Local names for API names, from any file: `use mod_api::…::X as Y`, `type Y = …X;`.
-    aliases: BTreeMap<&'t str, &'t str>,
-    /// API names some file imports by name (`use mod_api::…::X`).
-    imported: BTreeSet<&'t str>,
-    /// API modules some file imports with a glob (`use mod_api::m::*`), `mod_api::` left out.
-    globs: BTreeSet<String>,
+    /// Every local name some file gives another name, with each name it gives: any
+    /// `use … as Y` (`Y` names the path's last segment) and any `type Y = …X<…>;`.
+    aliases: BTreeMap<&'t str, BTreeSet<&'t str>>,
+    /// API paths some file binds a name to, `mod_api::` left out, with each path: every `use`
+    /// of an API path that is not a glob (`use mod_api::prelude as p;` binds `p` to
+    /// `prelude`), and those of `use` paths that start at such a name, followed.
+    bound: BTreeMap<&'t str, BTreeSet<Vec<&'t str>>>,
     /// The structs, enums, unions and enum variants the mod defines.
     types: BTreeSet<&'t str>,
-    /// The type aliases the mod defines as items of their own, each with every target name it is
-    /// given (`type X = …Y<…>;`).
-    item_aliases: BTreeMap<&'t str, Vec<&'t str>>,
-    /// Every other name the mod defines: traits, enum variants, associated types.
+    /// The type aliases the mod defines as items of their own.
+    item_aliases: BTreeSet<&'t str>,
+    /// Every other name the mod defines: traits, associated types.
     others: BTreeSet<&'t str>,
-    /// The modules the mod declares, `mod x;` or `mod x { … }`.
-    modules: BTreeSet<&'t str>,
-    /// Every name a `use` anywhere in the mod binds, with each path it binds it to.
-    bindings: BTreeMap<&'t str, Vec<Vec<&'t str>>>,
-    /// The path of every glob import anywhere in the mod, `*` left out.
-    all_globs: Vec<Vec<&'t str>>,
-    /// Names no path inside the mod can make its own: the API's roots and every
-    /// `extern crate … as` name.
-    crate_names: BTreeSet<&'t str>,
+    /// Names some `macro_rules!` or some `use` that does not start at an API root binds: a
+    /// standard or API macro or attribute of that name may be another.
+    rebound: BTreeSet<&'t str>,
+    /// Some glob outside the API and the mod (`use dep::*;`) or a `#[macro_use]` may bring in
+    /// macros of any name.
+    rebound_all: bool,
 }
 
 fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
     let mut roots = BTreeSet::from(["mod_api"]);
     for file in files {
         for (path, name) in &file.imports {
-            if path[..] == ["mod_api"] || path[..] == ["mod_api", "self"] {
+            if path[..] == ["mod_api"] {
                 roots.insert(*name);
             }
         }
@@ -722,57 +700,45 @@ fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
     let mut facts = ModFacts {
         roots,
         aliases: BTreeMap::new(),
-        imported: BTreeSet::new(),
-        globs: BTreeSet::new(),
+        bound: BTreeMap::new(),
         types: BTreeSet::new(),
-        item_aliases: BTreeMap::new(),
+        item_aliases: BTreeSet::new(),
         others: BTreeSet::new(),
-        modules: BTreeSet::new(),
-        bindings: BTreeMap::new(),
-        all_globs: Vec::new(),
-        crate_names: BTreeSet::new(),
+        rebound: BTreeSet::new(),
+        rebound_all: false,
     };
-    facts.crate_names.extend(facts.roots.iter().copied());
     for file in files {
+        facts.rebound.extend(file.macro_rules.iter().copied());
+        facts.rebound_all |= file
+            .attributes
+            .iter()
+            .any(|(open, _)| ident(&file.tokens, open + 1) == Some("macro_use"));
         for (path, name) in &file.imports {
+            let first = path[0];
+            let api = facts.roots.contains(first);
             if *name == "*" {
-                facts.all_globs.push(path[..path.len() - 1].to_vec());
-            } else {
-                facts.bindings.entry(name).or_default().push(path.clone());
-            }
-        }
-        for at in 0..file.tokens.len() {
-            if ident(&file.tokens, at) == Some("extern")
-                && ident(&file.tokens, at + 1) == Some("crate")
-                && let Some(name) = ident(&file.tokens, at + 2)
-            {
-                let local = match ident(&file.tokens, at + 3) {
-                    Some("as") => ident(&file.tokens, at + 4).unwrap_or(name),
-                    _ => name,
-                };
-                facts.crate_names.insert(local);
-            }
-        }
-    }
-    for file in files {
-        for (path, name) in &file.imports {
-            if path.len() < 2 || !facts.roots.contains(path[0]) {
+                facts.rebound_all |= !api && !matches!(first, "crate" | "self" | "super");
                 continue;
+            }
+            if !api {
+                facts.rebound.insert(name);
             }
             let last = path[path.len() - 1];
-            if *name == "*" {
-                facts.globs.insert(path[1..path.len() - 1].join("::"));
-                continue;
-            }
-            facts.imported.insert(last);
             if name != &last {
-                facts.aliases.insert(name, last);
+                facts.aliases.entry(name).or_default().insert(last);
+            }
+            if api && path.len() >= 2 {
+                facts
+                    .bound
+                    .entry(name)
+                    .or_default()
+                    .insert(path[1..].to_vec());
             }
         }
         for (alias, target, item) in &file.type_aliases {
-            facts.aliases.entry(alias).or_insert(target);
+            facts.aliases.entry(alias).or_default().insert(target);
             if *item {
-                facts.item_aliases.entry(alias).or_default().push(target);
+                facts.item_aliases.insert(alias);
             } else {
                 facts.others.insert(alias);
             }
@@ -782,12 +748,6 @@ fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
             let Some(keyword) = ident(tokens, at) else {
                 continue;
             };
-            if keyword == "mod"
-                && let Some(name) = ident(tokens, at + 1)
-                && (punct(tokens, at + 2, b';') || punct(tokens, at + 2, b'{'))
-            {
-                facts.modules.insert(name);
-            }
             if !matches!(keyword, "struct" | "enum" | "union" | "trait") {
                 continue;
             }
@@ -822,7 +782,80 @@ fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
             }
         }
     }
+    // `use` paths that start at a name bound to an API path: `use p::Biome;` after
+    // `use mod_api::prelude as p;`. Followed a bounded number of times.
+    for _ in 0..4 {
+        let mut more: Vec<(&str, Vec<&str>)> = Vec::new();
+        for file in files {
+            for (path, name) in &file.imports {
+                if *name == "*" || path.len() < 2 {
+                    continue;
+                }
+                for prefix in facts.bound.get(path[0]).into_iter().flatten() {
+                    let mut full = prefix.clone();
+                    full.extend(&path[1..]);
+                    if !facts
+                        .bound
+                        .get(name)
+                        .is_some_and(|known| known.contains(&full))
+                    {
+                        more.push((name, full));
+                    }
+                }
+            }
+        }
+        if more.is_empty() {
+            break;
+        }
+        for (name, path) in more {
+            facts.bound.entry(name).or_default().insert(path);
+        }
+    }
     facts
+}
+
+/// Each API path (`mod_api::` left out) a path written in the mod may be: itself after an API
+/// root, or after a name bound to an API path.
+fn api_paths_of<'t>(path: &[&'t str], module: &ModFacts<'t>) -> Vec<Vec<&'t str>> {
+    let Some((first, rest)) = path.split_first() else {
+        return Vec::new();
+    };
+    if module.roots.contains(first) {
+        return vec![rest.to_vec()];
+    }
+    module
+        .bound
+        .get(first)
+        .into_iter()
+        .flatten()
+        .map(|prefix| {
+            let mut full = prefix.clone();
+            full.extend(rest);
+            full
+        })
+        .collect()
+}
+
+/// The API names `name` may stand for: itself when it is one, and every name the mod's aliases
+/// lead it to, followed transitively in any file.
+fn api_names_of<'t, 'k>(
+    name: &'t str,
+    module: &ModFacts<'t>,
+    by_name: &BTreeMap<&'k str, Vec<&'k str>>,
+) -> BTreeSet<&'k str> {
+    let mut out = BTreeSet::new();
+    let mut seen = BTreeSet::new();
+    let mut pending = vec![name];
+    while let Some(next) = pending.pop() {
+        if !seen.insert(next) {
+            continue;
+        }
+        if let Some((key, _)) = by_name.get_key_value(next) {
+            out.insert(*key);
+        }
+        pending.extend(module.aliases.get(next).into_iter().flatten().copied());
+    }
+    out
 }
 
 /// Standard macros that cannot bring a name into scope: they expand to an expression, a string
@@ -900,81 +933,148 @@ const BUILTIN_ATTRIBUTES: &[&str] = &[
     "link",
 ];
 
-/// Whether a macro the scan cannot expand may bring names into the mod's scope: a `use` that
-/// holds a metavariable, a macro called in item position outside function bodies (other than the
-/// standard ones in [`STD_MACROS`] and the mod's own `macro_rules!` whose bodies write no `use`,
-/// no `mod` and call only such macros), or an attribute on an item that is neither one the
-/// compiler reads ([`BUILTIN_ATTRIBUTES`]) nor one of the API's own attribute or derive macros
-/// (and their helper attributes) in the surface.
-fn macro_doubt(files: &[FileFacts<'_>], module: &ModFacts<'_>, surface: &Surface) -> bool {
-    if files.iter().any(|file| file.use_metavariable) {
-        return true;
-    }
-    // The mod's own `macro_rules!` that cannot emit a `use` or a `mod`, as a least fixpoint over
-    // the macros their bodies call.
-    let mut definitions: BTreeMap<&str, Vec<(&FileFacts<'_>, usize, usize)>> = BTreeMap::new();
-    for file in files {
-        for (name, open, close) in &file.macro_rules {
-            definitions
-                .entry(name)
-                .or_default()
-                .push((file, *open, *close));
+/// The derives the standard library defines.
+const STD_DERIVES: &[&str] = &[
+    "Debug",
+    "Clone",
+    "Copy",
+    "PartialEq",
+    "Eq",
+    "PartialOrd",
+    "Ord",
+    "Hash",
+    "Default",
+];
+
+/// The macro, attribute and derive names a file may use and still be read as written: the
+/// standard ones and the API's own, less every name something in the mod may rebind.
+struct Trusted<'s> {
+    roots: &'s BTreeSet<&'s str>,
+    /// By kind, the API's own macro names.
+    api_macros: BTreeSet<&'s str>,
+    api_attributes: BTreeSet<&'s str>,
+    api_derives: BTreeSet<&'s str>,
+    rebound: &'s BTreeSet<&'s str>,
+    rebound_all: bool,
+}
+
+/// What a macro, attribute or derive path is.
+#[derive(Clone, Copy)]
+enum Named {
+    Macro,
+    Attribute,
+    Derive,
+}
+
+impl Trusted<'_> {
+    /// Whether `path`, used as a `kind`, is certainly a standard or API one.
+    fn path(&self, path: &[&str], kind: Named) -> bool {
+        let (std, api) = match kind {
+            Named::Macro => (STD_MACROS, &self.api_macros),
+            Named::Attribute => (BUILTIN_ATTRIBUTES, &self.api_attributes),
+            Named::Derive => (STD_DERIVES, &self.api_derives),
+        };
+        match path {
+            [name] => {
+                !self.rebound_all
+                    && !self.rebound.contains(name)
+                    && (std.contains(name)
+                        || api.contains(name)
+                        || (matches!(kind, Named::Macro) && *name == "macro_rules"))
+            }
+            [root, .., name] if self.roots.contains(root) => api.contains(name),
+            [root, .., name] if matches!(*root, "std" | "core" | "alloc") => std.contains(name),
+            [root, ..] => {
+                matches!(kind, Named::Attribute)
+                    && matches!(*root, "rustfmt" | "clippy" | "diagnostic")
+            }
+            [] => false,
         }
     }
-    let mut safe: BTreeSet<&str> = BTreeSet::new();
-    loop {
-        let more: Vec<&str> = definitions
-            .iter()
-            .filter(|(name, _)| !safe.contains(*name))
-            .filter(|(_, bodies)| {
-                bodies.iter().all(|(file, open, close)| {
-                    let tokens = &file.tokens;
-                    (*open..*close).all(|at| match tokens[at].0 {
-                        Token::Ident("use" | "mod") => false,
-                        Token::Punct(b'!') => match ident(tokens, at.wrapping_sub(1)) {
-                            Some(called) => {
-                                !(at >= 3
-                                    && punct(tokens, at - 2, b':')
-                                    && punct(tokens, at - 3, b':'))
-                                    && !(at >= 2 && punct(tokens, at - 2, b'$'))
-                                    && (STD_MACROS.contains(&called) || safe.contains(called))
-                            }
-                            None => true,
-                        },
-                        _ => true,
-                    })
+
+    /// Whether the attribute written in `tokens[start..end]` is certainly a standard or API one,
+    /// reading `derive(…)` and `cfg_attr(…)` arguments to `depth` levels.
+    fn attribute(&self, tokens: &Tokens<'_>, start: usize, end: usize, depth: usize) -> bool {
+        let (path, next) = path_at(tokens, start, end);
+        if path.is_empty() || depth == 0 {
+            return false;
+        }
+        let arguments = || {
+            punct(tokens, next, b'(')
+                .then(|| closing(tokens, next))
+                .flatten()
+                .map(|close| arguments(tokens, next, close))
+        };
+        match &path[..] {
+            ["derive"] if self.path(&path, Named::Attribute) => arguments().is_some_and(|list| {
+                list.iter().all(|(from, to)| {
+                    let (derive, after) = path_at(tokens, *from, *to);
+                    after == *to && self.path(&derive, Named::Derive)
                 })
-            })
-            .map(|(name, _)| *name)
-            .collect();
-        if more.is_empty() {
+            }),
+            ["cfg_attr"] if self.path(&path, Named::Attribute) => arguments().is_some_and(|list| {
+                list.iter()
+                    .skip(1)
+                    .all(|(from, to)| self.attribute(tokens, *from, *to, depth - 1))
+            }),
+            _ => self.path(&path, Named::Attribute),
+        }
+    }
+
+    /// Whether every macro call and attribute in `file` is certainly a standard or API one, so
+    /// nothing the scan cannot expand may bring a name into its scope.
+    fn file(&self, file: &FileFacts<'_>) -> bool {
+        file.macro_calls
+            .iter()
+            .all(|path| self.path(path, Named::Macro))
+            && file
+                .attributes
+                .iter()
+                .all(|(open, close)| self.attribute(&file.tokens, open + 1, *close, 16))
+    }
+}
+
+/// The path written from `at` before `end` (a leading `::` allowed), and the index after it;
+/// empty when it does not start with a name.
+fn path_at<'t>(tokens: &Tokens<'t>, mut at: usize, end: usize) -> (Vec<&'t str>, usize) {
+    if punct(tokens, at, b':') && punct(tokens, at + 1, b':') {
+        at += 2;
+    }
+    let mut path = Vec::new();
+    while at < end
+        && let Some(name) = ident(tokens, at)
+    {
+        path.push(name);
+        at += 1;
+        if at < end && punct(tokens, at, b':') && punct(tokens, at + 1, b':') {
+            at += 2;
+        } else {
             break;
         }
-        safe.extend(more);
     }
-    let api_attributes: BTreeSet<&str> = surface
-        .macros
-        .iter()
-        .filter(|m| matches!(m.contract.kind, MacroKind::Attribute | MacroKind::Derive))
-        .flat_map(|m| {
-            std::iter::once(leaf(&m.id)).chain(m.contract.attributes.iter().map(String::as_str))
-        })
-        .collect();
-    files.iter().any(|file| {
-        file.item_macros.iter().any(|path| match &path[..] {
-            [name] => !STD_MACROS.contains(name) && !safe.contains(name),
-            _ => true,
-        }) || file.item_attributes.iter().any(|path| {
-            let builtin = path.len() == 1 && BUILTIN_ATTRIBUTES.contains(&path[0])
-                || matches!(path.first(), Some(&("rustfmt" | "clippy" | "diagnostic")));
-            let api = match &path[..] {
-                [name] => api_attributes.contains(name),
-                [root, .., name] => module.roots.contains(root) && api_attributes.contains(name),
-                [] => false,
-            };
-            !builtin && !api
-        })
-    })
+    (path, at)
+}
+
+/// The comma-separated arguments inside the bracket `open`..`close`, each as a token range.
+fn arguments(tokens: &Tokens<'_>, open: usize, close: usize) -> Vec<(usize, usize)> {
+    let mut list = Vec::new();
+    let mut depth = 0usize;
+    let mut from = open + 1;
+    for at in open + 1..close {
+        match tokens[at].0 {
+            Token::Punct(b'(' | b'[' | b'{') => depth += 1,
+            Token::Punct(b')' | b']' | b'}') => depth = depth.saturating_sub(1),
+            Token::Punct(b',') if depth == 0 => {
+                list.push((from, at));
+                from = at + 1;
+            }
+            _ => {}
+        }
+    }
+    if from < close {
+        list.push((from, close));
+    }
+    list
 }
 
 /// The bracket that encloses the token at `at`, as its index, if any.
@@ -991,56 +1091,156 @@ fn enclosing(tokens: &Tokens<'_>, at: usize) -> Option<usize> {
     None
 }
 
-/// Whether the tuple struct name at `at` stands as a value (its constructor as a function), not a
-/// type: an argument of a call, an array element, a field value, after `=`, `=>` or `return`.
-fn constructor_value(tokens: &Tokens<'_>, at: usize) -> bool {
-    if at == 0
-        || !matches!(
-            tokens.get(at + 1).map(|(t, _)| *t),
-            Some(Token::Punct(b')' | b',' | b';' | b']' | b'}'))
-        )
-    {
-        return false;
-    }
-    match tokens[at - 1].0 {
-        Token::Punct(b'=') | Token::Ident("return") => return true,
-        Token::Punct(b'>') if at >= 2 && punct(tokens, at - 2, b'=') => return true,
-        _ => {}
-    }
-    let Some(open) = enclosing(tokens, at) else {
-        return false;
-    };
-    match tokens[open].0 {
-        Token::Punct(b'(') => {
-            let definition = open >= 2 && ident(tokens, open - 2) == Some("fn");
-            open >= 1
-                && !definition
-                && match tokens[open - 1].0 {
-                    Token::Punct(b'!') => true,
-                    Token::Ident(name) => {
-                        !matches!(name, "fn" | "if" | "while" | "match" | "in" | "return")
-                    }
-                    _ => false,
-                }
+/// How far back the position checks below look, in tokens: past it they answer "a value",
+/// which counts a build, the safe side.
+const LOOK_BACK: usize = 4096;
+
+/// The bracket that encloses the token at `at`, angle brackets of generics counted (a `<`
+/// after `->` or `=>` is no bracket); `None` past a `;` or [`LOOK_BACK`].
+fn opener(tokens: &Tokens<'_>, at: usize) -> Option<usize> {
+    let (mut depth, mut angles) = (0usize, 0usize);
+    for index in (at.saturating_sub(LOOK_BACK)..at).rev() {
+        match tokens[index].0 {
+            Token::Punct(b')' | b']' | b'}') => depth += 1,
+            Token::Punct(b'(' | b'[' | b'{') if depth > 0 => depth -= 1,
+            Token::Punct(b'(' | b'[' | b'{') => return Some(index),
+            Token::Punct(b'>')
+                if depth == 0
+                    && !(index > 0
+                        && (punct(tokens, index - 1, b'-') || punct(tokens, index - 1, b'='))) =>
+            {
+                angles += 1;
+            }
+            Token::Punct(b'<') if depth == 0 => match angles.checked_sub(1) {
+                Some(left) => angles = left,
+                None => return Some(index),
+            },
+            Token::Punct(b';') if depth == 0 => return None,
+            _ => {}
         }
-        // An array element, not an attribute or an array or slice type (after `:`, `<`, `&`,
-        // `->` or `,` in a type list).
-        Token::Punct(b'[') => {
-            open >= 1
-                && !matches!(
-                    tokens[open - 1].0,
-                    Token::Punct(b'#' | b':' | b'<' | b'&' | b'>')
-                )
+    }
+    None
+}
+
+/// The keyword of the item whose name and generics come before `open` (`struct`, `union` or
+/// `enum`), if one does before a `;`, `{`, `}`, `=` or `,`; with the token it stopped at.
+fn item_keyword<'t>(tokens: &Tokens<'t>, open: usize) -> (Option<&'t str>, Option<usize>) {
+    for index in (open.saturating_sub(256)..open).rev() {
+        match tokens[index].0 {
+            Token::Ident(keyword @ ("struct" | "union" | "enum")) => return (Some(keyword), None),
+            Token::Punct(b';' | b'{' | b'}' | b'=' | b',') => return (None, Some(index)),
+            _ => {}
         }
-        // A field value in a literal, not a field type in a struct's definition.
-        Token::Punct(b'{') => {
-            punct(tokens, at - 1, b':')
-                && !(at >= 2 && punct(tokens, at - 2, b':'))
-                && !(open >= 2
-                    && matches!(ident(tokens, open - 2), Some("struct" | "union" | "enum")))
+    }
+    (None, None)
+}
+
+/// Whether the bracket at `open` holds a definition's fields: a struct's or union's body or
+/// tuple, or an enum variant's.
+fn definition_body(tokens: &Tokens<'_>, open: usize) -> bool {
+    match item_keyword(tokens, open) {
+        (Some(_), _) => true,
+        (None, Some(stop)) if matches!(tokens[stop].0, Token::Punct(b'{' | b',')) => {
+            enclosing(tokens, open).is_some_and(|outer| {
+                punct(tokens, outer, b'{') && item_keyword(tokens, outer).0 == Some("enum")
+            })
         }
         _ => false,
     }
+}
+
+/// Whether the `<` at `open` opens generics: after a capitalised name, a `::` (turbofish) or a
+/// definition's name.
+fn generic(tokens: &Tokens<'_>, open: usize) -> bool {
+    match open.checked_sub(1).map(|i| tokens[i].0) {
+        Some(Token::Ident(name)) => {
+            name.starts_with(|c: char| c.is_ascii_uppercase())
+                || matches!(name, "impl" | "fn")
+                || (open >= 2
+                    && matches!(
+                        ident(tokens, open - 2),
+                        Some("fn" | "struct" | "enum" | "union" | "trait" | "type" | "impl")
+                    ))
+        }
+        Some(Token::Punct(b':')) => open >= 2 && punct(tokens, open - 2, b':'),
+        _ => false,
+    }
+}
+
+/// Whether the statement holding the `=` at `eq` is a `type` alias, whose right side is a type.
+fn type_alias_eq(tokens: &Tokens<'_>, eq: usize) -> bool {
+    for index in (eq.saturating_sub(256)..eq).rev() {
+        match tokens[index].0 {
+            Token::Ident("type") => return true,
+            Token::Punct(b';' | b'{' | b'}') | Token::Ident("let") => return false,
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Whether the path that starts at `start` stands only where a type does, never a value: after
+/// `->`, a definition keyword, `impl`, `dyn`, `as` or `for`, a `:` that is not a struct
+/// literal's field, the `=` of a `type` alias, inside generics, a function type's arguments, a
+/// definition's fields, or a tuple, array or reference type in such a place. Anything else is a
+/// value, which counts a build.
+fn type_only(tokens: &Tokens<'_>, start: usize) -> bool {
+    let mut at = start;
+    for _ in 0..LOOK_BACK {
+        let Some(previous) = at.checked_sub(1) else {
+            return false;
+        };
+        match tokens[previous].0 {
+            Token::Ident(
+                "impl" | "dyn" | "struct" | "enum" | "union" | "trait" | "type" | "as" | "for"
+                | "where" | "mod" | "fn" | "use",
+            ) => return true,
+            Token::Punct(b'>') => return previous >= 1 && punct(tokens, previous - 1, b'-'),
+            Token::Punct(b'=') => return type_alias_eq(tokens, previous),
+            Token::Punct(b':') => {
+                // A struct literal's field: `{ name: N` or `, name: N` in a brace that holds no
+                // definition's fields.
+                let field = previous >= 2
+                    && ident(tokens, previous - 1).is_some()
+                    && matches!(tokens[previous - 2].0, Token::Punct(b'{' | b','))
+                    && enclosing(tokens, previous).is_some_and(|open| {
+                        punct(tokens, open, b'{') && !definition_body(tokens, open)
+                    });
+                return !field;
+            }
+            Token::Punct(b'<') => return generic(tokens, previous),
+            Token::Punct(b'&' | b'*') | Token::Ident("mut" | "const") | Token::Lifetime => {
+                at = previous;
+            }
+            Token::Punct(b',' | b'(' | b'[' | b'{') => {
+                let open = if punct(tokens, previous, b',') {
+                    match opener(tokens, previous) {
+                        Some(open) => open,
+                        None => return false,
+                    }
+                } else {
+                    previous
+                };
+                match tokens[open].0 {
+                    Token::Punct(b'<') => return generic(tokens, open),
+                    Token::Punct(b'(')
+                        if open >= 1
+                            && matches!(
+                                ident(tokens, open - 1),
+                                Some("Fn" | "FnMut" | "FnOnce" | "fn")
+                            ) =>
+                    {
+                        return true;
+                    }
+                    Token::Punct(b'(' | b'{') if definition_body(tokens, open) => return true,
+                    Token::Punct(b'(' | b'[') => at = open,
+                    _ => return false,
+                }
+            }
+            _ => return false,
+        }
+    }
+    false
 }
 
 /// The records `sources` (each a path and its Rust text) and `manifest` bring in, with
@@ -1082,7 +1282,7 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
     let struct_like = |id: &str| {
         matches!(
             kind(id),
-            Some(TypeKind::Struct | TypeKind::TupleStruct | TypeKind::Union)
+            Some(TypeKind::Struct | TypeKind::TupleStruct | TypeKind::UnitStruct | TypeKind::Union)
         )
     };
 
@@ -1100,153 +1300,60 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
         })
         .collect::<Result<_, _>>()?;
     let module = mod_facts(&files);
-    // Whether a `type` alias target may be an API item: an API name, or an alias of the mod's
-    // that may lead to one. Unsure is the API's.
-    let api_target = |target: &str| {
-        let mut pending = vec![target];
-        let mut seen = BTreeSet::new();
-        while let Some(name) = pending.pop() {
-            if by_name.contains_key(name) {
-                return true;
-            }
-            if seen.insert(name) {
-                pending.extend(module.item_aliases.get(name).into_iter().flatten().copied());
-                pending.extend(module.aliases.get(name).copied());
-            }
-        }
-        false
-    };
-    // A mod-wide alias of that name that may lead to an API item.
-    let api_alias = |name: &str| {
-        module
-            .item_aliases
-            .get(name)
-            .is_some_and(|targets| targets.iter().any(|t| api_target(t)))
-    };
-    // Whether some API glob import of the mod may export `name`: a glob of a module the API
-    // exports an item of that name under, or of one whose items' paths are not known.
-    let glob_may_export = |name: &str| {
-        module.globs.iter().any(|glob| {
-            let path = if glob.is_empty() {
-                name.to_owned()
-            } else {
-                format!("{glob}::{name}")
-            };
-            by_name.get(name).into_iter().flatten().any(|id| {
-                public_paths
-                    .get(id)
-                    .is_none_or(|paths| paths.is_empty() || paths.contains(&path))
+    let trusted = Trusted {
+        roots: &module.roots,
+        api_macros: surface
+            .macros
+            .iter()
+            .filter(|m| {
+                matches!(
+                    m.contract.kind,
+                    MacroKind::Function | MacroKind::Declarative
+                )
             })
-        })
+            .map(|m| leaf(&m.id))
+            .collect(),
+        api_attributes: surface
+            .macros
+            .iter()
+            .filter(|m| matches!(m.contract.kind, MacroKind::Attribute | MacroKind::Derive))
+            .flat_map(|m| {
+                let own = (m.contract.kind == MacroKind::Attribute).then(|| leaf(&m.id));
+                own.into_iter()
+                    .chain(m.contract.attributes.iter().map(String::as_str))
+            })
+            .collect(),
+        api_derives: surface
+            .macros
+            .iter()
+            .filter(|m| m.contract.kind == MacroKind::Derive)
+            .map(|m| leaf(&m.id))
+            .collect(),
+        rebound: &module.rebound,
+        rebound_all: module.rebound_all,
     };
-    // Every public path of the API, to tell which modules an API glob may hand over.
-    let api_paths: BTreeSet<&str> = public_paths
-        .values()
-        .flat_map(|paths| paths.iter().map(String::as_str))
-        .collect();
-    // The modules a path inside the mod certainly leads through: the least set where a name is
-    // in when the mod declares it with `mod`, no API root or `extern crate` takes it, no API glob
-    // may hand over a module of that name, and every `use` anywhere that binds it certainly
-    // leads to the mod's own modules: its path starts at `crate`, `self` or `super` and every
-    // later segment is in the set (the bound name itself may end it: `use crate::world;`).
-    // Built in rounds, so a cycle of bindings stays out, and bounded, so a chain longer than
-    // the bound stays out too. A glob through a path that is not certainly the mod's own, or of
-    // a name the scan cannot follow, may bring in any module, and then no segment is own.
-    let segment_keyword = |segment: &str| matches!(segment, "crate" | "super" | "self");
-    let api_glob_module = |segment: &str| {
-        module.globs.iter().any(|glob| {
-            let module = if glob.is_empty() {
-                format!("{segment}::")
-            } else {
-                format!("{glob}::{segment}::")
-            };
-            api_paths.iter().any(|path| path.starts_with(&module))
-        })
-    };
-    let candidates: Vec<&str> = module
-        .modules
+    // Whether nothing the scan cannot follow may change what names mean in each file: no glob,
+    // no inline module, no `use` with a metavariable, and only standard or API macros and
+    // attributes.
+    let certain: Vec<bool> = files
         .iter()
-        .copied()
-        .filter(|name| !module.crate_names.contains(name) && !api_glob_module(name))
+        .map(|file| {
+            !file.inline_modules
+                && !file.use_metavariable
+                && !file.imports.iter().any(|(_, local)| *local == "*")
+                && trusted.file(file)
+        })
         .collect();
-    let mut own_modules: BTreeSet<&str> = BTreeSet::new();
-    for _ in 0..MAX_USE_NESTING {
-        let more: Vec<&str> = candidates
-            .iter()
-            .copied()
-            .filter(|name| !own_modules.contains(name))
-            .filter(|name| {
-                module.bindings.get(name).into_iter().flatten().all(|path| {
-                    path.first().is_some_and(|first| segment_keyword(first))
-                        && path[1..].iter().enumerate().all(|(i, segment)| {
-                            segment_keyword(segment)
-                                || own_modules.contains(segment)
-                                || (i == path.len() - 2 && segment == name)
-                        })
-                })
+    // Whether an unqualified `name` in a file certainly means the mod's own type: the file
+    // defines it at its top level (a `type` alias of an API item is no definition), no `use` in
+    // it binds the name, and the file is certain. Anything else leaves the API's.
+    let own_in = |file: &FileFacts<'_>, certain: bool, name: &str| {
+        certain
+            && file.defines.contains(name)
+            && !file.type_aliases.iter().any(|(alias, target, item)| {
+                *item && *alias == name && !api_names_of(target, &module, &by_name).is_empty()
             })
-            .collect();
-        if more.is_empty() {
-            break;
-        }
-        own_modules.extend(more);
-    }
-    let globs_certain = module.all_globs.iter().all(|path| {
-        path.first()
-            .is_some_and(|first| module.roots.contains(first))
-            || (path.first().is_some_and(|first| segment_keyword(first))
-                && path[1..]
-                    .iter()
-                    .all(|segment| segment_keyword(segment) || own_modules.contains(segment)))
-    });
-    if !globs_certain || macro_doubt(&files, &module, surface) {
-        own_modules.clear();
-    }
-    let own_segment =
-        |segment: &str| matches!(segment, "super" | "self") || own_modules.contains(segment);
-    // Whether a path written in `file` starting at `first` starts inside the mod: `crate`,
-    // `super`, `self`, or one of the mod's own modules that this file binds by a `use` or declares
-    // with `mod` (either shadows any crate of that name), in a file that is one scope.
-    let starts_own = |file: &FileFacts<'_>, first: &str| {
-        segment_keyword(first)
-            || (own_modules.contains(first)
-                && !file.inline_modules
-                && (file.imports.iter().any(|(_, local)| *local == first)
-                    || (1..file.tokens.len()).any(|at| {
-                        ident(&file.tokens, at) == Some(first)
-                            && ident(&file.tokens, at - 1) == Some("mod")
-                    })))
-    };
-    // Whether a name reached through a path inside the mod (`crate::`, `super::`, `self::`, then
-    // `middle`) certainly means the mod's own type: every middle segment is the mod's own module,
-    // the mod defines the name (an alias that may lead to the API's is no definition), no file
-    // imports the API's of that name and no API glob may export it.
-    let own_by_path = |name: &str, middle: &[&str]| {
-        middle.iter().all(|segment| own_segment(segment))
-            && (module.types.contains(name)
-                || (module.item_aliases.contains_key(name) && !api_alias(name)))
-            && !module.imported.contains(name)
-            && !glob_may_export(name)
-    };
-    // Whether an unqualified `name` in `file` certainly means the mod's own type, following Rust's
-    // scoping file by file: the file defines it at its top level (a `type` alias that may lead to
-    // the API's is no definition), or imports it by name from a path inside the mod that
-    // certainly leads to its own. Anything else (an import of the API's, any glob, nothing at
-    // all) leaves the API's, and so does a file with an inline module, which is more than one
-    // scope. A glob in another file never reaches this one.
-    let own_in = |file: &FileFacts<'_>, name: &str| {
-        let api_alias_here = file
-            .type_aliases
-            .iter()
-            .any(|(alias, target, item)| *item && *alias == name && api_target(target));
-        !file.inline_modules
-            && ((file.defines.contains(name) && !api_alias_here)
-                || file.imports.iter().any(|(path, local)| {
-                    *local == name
-                        && path.len() >= 2
-                        && starts_own(file, path[0])
-                        && own_by_path(name, &path[1..path.len() - 1])
-                }))
+            && !file.imports.iter().any(|(_, local)| *local == name)
     };
 
     // The records named directly, each with the first place that names it; how each named
@@ -1256,58 +1363,43 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
     let mut written: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
     let mut named_structs: BTreeSet<&str> = BTreeSet::new();
     let mut unsure: Option<Place> = None;
-    for ((path, _), file) in sources.iter().zip(&files) {
+    for (((path, _), file), certain) in sources.iter().zip(&files).zip(certain) {
         let tokens = &file.tokens;
         for (at, (token, line)) in tokens.iter().enumerate() {
             let place = || (path.clone(), *line);
             let Token::Ident(written_name) = token else {
                 continue;
             };
-            // A path qualifier written before the name, and whether it starts at the API.
-            let mut start = at;
-            while start >= 3
-                && punct(tokens, start - 1, b':')
-                && punct(tokens, start - 2, b':')
-                && ident(tokens, start - 3).is_some()
-            {
-                start -= 3;
-            }
-            // The API name this token stands for, and whether it is a local name for one. For
-            // `Self`, whether the impl target is the mod's own type, as if written there.
-            let mut self_own = None;
-            let (name, local) = match *written_name {
+            let start = path_start(tokens, at);
+            // The name this token stands for (an impl's target for `Self`), whether it is the
+            // mod's own type there, and every API name it may be. A name written with a path
+            // is never the mod's own.
+            let (name, own_here) = match *written_name {
                 "Self" => match file
                     .bodies
                     .iter()
                     .filter(|(open, close, _, _)| *open < at && at < *close)
                     .min_by_key(|(open, close, _, _)| close - open)
                 {
-                    Some((_, _, target, path)) => {
-                        let name = *module.aliases.get(target).unwrap_or(target);
-                        self_own = Some(match &path[..] {
-                            _ if name != *target => false,
-                            [_] => own_in(file, name),
-                            [first, middle @ .., _] if starts_own(file, first) => {
-                                own_by_path(name, middle)
-                            }
-                            _ => false,
-                        });
-                        (name, true)
-                    }
+                    Some((_, _, target, path)) => (*target, path.len() == 1),
                     None => continue,
                 },
-                name => match module.aliases.get(name) {
-                    Some(target) if !by_name.contains_key(name) => (*target, true),
-                    _ => (name, false),
-                },
+                name => (name, start == at),
             };
-            let Some(ids) = by_name.get(name) else {
+            let api_names = api_names_of(name, &module, &by_name);
+            let aliased = api_names.iter().any(|api| *api != name);
+            let own_here = own_here && !aliased && own_in(file, certain, name);
+            let ids: Vec<&str> = api_names
+                .iter()
+                .flat_map(|api| by_name[api].iter().copied())
+                .collect();
+            if ids.is_empty() {
                 // A literal of a name the scan cannot place may be an API struct by another
                 // name; so may a macro body's `$name { … }`.
                 let unknown = name.starts_with(|c: char| c.is_ascii_uppercase())
                     && name.chars().any(|c| c.is_ascii_lowercase())
                     && !module.types.contains(name)
-                    && !module.item_aliases.contains_key(name)
+                    && !module.item_aliases.contains(name)
                     && !module.others.contains(name)
                     && *written_name != "Self";
                 let metavariable = at >= 1 && punct(tokens, at - 1, b'$');
@@ -1324,10 +1416,10 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                     }
                 }
                 continue;
-            };
+            }
             let qualifier = (start < at).then(|| ident(tokens, at - 3)).flatten();
             let members: Vec<&str> = qualifier
-                .filter(|_| !local)
+                .filter(|_| !aliased)
                 .map(|q| {
                     ids.iter()
                         .copied()
@@ -1335,11 +1427,7 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                         .collect()
                 })
                 .unwrap_or_default();
-            let named = if members.is_empty() {
-                ids.clone()
-            } else {
-                members
-            };
+            let named = if members.is_empty() { ids } else { members };
             let here = Origin::Source {
                 file: path.clone(),
                 line: *line,
@@ -1349,34 +1437,13 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                     .entry(id)
                     .and_modify(|origin| *origin = here.clone().min(origin.clone()))
                     .or_insert_with(|| here.clone());
-                if !struct_like(id) {
-                    continue;
-                }
-                // The mod's own type of the API name: written out through a path inside the mod
-                // that leads to its own definition, or unqualified where the file's scope
-                // certainly means its own.
-                let own = if let Some(own) = self_own {
-                    own
-                } else if local {
-                    false
-                } else if start < at {
-                    let middle: Vec<&str> = (start + 3..at)
-                        .step_by(3)
-                        .filter_map(|i| ident(tokens, i))
-                        .collect();
-                    ident(tokens, start).is_some_and(|first| starts_own(file, first))
-                        && own_by_path(name, &middle)
-                } else {
-                    own_in(file, name)
-                };
-                if own {
+                if !struct_like(id) || own_here {
                     continue;
                 }
                 named_structs.insert(id);
-                if file.in_use[at] || in_type_position(tokens, at) {
+                if file.in_use[at] || type_only(tokens, start) {
                     continue;
                 }
-                let tuple = kind(id) == Some(TypeKind::TupleStruct);
                 let union = kind(id) == Some(TypeKind::Union);
                 // A turbofish: `Name::<T> { … }`.
                 let mut next = at + 1;
@@ -1392,8 +1459,8 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                         }
                     }
                 }
-                let open = if tuple { b'(' } else { b'{' };
-                if punct(tokens, next, open) {
+                if punct(tokens, next, b'{') || punct(tokens, next, b'(') {
+                    let brace = punct(tokens, next, b'{');
                     let Some(close) = closing(tokens, next) else {
                         // Unclosed: unsure, so full.
                         building.entry(id).or_default().record(place(), true, false);
@@ -1413,36 +1480,42 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                     building
                         .entry(id)
                         .or_default()
-                        .record(place(), full, !tuple && !pattern);
-                } else if tuple && next == at + 1 && constructor_value(tokens, at) {
-                    // A tuple struct's constructor passed as a value: `.map(Name)`.
+                        .record(place(), full, brace && !pattern);
+                } else if next == at + 1
+                    && matches!(kind(id), Some(TypeKind::TupleStruct | TypeKind::UnitStruct))
+                    && !(punct(tokens, next, b':') && punct(tokens, next + 1, b':'))
+                    && !punct(tokens, next, b'<')
+                    && !punct(tokens, next, b'!')
+                {
+                    // A tuple struct's constructor or a unit struct used as a value.
                     building.entry(id).or_default().record(place(), true, false);
                 }
             }
         }
-        // The API paths this file writes: imported, written out, or under an imported glob.
+        // The API paths this file writes: imported, written out, or under an imported glob,
+        // each through an API root or a name bound to an API path.
         let mut paths: Vec<(String, &str)> = Vec::new();
-        for (segments, name) in &file.imports {
-            if segments.len() >= 2 && module.roots.contains(segments[0]) && *name != "*" {
-                paths.push((segments[1..].join("::"), segments[segments.len() - 1]));
+        let mut globs: BTreeSet<String> = BTreeSet::new();
+        for (segments, local) in &file.imports {
+            if *local == "*" {
+                for api in api_paths_of(&segments[..segments.len() - 1], &module) {
+                    globs.insert(api.join("::"));
+                }
+                continue;
+            }
+            for api in api_paths_of(segments, &module) {
+                if let Some(last) = api.last() {
+                    paths.push((api.join("::"), last));
+                }
             }
         }
         for chain in &file.chains {
-            if chain.len() >= 2 && module.roots.contains(chain[0]) {
-                paths.push((chain[1..].join("::"), chain[chain.len() - 1]));
+            for api in api_paths_of(chain, &module) {
+                if let Some(last) = api.last() {
+                    paths.push((api.join("::"), last));
+                }
             }
         }
-        let globs: Vec<&String> = file
-            .imports
-            .iter()
-            .filter(|(segments, name)| {
-                *name == "*" && segments.len() >= 2 && module.roots.contains(segments[0])
-            })
-            .filter_map(|(segments, _)| {
-                let glob = segments[1..segments.len() - 1].join("::");
-                module.globs.get(&glob)
-            })
-            .collect();
         if !globs.is_empty() {
             let names: BTreeSet<&str> = tokens
                 .iter()
@@ -1451,7 +1524,7 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                     _ => None,
                 })
                 .collect();
-            for glob in globs {
+            for glob in &globs {
                 for name in &names {
                     let path = if glob.is_empty() {
                         (*name).to_owned()

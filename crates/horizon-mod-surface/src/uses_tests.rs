@@ -1471,25 +1471,25 @@ fn whether_a_name_is_the_mods_own_follows_each_files_scope() {
         "use super::*;\nfn g() { let s = Settings { height: 1 }; }",
     );
     assert_eq!(built_in(&[own, super_glob], "type:Settings"), full);
-    // An explicit import of the mod's own: its own.
+    // An explicit import of the mod's own: a `use` binds the name, so the API's.
     let imported = (
         "src/third.rs",
         "use crate::widget::Settings;\nfn g() { let s = Settings { mine: 1 }; }",
     );
     let declared = ("src/lib.rs", "mod widget;\nmod third;");
-    assert_eq!(built_in(&[declared, own, imported], "type:Settings"), none);
+    assert_eq!(built_in(&[declared, own, imported], "type:Settings"), full);
     // An explicit import of the API's, while the mod defines its own elsewhere: the API's.
     let api_import = (
         "src/third.rs",
         "use mod_api::Settings;\nfn g() { let s = Settings { height: 1 }; }",
     );
     assert_eq!(built_in(&[own, api_import], "type:Settings"), full);
-    // A path inside the mod written out: its own.
+    // A path inside the mod written out: still the API's (a literal with a path always is).
     let qualified = (
         "src/third.rs",
         "fn g() { let s = crate::widget::Settings { mine: 1 }; }",
     );
-    assert_eq!(built_in(&[declared, own, qualified], "type:Settings"), none);
+    assert_eq!(built_in(&[declared, own, qualified], "type:Settings"), full);
     // A path inside the mod that leads to an associated type, which may stand for the API's: the
     // API's. So does one through an enum, which is no module the mod declares.
     let associated = (
@@ -1654,7 +1654,8 @@ fn a_type_alias_of_an_api_struct_is_not_the_mods_own() {
         "use mod_api::DimensionSettings as Api;\npub type DimensionSettings = Api;\nfn f() -> DimensionSettings {{ {DIMS_LITERAL} }}"
     );
     refused_for_the_new_field(fits_a_new_dims_field(&[("src/lib.rs", &renamed)]));
-    // An alias of the mod's own struct stays its own, in its file and through a path.
+    // An alias of the mod's own struct stays its own in its file; imported through a path, the
+    // `use` binds the name, so it counts for the API's.
     let own_types = (
         "src/types.rs",
         "pub struct Mine { pub a: u8 }\npub type DimensionSettings = Mine;",
@@ -1663,14 +1664,11 @@ fn a_type_alias_of_an_api_struct_is_not_the_mods_own() {
         "src/world.rs",
         "use crate::types::DimensionSettings;\nfn f() { let d = DimensionSettings { a: 1 }; }",
     );
-    assert_eq!(
-        fits_a_new_dims_field(&[
-            ("src/lib.rs", "mod types;\nmod world;"),
-            own_types,
-            own_world
-        ]),
-        Fit::Fits
-    );
+    refused_for_the_new_field(fits_a_new_dims_field(&[
+        ("src/lib.rs", "mod types;\nmod world;"),
+        own_types,
+        own_world,
+    ]));
     let own_alias = String::from(
         "struct Mine { a: u8 }\ntype DimensionSettings = Mine;\nfn f() { let d = DimensionSettings { a: 1 }; }",
     );
@@ -1739,24 +1737,25 @@ fn a_path_inside_the_mod_to_an_imported_api_struct_is_the_apis() {
         "src/world/gen.rs",
         "fn f() { let d = super::DimensionSettings { mine: 1 }; }",
     );
+    // A literal written with a path counts for the API's struct of that name, whatever the path.
     let uses = scan_files(made_for, &[own, other_glob, own_written]);
     assert_eq!(
         entry(&uses, "type:DimensionSettings").built,
-        Some(Built::None)
+        Some(Built::Full)
     );
-    // With nothing in the mod that hands it the API's, the path leads to the mod's own.
     let own_built = (
         "src/world/gen.rs",
         "fn f() { let d = crate::own::DimensionSettings { mine: 1 }; }",
     );
-    assert_eq!(
-        fits_a_new_dims_field(&[("src/lib.rs", "mod own;\nmod world;"), own, own_built]),
-        Fit::Fits
-    );
+    refused_for_the_new_field(fits_a_new_dims_field(&[
+        ("src/lib.rs", "mod own;\nmod world;"),
+        own,
+        own_built,
+    ]));
 }
 
 #[test]
-fn a_path_inside_the_mod_is_its_own_only_through_modules_it_declares() {
+fn a_literal_written_with_a_path_counts_for_the_apis_struct() {
     let own = (
         "src/own.rs",
         "pub struct DimensionSettings { pub mine: u8 }",
@@ -1853,8 +1852,9 @@ fn a_path_inside_the_mod_is_its_own_only_through_modules_it_declares() {
         own,
         ("src/terrain.rs", &written),
     ]));
-    // The mod's own `world`, imported from inside the mod, stays its own; so does a glob of
-    // the mod's own module.
+    // Even the mod's own `world` module, imported from inside the mod: a literal written with a
+    // path counts for the API's struct of that name, whatever the path (one rule, no module
+    // resolution).
     let own_world = (
         "src/world.rs",
         "pub struct DimensionSettings { pub mine: u8 }",
@@ -1869,10 +1869,10 @@ fn a_path_inside_the_mod_is_its_own_only_through_modules_it_declares() {
         );
         entry(&uses, "type:DimensionSettings").built
     };
-    assert_eq!(mine("mod world;\nmod terrain;"), Some(Built::None));
+    assert_eq!(mine("mod world;\nmod terrain;"), Some(Built::Full));
     assert_eq!(
         mine("mod world;\nmod terrain;\nuse crate::world::*;\nuse super::*;"),
-        Some(Built::None)
+        Some(Built::Full)
     );
     // A path through a binding of the name to itself is a cycle, not certain.
     assert_eq!(
@@ -1940,7 +1940,7 @@ fn a_path_inside_the_mod_is_its_own_only_through_modules_it_declares() {
         mine(
             "macro_rules! double { ($e:expr) => { $e * 2 }; }\nmacro_rules! quad { ($e:expr) => { double!(double!($e)) }; }\nquad!(1);\ncompile_error!(\"x\");\n#[derive(Clone)]\n#[cfg(test)]\n#[mod_api::horizon_mod]\nstruct S;\nfn f() { some_dep::bind!(world); }\nmod world;\nmod terrain;"
         ),
-        Some(Built::None)
+        Some(Built::Full)
     );
     // A mod's own macro whose body writes a `use`, or calls a macro that may, is doubt.
     assert_eq!(
@@ -2073,4 +2073,205 @@ fn deeply_nested_brackets_and_comments_scan_without_recursion() {
         "*/".repeat(depth)
     );
     assert!(ids(&scan_on(wider(), &comments)).contains(&"type:Settings"));
+}
+
+#[test]
+fn an_unqualified_name_is_the_mods_own_only_in_a_file_nothing_can_change() {
+    let own = |text: &str| {
+        built_in(
+            &[(
+                "src/widget.rs",
+                &format!(
+                    "pub struct Settings {{ pub mine: u8 }}\nfn g() -> Settings {{ Settings {{ mine: 1 }} }}\n{text}"
+                ),
+            )],
+            "type:Settings",
+        )
+    };
+    // The examples mod's shape: its own struct, standard derives, the API's own attribute, a
+    // standard macro, `Self { … }` in its impl.
+    assert_eq!(
+        own(
+            "#[derive(Default, Clone)]\n#[mod_api::horizon_mod]\nimpl Settings { fn new() -> Self { Self { mine: format!(\"x\").len() as u8 } } }\n#[cfg_attr(test, derive(Debug))]\nstruct T;"
+        ),
+        Some(Built::None)
+    );
+    // Anything in the file that may change what the name means makes it the API's: a `use` of
+    // the name anywhere, a glob, an inline module, a `use` with a metavariable, a macro or
+    // attribute that is not standard or the API's (read inside `derive` and nested `cfg_attr`,
+    // in function bodies and in macro bodies), or a call through a metavariable.
+    for text in [
+        "fn h() { use mod_api::Settings; }",
+        "use super::*;",
+        "mod inner {}",
+        "macro_rules! m { ($x:ident) => { use mod_api::$x; }; }",
+        "#[derive(bring::World)]\nstruct S;",
+        "#[cfg_attr(all(), bring::world)]\nstruct S;",
+        "#[cfg_attr(all(), cfg_attr(all(), bring::world))]\nstruct S;",
+        "#[cfg_attr(all(), derive(bring::World))]\nstruct S;",
+        "macro_rules! wrap { () => { #[bring::world] struct S; }; }\nwrap!();",
+        "macro_rules! wrap { ($a:meta) => { #[$a] struct S; }; }",
+        "macro_rules! pass { ($($t:tt)*) => { $($t)* }; }\npass! { struct S; }",
+        "fn h() { bring::api_world!(); }",
+        "fn h() { #[bring::world] fn g() {} }",
+        "macro_rules! m { ($n:ident) => { $n!() }; }",
+        "#![bring::inner]",
+    ] {
+        assert_eq!(own(text), Some(Built::Full), "{text}");
+    }
+    // A standard or API name that something in the mod may rebind is no longer trusted: a
+    // `macro_rules!` of that name, a `use` of it from outside the API, a glob from a dependency,
+    // or `#[macro_use]`.
+    for elsewhere in [
+        "macro_rules! vec { ($m:ident) => { pub mod $m {} }; }",
+        "use bring::api_world as vec;",
+        "use bring::world_attr as horizon_mod;",
+        "use bring::*;",
+        "#[macro_use]\nextern crate bring;",
+    ] {
+        let widget = "pub struct Settings { pub mine: u8 }\n#[mod_api::horizon_mod]\n#[horizon_mod]\nstruct T;\nfn g() -> Settings { let _ = vec![1]; Settings { mine: 1 } }";
+        assert_eq!(
+            built_in(
+                &[("src/lib.rs", elsewhere), ("src/widget.rs", widget)],
+                "type:Settings"
+            ),
+            Some(Built::Full),
+            "{elsewhere}"
+        );
+        assert_eq!(
+            built_in(
+                &[("src/lib.rs", "mod widget;"), ("src/widget.rs", widget)],
+                "type:Settings"
+            ),
+            Some(Built::None)
+        );
+    }
+}
+
+#[test]
+fn a_struct_name_in_a_value_position_is_a_build() {
+    let pos = |source: &str| entry(&scan_on(wider(), source), "type:Pos").built;
+    let full = Some(Built::Full);
+    // After a comparison, `if`, `match`, and as a block's tail.
+    assert_eq!(pos("fn f(p: Pos) -> bool { p < Pos(1, 2) }"), full);
+    assert_eq!(pos("fn f(p: Pos) { if Pos(1, 2) == p {} }"), full);
+    assert_eq!(pos("fn f() { match Pos(1, 2) { _ => {} } }"), full);
+    assert_eq!(pos("fn ctor() -> fn(i32, i32) -> Pos { Pos }"), full);
+    // Type-only places are not.
+    for source in [
+        "fn f(p: Pos) {}",
+        "fn f() -> Pos { make() }",
+        "fn f(p: &'a mut Pos, q: [Pos; 2], r: (Pos, u8)) {}",
+        "struct S { a: Pos, b: Vec<Pos>, c: HashMap<u8, Pos> }",
+        "struct T(Pos, u8);",
+        "enum E { A(Pos), B { p: Pos }, Pos }",
+        "type P = Pos;",
+        "impl From<Pos> for Q {}",
+        "fn f() -> Box<dyn Fn(Pos) -> u8> { todo() }",
+        "let v: Vec<(Pos, i32)> = Vec::<Pos>::new();",
+    ] {
+        assert_eq!(pos(source), Some(Built::None), "{source}");
+    }
+    // A unit struct used as a value is built in full, so a gained `#[non_exhaustive]` refuses.
+    let marker = || {
+        let mut pieces = wider();
+        let mut record = api_type("type:Marker", "", true, vec![]);
+        record = Type::new(
+            record.id.clone(),
+            "",
+            None,
+            TypeContract {
+                kind: TypeKind::UnitStruct,
+                ..record.contract.clone()
+            },
+            vec![],
+            vec![],
+        );
+        pieces.types.push(record);
+        pieces
+    };
+    let uses = scan_on(marker(), "fn f() { let m = mod_api::Marker; }");
+    assert_eq!(entry(&uses, "type:Marker").built, full);
+    let mut target = marker();
+    let record = target.types.pop().unwrap();
+    target.types.push(Type::new(
+        record.id.clone(),
+        "",
+        None,
+        TypeContract {
+            constructible: false,
+            non_exhaustive: true,
+            ..record.contract.clone()
+        },
+        vec![],
+        vec![],
+    ));
+    assert!(matches!(
+        fits(uses.entries(), &target.build()),
+        Fit::DoesNotFit(_)
+    ));
+}
+
+#[test]
+fn aliases_resolve_to_every_api_item_they_may_name() {
+    let settings = |files: &[(&str, &str)]| built_in(files, "type:Settings");
+    let full = Some(Built::Full);
+    // One local name for different API items in different files counts for each.
+    assert_eq!(
+        settings(&[
+            (
+                "src/a.rs",
+                "use mod_api::Settings as S;\nfn f() { let s = S { height: 1 }; }"
+            ),
+            ("src/b.rs", "use mod_api::ItemStack as S;"),
+        ]),
+        full
+    );
+    // A local name that is also an API name counts for both.
+    assert_eq!(
+        settings(&[(
+            "src/a.rs",
+            "use mod_api::Settings as ItemStack;\nfn f() { let s = ItemStack { height: 1 }; }"
+        )]),
+        full
+    );
+    // Aliases are followed transitively.
+    assert_eq!(
+        settings(&[(
+            "src/a.rs",
+            "type A = mod_api::Settings;\ntype B = A;\nfn f() { let s = B { height: 1 }; }"
+        )]),
+        full
+    );
+}
+
+#[test]
+fn a_path_through_an_imported_api_module_records_the_public_path() {
+    let biome = |paths: &[&str]| {
+        let mut record = api_type("type:world::Biome", "", false, vec![]);
+        record.paths = paths.iter().map(|p| p.to_string()).collect();
+        record
+    };
+    for source in [
+        "use mod_api::prelude as p;\nfn f(_: p::Biome) {}",
+        "use mod_api::prelude;\nfn f(_: prelude::Biome) {}",
+        "use mod_api::prelude as p;\nuse p::Biome;\nfn f(_: Biome) {}",
+    ] {
+        let mut made_for = wider();
+        made_for
+            .types
+            .push(biome(&["prelude::Biome", "world::Biome"]));
+        let uses = scan_files(made_for, &[("src/lib.rs", source)]);
+        assert_eq!(
+            entry(&uses, "type:world::Biome").paths,
+            ["prelude::Biome"],
+            "{source}"
+        );
+        let mut dropped = wider();
+        dropped.types.push(biome(&["world::Biome"]));
+        assert_eq!(
+            words(fits(uses.entries(), &dropped.build())),
+            ["`mod_api::prelude::Biome` is no longer exported under that path"]
+        );
+    }
 }
