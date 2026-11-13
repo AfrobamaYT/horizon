@@ -21,6 +21,7 @@ struct Heard {
     entries: Vec<mod_api::KnockbackEntry>,
     incoming_causing: Vec<i32>,
     cancel: bool,
+    repeat_short: bool,
 }
 
 struct Probe(Arc<Mutex<Heard>>);
@@ -43,6 +44,9 @@ impl Hooks for Probe {
         ));
         heard.entries.push(event.entry);
         event.strength *= 2.0;
+        if heard.repeat_short && event.entry == mod_api::KnockbackEntry::Short {
+            event.strength *= 2.0;
+        }
         event.x = -event.x;
         if heard.cancel {
             return mod_api::Flow::Cancel;
@@ -470,10 +474,15 @@ fn a_mobs_fireball_on_the_player_names_the_shooter_and_its_bow() {
 fn the_hook_names_the_entry_a_push_came_through_once_per_full_entry_call() {
     use mod_api::KnockbackEntry::{Full, Short};
     let heard = heard(|game, log| {
+        log.lock().unwrap().repeat_short = true;
         let hit = Damage::of(DamageKind::Generic);
         zombie_at(game, 42, Vec3::ZERO);
         let mut mob = game.mobs.pop().unwrap();
+        mob.velocity = Vec3::ZERO;
+        mob.on_ground = false;
         mob.knockback(damage_level_of!(game), 0.4, 1.0, 0.0, &hit, 0.0);
+        assert_eq!(mob.velocity, Vec3::new(1.6, 0.0, 0.0));
+        mob.velocity = Vec3::ZERO;
         assert_eq!(log.lock().unwrap().entries, [Short], "mob, short entry");
         mob.knockback_full(damage_level_of!(game), 0.4, 1.0, 0.0, &hit, 0.0, false);
         assert_eq!(
@@ -481,6 +490,7 @@ fn the_hook_names_the_entry_a_push_came_through_once_per_full_entry_call() {
             [Short, Full],
             "mob, full entry"
         );
+        assert_eq!(mob.velocity, Vec3::new(0.8, 0.0, 0.0));
         mob.knockback_full(damage_level_of!(game), 0.4, 1.0, 0.0, &hit, 0.0, true);
         assert_eq!(
             log.lock().unwrap().entries,
@@ -489,9 +499,19 @@ fn the_hook_names_the_entry_a_push_came_through_once_per_full_entry_call() {
         );
 
         player_with_sword(game);
+        game.player.as_mut().unwrap().ground.on_ground = false;
         let attack = &NO_ATTACK;
         game.knock_back_player(0.4, 1.0, 0.0, source(0), attack, 0.0);
+        assert_eq!(
+            game.player.as_ref().unwrap().velocity,
+            Vec3::new(1.6, 0.0, 0.0)
+        );
+        game.player.as_mut().unwrap().velocity = Vec3::ZERO;
         game.knock_back_player_full(0.4, 1.0, 0.0, source(0), attack, 0.0, false);
+        assert_eq!(
+            game.player.as_ref().unwrap().velocity,
+            Vec3::new(0.8, 0.0, 0.0)
+        );
         let entries = log.lock().unwrap().entries.clone();
         assert_eq!(
             &entries[3..],
