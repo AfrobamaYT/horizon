@@ -141,6 +141,8 @@ mod update;
 mod weather;
 
 #[cfg(test)]
+mod fertile_tests;
+#[cfg(test)]
 mod fire_tests;
 #[cfg(test)]
 mod growth_tests;
@@ -759,6 +761,34 @@ pub trait LevelAccess: BlockEntityNeighbors {
         _ground: BlockStateId,
         _ground_pos: BlockPos,
         _sustains: &mut Option<bool>,
+    ) {
+    }
+    /// Whether a part may answer `IBlockExtension.isFertile`: asked once per
+    /// `CropBlock.getGrowthSpeed`, so with none the speed is vanilla's loop.
+    /// The default is false.
+    fn asks_is_fertile(&self) -> bool {
+        false
+    }
+    /// `IBlockExtension.isFertile` for the soil `state` at `pos`, a block in
+    /// `#grows_crops` under a crop: `fertile` starts at vanilla's answer
+    /// (`moisture > 0`). The default does nothing.
+    fn before_is_fertile(&self, _state: BlockStateId, _pos: BlockPos, _fertile: &mut bool) {}
+    /// Whether a part may answer `IBlockExtension.canBeHydrated` for the
+    /// farmland `state`: asked once before its scan, so with none the scan is
+    /// vanilla's. The default is false.
+    fn asks_can_be_hydrated(&self, _state: BlockStateId) -> bool {
+        false
+    }
+    /// `IBlockExtension.canBeHydrated` for the farmland `state` at `pos` and
+    /// the non-empty `fluid` at `fluid_pos`: an answer put in `hydrates`
+    /// decides, left `None` the `#water` rule does. The default does nothing.
+    fn before_can_be_hydrated(
+        &self,
+        _state: BlockStateId,
+        _pos: BlockPos,
+        _fluid: FluidState,
+        _fluid_pos: BlockPos,
+        _hydrates: &mut Option<bool>,
     ) {
     }
     /// `VegetationBlock.mayPlaceOn(ground, level, groundPos)` for the plant
