@@ -131,7 +131,7 @@ mod generated {
         include!(concat!(env!("OUT_DIR"), "/dispatch_fixtures_api.rs"));
     }
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
-    pub(super) use self::mod_api::{BlockKey, BlockState};
+    pub(super) use self::mod_api::{BlockEntityTickReply, BlockFace, BlockKey, BlockState};
     pub use horizon_mod_api_macros::__subscriptions;
 }
 use generated::*;
@@ -605,7 +605,7 @@ mod stubs {
         pub(super) position: [f64; 3],
         pub(super) view: [f64; 3],
     }
-    pub(super) use crate::tests::mod_api::mod_api::DamageContainer;
+    pub(super) use crate::tests::mod_api::mod_api::{BlockEntityTickReply, DamageContainer};
     #[derive(Default)]
     pub(super) struct ModBlockEntity {
         id: String,
@@ -636,6 +636,8 @@ mod stubs {
         pub(super) fn id(&self) -> &str {
             self.id
         }
+        pub(super) fn __begin_tick_listener(&mut self) {}
+        pub(super) fn __finish_tick_listener(&mut self, _: BlockEntityTickReply) {}
     }
     pub(super) struct LootStack;
     pub(super) struct LootContext;
@@ -711,6 +713,26 @@ mod api {
         }
     }
     pub struct DamageContainer(pub f32);
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum BlockEntityTickReply {
+        Unchanged,
+        Changed,
+    }
+    #[derive(Clone, Copy)]
+    pub enum BlockFace {
+        Down,
+        Up,
+        North,
+        South,
+        West,
+        East,
+    }
+    #[derive(Clone)]
+    pub struct StandaloneModelForm;
+    pub struct Answered<T> {
+        pub answer: T,
+        pub mod_id: &'static str,
+    }
     #[derive(Clone, Copy)]
     pub struct LivingRef;
     #[derive(Clone, Copy)]
