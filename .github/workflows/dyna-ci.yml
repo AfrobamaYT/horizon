@@ -770,6 +770,9 @@ jobs:
       # folder, no file at the retired single-list path.
       - name: Ignored-test policy files read cleanly
         run: python3 tools/ci/check_ignored_test_rows.py
+      # The unit tier: a test that boots the game is #[ignore = "daily"]; the fixtures are in tools/ci/game-boot-fixtures.txt.
+      - name: Game-boot tests are daily tests
+        run: python3 tools/ci/check_game_boot_tests.py
       # docs/layers.md: a crate depends only on its own layer or a lower one; today's exceptions only shrink.
       - name: Crates follow the layers
         if: needs.changes.outputs.rust_required != 'false'
