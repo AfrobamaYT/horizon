@@ -601,6 +601,35 @@ class NightlyTrainTests(unittest.TestCase):
         self.assertTrue(train.nightly_decision(True, "forced", self.PRS, None, 30, force=True)[0])
         self.assertFalse(train.nightly_decision(True, "forced", self.PRS, 7, 0, force=True)[0])
 
+    def test_a_snapshot_build_never_holds_the_nightly_back(self):
+        def runs(*entries):
+            return [dict(databaseId=n, status=status, displayTitle=title) for n, (status, title) in enumerate(entries, 1)]
+        snapshot = ("in_progress", "snapshot build " + "a" * 40)
+        with mock.patch.object(train, "gh_json", return_value=runs(snapshot, ("queued", "snapshot build "))):
+            self.assertIsNone(train.nightly_building(), "an active snapshot, real or dry, is no Nightly")
+        with mock.patch.object(train, "gh_json", return_value=runs(snapshot, ("queued", "nightly build"))):
+            self.assertEqual(train.nightly_building(), 2)
+        with mock.patch.object(train, "gh_json", return_value=runs(("in_progress", "nightly build (request 7)"))):
+            self.assertEqual(train.nightly_building(), 1)
+        with mock.patch.object(train, "gh_json", return_value=runs(("completed", "nightly build"), snapshot)):
+            self.assertIsNone(train.nightly_building())
+        # The workflow names a snapshot's run exactly so, and a Nightly's never so.
+        run_name = (train.ROOT / ".github/workflows/nightly-build.yml").read_text().split("\nrun-name: ", 1)[1].split("\n", 1)[0]
+        self.assertIn("inputs.kind == 'snapshot' && format('snapshot build {0}', inputs.base)", run_name)
+        self.assertIn("format('nightly build{0}'", run_name)
+
+    def test_a_running_nightly_never_holds_a_snapshot_back(self):
+        sha = "a" * 40
+        argv = ["release_train.py", "decide", "--kind", "game", "--channel", "snapshot"]
+        with mock.patch("sys.argv", argv), mock.patch.object(train, "channel_head", return_value=sha), \
+                mock.patch.object(train, "run", return_value=sha + "\n"), \
+                mock.patch.object(train, "nightly_building", side_effect=AssertionError("asked")), \
+                mock.patch.object(train, "write_outputs") as outputs, mock.patch("sys.stdout"):
+            self.assertEqual(train.main(), 0)
+        values = outputs.call_args.args[0]
+        self.assertEqual(values["release"], "true")
+        self.assertTrue(values["tag"].startswith("snapshot-") and values["tag"].endswith("-aaaaaaa"))
+
     def test_the_cap_is_the_nightly_sets(self):
         from tools.ci import nightly_set
         self.assertEqual(train.NIGHTLY_CAP, nightly_set.MAX_BUILDS_PER_DAY)

@@ -156,7 +156,7 @@ def stage(target, stage_tool=None):
                 distribution(root)
                 subprocess.run(["bash", "-e", "-c", shell], cwd=root, check=True, capture_output=True,
                                env={**os.environ, "GITHUB_REPOSITORY": repository, "EPHEMERAL": "yes",
-                                    "ALSO_FOR": "nightly-2026-11-10-1234567", "RELEASE_SIGNING_KEY": "",
+                                    "KIND": "nightly", "ALSO_FOR": "nightly-2026-11-10-1234567", "RELEASE_SIGNING_KEY": "",
                                     "RELEASE_SIGNING_KEY_NEXT": ""})
                 manifest = (root / "dist/SHA256SUMS").read_bytes()
                 payload = root / "dist/mod-catalog.json"
@@ -189,7 +189,7 @@ def stage(target, stage_tool=None):
             (root / "dist/mod-catalog.json").unlink()
             result = subprocess.run(["bash", "-e", "-c", shell], cwd=root, capture_output=True,
                                     env={**os.environ, "GITHUB_REPOSITORY": "arismoko/horizon", "EPHEMERAL": "yes",
-                                         "ALSO_FOR": "nightly-2026-11-10-1234567"})
+                                         "KIND": "nightly", "ALSO_FOR": "nightly-2026-11-10-1234567"})
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse((root / "dist/SHA256SUMS.sig").exists())
 

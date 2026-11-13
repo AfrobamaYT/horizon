@@ -473,12 +473,18 @@ def published_nightly():
     return json.loads(out) if out.strip() else None
 
 
+SNAPSHOT_RUN = "snapshot build"
+
+
 def nightly_building():
-    """The run of `nightly build` under way or waiting, if any: the train starts no second one."""
-    runs = gh_json("run", "list", "--repo", REPO, "--workflow", NIGHTLY_WORKFLOW, "--limit", "10",
-                   "--json", "databaseId,status")
-    return next((entry["databaseId"] for entry in runs if entry["status"] in ("queued", "in_progress", "waiting",
-                                                                              "pending", "requested")), None)
+    """The Nightly's run of `nightly build` under way or waiting, if any: the train starts no second one. A
+    snapshot's run (named `snapshot build <commit>` by nightly-build.yml's run-name) has its own concurrency group
+    and never holds a Nightly back; every other run of the workflow is a Nightly's."""
+    runs = gh_json("run", "list", "--repo", REPO, "--workflow", NIGHTLY_WORKFLOW, "--limit", "20",
+                   "--json", "databaseId,status,displayTitle")
+    return next((entry["databaseId"] for entry in runs
+                 if entry["status"] in ("queued", "in_progress", "waiting", "pending", "requested")
+                 and entry["displayTitle"].split(" ", 2)[:2] != SNAPSHOT_RUN.split()), None)
 
 
 def nightly_builds_today(today):
