@@ -58,4 +58,3 @@ identifier alone does not register a statistic.
 
 `/scoreboard objectives add steps minecraft.custom:rewrite.steps` creates an
 objective for this registered counter.
-

@@ -91,13 +91,12 @@ impl CompileBudget {
             }
         };
         if dedicated {
-            let properties = horizon_server_files::java_properties::Properties::load(
-                &contents.chars().collect::<Vec<_>>(),
-            )
-            .map_err(|error| SettingError::File {
-                path,
-                why: error.to_string(),
-            })?;
+            let properties =
+                horizon_java_properties::Properties::load(&contents.chars().collect::<Vec<_>>())
+                    .map_err(|error| SettingError::File {
+                        path,
+                        why: error.to_string(),
+                    })?;
             return properties
                 .get(SETTING)
                 .map(Self::parse)
