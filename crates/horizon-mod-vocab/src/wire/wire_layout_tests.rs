@@ -182,6 +182,7 @@ fn handle_records_have_declared_field_bytes() {
     fields(ChunkRef::new(level, [3, -4]), (level, [3i32, -4]));
     fields(RaidRef::new(level, 53), (level, 53i32));
     fields(RaidRef::new(level, -1), (level, -1i32));
+    fields(WaterTicket::new(level, 59), (level, 59u64));
     fields(player, (entity, 0x1234u128));
     fields(
         GlobalPos::new(id("example:moon"), pos),
@@ -775,6 +776,17 @@ fn every_item_place_case_has_declared_tag_and_field_types() {
             slot: EquipmentSlot::Saddle,
         },
         (9u32, 29u32, EquipmentSlot::Saddle),
+    );
+    fields(ItemPlace::Scratch(41), (10u32, 41u64));
+    let parent = Box::new(ItemPlace::ItemEntity { id: 71 });
+    fields(ItemPlace::Strict(parent.clone()), (11u32, parent.clone()));
+    fields(ItemPlace::OneByOne(parent.clone()), (12u32, parent.clone()));
+    fields(
+        ItemPlace::InfiniteMaterials {
+            player: 0x1234,
+            inner: parent.clone(),
+        },
+        (13u32, 0x1234u128, parent),
     );
     // The other four holder cases are exercised in handle_records above.
     fields(AttachmentHolder::Level(level), (4u32, level));

@@ -81,7 +81,7 @@ erosion, depth and weirdness, and an `offset` from 0 to 1. The biome whose point
 climate at a position wins, as in a data pack's `minecraft:multi_noise` source with an inline `biomes` list;
 the biomes can be the mod's own or vanilla's. A mod's points shape its own level only: placing a mod's biomes
 among vanilla's in the Overworld or the Nether is a [biome region](../content-mods/biome-regions.md). Only `Fixed` suits a chunk
-generator of the mod's own, which writes terrain only. `mod_biome_source` names a [biome source](#biome-sources) a
+generator of the mod's own. `mod_biome_source` names a [biome source](#biome-sources) a
 mod registered instead, for either generator.
 
 A dimension in an unowned namespace, an empty name, a name that is not a folder of the world
@@ -171,6 +171,30 @@ synchronous, `/locate`-cost search, not a cheap loaded-chunk lookup: cache resul
 per-tick use. The radius counts placement-cell rings (at most 100); stronghold rings are
 checked regardless of radius. It does not load or generate chunks.
 
+## Watered-area tickets
+
+On the server, `level.add_water_ticket(host, min, max)` returns an `Option<WaterTicket>`
+for a sprinkler's watered area. Bounds are integer and half-open on **all three axes**:
+`min` is included, `max` is excluded. For 5×1×5 farmland beginning at `[4, 64, 4]`,
+use `[4, 64, 4]` and `[9, 65, 9]`; `[8, 64, 8]` is inside, `[9, 64, 4]` is outside.
+Empty or reversed boxes and boxes covering more than 65,536 x/z chunks are refused.
+
+Keep the handle, then call `ticket.remove(host)` when the sprinkler stops or breaks.
+Removal returns whether that ticket was removed; overlapping tickets remain independent.
+Only the mod that added a ticket can remove it. `level.has_water_ticket(host, pos)` tests
+whether any ticket covers a block. Both calls reach active or parked server levels without
+loading chunks; unavailable/stale handles and clients answer `false` (adding answers `None`).
+Adding requires an enabled mod call, and native and wasm use the same generated boundary.
+
+Tickets are chunk-indexed, in memory only, and never force chunks to load. They are removed
+on explicit removal, level unload, or their owner's disable; re-enabling does not restore
+them. A reopened world starts empty: re-add from `level_load` or a block entity's load
+listener. Several boxes can describe a shape without a per-position mod predicate.
+Farmland checks the ticket before its vanilla water scan, so dry farmland inside moistens
+to 7. Removing the last covering ticket restores normal drying, while nearby water and
+rain continue working normally and the moisture-change veto still applies. Empty levels
+pay only the empty-index guard, not a mod scan or callback.
+
 ## Saving a level
 
 `level.request_save(host)` asks the server to save a level, as the autosave and `/save-all` do, with its
@@ -197,16 +221,33 @@ or from a data pack's level stem as `"generator": {"type": "mymod:void"}`:
 
 There is no `Host` in world generation: chunks fill on the worker threads, so a generator sees only
 the `ChunkAccess` of the chunk it fills, is `Send + Sync`, and keeps no mutable state, because two
-workers can fill neighbouring chunks at once. The same seed and chunk give the same blocks.
-`ChunkAccess` has the chunk's `pos`, the world's `seed`, the level's `min_y` and `height`, and
-borrowed immutable `metadata()`. Resolve `BlockKey`s at registration, then use `state` or
+workers can fill neighbouring chunks at once. The same level id, seed and chunk give the same blocks.
+`ChunkAccess` has the chunk's `pos`, the id of its level (`level()`, such as `mymod:pocket`, so
+one generator can serve several levels and tell them apart), the level's `seed` (the world's seed),
+the level's `min_y` and `height`, and borrowed immutable `metadata()`. Resolve `BlockKey`s at registration, then use `state` or
 `state_with` to construct API-owned `BlockState`s before the terrain-writing loop, never once per
 placed block. `set_block` skips a position outside the chunk or build height and answers whether
 it wrote. The chunk starts as air; invalid state ordinals are refused rather than written.
 
-The generator gives terrain only. The level has no surface, carvers or features, and every chunk
-has the stem's one biome, unless its stem names a [biome source](#biome-sources) a mod registered.
-`noise_settings` means nothing to it.
+By default the generator gives terrain only: the level has no surface, carvers, structures or
+features, every chunk has the stem's one biome, unless its stem names a
+[biome source](#biome-sources) a mod registered, and `noise_settings` means nothing to it.
+
+`vanilla_stages` asks for vanilla's stages around the terrain, as `VanillaStages` with the fields
+`surface`, `carvers`, `structures` and `features`; it is asked once, at registration. They run in
+vanilla's order: the structure starts before the terrain, then the level's material rule
+(`surface`: grass, sand, deepslate, bedrock and ore veins over every solid block) and its biomes'
+carvers, as vanilla's noise generator runs them after its noise fill, then the structure pieces
+and the biomes' placed features. The material rule, the carvers' aquifer and the height a structure
+starts at come from the level's `noise_settings`, not from the generator's terrain, and so does its
+sea level. With any stage, `ChunkAccess`'s `min_y` and `height` are the noise settings' range and
+`set_block` writes only inside it, as vanilla's noise fill does. A world with its structures turned
+off gets none. A level whose stem names no noise settings or ones the world lacks, one that asks for
+structures in a world with no structure sets or for structures or features in one with no placed
+features, and one that asks for features the game cannot place yet, refuses to open with a message
+naming the generator and what is missing; the surface and the carvers alone need neither. A level that asks for none of them costs
+what it did before; one that asks for any runs on vanilla's generator, with the mod's terrain in
+place of the noise.
 
 A generator in an unowned namespace, an empty name, a name that is not a folder of the world (as
 for a dimension), an id registered twice and `minecraft:noise` stop the game at startup with a

@@ -633,6 +633,11 @@ impl Title {
                     centered(atlas, batch, line, text_top + i as f32 * 9.0, u32::MAX);
                 }
             }
+            Mode::MissingMods { missing, .. } => {
+                crate::ui::menu_background(batch, atlas, 0.0, 0.0, w, h, false);
+                phases(crate::screen_draw::RenderPhase::Background, batch);
+                self.draw_missing_mods(atlas, batch, (w, h), missing)
+            }
             Mode::MultiplayerWarning { check } => {
                 crate::ui::menu_background(batch, atlas, 0.0, 0.0, w, h, false);
                 phases(crate::screen_draw::RenderPhase::Background, batch);

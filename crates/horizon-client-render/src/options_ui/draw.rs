@@ -2,11 +2,9 @@
 use super::*;
 use crate::screen_draw::Draw;
 
-type PackDraw = (shell::Columns, Vec<shell::Line<u16, u16>>, f32);
 pub(super) enum FrameDraw {
     Error,
     Calibration(crate::hdr_calibration::Layout),
-    PackOptions(PackDraw),
     Shell(Page),
     RadialName,
     SplitSetup,
@@ -32,6 +30,7 @@ impl OptionsUi {
                 Page::ControllerRadialPick => &mut self.radial_pick,
                 page if Self::controller_page(page).is_some() => &mut self.controller,
                 page if Self::shader_page(page).is_some() => &mut self.shader,
+                Page::PackOptions => &mut self.pack_options,
                 _ => unreachable!("prepared shell page"),
             };
             hosted.discard_draw();
@@ -70,8 +69,6 @@ impl OptionsUi {
                     .unwrap()
                     .draw_background(batch, atlas),
             )
-        } else if page == Page::PackOptions {
-            FrameDraw::PackOptions(self.pack_options.draw_background(batch, atlas, in_world))
         } else if page == Page::ControllerRadialName && self.radial.screen.naming.is_some() {
             ui::menu_background(batch, atlas, 0.0, 0.0, w.ceil(), h.ceil(), in_world);
             FrameDraw::RadialName
@@ -141,11 +138,6 @@ impl OptionsUi {
                 self.calibration
                     .as_ref()
                     .expect("calibration remains open")
-                    .draw_contents(batch, atlas, cursor, layout);
-                FrameDraw::Complete
-            }
-            FrameDraw::PackOptions(layout) => {
-                self.pack_options
                     .draw_contents(batch, atlas, cursor, layout);
                 FrameDraw::Complete
             }

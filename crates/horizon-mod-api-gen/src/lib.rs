@@ -72,7 +72,7 @@ fn doc_comments(
     Ok(docs)
 }
 
-/// The handles of the mod API: its public `*Ref` and `*Key` structs, by their receiver name.
+/// The mod API's public `*Ref`, `*Key` and `*Ticket` handles, by their receiver name.
 struct ApiTypes {
     handles: BTreeMap<String, String>,
 }
@@ -91,7 +91,7 @@ fn api_types(source: &str) -> Result<ApiTypes, String> {
         let base = name
             .strip_suffix("Ref")
             .map(str::to_owned)
-            .or_else(|| name.ends_with("Key").then(|| name.clone()));
+            .or_else(|| (name.ends_with("Key") || name.ends_with("Ticket")).then(|| name.clone()));
         if let Some(base) = base.filter(|base| !base.is_empty()) {
             let receiver = base.to_snake_case();
             if handles.insert(receiver.clone(), name).is_some() {
@@ -680,6 +680,7 @@ pub mod points;
 pub mod replace;
 pub(crate) mod source;
 pub mod staging;
+pub mod surface;
 pub use build::{generate, generate_points, generate_render, write_if_changed};
 pub use notes::generate as generate_hook_notes;
 mod staged;
