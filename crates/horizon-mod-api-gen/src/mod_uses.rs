@@ -453,7 +453,7 @@ mod tests {
         write(
             root,
             "src/lib.rs",
-            "#[path = \"gen/x.rs\"] mod x;\ninclude!(\"../src/y.rs\");\ninclude! { r#\"y.rs\"# }\ninclude![\"\\x79.rs\"];\n// #[path = \"/etc\"]",
+            "#[path = \"gen/x.rs\"] mod x;\ninclude!(\"../src/y.rs\");\ninclude! { r#\"y.rs\"# }\ninclude![\"\\x79.rs\"];\ninclude!(\"\\u{79}.rs\");\n// #[path = \"/etc\"]",
         );
         assert!(read(root).is_ok());
         let escapes = |text: &str| {
