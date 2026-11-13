@@ -1519,11 +1519,10 @@ capabilities = ["registries"]
             zip.write_all(bytes).unwrap();
         }
         let mut archive = zip::ZipArchive::new(zip.finish().unwrap()).unwrap();
-        assert!(
-            Package::read_zip(&mut archive)
-                .unwrap_err()
-                .contains(USES_FILE)
-        );
+        let error = Package::read_zip(&mut archive)
+            .err()
+            .expect("a content package's uses.json is refused");
+        assert!(error.contains(USES_FILE), "{error}");
     }
 
     #[test]
