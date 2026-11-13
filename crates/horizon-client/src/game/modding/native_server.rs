@@ -4612,8 +4612,6 @@ pub(super) mod fake_action_tests {
                 .crafting
                 .inventory
                 .as_ref()
-                .unwrap()
-                .as_ref()
                 .unwrap();
             assert_eq!((&**restored) as *const horizon_client::menu::Menu, owner);
             assert_eq!(restored.carried, Some(ItemStack::new("minecraft:stick", 3)));
