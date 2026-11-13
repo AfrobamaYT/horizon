@@ -1,7 +1,9 @@
 //! Native mods' world views (`native_render::world_views`): the frame's world drawn again
 //! from a camera of the mod's own into a target of its own, as the water mirror is: the same
 //! section lists (culled for every view's frustum too), the same entity geometry, the frame's
-//! sky and fog, through the frame's pipelines with the view's globals.
+//! sky and fog, through the frame's pipelines with the view's globals. A view's clip plane is
+//! its projection's near plane; a mirrored view's projection flips x, and it draws through
+//! pipelines that cull the front faces instead (`Flipped`).
 
 use super::{Cull, Frame, Frustum, Globals, Renderer, frustum, native_render};
 use glam::{DVec3, Mat4, Vec3, Vec4};
@@ -75,7 +77,9 @@ pub(super) fn open_while_asked(camera: Frustum, max_side: u32) -> Frustum {
 }
 
 /// A view's camera in the frame's camera-relative world: the frame's geometry is placed relative
-/// to the player's camera, so the view's matrices take the offset to its own camera in.
+/// to the player's camera, so the view's matrices take the offset to its own camera in. A
+/// mirror flips the eye's x (the picture left to right, every winding round); a clip plane
+/// becomes the near plane (`near_plane_on`).
 pub(super) struct ViewCamera {
     /// The frame's camera-relative world to the view's clip space.
     pub view_proj: Mat4,
@@ -90,10 +94,19 @@ pub(super) struct ViewCamera {
 impl ViewCamera {
     pub fn new(view: &native_render::WorldView, camera: DVec3, far: f32) -> Self {
         let aspect = view.size[0] as f32 / view.size[1] as f32;
-        let rotation = crate::camera::view_matrix_rolled(view.yaw, view.pitch, view.roll);
+        let mirror = Vec3::new(if view.mirror { -1.0 } else { 1.0 }, 1.0, 1.0);
+        let rotation = Mat4::from_scale(mirror)
+            * crate::camera::view_matrix_rolled(view.yaw, view.pitch, view.roll);
         let projection = super::world_projection(view.fov_degrees, aspect, far);
         let offset = (view.camera - camera).as_vec3();
-        let own_view_proj = projection * rotation;
+        let mut own_view_proj = projection * rotation;
+        // The plane relative to the view's camera, in f64 so far from the origin it loses nothing.
+        if let Some(plane) = view.clip_plane.and_then(crate::render_views::unit_plane) {
+            let relative = plane.truncate().dot(view.camera) + plane.w;
+            let plane = plane.truncate().as_vec3().extend(relative as f32);
+            let tan_half = (view.fov_degrees.to_radians() / 2.0).tan();
+            own_view_proj = near_plane_on(own_view_proj, plane, tan_half, aspect);
+        }
         Self {
             view_proj: own_view_proj * Mat4::from_translation(-offset),
             own_view_proj,
@@ -102,6 +115,33 @@ impl ViewCamera {
             aspect,
         }
     }
+}
+
+/// `view_proj`, a reversed-Z perspective from the origin with the vertical half-angle's tangent
+/// `tan_half` and `aspect`, with its near plane turned onto `plane` (a unit normal, the origin
+/// behind it): the clip z row becomes `w - k * plane`, so `z <= w` keeps what is in front of the
+/// plane and depth still falls with distance. `k` is the cosine of the angle out to the
+/// frustum's corners: nothing in the frustum is farther in front of the plane than its `w` over
+/// `k`, so `z >= 0` leaves none of it out (the far plane goes).
+fn near_plane_on(view_proj: Mat4, plane: Vec4, tan_half: f32, aspect: f32) -> Mat4 {
+    let k = 1.0 / (1.0 + tan_half * tan_half * (1.0 + aspect * aspect)).sqrt();
+    let rows = view_proj.transpose();
+    Mat4::from_cols(
+        rows.x_axis,
+        rows.y_axis,
+        rows.w_axis - k * plane,
+        rows.w_axis,
+    )
+    .transpose()
+}
+
+/// The frame's solid and translucent terrain pipelines as a mirrored view draws them: culling
+/// the front faces, since its flipped picture turns every winding round, so the faces it drops
+/// are the ones the view unmirrored drops (gfx.rs builds the per-section ones, `flat::Flat` the
+/// flat ones).
+pub(super) struct Flipped {
+    pub solid: wgpu::RenderPipeline,
+    pub translucent: wgpu::RenderPipeline,
 }
 
 /// A view's targets, kept while it is asked for each frame.
@@ -113,8 +153,20 @@ pub(super) struct Target {
     depth: wgpu::TextureView,
 }
 
-#[derive(Default)]
-pub(super) struct Targets(HashMap<u64, Target>);
+/// The views' targets by id, and the pipelines mirrored views draw with.
+pub(super) struct Kept {
+    targets: HashMap<u64, Target>,
+    flipped: Flipped,
+}
+
+impl Kept {
+    pub fn new(solid: wgpu::RenderPipeline, translucent: wgpu::RenderPipeline) -> Self {
+        Self {
+            targets: HashMap::new(),
+            flipped: Flipped { solid, translucent },
+        }
+    }
+}
 
 /// What of the frame the views draw.
 struct Lists {
@@ -160,7 +212,7 @@ impl Renderer {
             entity_quads,
         };
         let format = self.output.frame.format;
-        let mut targets = std::mem::take(&mut self.world_views.0);
+        let mut targets = std::mem::take(&mut self.world_views.targets);
         targets.retain(|id, _| views.iter().any(|v| v.id == *id));
         for view in views {
             let target = targets
@@ -182,12 +234,15 @@ impl Renderer {
                     (view.fov_degrees.to_radians() / 2.0).tan(),
                 ],
                 outline_params: super::outline_params(view.size[0], view.size[1]),
-                view_origin: [camera.offset.x, camera.offset.y, camera.offset.z, 0.0],
+                view_origin: camera
+                    .offset
+                    .extend(if view.mirror { -1.0 } else { 0.0 })
+                    .into(),
                 ..lists.globals
             };
             self.uploads
                 .buffer(encoder, &self.globals, 0, bytemuck::bytes_of(&globals));
-            self.draw_world_view(encoder, target, frame, lists);
+            self.draw_world_view(encoder, target, frame, lists, view.mirror);
             native_render::world_view_drawn(&mut native_render::WorldViewDrawn {
                 id: view.id,
                 device: &self.device,
@@ -210,18 +265,21 @@ impl Renderer {
                 bytemuck::bytes_of(&lists.globals),
             );
         }
-        self.world_views.0 = targets;
+        self.world_views.targets = targets;
     }
 
     /// The sky, the solid terrain, the entities and the translucent terrain, in the world
     /// pass's order, without what follows one camera alone (the sunrise's mesh, the sun and
-    /// moon, stars, clouds, particles, weather, the block outline, the hand).
+    /// moon, stars, clouds, particles, weather, the block outline, the hand). `mirror`: the
+    /// terrain through the `Flipped` pipelines (the sky, entities and block entities cull no
+    /// faces).
     fn draw_world_view(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         target: &Target,
         frame: &Frame,
         lists: &Lists,
+        mirror: bool,
     ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Native world view"),
@@ -250,15 +308,16 @@ impl Renderer {
             pass.draw(0..3, 0..1);
         }
         let flat = self.flat.as_ref().filter(|_| lists.flat);
+        let flipped = mirror.then(|| flat.map_or(&self.world_views.flipped, |f| &f.flipped));
         let vertices = || super::flat_vertices(&self.arena, self.translucent_arena.as_ref());
         match flat {
             Some(flat) => {
-                pass.set_pipeline(flat.solid.get(lists.hdr));
+                pass.set_pipeline(flipped.map_or(flat.solid.get(lists.hdr), |f| &f.solid));
                 flat.draw(&mut pass, &flat.calls[..flat.solid_calls], vertices());
                 pass.set_bind_group(0, &self.group, &[]);
             }
             None => {
-                pass.set_pipeline(self.solid.get(lists.hdr));
+                pass.set_pipeline(flipped.map_or(self.solid.get(lists.hdr), |f| &f.solid));
                 pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.set_vertex_buffer(1, self.instances.slice(..));
                 self.draw_solid_sections(&mut pass, &self.indirect, 0, 0, lists.solid_draws);
@@ -296,11 +355,11 @@ impl Renderer {
         pass.set_bind_group(0, &self.group, &[]);
         match flat {
             Some(flat) => {
-                pass.set_pipeline(&flat.translucent);
+                pass.set_pipeline(flipped.map_or(&flat.translucent, |f| &f.translucent));
                 flat.draw(&mut pass, flat.translucent_calls(), vertices());
             }
             None => {
-                pass.set_pipeline(&self.translucent);
+                pass.set_pipeline(flipped.map_or(&self.translucent, |f| &f.translucent));
                 pass.set_vertex_buffer(1, self.instances.slice(..));
                 self.draw_sections(
                     &mut pass,
@@ -392,5 +451,57 @@ mod tests {
         );
         let up = rolled.view_proj * glam::Vec4::new(0.0, 1.0, 10.0, 1.0);
         assert!(up.x < -0.05 * up.w && (up.y / up.w).abs() < 1e-5, "{up}");
+    }
+
+    /// A mirrored view sees a point where the unmirrored one does, with x the other way, and
+    /// its matrix's determinant changes sign: every winding turns round (what `Flipped` makes
+    /// up for).
+    #[test]
+    fn a_mirrored_view_flips_the_picture_left_to_right() {
+        let camera = DVec3::new(100.5, 70.0, -20.25);
+        let view = native_render::WorldView::new(1, camera, 0.0, 0.0, 70.0, [320, 180]);
+        let plain = ViewCamera::new(&view, camera, 512.0);
+        let mirrored = ViewCamera::new(&view.with_mirror(), camera, 512.0);
+        // looking south (+z), a point a block east (+x) is left of the middle; mirrored, right
+        let east = Vec4::new(1.0, 0.0, 10.0, 1.0);
+        let x = |m: Mat4| (m * east).x / (m * east).w;
+        assert!((x(plain.view_proj) + 0.08033).abs() < 1e-4);
+        assert!((x(mirrored.view_proj) - 0.08033).abs() < 1e-4);
+        assert!(plain.view_proj.determinant() * mirrored.view_proj.determinant() < 0.0);
+    }
+
+    /// A clip plane is the view's near plane: depth 1 on it, past 1 (left out) behind it,
+    /// falling with distance in front of it, and above 0 as far as the frustum reaches.
+    #[test]
+    fn a_clip_plane_is_the_near_plane() {
+        // a camera at z 40 looking north (-z), and the plane z = 20 facing north
+        let frame_camera = DVec3::new(8.0, 104.0, 0.5);
+        let view = native_render::WorldView::new(
+            1,
+            DVec3::new(8.0, 104.0, 40.0),
+            180.0,
+            0.0,
+            70.0,
+            [200, 120],
+        )
+        .with_clip_plane([0.0, 0.0, -2.0, 40.0]);
+        let camera = ViewCamera::new(&view, frame_camera, 1000.0);
+        let depth = |z: f64| {
+            let p = (DVec3::new(8.0, 104.0, z) - frame_camera).as_vec3();
+            let clip = camera.view_proj * p.extend(1.0);
+            clip.z / clip.w
+        };
+        assert!((depth(20.0) - 1.0).abs() < 1e-5, "{}", depth(20.0));
+        assert!((depth(28.0) - 1.39475).abs() < 1e-4, "{}", depth(28.0));
+        assert!((depth(12.0) - 0.83082).abs() < 1e-4, "{}", depth(12.0));
+        assert!((depth(-300.0) - 0.44271).abs() < 1e-4, "{}", depth(-300.0));
+        // A plane facing the frustum's top right corner, a block out along it: 1000 blocks out
+        // along that corner is still in front of the far end, at depth 1 / 1000.
+        let tan_half = 35f32.to_radians().tan();
+        let corner = Vec3::new(2.0 * tan_half, tan_half, -1.0).normalize();
+        let lens = super::super::world_projection(70.0, 2.0, 512.0);
+        let clipped = near_plane_on(lens, corner.extend(-1.0), tan_half, 2.0);
+        let far = clipped * (corner * 1000.0).extend(1.0);
+        assert!((far.z / far.w - 0.001).abs() < 1e-5, "{far}");
     }
 }

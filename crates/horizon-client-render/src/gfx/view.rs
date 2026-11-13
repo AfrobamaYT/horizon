@@ -3,7 +3,7 @@
 //! camera-relative world (section origins, entity offsets) is built once and
 //! only each view's rotation and lens differ.
 
-use glam::Mat4;
+use glam::{DVec3, Mat4, Vec3};
 
 /// The most views one frame draws.
 const MAX_VIEWS: usize = 2;
@@ -72,6 +72,25 @@ impl ViewSet {
     pub fn cull(&self) -> &View {
         &self.cull
     }
+}
+
+/// Where a perspective `view_proj` sees from, in its own (camera-relative)
+/// space: the point whose clip x, y and w are all 0. `None` for a
+/// projection without one (orthographic).
+pub(super) fn projection_center(view_proj: Mat4) -> Option<Vec3> {
+    let m = view_proj.as_dmat4();
+    let rows = [m.row(0), m.row(1), m.row(3)];
+    let a = glam::DMat3::from_cols(
+        DVec3::new(rows[0].x, rows[1].x, rows[2].x),
+        DVec3::new(rows[0].y, rows[1].y, rows[2].y),
+        DVec3::new(rows[0].z, rows[1].z, rows[2].z),
+    );
+    let det = a.determinant();
+    if !det.is_normal() {
+        return None;
+    }
+    let b = DVec3::new(rows[0].w, rows[1].w, rows[2].w);
+    Some((a.inverse() * -b).as_vec3())
 }
 
 #[cfg(test)]

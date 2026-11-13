@@ -11,15 +11,24 @@ A client mod can have the world drawn again from cameras of its own, into target
 second camera's preview beside the player's view, stills for a film strip. As each frame is built and drawn (not on
 the title screen's panorama), `world_views` asks for them, more than once a frame, so keep it cheap: push a
 `WorldView::new(id, camera, yaw, pitch, fov_degrees, size)` (`with_roll(degrees)` turns it about the view
-direction) for each one wanted this frame. Up to `MAX_WORLD_VIEWS` (4) draw, each at most `MAX_WORLD_VIEW_SIDE`
-(4096) pixels a side, or the device's largest texture side when that is smaller; one with a value out of range or an `id` already asked for is left out. Push the same views
-each time within a frame.
+direction) for each one wanted this frame. For a view through a portal or a mirror:
+- `with_clip_plane([x, y, z, d])` draws only what lies in front of that world-space plane (`x * p.x + y * p.y +
+  z * p.z + d >= 0`): terrain, entities and block entities behind it are left out, as a wall behind a portal's far
+  side is. It becomes the view's near plane, so it needs no device feature, and the camera must be behind it.
+- `with_mirror()` mirrors the picture left to right, as a mirror shows it: give the camera reflected through the
+  mirror. A mirrored picture turns every triangle's winding round, so the view draws with face culling flipped to
+  make up for it: the faces culled are the ones the unmirrored view culls, and back faces stay hidden.
+ Up to `MAX_WORLD_VIEWS` (4) draw, each at most `MAX_WORLD_VIEW_SIDE`
+(4096) pixels a side, or the device's largest texture side when that is smaller; one with a value out of range or an `id` already asked for is left out. A clip plane
+is out of range when its normal `[x, y, z]` is zero, a value is not finite, or the camera is not behind it. Push
+the same views each time within a frame.
 
 Each view is drawn after the frame's world with the frame's terrain (solid and translucent), sky colour, fog and
 entities (block entities too), from its own camera and with its own frustum; then `world_view_drawn` hands it back
 as a `WorldViewDrawn`: its `id`, `color` (`color_format`, the world's light as `WorldDrawn::color` holds it, before
 the tone curve, without the hand, the HUD or the frame's post passes), `depth` (Depth32Float, reversed), `view_proj`
-(the world relative to the view's `camera`, to its clip space), and the device, queue and the frame's encoder. Draw
+(the world relative to the view's `camera`, to its clip space, as the picture and `depth` were drawn: the clip
+plane as its near plane, x flipped for a mirror), and the device, queue and the frame's encoder. Draw
 your own geometry into it there, sample it (both textures can be bound) or copy it out: `copy_texture_to_buffer`
 into a buffer of your own and map that after the frame, for a still. The target stays the view's while each frame
 asks for it, so a texture view of it can be kept and shown, and is drawn over every frame; one no frame asks for any
@@ -34,7 +43,8 @@ a shader pack's passes. A frame without views costs nothing more: while no mod l
 called.
 
 `python3 tools/run_world_views.py <dir>` (throwaway homes) draws views through the renderer offscreen and checks
-that the frame's picture is unchanged; `--bench` times a frame with and without one."#]
+that the frame's picture is unchanged, that mirrored views cull the faces unmirrored ones do and that a clip plane
+leaves out what is behind it; `--bench` times a frame with and without one."#]
     #[hook(
         side = "client",
         contract = "collect",

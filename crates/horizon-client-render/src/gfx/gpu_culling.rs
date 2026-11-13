@@ -349,7 +349,7 @@ pub(super) struct FrameInputs<'a> {
     /// The cave-culling graph, while cave culling runs and has one
     /// (`Occlusion::reach`); `None`: every section counts as reached.
     pub reach: Option<Reach<'a>>,
-    /// The eye (gfx.rs `projection_center`), while solid quads facing away
+    /// The eye (`view::projection_center`), while solid quads facing away
     /// from it are left out (`sides_on`); `None`: every solid quad is drawn. A
     /// GPU frame has no water mirror, whose eye below would see more of them.
     pub eye: Option<Vec3>,
@@ -1724,7 +1724,7 @@ mod tests {
     /// The frustum `draw_frame` culls with for the view and projection `m`, and
     /// the eye it leaves out the faces turned away from (`projection_center`).
     fn through(m: Mat4) -> (Frustum, Vec3) {
-        let eye = super::super::projection_center(m).expect("a perspective");
+        let eye = super::super::view::projection_center(m).expect("a perspective");
         let planes = super::super::frustum(m);
         (Frustum { planes }, eye)
     }
