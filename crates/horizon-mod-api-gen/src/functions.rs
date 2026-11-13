@@ -177,7 +177,7 @@ impl FunctionIndex {
     /// nothing in it reaches the copy unchecked.
     pub fn checked(self) -> Result<Self, String> {
         let name = |text: &str| syn::parse_str::<syn::Ident>(text).is_ok();
-        let path = |text: &str| text.split("::").all(|segment| name(segment));
+        let path = |text: &str| text.split("::").all(name);
         for (krate, facts) in &self.crates {
             if !name(krate) || !name(&facts.library) {
                 return Err(format!(
