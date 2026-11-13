@@ -437,6 +437,20 @@ mod tests {
         );
     }
     #[test]
+    fn the_crate_has_no_dependency_beyond_the_standard_library() {
+        // `horizon-mod-wasm` links this crate, and its normal dependency closure must stay free of the
+        // engine's world, protocol and thread crates: any entry in these tables would end that.
+        let manifest = include_str!("../Cargo.toml");
+        let mut table = "";
+        for line in manifest.lines().map(str::trim) {
+            if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+                table = name;
+            } else if table.contains("dependencies") && !line.is_empty() && !line.starts_with('#') {
+                panic!("Cargo.toml lists a dependency in [{table}]: {line}");
+            }
+        }
+    }
+    #[test]
     fn dates() {
         assert_eq!(date_string(0), "Thu Jan 01 00:00:00 UTC 1970");
         assert_eq!(days_from_civil(2026, 10, 12), 20_738);

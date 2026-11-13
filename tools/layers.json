@@ -36,6 +36,7 @@
     "horizon-prepare": "engine",
     "horizon-protocol": "engine",
     "horizon-server-files": "engine",
+    "horizon-java-properties": "engine",
     "horizon-system": "engine",
     "horizon-threads": "engine",
     "horizon-guest-stack": "engine",
@@ -113,7 +114,8 @@
       "horizon-game-discovery",
       "horizon-engine-slots",
       "horizon-threads",
-      "horizon-guest-stack"
+      "horizon-guest-stack",
+      "horizon-java-properties"
     ],
     "forbidden": [
       "arboard",
