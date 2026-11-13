@@ -1,16 +1,16 @@
 //! World views (`horizon_client_render::render_slots::world_views`, the hook notes' "World views") through the real
 //! `Renderer`, offscreen: a white wall the player's camera faces and a green one behind it that
 //! a view from the other side faces, an entity quad between them, drawn without views and with
-//! two. The frame's own picture stays as it was; each view comes back at its size with what its
-//! own camera sees. Behind the player's camera, a blue wall facing it: mirrored views draw its
-//! front and cull its back as an unmirrored view does, mirrored left to right; a clip plane
-//! leaves the green wall out of a view behind it, and a clipped view's entities keep their
-//! depth order against terrain. Run with throwaway HORIZON_HOME, HORIZON_LAUNCHER_HOME,
-//! XDG_DATA_HOME and XDG_CONFIG_HOME, through production source staging:
-//! `python3 tools/run_world_views.py <output-dir>`;
-//! `--bench` (an optimized build): instead, the time of a frame of rolling land 49 by 49
-//! chunks around the camera at 1920 by 1080 without a view, with a 1 by 1 one (the culling it
-//! turns off), a 640 by 360 one and a 1920 by 1080 one.
+//! two. The frame's own picture and draws stay as they were; each view comes back at its size
+//! with what its own camera sees, and the mod is asked once a frame. Behind the player's camera,
+//! a blue wall facing it: mirrored views draw its front and cull its back as an unmirrored view
+//! does, mirrored left to right; a clip plane leaves the green wall out of a view behind it, and
+//! a clipped view's entities keep their depth order against terrain. Run with throwaway
+//! HORIZON_HOME, HORIZON_LAUNCHER_HOME, XDG_DATA_HOME and XDG_CONFIG_HOME, through production
+//! source staging: `python3 tools/run_world_views.py <output-dir>`; `--bench` (an optimized
+//! build): instead, frames of rolling land 49 by 49 chunks around the camera at 1920 by 1080
+//! without a view, with one 640 by 360 view and with four: their CPU time, visibility spans,
+//! section draws and GPU time.
 use client::{
     gfx::{Frame, Renderer, ScreenshotRequest},
     graphics::GraphicsApi,
@@ -37,13 +37,15 @@ const GUI: client::hud::GuiScale = client::hud::GuiScale {
     unicode: false,
 };
 
-/// The views the mod below asks for each frame.
+/// The views the mod below asks for each frame, and how many times it was asked.
 static VIEWS: Mutex<Vec<WorldView>> = Mutex::new(Vec::new());
+static ASKED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 /// Each drawn view's id, size and a copy of its picture on its way back.
 static DRAWN: Mutex<Vec<(u64, [u32; 2], wgpu::TextureFormat, wgpu::Buffer)>> =
     Mutex::new(Vec::new());
 static DEVICE: Mutex<Option<wgpu::Device>> = Mutex::new(None);
 fn ask_views(views: &mut Vec<WorldView>) {
+    ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     views.extend(VIEWS.lock().unwrap().iter().copied());
 }
 fn view_drawn(view: &mut WorldViewDrawn<'_>) {
@@ -282,6 +284,12 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         .chain(quad(upright([5.0, 99.0, 7.0, 101.0], 29.995), magenta))
         .collect();
     let hud = HudBatch::new([320, 180], GUI);
+    // The game's frame: the entities culled with `camera_frustum`, which asks for the views,
+    // then the frame drawn with them.
+    let camera = DVec3::new(8.0, 104.0, 0.5);
+    let entity_frusta = |renderer: &mut Renderer| {
+        renderer.camera_frustum(camera, 85.0, 0.0, 0.0, glam::Mat4::IDENTITY, 1000.0)
+    };
     let shot = |renderer: &mut Renderer, name: &str, views: Vec<WorldView>| {
         *VIEWS.lock().unwrap() = views;
         let mut frame = fixture_frame(&hud);
@@ -293,8 +301,14 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
             scaled: false,
             background: false,
         });
-        renderer.render(&frame).unwrap();
-        renderer.render(&frame).unwrap();
+        let asked = ASKED.load(std::sync::atomic::Ordering::Relaxed);
+        for _ in 0..2 {
+            entity_frusta(renderer);
+            renderer.render(&frame).unwrap();
+        }
+        let asked = ASKED.load(std::sync::atomic::Ordering::Relaxed) - asked;
+        assert_eq!(asked, 2, "the mod is asked once a frame");
+        let draws = [renderer.drawn_sections, renderer.section_draws];
         // the frames are submitted on the renderer's own thread: their copies first
         renderer.wait_submissions();
         renderer
@@ -307,9 +321,9 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         // the second frame's views
         let mut drawn = drawn_views();
         drawn.drain(..drawn.len() / 2);
-        (read(&path), drawn)
+        (read(&path), drawn, draws)
     };
-    let (plain, none) = shot(&mut renderer, "plain", Vec::new());
+    let (plain, none, plain_draws) = shot(&mut renderer, "plain", Vec::new());
     assert!(none.is_empty(), "no view asked for, none drawn");
     let wall_px = count(&plain, [255, 255, 255]);
     let entity_px = count(&plain, [255, 64, 64]);
@@ -334,11 +348,18 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         [200, 120],
     );
     let close = WorldView::new(9, DVec3::new(8.0, 104.0, 9.0), 180.0, 0.0, 70.0, [64, 64]);
-    let (with_views, drawn) = shot(&mut renderer, "views", vec![behind, close]);
+    let (with_views, drawn, view_draws) = shot(&mut renderer, "views", vec![behind, close]);
     assert!(
         with_views == plain,
         "the frame's picture is the same with views drawn"
     );
+    // the white and green walls ahead, each face toward the camera alone; not the blue one
+    assert_eq!(plain_draws, [2, 2], "the frame's sections and draws");
+    assert_eq!(
+        view_draws, plain_draws,
+        "views leave the frame's culling as it was"
+    );
+    let views_drew = renderer.world_view_draws();
     let ids: Vec<u64> = drawn.iter().map(|(id, ..)| *id).collect();
     assert_eq!(ids, [7, 9], "each view drawn once, in order");
     let (_, size, far) = &drawn[0];
@@ -362,22 +383,22 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     let red = count(near, [255, 64, 64]);
     assert!(red > 200, "the view behind the entity sees it: {red}");
 
-    // the game culls entities with the camera's frustum, which takes in what is behind the
-    // camera while a view is asked for
-    let behind_camera = |renderer: &Renderer| {
-        renderer
-            .camera_frustum(85.0, 0.0, 0.0, glam::Mat4::IDENTITY, 1000.0)
-            .intersects(
-                glam::Vec3::new(-1.0, -1.0, -12.0),
-                glam::Vec3::new(1.0, 1.0, -10.0),
-            )
+    // The game culls entities with the camera's frustum joined to the views': behind the
+    // camera, one ahead of view 7 is kept for it, one 80 blocks east of it is in no frustum.
+    let seen = |renderer: &mut Renderer, x: f32| {
+        let (min, max) = (
+            glam::Vec3::new(x - 1.0, -1.0, -12.0),
+            glam::Vec3::new(x + 1.0, 1.0, -10.0),
+        );
+        entity_frusta(renderer).intersects(min, max)
     };
-    assert!(
-        behind_camera(&renderer),
-        "entities behind the camera are kept for the views"
-    );
+    assert!(seen(&mut renderer, 0.0), "an entity a view sees is kept");
+    assert!(!seen(&mut renderer, 80.0), "one no frustum sees is culled");
     *VIEWS.lock().unwrap() = Vec::new();
-    assert!(!behind_camera(&renderer), "and culled without views");
+    assert!(
+        !seen(&mut renderer, 0.0),
+        "and the first too, without views"
+    );
 
     // Mirrored views (64 by 64, x 12): looking north at the blue wall's front 4.5 blocks off, it
     // fills the picture; looking south from z -10 at its back, it is culled, mirrored or not, and
@@ -392,7 +413,7 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         at(13, -10.0, 0.0),
         clipped,
     ];
-    let (_, drawn) = shot(&mut renderer, "mirrors", mirrors);
+    let (_, drawn, _) = shot(&mut renderer, "mirrors", mirrors);
     let ids: Vec<u64> = drawn.iter().map(|(id, ..)| *id).collect();
     assert_eq!(ids, [11, 12, 13, 7]);
     for (id, size, pixels) in &drawn {
@@ -454,7 +475,7 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
             .with_clip_plane([0.0, 0.0, -1.0, 36.0])
             .with_mirror(),
     ];
-    let (_, drawn) = shot(&mut renderer, "clipped_entities", entity_views);
+    let (_, drawn, _) = shot(&mut renderer, "clipped_entities", entity_views);
     for (id, size, pixels) in &drawn {
         write_png(&out.join(format!("entity_view_{id}.png")), *size, pixels)?;
     }
@@ -498,7 +519,7 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         north(26, 40.0, [128, 128]).with_clip_plane([0.0, 0.0, -1.0, 30.0]),
         north(27, 40.0, [128, 128]),
     ];
-    let (_, drawn) = shot(&mut renderer, "plane_edge", edge);
+    let (_, drawn, _) = shot(&mut renderer, "plane_edge", edge);
     for (id, size, pixels) in &drawn {
         write_png(&out.join(format!("edge_view_{id}.png")), *size, pixels)?;
     }
@@ -520,11 +541,11 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     let turned = behind.with_roll(30.0);
     let mut resized = turned;
     resized.size = [96, 160];
-    let (_, drawn) = shot(&mut renderer, "resized", vec![resized]);
+    let (_, drawn, _) = shot(&mut renderer, "resized", vec![resized]);
     assert_eq!(drawn.len(), 1);
     assert_eq!((drawn[0].1, drawn[0].2.len()), ([96, 160], 96 * 160));
 
-    let (after, drawn) = shot(&mut renderer, "after", Vec::new());
+    let (after, drawn, _) = shot(&mut renderer, "after", Vec::new());
     assert!(
         drawn.is_empty() && after == plain,
         "with the views gone the frame is as before"
@@ -534,6 +555,7 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         serde_json::to_vec_pretty(&serde_json::json!({
             "wall_pixels": wall_px, "entity_pixels": entity_px, "view_green_pixels": green,
             "view_entity_pixels": red, "frame_unchanged_with_views": true,
+            "frame_sections_and_draws": plain_draws, "view_draws": views_drew,
             "mirrored_front_pixels": front_blue, "mirrored_back_pixels": back_blue[0],
             "mirrored_unlike_pixels": unlike, "clipped_white_pixels": clip_white,
             "clipped_behind_wall_pixels": behind_wall, "coplanar_pixels": coplanar,
@@ -609,7 +631,9 @@ fn hills(cx: i32, cz: i32) -> SectionMesh {
     mesh
 }
 
-/// `--bench`: milliseconds a frame without a view, with a small one and with a full-size one.
+/// `--bench`: a frame without a view, with one and with four, each 640 by 360: its CPU time (the
+/// render call, milliseconds), its visibility spans (the frame's walk and the views'), its
+/// section draws and the views', and its GPU time.
 fn bench(renderer: &mut Renderer, out: &Path) -> Result<(), Box<dyn std::error::Error>> {
     const R: i32 = 24;
     renderer.resize(1920, 1080);
@@ -621,6 +645,7 @@ fn bench(renderer: &mut Renderer, out: &Path) -> Result<(), Box<dyn std::error::
             sections += 1;
         }
     }
+    client::spans::enable(true);
     let hud = HudBatch::new([1920, 1080], GUI);
     let mut time = |views: Vec<WorldView>| {
         *VIEWS.lock().unwrap() = views;
@@ -637,36 +662,60 @@ fn bench(renderer: &mut Renderer, out: &Path) -> Result<(), Box<dyn std::error::
             renderer.render(&frame).unwrap();
             DRAWN.lock().unwrap().clear();
         }
-        let started = std::time::Instant::now();
+        client::spans::take();
+        renderer.gpu_times.clear();
         const FRAMES: u32 = 240;
+        let (mut cpu, mut walk, mut views_walk) = (0.0, 0.0, 0.0);
         for _ in 0..FRAMES {
+            let started = std::time::Instant::now();
             renderer.render(&frame).unwrap();
+            cpu += started.elapsed().as_secs_f64() * 1000.0;
+            for span in client::spans::take() {
+                match span.name {
+                    "visibility" => walk += f64::from(span.ms),
+                    "world view visibility" => views_walk += f64::from(span.ms),
+                    _ => {}
+                }
+            }
             DRAWN.lock().unwrap().clear();
         }
-        // the last frame's picture, so the GPU has caught up
-        renderer.screenshot = Some(ScreenshotRequest {
-            path: out.join("bench.png"),
-            size: None,
-            scaled: false,
-            background: false,
-        });
-        renderer.render(&frame).unwrap();
-        renderer.render(&frame).unwrap();
-        DRAWN.lock().unwrap().clear();
-        started.elapsed().as_secs_f64() * 1000.0 / f64::from(FRAMES + 2)
+        renderer.wait_submissions();
+        let frames = f64::from(FRAMES);
+        let gpu = &renderer.gpu_times;
+        let gpu_ms = (!gpu.is_empty())
+            .then(|| gpu.iter().map(|&t| f64::from(t)).sum::<f64>() / gpu.len() as f64);
+        serde_json::json!({
+            "frame_cpu_ms": cpu / frames, "visibility_ms": walk / frames,
+            "view_visibility_ms": views_walk / frames, "frame_sections": renderer.drawn_sections,
+            "frame_section_draws": renderer.section_draws,
+            "frame_draw_calls": renderer.section_draw_calls,
+            "view_section_draws": renderer.world_view_draws(), "gpu_ms": gpu_ms,
+        })
     };
-    // a camera 60 blocks away, looking back across the land
-    let view = |size| WorldView::new(1, DVec3::new(70.0, 95.0, 40.0), 120.0, 10.0, 70.0, size);
-    let plain = time(Vec::new());
-    // a 1 by 1 view: what the frame's culling for views costs, nearly without a view's pixels
-    let culling = time(vec![view([1, 1])]);
-    let small = time(vec![view([640, 360])]);
-    let full = time(vec![view([1920, 1080])]);
+    // cameras 60 blocks away, looking back across the land from four sides
+    let view = |id, x: f64, z: f64, yaw| {
+        WorldView::new(
+            id,
+            DVec3::new(8.0 + x, 95.0, 8.0 + z),
+            yaw,
+            10.0,
+            70.0,
+            [640, 360],
+        )
+    };
+    let four = vec![
+        view(1, 60.0, 30.0, 120.0),
+        view(2, -60.0, 30.0, -120.0),
+        view(3, 30.0, -60.0, 30.0),
+        view(4, -30.0, -60.0, -30.0),
+    ];
+    let none = time(Vec::new());
+    let one = time(four[..1].to_vec());
+    let all = time(four);
     let again = time(Vec::new());
     let result = serde_json::json!({
-        "sections": sections, "frame_ms_without_view": plain, "frame_ms_with_1x1_view": culling,
-        "frame_ms_with_640x360_view": small,
-        "frame_ms_with_1920x1080_view": full, "frame_ms_without_view_after": again,
+        "sections": sections, "no_view": none, "one_view": one, "four_views": all,
+        "no_view_after": again,
         "graphics_adapter": client::crash::system_details("bench").into_iter()
             .find(|(name, _)| name == "Graphics Adapter").map(|(_, detail)| detail),
     });

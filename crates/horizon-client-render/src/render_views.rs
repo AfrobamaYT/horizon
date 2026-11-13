@@ -142,17 +142,17 @@ pub struct WorldViewDrawn<'a> {
 
 /// The views of those asked for ([`crate::render_slots::world_views`]) that can be drawn on a device whose textures
 /// are at most `max_side` pixels a side (`max_texture_dimension_2d`; never above
-/// [`MAX_WORLD_VIEW_SIDE`]).
-pub fn drawable_world_views(mut views: Vec<WorldView>, max_side: u32) -> Vec<WorldView> {
-    let mut ids = Vec::new();
+/// [`MAX_WORLD_VIEW_SIDE`]), kept in `views` in place, without allocating.
+pub fn drawable_world_views(views: &mut Vec<WorldView>, max_side: u32) {
+    let mut ids = [0; MAX_WORLD_VIEWS];
+    let mut kept = 0;
     views.retain(|v| {
-        v.valid(max_side) && !ids.contains(&v.id) && {
-            ids.push(v.id);
+        kept < MAX_WORLD_VIEWS && v.valid(max_side) && !ids[..kept].contains(&v.id) && {
+            ids[kept] = v.id;
+            kept += 1;
             true
         }
     });
-    views.truncate(MAX_WORLD_VIEWS);
-    views
 }
 
 #[cfg(test)]
@@ -196,18 +196,14 @@ mod tests {
                 .with_mirror(),
         ];
         asked.extend((10..20).map(|id| view(id, 170.0, [1, MAX_WORLD_VIEW_SIDE])));
-        let drawn: Vec<u64> = drawable_world_views(asked, MAX_WORLD_VIEW_SIDE)
-            .iter()
-            .map(|v| v.id)
-            .collect();
+        drawable_world_views(&mut asked, MAX_WORLD_VIEW_SIDE);
+        let drawn: Vec<u64> = asked.iter().map(|v| v.id).collect();
         // the first id 1 only; the out-of-range ones left out; at most four in all
         assert_eq!(drawn, [1, 8, 10, 11]);
         // A device with smaller textures (downlevel, GL: 2048) leaves out what it cannot hold.
-        let small = vec![view(20, 70.0, [2049, 64]), view(21, 70.0, [2048, 2048])];
-        let drawn: Vec<u64> = drawable_world_views(small, 2048)
-            .iter()
-            .map(|v| v.id)
-            .collect();
+        let mut small = vec![view(20, 70.0, [2049, 64]), view(21, 70.0, [2048, 2048])];
+        drawable_world_views(&mut small, 2048);
+        let drawn: Vec<u64> = small.iter().map(|v| v.id).collect();
         assert_eq!(drawn, [21]);
     }
 }

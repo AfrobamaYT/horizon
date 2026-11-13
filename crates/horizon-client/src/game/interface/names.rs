@@ -220,7 +220,7 @@ impl Game<'_> {
         camera: glam::DVec3,
         alpha: f64,
         hooks: bool,
-        frustum: Option<&horizon_client::gfx::Frustum>,
+        frustum: Option<&horizon_client::gfx::JoinedFrusta>,
     ) -> Vec<NameTag> {
         let target = self.mob_hit().map(|(i, _, _)| self.mobs[i].id);
         let viewer = self.player_team();
