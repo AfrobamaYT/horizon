@@ -968,7 +968,7 @@ impl SyncData {
         root: &Path,
         builtin: &Builtin,
         dynamic: &Dynamic,
-        conditions: &horizon_world::conditions::LoadConditions,
+        _conditions: &horizon_world::conditions::LoadConditions,
     ) -> UpdateTags {
         let tag_root = root.join("tags");
         let mut registries = Vec::new();
@@ -986,7 +986,6 @@ impl SyncData {
             }
             let mut files = BTreeMap::new();
             walk(&dir, &mut files);
-            files.retain(|id, value| conditions.allows_path(value, &dir, id));
             if files.is_empty() {
                 continue;
             }
