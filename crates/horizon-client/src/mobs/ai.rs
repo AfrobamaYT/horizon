@@ -4906,7 +4906,10 @@ mod same_vehicle_push_tests {
             let mut pusher = pen[0].clone();
             let mut events = Vec::new();
             super::super::push::with_cap(cap, || {
-                with_test_world(crowd, |w, _| push_entities(&mut pusher, w, &mut events))
+                with_test_world(crowd, |w, _| {
+                    let mut level = crate::health::TestLevel::new(0);
+                    push_entities(&mut pusher, w, &mut level.level(), &mut events)
+                })
             });
             let ids: Vec<u32> = events
                 .iter()
@@ -4976,9 +4979,10 @@ mod same_vehicle_push_tests {
                 super::super::push::with_cap(cap, || {
                     with_test_world(&crowd, |w, _| {
                         let mut events = Vec::new();
+                        let mut level = crate::health::TestLevel::new(0);
                         for m in pen.iter_mut() {
                             events.clear();
-                            push_entities(m, w, &mut events);
+                            push_entities(m, w, &mut level.level(), &mut events);
                             m.pushed.clear();
                         }
                     })

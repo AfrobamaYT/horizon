@@ -1867,6 +1867,8 @@ mod tests {
                         .enumerate()
                         .map(|(k, (tracker, out))| Viewer {
                             entity_id: 1 + k as i32,
+                            horizon: true,
+                            sources: None,
                             spectator: false,
                             permission: 0,
                             moved: moved[k],

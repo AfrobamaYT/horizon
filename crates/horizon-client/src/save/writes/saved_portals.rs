@@ -104,7 +104,10 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Biomes::load(&root).expect("biomes");
+        let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.clone(),
+        ))
+        .expect("biomes");
         let state = |name: &str| assets.registry.default_state(name).unwrap();
         let (portal, obsidian) = (
             state("minecraft:nether_portal"),

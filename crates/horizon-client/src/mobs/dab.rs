@@ -123,7 +123,7 @@ pub(super) fn step(
     // Neither the goals and targets, nor the brains, nor `customServerAiStep`, so no draw of theirs.
     m.ai.no_action_time += 1;
     if m.species() == Species::HappyGhast {
-        super::happy_ghast::ensure_setup(m);
+        super::happy_ghast::ensure_setup(m, Some(w));
     }
     // Then the rest of `serverAiStep`: the navigation follows its path, the controls carry it out.
     let frozen = super::creaking::is_creaking(m) && !super::creaking::can_move(m);
