@@ -223,10 +223,6 @@ use {
 
 /// A frame's finished meshes up to this many upload at once, unqueued.
 const AUTO_UPLOADS_AT_ONCE: usize = 8;
-/// The most changed columns far terrain waits on behind a mod's hold (`Game::lod_held`): past
-/// it, they go in as ever.
-const HELD_FAR_COLUMNS: usize = 1 << 13;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Screen {
     Playing,
@@ -1026,9 +1022,6 @@ struct Game<'a> {
     lod: Option<horizon_client::lod::Lod>,
     lod_source_attempted: bool,
     lod_observe: horizon_client::fast_hash::FxHashSet<(i32, i32)>,
-    /// Columns the single-player server changed in bulk inside a mod's hold on the terrain
-    /// (`native_world_hold`): far terrain takes them in when the hold lets go of them.
-    lod_held: horizon_client::fast_hash::FxHashMap<(i32, i32), Arc<horizon_client::chunk::Chunk>>,
     /// The server level far terrain keeps the chunks of.
     lod_level: Option<String>,
     /// The server's BlueMap far terrain draws from, when the player named one
@@ -10736,7 +10729,6 @@ impl<'a> Game<'a> {
             lod_source_attempted: false,
             far_beacons: HashMap::new(),
             lod_observe: Default::default(),
-            lod_held: Default::default(),
             lod_level: None,
             lod_blue_map: None,
             lod_covered_at: None,

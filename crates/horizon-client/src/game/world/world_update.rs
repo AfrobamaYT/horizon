@@ -13,7 +13,6 @@ impl Game<'_> {
         self.lod = None;
         self.lod_source_attempted = false;
         self.lod_observe.clear();
-        self.lod_held.clear();
         self.lod_blue_map = None;
         self.far_beacons.clear();
         self.lod_covered_at = None;
@@ -164,20 +163,12 @@ impl Game<'_> {
         if self.remote.is_some() {
             let changed = horizon_client::lan::handoff::take_changed();
             if let Some(lod) = &mut self.lod {
-                let renderer = self.renderer.as_ref();
                 for chunk in changed {
                     let column = (chunk.x, chunk.z);
                     if self.world.chunks.contains_key(&column) {
                         continue;
                     }
-                    // Inside a mod's hold, far terrain shows it with the sections (`native_world_hold`).
-                    if renderer.is_some_and(|r| r.world_holds_column(column))
-                        && self.lod_held.len() < HELD_FAR_COLUMNS
-                    {
-                        self.lod_held.insert(column, chunk);
-                    } else {
-                        lod.observe(chunk, self.res.facts());
-                    }
+                    lod.observe(chunk, self.res.facts());
                 }
             }
         }
@@ -323,20 +314,6 @@ impl Game<'_> {
             .map(|p| [p.position.x, p.position.y, p.position.z])
             .and_then(|camera| self.lod_aim(camera));
         if let Some(renderer) = self.renderer.as_mut() {
-            // Far terrain takes in the columns the hold let go of, as the sections show.
-            if !self.lod_held.is_empty() {
-                let let_go: Vec<_> = self
-                    .lod_held
-                    .extract_if(|&column, _| !renderer.world_holds_column(column))
-                    .collect();
-                if let Some(lod) = &mut self.lod {
-                    for (column, chunk) in let_go {
-                        if !self.world.chunks.contains_key(&column) {
-                            lod.observe(chunk, self.res.facts());
-                        }
-                    }
-                }
-            }
             let g = &self.settings.horizon;
             let budgeted = g.chunk_updates > 0 || g.upload_budget_kib > 0;
             // The meshes, once copied, are freed by a worker (`Streaming::free`).
