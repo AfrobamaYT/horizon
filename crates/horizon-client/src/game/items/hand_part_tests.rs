@@ -223,15 +223,11 @@ fn remote_mining_component_update_restarts_unless_the_part_refuses() {
                 with_stick_part(|game| {
                     use horizon_client::{chunk::Chunk, motion::PlayerMotion};
                     use horizon_core::geometry::Vec3;
-                    use horizon_protocol::{
-                        connection::{Connection, Pipe},
-                        packets::play,
-                    };
+                    use horizon_protocol::packets::play;
                     use std::sync::Arc;
                     *RESET.lock().unwrap() = keep.then_some(false);
-                    let (client, server) = Pipe::pair();
-                    game.connect_local(client, "HandMiningTest").unwrap();
-                    let (mut peer, _writer) = Connection::local(server).split();
+                    // Play packets are suppressed until login/configuration finishes.
+                    let (mut peer, _writer) = crate::game::remote::tests::connect_menu_test(game);
                     peer.set_read_timeout(Some(std::time::Duration::from_millis(50)))
                         .unwrap();
                     game.set_mode_id(0);
