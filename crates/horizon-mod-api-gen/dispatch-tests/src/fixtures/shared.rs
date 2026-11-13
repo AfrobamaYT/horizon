@@ -121,6 +121,8 @@ mod generated {
             pub id: String,
         }
         pub(super) use super::super::ItemStack;
+        // The generated standalone-model dispatch builds the stub `Answered` and names the type through this path.
+        pub(super) use super::super::Answered;
         pub(super) use super::super::{
             Command, Config, Dispensed, InteractionResult, MapDecoration, MapInfo, Minimap, Screen,
             Zoom,
@@ -729,10 +731,6 @@ mod api {
     }
     #[derive(Clone)]
     pub struct StandaloneModelForm;
-    pub struct Answered<T> {
-        pub answer: T,
-        pub mod_id: &'static str,
-    }
     #[derive(Clone, Copy)]
     pub struct LivingRef;
     #[derive(Clone, Copy)]
