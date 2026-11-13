@@ -435,7 +435,7 @@ impl Game<'_> {
         {
             self.as_guest(conn, |game| game.server_spin_attack());
         }
-        let in_wall = !sleeping && self.in_wall(at, dimensions);
+        let in_wall = !sleeping && self.in_wall(conn, at, dimensions);
         let mut soul = None;
         let events = self.as_guest(conn, |game| {
             let (rules, motion) = (game.world.health_rules, game.motion);

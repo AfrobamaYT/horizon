@@ -3124,44 +3124,6 @@ impl Game<'_> {
         batch.text(atlas, &inventory, ox + 8.0, label_y, grey, false);
         true
     }
-    /// The tick of the mod block entity at `pos`.
-    pub(super) fn tick_mod_block_entity_loaded(&mut self, pos: Pos) {
-        let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&pos) else {
-            return;
-        };
-        // An empty id marks its place while the mod has it.
-        let mut taken = std::mem::take(&mut **m);
-        let placeholder_identity = m.revision().identity();
-        let state = self.world.block(pos.0, pos.1, pos.2).0;
-        let slots = self
-            .world
-            .block_entities
-            .mod_container(state)
-            .map_or(0, |c| c.slots);
-        // Grown only: items a container no longer has room for stay saved.
-        if taken.items.len() < slots {
-            taken.items.resize(slots, None);
-        }
-        let items = taken.items.clone();
-        // Without a container, an `Items` item list is the mod's own field.
-        if slots == 0 && !taken.items.is_empty() {
-            let items = horizon_client::save::encode_items(&std::mem::take(&mut taken.items));
-            taken.nbt.insert("Items".into(), items);
-        }
-        let parent = (
-            self.block_entity_tick_key
-                .replace(super::block_entity_tick_items::Key {
-                    pos,
-                    placeholder_identity,
-                    failure_generation: self.wasm_dispatch_failures.get(),
-                    transaction_depth: self.transactions.len(),
-                    unbalanced: false,
-                }),
-            self.block_entity_tick_items.take(),
-        );
-        self.api_block_entity_tick([pos.0, pos.1, pos.2], &mut taken);
-        self.finish_tick_item_writeback(pos, taken, &items, parent);
-    }
     /// Puts back a mod block entity taken out for a call, unless the call
     /// removed or replaced it, with what its `setChanged` does.
     pub(super) fn put_back_mod_block_entity(

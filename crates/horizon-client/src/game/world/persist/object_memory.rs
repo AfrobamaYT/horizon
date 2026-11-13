@@ -349,6 +349,7 @@ impl Game<'_> {
                 // PrimedTnt.readAdditionalSaveData: 4 by default,
                 // kept to 0..128.
                 power: entity_nbt::tnt_power(&tag),
+                used_portal: false,
                 block_state: tag
                     .get("block_state")
                     .and_then(|v| entity_nbt::state_from_nbt(self.pack.assets.registry, v)),

@@ -6,6 +6,48 @@ through `RenderAssets::model` after resources are published. World render hooks 
 copies in a group. GUI scenes, mobs and kept/spinning renderers use their
 CPU routes; groups are a world-drawing facility, not another renderer.
 
+## Bake-time standalone forms
+
+`standalone_models` contract version 2 keeps `event.models: &mut Vec<String>` for plain
+file ids and adds `event.forms: &mut Vec<StandaloneModelForm>`. Both native and wasm
+listeners receive `RegistrationContext`, not a runtime `Host`. Forms are attributed
+to the registering mod by dispatch:
+
+```rust,ignore
+event.forms.push(StandaloneModelForm::Rotated {
+    id: "mymod:shaft_east".into(),
+    model: "mymod:block/shaft".into(),
+    turns: [0, 1, 0],
+    uvlock: true,
+});
+event.forms.push(StandaloneModelForm::Combined {
+    id: "mymod:machine".into(),
+    parts: vec!["mymod:block/base".into(), "mymod:block/overlay".into()],
+});
+```
+
+`turns` are negative quarter-turn counts, modulo four, applied X then Y then Z
+about the block centre, exactly as blockstate baking. UV locking uses the inverse
+face transformation during baking; rotating a draw pose is not equivalent. For a
+Y quarter-turn a north wall becomes east but stays upright either way; a north-pointing
+arrow on the top turns east without UV locking and retains its world orientation with it.
+
+Combined parts bake unturned in declaration order, retaining each part's positions,
+materials and quad metadata in one `ModelRef`. Their particle is the first available
+part particle and model-level ambient occlusion is enabled only if every part enables it.
+Dependencies, including parents and loader references, load through the normal model
+library; they are not implicitly registered as standalone results. If any dependency
+cannot load or bake, no part of that form is published and the warning names the
+registering mod, even when the result or source has a different namespace.
+
+Result ids follow the same rule as plain ids: a nonempty namespace and path are
+required; they need not equal the registering mod id. Plain ids win duplicate result
+ids, then the first successfully baked form wins. Registration runs once, but all
+forms rebake from current resources on every successful load. Resolve result ids in
+`model_baking_completed`; reload invalidates old handles and failed reloads retain them.
+This API bakes quads only, not a mod-defined baked result type.
+
+
 ## Terrain materials in a block entity
 
 `draw.model(model, tint)` draws a resolved model as an entity model. A block entity, mob or

@@ -2,12 +2,12 @@
 //! (StoredUserList and its entries): a Java HashMap keyed by the UUID string
 //! or the address, saved as a pretty-printed Gson array in that map's order.
 use super::{
-    java_properties::{civil_from_days, days_from_civil, now_millis},
     json::{self, Json},
     properties::parse_uuid,
 };
 use horizon_core::java_hash_map::{JavaHashMap, JavaKey};
 use horizon_core::random::java_string_hash;
+use horizon_java_properties::{civil_from_days, days_from_civil, now_millis};
 use horizon_protocol::crypto::uuid_string;
 use std::{cmp::Ordering, path::PathBuf};
 

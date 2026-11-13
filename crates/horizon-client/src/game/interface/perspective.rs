@@ -822,8 +822,8 @@ impl Game<'_> {
         if drawn {
             return;
         }
-        // `native_mob_layer`'s posed parts, kept from the draw below while a mod listens.
-        let mut parts = None;
+        // The mods' layers' posed parts, kept from the draw below while they want them.
+        let (mut parts, layers) = (None, self.mod_layers(m));
         let listened = self.mob_render_listened();
         // A spectator still draws its own model in third person: the poses'
         // visibility (set by player_model_visibility) hides body parts, and
@@ -839,7 +839,7 @@ impl Game<'_> {
                 self.res.mob_data(),
                 &self.player_armor_layers(),
                 hidden,
-                listened.then_some(&mut parts),
+                (listened || layers.is_some()).then_some(&mut parts),
                 out,
             );
         } else {
@@ -851,7 +851,7 @@ impl Game<'_> {
                 packed,
                 self.res.mob_data(),
                 &self.player_armor_layers(),
-                listened.then_some(&mut parts),
+                (listened || layers.is_some()).then_some(&mut parts),
                 out,
             );
         }
@@ -879,8 +879,17 @@ impl Game<'_> {
             self.held_item_geometry(m, camera, alpha, packed, true, None, out);
             // CustomHeadLayer: a pumpkin, skull or other head item.
             self.head_item_geometry(m, camera, alpha, packed, true, out);
-            // `native_mob_layer`: a native mod's layer, over the vanilla ones.
-            self.mod_mob_layer_geometry(m, Some(who), parts, alpha as f32, camera, packed, out);
+            // Mods' layers (`register_entity_layers`, `native_mob_layer`), over vanilla's.
+            self.mod_layer_geometry(
+                m,
+                Some(who),
+                parts,
+                layers,
+                alpha as f32,
+                camera,
+                packed,
+                out,
+            );
         }
         // LivingEntity.isCurrentlyGlowing: the Glowing effect.
         let vanilla = self
