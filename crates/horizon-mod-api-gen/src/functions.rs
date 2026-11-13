@@ -171,6 +171,45 @@ impl FunctionIndex {
         Ok(())
     }
 
+    /// The index as its reader may trust it, or why not: every crate and library is a Rust
+    /// name and every module a path of one, as the copy writes them into Rust code, and each
+    /// function is in a module the index lists. A downloaded index is checked here once, so
+    /// nothing in it reaches the copy unchecked.
+    pub fn checked(self) -> Result<Self, String> {
+        let name = |text: &str| syn::parse_str::<syn::Ident>(text).is_ok();
+        let path = |text: &str| text.split("::").all(|segment| name(segment));
+        for (krate, facts) in &self.crates {
+            if !name(krate) || !name(&facts.library) {
+                return Err(format!(
+                    "{FILE}: crate `{krate}` or its library `{}` is not a Rust name",
+                    facts.library
+                ));
+            }
+            if let Some(module) = facts
+                .modules
+                .keys()
+                .find(|module| !path(module) || module.split("::").next() != Some(krate))
+            {
+                return Err(format!(
+                    "{FILE}: `{module}` is not a module path of crate `{krate}`"
+                ));
+            }
+        }
+        if let Some((key, function)) = self.functions.iter().find(|(_, function)| {
+            let krate = function.module.split("::").next().unwrap_or_default();
+            !self
+                .crates
+                .get(krate)
+                .is_some_and(|facts| facts.modules.contains_key(&function.module))
+        }) {
+            return Err(format!(
+                "{FILE}: function `{key}` is in `{}`, which is not a module the index lists",
+                function.module
+            ));
+        }
+        Ok(self)
+    }
+
     /// The function `target` names, read at its indexed span: the very item the index's verdict
     /// is about, never one looked up again by name. Call it once [`FunctionIndex::check`] passed.
     pub(crate) fn found(

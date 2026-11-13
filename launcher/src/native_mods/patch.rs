@@ -348,15 +348,16 @@ fn function_index(game: &Path, commit: &str) -> Result<api_gen::functions::Funct
             path.display()
         )
     })?;
-    let (build, index) = horizon_mod_package::build_data::read(FILE, &text)
-        .map_err(|e| format!("E_MIXIN_INDEX: {e}"))?;
+    let (build, index): (_, api_gen::functions::FunctionIndex) =
+        horizon_mod_package::build_data::read(FILE, &text)
+            .map_err(|e| format!("E_MIXIN_INDEX: {e}"))?;
     if build.commit != commit {
         return Err(format!(
             "E_MIXIN_INDEX: {FILE} describes game build {}, not {commit}; fetch the SDK again",
             build.commit
         ));
     }
-    Ok(index)
+    index.checked().map_err(|e| format!("E_MIXIN_INDEX: {e}"))
 }
 
 /// Copies, generates and transforms the patch crates for `projects` into `out`, without
@@ -604,6 +605,19 @@ mod refusal_tests {
         assert_eq!(
             super::function_index(game.path(), &commit).unwrap(),
             Default::default()
+        );
+        // A tampered index whose module the copy would write as Rust is refused, not a panic.
+        std::fs::write(
+            game.path().join("functions.json"),
+            format!(
+                r#"{{"schema":1,"build":{{"commit":"{commit}"}},"crates":{{"horizon_client":{{"library":"horizon_client","modules":{{"horizon_client::game":[]}}}}}},"functions":{{"horizon_client::game::f":{{"module":"horizon_client::not a path!","file":"crates/horizon-client/src/game.rs","span":[0,1],"signature_hash":"","sha256":""}}}},"refused":{{}}}}"#
+            ),
+        )
+        .unwrap();
+        let error = super::function_index(game.path(), &commit).unwrap_err();
+        assert!(
+            error.starts_with("E_MIXIN_INDEX: functions.json: function `horizon_client::game::f` is in `horizon_client::not a path!`"),
+            "{error}"
         );
     }
 
