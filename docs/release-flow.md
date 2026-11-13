@@ -204,16 +204,19 @@ trigger since 2026-11-13.
 
 ### Daily run
 
-`.github/workflows/daily.yml` runs every in-game test once a day, at 09:00 UTC on main's head, and when root
-dispatches it (`-f commit=<sha>`, `-f dry_run=false` to write). Its legs are the workflows that left main pushes:
+`.github/workflows/daily.yml` runs the in-game legs once a day, at 09:00 UTC on main's head, and when root
+dispatches it (`-f commit=<sha>`, `-f dry_run=false` to write). One run runs and at most one waits; a newer waiting
+dispatch replaces an older waiting one. The schedule stops when main's head already has a completed real daily run;
+a hand dispatch never does, so it retries a run whose tag move, issues or nightly failed. Its legs are the workflows that left main pushes:
 the ignored-tests data shards (`ignored-tests.yml`), the wasm fixture and guest stacks (`wasm-mods.yml`),
 `fn-replace-check.yml`, the native linkage probe (`native-dylib-probe.yml`) and the prebuilt SDK of the commit
 (`prebuilt-game.yml`, published as `prebuilt-<sha>` only by a real run on main, which the Nightly needs), each called
 with the commit. Its
 summary (`tools/ci/daily_summary.py`) reads each leg's result and its sanitised verdict file, never a log:
 
-- every leg green: the tag `daily-green` moves to the commit, and `release.yml` (kind `nightly`) decides the
-  Nightly of that commit;
+- every leg green: the tag `daily-green` moves to the commit, and `release.yml` (kind `nightly`) publishes the
+  Nightly of that commit whenever a player-facing pull request merged since the published one (no batch-size or
+  age rule; the pause switch and release-blockers still hold it);
 - a failing test: one issue `Daily: <crate> <test>` (label `bug`) with its panic location, the first daily run that
   saw it and the pull requests merged since the last green daily as suspects; later runs comment on it, and the
   first run where it passes closes it. A leg that failed without a test name gets one issue per leg.
