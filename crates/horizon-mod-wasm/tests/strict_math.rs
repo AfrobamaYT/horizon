@@ -41,7 +41,8 @@ fn compiled_guest_strict_math_matches_literal_jdk_vectors() {
         loaded.initialize(&[info]).unwrap();
         mod_api::testing::with_mods(loaded.mods.into(), || {
             let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
-            let mut checked = -1.0;
+            // A distinct fixture request keeps the host-profile probe independent.
+            let mut checked = -2.0;
             // The guest runs all literal assertions before writing its completed
             // row count. A guest panic/trap cannot masquerade as successful math.
             mod_api::dispatch_tick_target_millis(&Quiet, &mut checked);
