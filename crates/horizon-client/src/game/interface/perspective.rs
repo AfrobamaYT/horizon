@@ -876,7 +876,7 @@ impl Game<'_> {
             self.held_item_geometry(m, camera, alpha, packed, true, None, out);
             // CustomHeadLayer: a pumpkin, skull or other head item.
             self.head_item_geometry(m, camera, alpha, packed, true, out);
-            // Mods' layers (`register_entity_layers`), then the post hooks, over vanilla's.
+            // Mods' layers (`register_entity_layers`), over vanilla's.
             self.mod_layer_geometry(
                 m,
                 Some(who),
@@ -888,6 +888,8 @@ impl Game<'_> {
                 out,
             );
         }
+        // The post hooks, whether or not the layers drew (a spectator draws none).
+        self.mod_render_post(m, Some(who), parts, alpha as f32, camera, packed, out);
         // LivingEntity.isCurrentlyGlowing: the Glowing effect.
         let vanilla = self
             .potions

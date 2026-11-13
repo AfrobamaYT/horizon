@@ -157,11 +157,10 @@ impl Game<'_> {
         FRAME.with_borrow_mut(|frame| frame.canceled.insert(id));
         None
     }
-    /// The mods' layers over `mob` (`who` set for a player), drawn after the vanilla model and its
-    /// layers: `layers`, the ones added to its type or player model (`register_entity_layers`,
-    /// looked up once for the mob by `mod_layers`, whose answer also decided whether the draw kept
-    /// its parts), then `render_living_post` and, for a player, `render_player_post`. `parts` are
-    /// the humanoid parts as the vanilla draw posed them this frame, kept by it.
+    /// The layers mods added to `mob`'s type or player model (`register_entity_layers`), drawn
+    /// after its vanilla model and layers: `layers`, looked up once for the mob by `mod_layers`,
+    /// whose answer also decided whether the draw kept its parts. `who` is set for a player, and
+    /// `parts` are the humanoid parts as the vanilla draw posed them this frame, kept by it.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn mod_layer_geometry(
         &self,
@@ -174,16 +173,33 @@ impl Game<'_> {
         light: u32,
         out: &mut Vec<Vertex>,
     ) {
-        let local = who.as_ref().is_some_and(|who| who.local);
         if let Some(layers) = layers {
+            let local = who.as_ref().is_some_and(|who| who.local);
             let id = render_id(mob.id, local, self.own_entity_id());
             let parts = parts.as_ref();
             self.registered_layer_geometry(mob, id, &layers, parts, partial, camera, light, out);
         }
+    }
+    /// The mods' post hooks for `mob`, whose pre hooks weren't canceled: `render_living_post`,
+    /// then, for a player (`who`), `render_player_post`. Asked whether or not its layers drew (a
+    /// spectating player draws none). `parts` are the humanoid parts as the vanilla draw posed
+    /// them this frame, kept by it.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn mod_render_post(
+        &self,
+        mob: &Mob,
+        who: Option<PlayerRender<'_>>,
+        parts: Option<PosedParts>,
+        partial: f32,
+        camera: DVec3,
+        light: u32,
+        out: &mut Vec<Vertex>,
+    ) {
         // Every mob in view each frame: only when a mod listens.
         if !self.mob_render_listened() {
             return;
         }
+        let local = who.as_ref().is_some_and(|who| who.local);
         self.mod_entity_draw(mob, local, partial, camera, light, out, |render, draw| {
             self.native_render_living_post(render, parts.as_ref(), draw);
         });

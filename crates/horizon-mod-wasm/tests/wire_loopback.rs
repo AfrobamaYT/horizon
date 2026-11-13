@@ -2331,7 +2331,7 @@ fn listener_metadata_and_cancellation_cross_the_real_guest() {
 mod arm_pose_registration;
 
 #[test]
-fn wire_loopback_mob_submit_hidden_parts_write_back() {
+fn wire_loopback_render_living_pre_hidden_parts_write_back() {
     mod_api::__private::initialize().unwrap();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     struct Client;

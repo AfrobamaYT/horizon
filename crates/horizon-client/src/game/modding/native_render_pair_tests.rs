@@ -3,7 +3,6 @@
 //! canceled pre hook skips the entity's model, its layers, its post hooks and the frame's later
 //! passes; a culled entity is asked neither; the hooks run in the draw queue's order.
 use super::Game;
-use super::native_mob_draw::PlayerRender;
 use horizon_client::{mesher::Vertex, mobs::Mob};
 use mod_api::{
     BlockEntityDrawContext, Hooks, RenderLivingPostEvent, RenderLivingPreEvent,
@@ -17,8 +16,8 @@ struct Heard {
     events: Vec<String>,
     /// Entity ids whose `render_living_pre` it cancels.
     cancel_living: Vec<u32>,
-    /// Player names whose `render_player_pre` it cancels.
-    cancel_player: Vec<&'static str>,
+    /// Whether it cancels `render_player_pre` of this window's own player (`true`) or another.
+    cancel_player: Vec<bool>,
 }
 
 /// A mod listening to the four hooks: it records each call and, in each pre hook, draws one stone
@@ -43,8 +42,8 @@ impl Hooks for Pair {
         event: &mut RenderPlayerPreEvent<'_>,
     ) -> mod_api::Flow {
         let mut heard = self.0.lock().unwrap();
-        heard.events.push(format!("player_pre {}", event.who.name));
-        event.cancelled = heard.cancel_player.contains(&event.who.name);
+        heard.events.push(format!("player_pre {}", event.who.local));
+        event.cancelled = heard.cancel_player.contains(&event.who.local);
         mod_api::Flow::Continue
     }
     fn render_living_pre(
@@ -74,14 +73,14 @@ impl Hooks for Pair {
         event: &mut RenderPlayerPostEvent<'_>,
     ) {
         let mut heard = self.0.lock().unwrap();
-        heard.events.push(format!("player_post {}", event.who.name));
+        heard
+            .events
+            .push(format!("player_post {}", event.who.local));
     }
 }
 
 /// The camera, south of the entities and looking at them.
 const CAMERA: glam::DVec3 = glam::DVec3::new(0.5, 64.0, -4.5);
-/// Full light, as the entity pass packs it.
-const LIGHT: u32 = 0x00F0_00F0;
 
 /// A mob of `kind` with id `id`, standing `x` blocks east of the camera's line.
 fn mob(game: &Game<'_>, kind: &str, id: u32, x: f64) -> Mob {
@@ -208,60 +207,79 @@ fn a_culled_entity_is_asked_neither_hook() {
     });
 }
 
+/// This window's player in third person, drawn by the game's own path for it, with its own entity
+/// id 4321; spectating when `spectator`.
+fn own_player_frame(game: &mut Game<'_>, spectator: bool) -> Vec<Vertex> {
+    let at = horizon_core::geometry::Vec3::new(0.5, 64.0, 0.5);
+    let mut player = horizon_client::motion::PlayerMotion::new(game.motion, at).unwrap();
+    player.entity_id = 4321;
+    game.player = Some(player);
+    if let Some(remote) = game.remote.as_mut() {
+        remote.entity_id = 4321;
+    }
+    game.camera_type = horizon_client::camera::CameraType::ThirdPersonBack;
+    game.tick_player_model();
+    game.player_model.as_mut().unwrap().extra.spectator = spectator;
+    game.prepare_entity_culling();
+    let mut out = Vec::new();
+    game.player_model_geometry(CAMERA, 1.0, &mut out);
+    out
+}
+
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn the_player_pair_wraps_the_living_pair() {
     let heard: Arc<Mutex<Heard>> = Arc::default();
     with_pair(&heard, |game| {
-        let player = mob(game, "minecraft:player", 93, 0.0);
-        let who = PlayerRender {
-            name: "alex",
-            local: false,
-        };
-        // The pre hooks, the model's place, then the layers and post hooks, as the draw runs them.
-        let frame = |game: &mut Game<'_>| {
-            game.prepare_entity_culling();
-            let listened = game.mob_render_listened();
-            let mut out = Vec::new();
-            if game
-                .mod_render_pre(&player, Some(who), listened, 1.0, CAMERA, LIGHT, &mut out)
-                .is_some()
-            {
-                let layers = game.mod_layers(&player);
-                game.mod_layer_geometry(
-                    &player,
-                    Some(who),
-                    None,
-                    layers,
-                    1.0,
-                    CAMERA,
-                    LIGHT,
-                    &mut out,
-                );
-            }
-            events(&heard)
-        };
+        own_player_frame(game, false);
         assert_eq!(
-            frame(game),
+            events(&heard),
             [
-                "player_pre alex",
-                "living_pre 93",
-                "living_post 93",
-                "player_post alex"
+                "player_pre true",
+                "living_pre 4321",
+                "living_post 4321",
+                "player_post true"
             ]
         );
-        heard.lock().unwrap().cancel_living.push(93);
+        heard.lock().unwrap().cancel_living.push(4321);
+        own_player_frame(game, false);
         assert_eq!(
-            frame(game),
-            ["player_pre alex", "living_pre 93", "player_post alex"],
+            events(&heard),
+            ["player_pre true", "living_pre 4321", "player_post true"],
             "a canceled living pre still asks the player post"
         );
-        assert!(game.render_canceled(93));
-        heard.lock().unwrap().cancel_player.push("alex");
+        assert!(game.own_render_canceled());
+        heard.lock().unwrap().cancel_player.push(true);
+        own_player_frame(game, false);
         assert_eq!(
-            frame(game),
-            ["player_pre alex"],
+            events(&heard),
+            ["player_pre true"],
             "a canceled player pre skips the rest"
         );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_spectator_draws_no_layers_but_gets_its_post_hooks() {
+    let heard: Arc<Mutex<Heard>> = Arc::default();
+    with_pair(&heard, |game| {
+        // This window's player, spectating, in third person.
+        own_player_frame(game, true);
+        assert_eq!(
+            events(&heard),
+            [
+                "player_pre true",
+                "living_pre 4321",
+                "living_post 4321",
+                "player_post true"
+            ]
+        );
+        // A spectating mannequin in the level's draw.
+        let mut mannequin = mob(game, "minecraft:mannequin", 94, 0.0);
+        mannequin.extra.spectator = true;
+        game.mobs.push(mannequin);
+        mob_frame(game);
+        assert_eq!(events(&heard), ["living_pre 94", "living_post 94"]);
     });
 }

@@ -8116,9 +8116,9 @@ impl Game<'_> {
                 // Held items join the GPU path's draws, their silhouette too.
                 let skin = (skinning && silhouette_on_gpu).then_some(&mut skinned);
                 self.mob_block_geometry(mob, camera, alpha, packed, skin, out);
-                // Mods' layers (`register_entity_layers`), then the post hooks, over vanilla's.
                 self.mod_layer_geometry(mob, who, parts, added, alpha as f32, camera, packed, out);
             }
+            self.mod_render_post(mob, who, parts, alpha as f32, camera, packed, out);
             if let Some(rgb) = outline {
                 self.mark_outline(&out[entity_start..], rgb);
                 if let Some(((first, _, _), _)) = skinned {
