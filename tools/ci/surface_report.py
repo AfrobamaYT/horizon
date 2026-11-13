@@ -48,8 +48,11 @@ def base_commit(event: str, pr: str, git, api) -> tuple[str | None, str]:
         parent = merge_parent(git("cat-file", "-p", "HEAD"))
         return (parent, "") if parent else (None, "the checkout is not a pull request's merge commit")
     if event == "workflow_dispatch" and pr:
+        # The checked-out revision, not the pull request's head now: a push after the run
+        # picked its revision would give a base from another history.
+        head = git("rev-parse", "HEAD").strip()
         pull = api(f"pulls/{pr}")
-        compare = api(f"compare/{pull['base']['ref']}...{pull['head']['sha']}")
+        compare = api(f"compare/{pull['base']['ref']}...{head}")
         return compare["merge_base_commit"]["sha"], ""
     return None, f"no base for a {event or 'local'} run"
 
@@ -85,10 +88,12 @@ def report(tool: str, base: Path, head: Path, work: Path, gate_on: bool) -> tupl
                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                for name, tree in (("base", base), ("head", head))}
     results = {name: process.communicate() for name, process in exports.items()}
-    for name, (_, err) in results.items():
-        if exports[name].returncode != 0:
-            who = "the base tree" if name == "base" else "this tree"
-            return 0, f"No surface report: the head's horizon-stage cannot read {who} ({last_line(err)})."
+    # This tree failing is a broken generator, which no other step would catch; the base failing
+    # is an older tree this tool cannot read, which is no fault of the pull request.
+    if exports["head"].returncode != 0:
+        return 1, f"The surface export of this tree failed: {last_line(results['head'][1])}.\n"
+    if exports["base"].returncode != 0:
+        return 0, f"No surface report: the head's horizon-stage cannot read the base tree ({last_line(results['base'][1])}).\n"
     command = [tool, "surface-diff", str(work / "base.json"), str(work / "head.json"),
                "--notes", str(head / NOTES), "--base-notes", str(base / NOTES), "--json", str(work / "diff.json")]
     if gate_on:
@@ -111,7 +116,8 @@ def summary(text: str) -> str:
         kept = kept[: line_end + 1] if line_end >= 0 else kept
         shown = kept.decode(errors="ignore")
         rest = text[len(shown) :].count("\n")
-        text = shown.rstrip("\n") + f"\n… cut here; {rest} more lines in the step log\n"
+        lines = "line" if rest == 1 else "lines"
+        text = shown.rstrip("\n") + f"\n… cut here; {rest} more {lines} in the step log\n"
     return head + text + foot
 
 

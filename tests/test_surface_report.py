@@ -1,10 +1,15 @@
 """The surface report step: which base it compares, when it passes, when it fails."""
+import contextlib
 import importlib.util
+import io
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 import unittest
+import urllib.error
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("surface_report", ROOT / "tools/ci/surface_report.py")
@@ -23,16 +28,18 @@ class BaseCommitTests(unittest.TestCase):
         self.assertIsNone(sha)
         self.assertIn("not a pull request's merge commit", why)
 
-    def test_a_dispatch_asks_for_the_merge_base_of_the_pull_request(self):
+    def test_a_dispatch_asks_for_the_merge_base_of_the_checked_out_revision(self):
         asked = []
 
         def api(path):
             asked.append(path)
             if path == "pulls/12":
-                return {"base": {"ref": "main"}, "head": {"sha": "cccc"}}
+                # The pull request has moved on since the run picked its revision.
+                return {"base": {"ref": "main"}, "head": {"sha": "eeee"}}
             return {"merge_base_commit": {"sha": "dddd"}}
 
-        sha, _ = surface_report.base_commit("workflow_dispatch", "12", None, api)
+        git = lambda *a: "cccc\n" if a == ("rev-parse", "HEAD") else ""
+        sha, _ = surface_report.base_commit("workflow_dispatch", "12", git, api)
         self.assertEqual((sha, asked), ("dddd", ["pulls/12", "compare/main...cccc"]))
 
     def test_a_push_has_no_base(self):
@@ -57,7 +64,7 @@ class GateTests(unittest.TestCase):
 class ReportTests(unittest.TestCase):
     """report() against a stub horizon-stage whose behaviour each test sets."""
 
-    def run_report(self, base_export=0, diff_exit=0, gate_on=False):
+    def run_report(self, base_export=0, diff_exit=0, gate_on=False, head_export=0):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
             tool = work / "horizon-stage"
@@ -65,6 +72,7 @@ class ReportTests(unittest.TestCase):
 echo "$@" >> {work}/calls
 if [ "$1" = surface ]; then
   case "$2" in *base) [ {base_export} = 0 ] || {{ echo 'unclassified: x' >&2; echo 'horizon-stage surface: unknown key `access`' >&2; exit 1; }};; esac
+  case "$2" in *head) [ {head_export} = 0 ] || {{ echo 'horizon-stage surface: a.rs: parse error' >&2; exit 1; }};; esac
   echo '{{}}' > "$3"; exit 0
 fi
 echo "Surface: report"; [ {diff_exit} = 0 ] || echo "breaking change without a change note: fn:a" >&2
@@ -79,8 +87,15 @@ exit {diff_exit}
         code, text, calls = self.run_report(base_export=1)
         self.assertEqual(code, 0)
         self.assertEqual(text, "No surface report: the head's horizon-stage cannot read the base tree "
-                               "(horizon-stage surface: unknown key `access`).")
+                               "(horizon-stage surface: unknown key `access`).\n")
         self.assertNotIn("surface-diff", calls)
+
+    def test_this_tree_failing_to_export_fails_the_step(self):
+        for base_export in (0, 1):
+            code, text, calls = self.run_report(head_export=1, base_export=base_export)
+            self.assertEqual(code, 1)
+            self.assertEqual(text, "The surface export of this tree failed: horizon-stage surface: a.rs: parse error.\n")
+            self.assertNotIn("surface-diff", calls)
 
     def test_the_diff_decides_and_the_gate_is_passed_on(self):
         code, text, calls = self.run_report()
@@ -120,7 +135,51 @@ class SummaryTests(unittest.TestCase):
         out = surface_report.summary("a" * 300_000 + "\n")
         self.assertLessEqual(self.size(out), surface_report.SUMMARY_LIMIT)
         self.assertGreater(out.count("a"), 199_000)
-        self.assertTrue(out.endswith("a\n… cut here; 1 more lines in the step log\n```\n"))
+        self.assertTrue(out.endswith("a\n… cut here; 1 more line in the step log\n```\n"))
+
+
+class MainTests(unittest.TestCase):
+    """main(): the base it fetches, what it prints, what it writes to the job summary."""
+
+    def run_main(self, event="pull_request", pr="", **patches):
+        with tempfile.TemporaryDirectory() as directory:
+            summary_file = Path(directory) / "summary.md"
+            env = {"HORIZON_STAGE_TOOL": "/no/tool", "EVENT": event, "PR": pr,
+                   "GITHUB_STEP_SUMMARY": str(summary_file), "RUNNER_TEMP": directory}
+            with mock.patch.dict(os.environ, env), contextlib.redirect_stdout(io.StringIO()) as out, \
+                    contextlib.ExitStack() as stack:
+                for name, value in patches.items():
+                    stack.enter_context(mock.patch.object(surface_report, name, value))
+                code = surface_report.main()
+            return code, out.getvalue(), summary_file.read_text()
+
+    def test_an_unfetchable_base_reports_and_passes(self):
+        def git(*args):
+            raise subprocess.CalledProcessError(128, ["git", *args])
+
+        code, out, summary = self.run_main(git=git)
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("No surface report: the base could not be fetched: "), out)
+        self.assertIn("No surface report", summary)
+
+    def test_a_dispatch_whose_api_call_fails_reports_and_passes(self):
+        def api(path):
+            raise urllib.error.URLError("no route")
+
+        code, out, _ = self.run_main("workflow_dispatch", "7", github_api=api, git=lambda *a: "cccc\n")
+        self.assertEqual(code, 0)
+        self.assertIn("the base could not be fetched", out)
+
+    def test_a_report_is_printed_written_and_its_code_returned(self):
+        fetched = []
+        code, out, summary = self.run_main(
+            base_commit=lambda *a: ("abcd", ""),
+            unpack=lambda sha, into: fetched.append(sha),
+            report=lambda *a: (1, "Surface: breaking\n"))
+        self.assertEqual((code, fetched), (1, ["abcd"]))
+        self.assertRegex(out, r"^Surface: breaking\nBase abcd; fetch \d+\.\ds, total \d+\.\ds\n$")
+        self.assertTrue(summary.startswith("### Mod API surface\n\n```text\nSurface: breaking\nBase abcd"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -602,8 +602,8 @@ jobs:
       - name: Report the mod API surface change
         # What this pull request changes in what mods can name, in the job summary: the head's horizon-stage exports
         # the merge base and this tree, then classifies the diff (tools/ci/surface_report.py). A report, not a gate:
-        # it fails only for a stale or unreadable change note, or, with tools/ci/surface.toml's gate on, for a
-        # breaking change no note declares.
+        # it fails only when this tree cannot be exported, for a stale or unreadable new change note, or, with
+        # tools/ci/surface.toml's gate on, for a breaking change no note declares.
         if: needs.changes.outputs.rust_required != 'false' && (github.event_name == 'pull_request' || inputs.pr != '')
         env:
           EVENT: ${{ github.event_name }}
