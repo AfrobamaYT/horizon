@@ -36,10 +36,13 @@ Canceling `right_click_block` skips both uses and substitutes `cancellation_resu
 
 ## Instant item use
 
-`ItemPart::use_item` receives `UseItemEvent { stack, hand }`. `hand: Hand` is the
-interaction hand of this click (`Hand::Main` or `Hand::Off`), including air clicks
-with identical stacks in both hands. Read it directly when choosing which held stack
-to shrink. `living_used_item_hand` instead answers only during active item use and
+`ItemPart::use_item` receives `UseItemEvent { stack, hand, player, player_entity_id }`.
+`hand: Hand` is the interaction hand of this click (`Hand::Main` or `Hand::Off`),
+including air clicks with identical stacks in both hands. Read it directly when
+choosing which held stack to shrink. `player` and `player_entity_id` name who clicked,
+as `UseOnEvent` does: on a server the acting player's UUID and entity id (a guest's
+own, never the host's), on a client this client's own player. They come with the
+event, so a Part does not need `players().acting_player()` to be set while it runs. `living_used_item_hand` instead answers only during active item use and
 cannot identify an instantaneous click. The Part runs on both sides with `HostSide`,
 after the global right-click event and before the item's own use, on native and wasm.
 Return `Some(InteractionResult::Success)` to consume and swing on the client,
