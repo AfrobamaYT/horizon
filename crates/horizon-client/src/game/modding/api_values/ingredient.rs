@@ -8,8 +8,8 @@ impl TryIntoApi for crate::crafting::Ingredient {
             items: self.items.clone(),
             order: self.order.clone(),
             custom: self.custom.clone(),
-            rule: self.rule.clone(),
-            display: self.display.clone(),
+            rule: self.rule.clone().map(Box::new),
+            display: self.display.clone().map(Box::new),
             children: self
                 .children
                 .as_ref()
@@ -22,7 +22,8 @@ impl TryIntoEngine for mod_api::Ingredient {
     type Engine = crate::crafting::Ingredient;
     type Error = StackWriteError;
     fn try_into_engine(&self, _items: &Items) -> Result<Self::Engine, Self::Error> {
-        Ok(crate::crafting::Ingredient {
+        let mut ingredient = crate::crafting::Ingredient {
+            compiled: None,
             component_defaults: _items.component_defaults.clone(),
             shown: self
                 .display
@@ -31,8 +32,8 @@ impl TryIntoEngine for mod_api::Ingredient {
             items: self.items.clone(),
             order: self.order.clone(),
             custom: self.custom.clone(),
-            rule: self.rule.clone(),
-            display: self.display.clone(),
+            rule: self.rule.as_deref().cloned(),
+            display: self.display.as_deref().cloned(),
             children: self
                 .children
                 .as_ref()
@@ -45,6 +46,10 @@ impl TryIntoEngine for mod_api::Ingredient {
                     ))
                 })
                 .transpose()?,
-        })
+        };
+        ingredient
+            .prepare_components(_items)
+            .ok_or(StackWriteError::UnknownItem)?;
+        Ok(ingredient)
     }
 }

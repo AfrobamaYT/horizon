@@ -456,6 +456,8 @@ pub struct Items {
     pub items: HashMap<Arc<str>, ItemInfo>,
     /// Shared Block.getItem snapshot, including blocks sharing another block's item.
     pub block_items: Arc<HashMap<String, String>>,
+    /// Registry snapshot used to validate ingredient component payloads.
+    pub component_registry: Arc<horizon_client_core::registries::Registries>,
     /// Loaded component prototypes for concrete ingredient predicates.
     pub component_defaults: Arc<HashMap<String, horizon_core::nbt::Compound>>,
     /// Default `minecraft:mob_visibility` by item id, with the `equippable`
@@ -1110,9 +1112,13 @@ impl Items {
         // game's own: one map with the loot data of the same root and packs.
         let loot = horizon_world::loot::shared_tables(root, overlay)?;
         let registry_order = registry_order(root, &order);
+        let enchantments = Arc::new(crate::enchant::Enchantments::load_with(
+            root, overlay, defaults,
+        )?);
         Ok(Self {
             items,
             block_items: Default::default(),
+            component_registry: ingredient_defaults::component_registry(root, &enchantments)?,
             component_defaults: ingredient_defaults::component_defaults(defaults)?,
             mob_visibility,
             order,
@@ -1126,9 +1132,7 @@ impl Items {
             loot,
             songs: load_songs(root, overlay),
             instruments: load_instruments(root, overlay),
-            enchantments: Arc::new(crate::enchant::Enchantments::load_with(
-                root, overlay, defaults,
-            )?),
+            enchantments,
         })
     }
     /// Use the server's loaded loot-table snapshot for item and block drops.
@@ -1179,6 +1183,7 @@ impl Items {
         Self {
             items: HashMap::new(),
             block_items: Default::default(),
+            component_registry: Default::default(),
             component_defaults: Default::default(),
             mob_visibility: HashMap::new(),
             order: Vec::new(),

@@ -1594,6 +1594,9 @@ impl Recipes {
             station,
         ) in sources.recipes.iter().zip(sources.station_recipes(items))
         {
+            if !Ingredient::validate_recipe(resolved, items, name) {
+                continue;
+            }
             let mut entry = None;
             if let Some(kind) = json["type"]
                 .as_str()

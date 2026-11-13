@@ -32,8 +32,13 @@ fn resolve(display: &Value, items: &Items) -> Option<Vec<ItemStack>> {
             }
             stacks
         }
-        "minecraft:with_any_potion" | "minecraft:only_with_component" => {
+        "minecraft:with_any_potion" => resolve(display.get("contents")?, items)?,
+        "minecraft:only_with_component" => {
+            let component = display.get("component")?.as_str()?;
             resolve(display.get("contents")?, items)?
+                .into_iter()
+                .filter(|stack| stack.carries_component(items.get(&stack.item), component))
+                .collect()
         }
         "minecraft:dyed" => resolve(display.get("target")?, items)?,
         "minecraft:smithing_trim" => resolve(display.get("base")?, items)?,

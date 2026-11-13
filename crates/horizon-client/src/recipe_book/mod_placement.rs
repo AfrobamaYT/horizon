@@ -167,7 +167,8 @@ fn convert(value: &mod_api::Ingredient) -> Ingredient {
         order: value.order.clone(),
         custom: value.custom.clone(),
         rule: None,
-        display: value.display.clone(),
+        compiled: None,
+        display: value.display.as_deref().cloned(),
         component_defaults: Default::default(),
         shown: None,
         children: value

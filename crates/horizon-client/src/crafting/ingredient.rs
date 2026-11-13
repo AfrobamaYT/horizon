@@ -1,4 +1,6 @@
 //! Engine recipe ingredients and stack matching.
+#[path = "ingredient/components.rs"]
+mod components;
 #[path = "ingredient/display.rs"]
 mod display;
 #[path = "ingredient/matching.rs"]
@@ -48,6 +50,8 @@ pub struct Ingredient {
     pub children: Option<(Shape, Vec<Self>)>,
     /// Built-in predicate evaluated against the concrete stack.
     pub rule: Option<IngredientRule>,
+    /// Validated decoded component predicate, shared by all candidate checks.
+    pub compiled: Option<std::sync::Arc<components::ComponentPredicate>>,
     /// Slot display override; membership continues to use `items`.
     pub display: Option<horizon_core::nbt::Compound>,
     /// Resolved slot display stacks; never used for placement or matching.
@@ -57,6 +61,41 @@ pub struct Ingredient {
         std::sync::Arc<std::collections::HashMap<String, horizon_core::nbt::Compound>>,
 }
 impl Ingredient {
+    /// Reject malformed component patches before any part of a recipe is published.
+    pub fn validate_recipe(value: &Value, items: &Items, recipe: &str) -> bool {
+        components::validate_recipe(value, items, recipe)
+    }
+    /// Decode built-in rules and materialize display stacks at a load boundary.
+    pub fn prepare_components(&mut self, items: &Items) -> Option<()> {
+        if let Some(rule) = &self.rule {
+            let compiled = std::sync::Arc::new(
+                components::ComponentPredicate::compile(rule, &self.order, items).ok()?,
+            );
+            if self.display.is_none() {
+                self.shown = Some(compiled.shown(rule, &self.order));
+            }
+            self.compiled = Some(compiled);
+        }
+        Some(())
+    }
+    fn default_matches(&self, stack: &ItemStack) -> bool {
+        match &self.children {
+            Some((Shape::Compound, kids)) => kids.iter().any(|kid| kid.default_matches(stack)),
+            Some((Shape::Intersection, kids)) => kids.iter().all(|kid| kid.default_matches(stack)),
+            Some((Shape::Difference, kids)) => {
+                kids[0].default_matches(stack) && !kids[1].default_matches(stack)
+            }
+            Some((Shape::CustomDisplay, kids)) => kids[0].default_matches(stack),
+            None => {
+                self.items.contains(stack.item.as_ref())
+                    && self
+                        .compiled
+                        .as_ref()
+                        .is_none_or(|rule| rule.matches(stack))
+            }
+        }
+    }
+
     /// Resolve a stored slot display at the owning resource boundary.
     pub fn resolve_display(
         display: &horizon_core::nbt::Compound,
@@ -83,6 +122,7 @@ impl Ingredient {
             custom: None,
             children: None,
             rule: None,
+            compiled: None,
             display: None,
             shown: None,
             component_defaults: Default::default(),
@@ -219,16 +259,32 @@ impl Ingredient {
             Some(display) => Some(display_stacks(display, items)?),
             None => None,
         };
-        (!walked.order.is_empty()).then(|| Self {
+        let mut ingredient = Self {
             items: walked.set,
             order: walked.order,
             custom: walked.custom,
             rule: walked.rule,
+            compiled: None,
             shown,
             display: walked.display,
             component_defaults: items.component_defaults.clone(),
             children,
-        })
+        };
+        ingredient.prepare_components(items)?;
+        if matches!(
+            ingredient.children,
+            Some((Shape::Difference | Shape::Intersection, _))
+        ) {
+            let order = ingredient
+                .order
+                .iter()
+                .filter(|id| ingredient.default_matches(&ItemStack::new(id, 1)))
+                .cloned()
+                .collect::<Vec<_>>();
+            ingredient.items = order.iter().cloned().collect();
+            ingredient.order = order;
+        }
+        (!ingredient.order.is_empty()).then_some(ingredient)
     }
 }
 
@@ -239,3 +295,7 @@ mod custom_data_tests;
 #[cfg(test)]
 #[path = "ingredient/builtin_kinds_tests.rs"]
 mod builtin_kinds_tests;
+
+#[cfg(test)]
+#[path = "ingredient/review_tests.rs"]
+mod review_tests;

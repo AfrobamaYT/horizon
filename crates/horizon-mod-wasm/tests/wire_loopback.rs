@@ -2543,3 +2543,6 @@ mod datafix_upgrades;
 
 #[path = "wire_loopback/friction.rs"]
 mod friction;
+
+#[path = "wire_loopback/ingredient_builtins.rs"]
+mod ingredient_builtins;

@@ -5,9 +5,13 @@ impl Items {
     /// station rules and loot functions are built from), for tools that need
     /// tag membership.
     pub fn tags_only(root: &Path, overlay: &PackOverlay, defaults: &ItemDefaults) -> Result<Self> {
+        let enchantments = Arc::new(crate::enchant::Enchantments::load_with(
+            root, overlay, defaults,
+        )?);
         Ok(Self {
             items: HashMap::new(),
             block_items: Default::default(),
+            component_registry: component_registry(root, &enchantments)?,
             component_defaults: component_defaults(defaults)?,
             mob_visibility: HashMap::new(),
             order: Vec::new(),
@@ -21,9 +25,7 @@ impl Items {
             loot: Default::default(),
             songs: HashMap::new(),
             instruments: HashMap::new(),
-            enchantments: Arc::new(crate::enchant::Enchantments::load_with(
-                root, overlay, defaults,
-            )?),
+            enchantments,
         })
     }
 }
@@ -87,4 +89,33 @@ pub(super) fn block_items(root: &Path) -> Result<HashMap<String, String>> {
             Ok((block, item.to_owned()))
         })
         .collect()
+}
+
+/// Registry metadata used by ingredient component codecs at the load boundary.
+pub(super) fn component_registry(
+    root: &Path,
+    enchantments: &crate::enchant::Enchantments,
+) -> Result<Arc<horizon_client_core::registries::Registries>> {
+    let mut registry = horizon_client_core::registries::Registries::default();
+    let path = root.join("command-registries.json");
+    if path.exists() {
+        registry.fill_from_export(&serde_json::from_slice(&fs::read(path)?)?);
+    }
+    let path = root.join("registries.json");
+    if path.exists() {
+        let json: Value = serde_json::from_slice(&fs::read(path)?)?;
+        if let Some(entries) = json["minecraft:data_component_type"]["entries"].as_object() {
+            registry
+                .by_registry
+                .entry("minecraft:data_component_type".into())
+                .or_default()
+                .ids = entries.keys().cloned().collect();
+        }
+    }
+    registry.enchantments = enchantments
+        .list
+        .iter()
+        .map(|entry| entry.id.to_string())
+        .collect();
+    Ok(Arc::new(registry))
 }

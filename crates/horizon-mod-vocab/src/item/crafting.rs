@@ -31,6 +31,7 @@ impl RecipePropertyAddition {
 }
 /// A set of accepted items (expanded from an item, list or tag), and the
 /// items in its `HolderSet` order (`Ingredient.display`'s `TagSlotDisplay`).
+/// Optional metadata is boxed so nested ingredient reads fit the guest stack budget.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: placement providers and the game construct complete ingredient values
 #[derive(horizon_mod_api_macros::Wire)]
@@ -47,9 +48,9 @@ pub struct Ingredient {
     /// as on NeoForge — the flat list above only names items.
     pub children: Option<(Shape, Vec<Self>)>,
     /// A concrete-stack built-in predicate.
-    pub rule: Option<IngredientRule>,
+    pub rule: Option<Box<IngredientRule>>,
     /// Explicit slot display, independent of membership.
-    pub display: Option<horizon_core::nbt::Compound>,
+    pub display: Option<Box<horizon_core::nbt::Compound>>,
 }
 /// Built-in predicates evaluated against the concrete stack.
 #[derive(Clone, Debug, PartialEq, horizon_mod_api_macros::Wire)]

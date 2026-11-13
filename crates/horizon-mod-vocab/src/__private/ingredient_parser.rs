@@ -232,7 +232,7 @@ impl WalkedIngredient {
                 nested = Some((Shape::Difference, vec![base.clone(), gone.clone()]));
                 base.order
                     .iter()
-                    .filter(|i| !gone.set.contains(*i))
+                    .filter(|i| !gone.is_simple() || !gone.set.contains(*i))
                     .cloned()
                     .collect()
             }

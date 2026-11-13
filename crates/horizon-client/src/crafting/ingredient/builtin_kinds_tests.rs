@@ -64,19 +64,28 @@ fn components_strict_counts_max_damage_default_and_custom_name() {
     );
     assert!(!ingredient.test_in(&context, &sword));
 
-    // Naming the full prototype establishes that adding only a name breaks strictness.
-    let mut complete = ingredient.clone();
-    let mut patch = items.component_defaults["minecraft:diamond_sword"].clone();
-    patch.insert("minecraft:damage".into(), Tag::Int(5));
-    complete.rule = Some(IngredientRule::Components {
-        patch,
-        removed: Vec::new(),
-        strict: true,
-    });
+    // A literal supported-only prototype isolates strict extra-component behavior.
+    let mut supported = Items::empty();
+    supported.component_defaults = std::sync::Arc::new(std::collections::HashMap::from([
+        ("minecraft:diamond_sword".into(), crate::json_nbt::json_to_compound(
+            serde_json::json!({"minecraft:damage":0,"minecraft:max_damage":1561,"minecraft:max_stack_size":1}).as_object().unwrap()).unwrap())
+    ]));
+    let complete = parse(
+        r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:damage":5,"minecraft:max_damage":1561,"minecraft:max_stack_size":1},"strict":true}"#,
+        &supported,
+    );
     let mut plain = ItemStack::new("minecraft:diamond_sword", 1);
     plain.damage = 5;
     assert!(complete.test_in(&context, &plain));
     assert!(!complete.test_in(&context, &sword));
+    let missing_max = parse(
+        r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"minecraft:damage":5,"minecraft:max_stack_size":1},"strict":true}"#,
+        &supported,
+    );
+    assert!(
+        !missing_max.test_in(&context, &plain),
+        "the literal max_damage default must be named"
+    );
 }
 #[test]
 #[ignore = "requires prepared resources"]
@@ -86,6 +95,10 @@ fn components_removal_requires_absence_including_defaults() {
         r#"{"type":"neoforge:components","items":"minecraft:diamond_sword","components":{"!minecraft:enchantments":{}}}"#,
         &items,
     );
+    assert!(!ingredient.shown.as_ref().unwrap()[0].carries_component(
+        items.get("minecraft:diamond_sword"),
+        "minecraft:enchantments"
+    ));
     let load = load();
     let context = load.loop_context(LoopSide::Server, []);
     let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
@@ -227,18 +240,4 @@ fn recipe_book_and_placement_use_component_ingredient_item_lists() {
         book.items_of(&placement.ingredients[0]),
         ["minecraft:diamond_sword"]
     );
-}
-
-#[test]
-fn components_compare_live_transient_components() {
-    let ingredient = parse(
-        r#"{"type":"neoforge:components","items":"minecraft:filled_map","components":{"minecraft:map_post_processing":1}}"#,
-        &Items::empty(),
-    );
-    let load = load();
-    let context = load.loop_context(LoopSide::Server, []);
-    let mut stack = ItemStack::new("minecraft:filled_map", 1);
-    assert!(!ingredient.test_in(&context, &stack));
-    stack.data_mut().map_post_processing = Some(1);
-    assert!(ingredient.test_in(&context, &stack));
 }
