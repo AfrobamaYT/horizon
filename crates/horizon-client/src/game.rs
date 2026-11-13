@@ -1427,7 +1427,7 @@ struct Game<'a> {
     /// `AbstractContainerScreen`'s quick craft and skip-release state.
     inv_clicks: horizon_client::container_screen::Clicks,
     /// The Mouse Tweaks extra's drag and wheel (`tweaks`).
-    tweaks: tweaks::Tweaks,
+    tweaks: extras::mouse_tweaks::Tweaks,
     /// The wheel and hovered slot of `BundleMouseActions`.
     bundle_mouse: bundles::BundleMouse,
     /// The last inventory click, for the double click that gathers a stack.
@@ -3722,7 +3722,7 @@ impl Game<'_> {
         velocity: [f64; 3],
     ) {
         let random = spill::prepare_item_random(None);
-        self.add_item_entity_prepared(stack, position, Some(velocity), 0, Some(random));
+        self.add_item_entity_prepared(stack, position, Some(velocity), 0, Some(random), 0);
     }
     fn add_item_entity(
         &mut self,
@@ -3731,7 +3731,10 @@ impl Game<'_> {
         velocity: Option<[f64; 3]>,
         pickup_delay: u32,
     ) -> [f64; 3] {
-        self.add_item_entity_prepared(stack, position, velocity, pickup_delay, None)
+        self.add_item_entity_prepared(stack, position, velocity, pickup_delay, None, 0)
+    }
+    pub(super) fn spawn_item_aged(&mut self, stack: ItemStack, position: [f64; 3], age: i32) {
+        self.add_item_entity_prepared(stack, position, None, 10, None, age);
     }
     /// Joins an item only after drop hooks have seen its constructor's motion.
     fn add_item_entity_prepared(
@@ -3741,6 +3744,7 @@ impl Game<'_> {
         velocity: Option<[f64; 3]>,
         pickup_delay: u32,
         random: Option<spill::ItemRandom>,
+        age: i32,
     ) -> [f64; 3] {
         let random = random.unwrap_or_else(|| spill::prepare_item_random(velocity));
         let item = stack.item.clone();
@@ -3756,6 +3760,7 @@ impl Game<'_> {
             rotation: [yaw, 0.0],
             pickup_delay: i64::from(pickup_delay),
             random: random.own.into(),
+            age,
             ..ItemEntity::new(
                 self.next_entity,
                 stack,
@@ -5986,6 +5991,19 @@ impl Game<'_> {
             self.guest_cooldowns.push((group, ticks));
         }
     }
+    /// `Level.playSound(player, ...)`: a guest's client already predicted the
+    /// fire-starter sound, so play it locally on the server and forward it to
+    /// the other guests without leaving it in the broadcast capture.
+    pub(super) fn play_block_use_sound(&mut self, sound: &str, at: [f64; 3], pitch: f32) {
+        if self.lan_acting.is_some() {
+            self.audio.play_unshared(sound, Some(at), 1.0, pitch);
+            self.guest_block_sounds
+                .push((sound.to_owned(), at, 1.0, pitch));
+        } else {
+            self.audio.play(sound, Some(at), 1.0, pitch);
+        }
+    }
+
     /// One hand's turn in `startUseItem`: `useItemOn` the block aimed at,
     /// then `useItem`. Whether the click ends here (it acted or failed).
     fn use_hand(&mut self, block_hit: Option<&Hit>) -> Result<bool> {
@@ -8910,10 +8928,13 @@ impl Game<'_> {
                 self.station_sound(sound);
             }
         } else if kind == Kind::Stonecutter {
+            let input_changed = before[0] != menu.slot(0).cloned();
             if let Some(s) = self.station.as_mut() {
                 s.selected = usize::try_from(menu.data[0]).ok();
                 s.stone = std::mem::take(&mut menu.stone);
-                s.stonecutter_changed();
+                if input_changed {
+                    s.stonecutter_changed();
+                }
             }
             for sound in sounds.into_iter().filter(|_| !predicting) {
                 self.station_sound(sound);
@@ -11624,19 +11645,16 @@ impl Game<'_> {
                     .ok_or("missing lit block state")?;
                 state.properties.insert("lit".into(), "true".into());
                 self.level_set(hit.pos, registry.resolve(&state)?)?;
-                self.audio.play(
-                    if item == "fire_charge" {
-                        "minecraft:item.firecharge.use"
-                    } else {
-                        "minecraft:item.flintandsteel.use"
-                    },
-                    Some(at(hit.pos)),
-                    1.0,
-                    horizon_client::items::fire_starter_pitch(
-                        item == "fire_charge",
-                        &mut self.world.random,
-                    ),
+                let sound = if item == "fire_charge" {
+                    "minecraft:item.firecharge.use"
+                } else {
+                    "minecraft:item.flintandsteel.use"
+                };
+                let pitch = horizon_client::items::fire_starter_pitch(
+                    item == "fire_charge",
+                    &mut self.world.random,
                 );
+                self.play_block_use_sound(sound, at(hit.pos), pitch);
                 // FlintAndSteelItem / FireChargeItem.useOn: BLOCK_CHANGE at the lit block,
                 // and ItemStack.useOn's used statistic.
                 self.post_block_game_event(
@@ -11670,7 +11688,7 @@ impl Game<'_> {
                     item == "fire_charge",
                     &mut self.world.random,
                 );
-                self.audio.play(sound, Some(at(target)), 1.0, pitch);
+                self.play_block_use_sound(sound, at(target), pitch);
                 // BLOCK_PLACE: flint and steel names the clicked block, a fire charge the
                 // fire. Then ItemStack.useOn's used statistic.
                 let placed_at = if item == "fire_charge" {
@@ -16467,6 +16485,35 @@ use inventory_input::drop_whole_stack;
 use subtitles::{Subtitles, in_game_ui, subtitles};
 
 use hud_render::{block_outline_drawn, debug_crosshair_drawn, is_game_master_block};
+#[cfg(test)]
+mod test_neighbourhood {
+    //! Shared fixture step for tests that tick entities on prepared data.
+    use super::*;
+
+    impl Game<'_> {
+        /// Loads the chunks within 2 columns of `(cx, cz)` that are not loaded yet.
+        /// Entity ticking waits for every chunk in that 5x5 neighbourhood
+        /// (`ChunkMap.prepareEntityTickingChunk`), so a fixture that ticks mobs,
+        /// items or TNT in a chunk calls this after setting up its own chunks.
+        pub(crate) fn load_ticking_neighbourhood(&mut self, cx: i32, cz: i32) {
+            for z in cz - 2..=cz + 2 {
+                for x in cx - 2..=cx + 2 {
+                    if self.world.chunks.contains_key(&(x, z)) {
+                        continue;
+                    }
+                    self.world.chunks.insert(
+                        (x, z),
+                        std::sync::Arc::new(horizon_client::chunk::Chunk::empty(x, z)),
+                    );
+                    // A chunk that is already registered keeps its ticks.
+                    let _ = self
+                        .block_ticks
+                        .add_empty_chunk(horizon_core::position::ChunkPos::new(x, z));
+                }
+            }
+        }
+    }
+}
 
 fn write_level_for_role(
     level: &mut Level,

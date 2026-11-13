@@ -372,6 +372,7 @@ mod hdr_icc;
 mod hdr_start;
 mod hdr_stats;
 pub(crate) mod hud_coverage;
+mod in_flight;
 pub use hdr::{Calibration as HdrCalibration, Output as HdrOutput};
 mod hold;
 pub use hold::WorldHold;
@@ -12656,126 +12657,6 @@ pub(crate) fn copy_frame(
     );
     buffer
 }
-impl Renderer {
-    /// The frame's readbacks to start right after its submission (on the submit thread when
-    /// the frame goes there): occlusion culling's results (`cull`) and GPU culling's
-    /// statistics. GPU frames leave occlusion culling off, so a frame has one at most.
-    fn after_submit(&mut self) -> Option<submit::AfterSubmit> {
-        let cull = self.cull.as_mut().and_then(|c| c.submitted());
-        let gpu = self.gpu_culling.as_mut().and_then(|g| g.submitted());
-        match (cull, gpu) {
-            (Some(c), Some(g)) => Some(Box::new(move || {
-                c();
-                g();
-            })),
-            (Some(c), None) => Some(Box::new(c)),
-            (None, Some(g)) => Some(Box::new(g)),
-            (None, None) => None,
-        }
-    }
-    /// Frame `frame`'s statistics shown, unless a newer frame's are: a CPU frame's as it is
-    /// drawn, a GPU frame's when its counts come back (`GpuCulling::collect`).
-    fn show_stats(&mut self, frame: u64, [sections, draws, calls]: [usize; 3]) {
-        if frame > self.stats_frame {
-            self.stats_frame = frame;
-            (
-                self.drawn_sections,
-                self.section_draws,
-                self.section_draw_calls,
-            ) = (sections, draws, calls);
-        }
-    }
-    /// Frames between the last one drawn and the one whose statistics are shown: 0 after a
-    /// CPU frame, one to three in GPU frames, while their counts are on their way back.
-    pub fn stats_lag(&self) -> u64 {
-        self.frame_serial - self.stats_frame
-    }
-    /// Take in the frame the submit thread submitted: start its readbacks and, offscreen,
-    /// keep at most two frames ahead of the GPU, as a frame submitted in place does.
-    fn land_frame(&mut self) {
-        let Some(offscreen) = self.deferred.take() else {
-            return;
-        };
-        let submission = self.queue.landed();
-        if let Some(timer) = &mut self.gpu_timer {
-            timer.submitted(&self.queue);
-            timer.collect(&self.device, &mut self.gpu_times);
-        }
-        if let Some(Some(timer)) = Self::pass_timer(&mut self.pack_post, &mut self.native) {
-            timer.submitted(&self.queue);
-        }
-        if let Some(timer) = &mut self.own_timing {
-            timer.submitted(&self.queue);
-        }
-        if offscreen && let Some(submission) = submission {
-            self.in_flight.push_back(submission);
-            if !self.paced_elsewhere {
-                self.wait_frames();
-            }
-        }
-    }
-    /// No swapchain paces offscreen frames: keep two on the GPU at most.
-    pub fn wait_in_flight(&mut self) {
-        self.land_frame();
-        self.wait_frames();
-    }
-    /// The frame on the submit thread submitted and presented: a surface reconfigure waits
-    /// for the device and breaks if a frame is submitted while it waits, the compositor
-    /// copies views after them, and `flip_frame` listeners hear a frame after its present.
-    /// (The end of a frame already lands the frames of the turn before; this is the turn's
-    /// own.)
-    pub fn wait_submissions(&mut self) {
-        self.queue.wait();
-    }
-    fn wait_frames(&mut self) {
-        while self.in_flight.len() > 2 {
-            let index = self.in_flight.pop_front();
-            let _ = self.device.poll(wgpu::PollType::Wait {
-                submission_index: index,
-                timeout: Some(std::time::Duration::from_secs(5)),
-            });
-        }
-    }
-    /// Take a screenshot request: queue the frame's copy, or report why the
-    /// frame cannot be read back.
-    fn take_readback(
-        &mut self,
-        request: ScreenshotRequest,
-        encoder: &mut wgpu::CommandEncoder,
-        texture: &wgpu::Texture,
-    ) -> Option<(ScreenshotRequest, wgpu::Buffer)> {
-        // The copy and PNG writer both assume 8-bit pixels; a float surface would make
-        // the row stride too small for the copy and abort in validation.
-        if self.config.format.block_copy_size(None) == Some(4) {
-            let size = [self.config.width, self.config.height];
-            let format = self.config.format.remove_srgb_suffix();
-            // The layered float frame maps the world to SDR, then adds the HUD as drawn.
-            // Other 16-bit frames keep their clipped 8-bit copy.
-            let copy = self
-                .hdr
-                .as_mut()
-                .and_then(|hdr| {
-                    hdr.sdr_screenshot(&self.device, encoder, format, request.size.is_some())
-                })
-                .or_else(|| {
-                    (texture.format() != format && texture.format() == self.output.frame.format)
-                        .then(|| {
-                            self.readback
-                                .unorm_copy(&self.device, encoder, texture, format)
-                        })
-                });
-            let texture = copy.as_ref().unwrap_or(texture);
-            Some((request, copy_frame(&self.device, encoder, texture, size)))
-        } else {
-            let error = format!(
-                "screenshots need a 32-bit surface format, not {:?}",
-                self.config.format
-            );
-            self.screenshot_result = Some(Err(error));
-            None
-        }
-    }
-}
 /// `screenshots/2026-10-28_12.00.00.png` -> `screenshots/2026-10-28_12.00.00-hdr.png`.
 fn hdr_screenshot_path(path: &std::path::Path) -> PathBuf {
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
@@ -12830,61 +12711,63 @@ pub(crate) fn square_downscale(pixels: &[u8], width: u32, height: u32, size: [u3
     }
     out
 }
-/// Camera-relative clip planes (`Frustum`).
+/// The union of two frusta (the camera's and its water mirror's), for `Resident::visible`.
 #[derive(Clone, Copy, Debug)]
-pub struct Frustum {
-    planes: [Vec4; 6],
+pub struct Frusta(pub Frustum, pub Option<Frustum>);
+/// What `Resident::visible` culls with: a frustum or a union of them.
+pub trait Cull {
+    fn intersects(&self, min: Vec3, max: Vec3) -> bool;
+    fn contains(&self, min: Vec3, max: Vec3) -> bool;
+    /// Whether a section is tested by the box around its geometry, not its whole 16 blocks.
+    fn tight(&self) -> bool {
+        true
+    }
 }
+impl Cull for Frustum {
+    fn intersects(&self, min: Vec3, max: Vec3) -> bool {
+        Frustum::intersects(self, min, max)
+    }
+    fn contains(&self, min: Vec3, max: Vec3) -> bool {
+        Frustum::contains(self, min, max)
+    }
+}
+impl Cull for Frusta {
+    fn intersects(&self, min: Vec3, max: Vec3) -> bool {
+        self.0.intersects(min, max) || self.1.is_some_and(|f| f.intersects(min, max))
+    }
+    /// Entirely inside one of them is entirely inside the union.
+    fn contains(&self, min: Vec3, max: Vec3) -> bool {
+        self.0.contains(min, max) || self.1.is_some_and(|f| f.contains(min, max))
+    }
+}
+/// The block entities of `sections` whose box, a block wider on every side, comes within the
+/// 64 blocks block entities are drawn to (`Renderer::visible_block_entities_in_frustum`).
+fn block_entities_within_reach<'a>(
+    sections: impl Iterator<Item = SectionKey> + 'a,
+    block_entities: &'a FxHashMap<SectionKey, Vec<([i32; 3], u32)>>,
+    camera: DVec3,
+    min_y: i32,
+) -> impl Iterator<Item = &'a ([i32; 3], u32)> + 'a {
+    sections
+        .filter_map(move |key| {
+            let min = (DVec3::new(
+                f64::from(key.0 * 16 - 1),
+                f64::from(min_y + key.1 * 16 - 1),
+                f64::from(key.2 * 16 - 1),
+            ) - camera)
+                .as_vec3();
+            let max = min + Vec3::splat(18.0);
+            let near = Vec3::ZERO.max(min).min(max).length_squared() <= 64.0 * 64.0;
+            near.then(|| block_entities.get(&key)).flatten()
+        })
+        .flatten()
+}
+mod view_frustum;
+pub use view_frustum::Frustum;
 
-/// A frustum with the given clip planes, for tests that drive the public draw call.
 #[cfg(feature = "test-support")]
 pub fn test_frustum(planes: [Vec4; 6]) -> Frustum {
     Frustum { planes }
-}
-impl Frustum {
-    /// Whether the camera-relative box `min..max` is at least partly inside.
-    pub fn intersects(&self, min: Vec3, max: Vec3) -> bool {
-        !self.planes.iter().any(|p| {
-            let sign = p.truncate().cmpge(Vec3::ZERO);
-            let v = Vec3::select(sign, max, min);
-            p.truncate().dot(v) + p.w < 0.0
-        })
-    }
-    /// Whether a camera-relative sphere is at least partly inside. Frustum
-    /// planes are normalized, so each test needs only one dot product and a
-    /// radius comparison.
-    pub fn intersects_sphere(&self, center: Vec3, radius: f32) -> bool {
-        if !center.is_finite() || !radius.is_finite() || radius < 0.0 {
-            return true;
-        }
-        !self
-            .planes
-            .iter()
-            .any(|plane| plane.truncate().dot(center) + plane.w < -radius)
-    }
-    /// Depth clip planes alone: X/Y projection jitter cannot change this test.
-    /// Retaining side-of-screen geometry makes this safe before TAA selects a phase.
-    pub fn intersects_depth(&self, min: Vec3, max: Vec3) -> bool {
-        if !min.is_finite() || !max.is_finite() || !min.cmple(max).all() {
-            return true;
-        }
-        !self.planes[4..].iter().any(|p| {
-            let sign = p.truncate().cmpge(Vec3::ZERO);
-            let v = Vec3::select(sign, max, min);
-            p.truncate().dot(v) + p.w < 0.0
-        })
-    }
-    /// Whether the camera-relative box `min..max` is entirely inside. Then
-    /// `intersects` accepts every box within it: each plane's distance only
-    /// grows from this box's nearest corner to the inner box's farthest, and
-    /// rounding keeps that order.
-    pub fn contains(&self, min: Vec3, max: Vec3) -> bool {
-        self.planes.iter().all(|p| {
-            let sign = p.truncate().cmpge(Vec3::ZERO);
-            let v = Vec3::select(sign, min, max);
-            p.truncate().dot(v) + p.w >= 0.0
-        })
-    }
 }
 /// Vanilla's `Projection`: reversed depth (near maps to 1, far to 0, tests
 /// are GREATER_THAN_OR_EQUAL), which keeps far faces a hair apart, like

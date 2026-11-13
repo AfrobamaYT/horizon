@@ -5610,6 +5610,7 @@ fn equipment_source(g: &Guest, index: usize) -> Option<&ItemStack> {
 #[cfg(test)]
 mod tests {
     mod cave_air_tests;
+    mod effect_meta_tests;
     #[path = "../far_tests.rs"]
     mod far_tests;
     mod ordered_inbox_tests;

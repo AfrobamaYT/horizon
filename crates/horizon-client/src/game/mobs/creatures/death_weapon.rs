@@ -319,11 +319,22 @@ impl Game<'_> {
         // The item drops come before the carried block and the orbs, so the
         // mods get them all at once and they still spawn in that order.
         let mut stacks = Vec::new();
+        let mut ages = Vec::new();
         let mut rest = Vec::new();
         for d in items {
             match d {
-                drops::Drop::Item(stack) => stacks.push(to_stack(&stack)),
-                drops::Drop::Stack(stack) => stacks.push(stack),
+                drops::Drop::Item(stack) => {
+                    stacks.push(to_stack(&stack));
+                    ages.push(0);
+                }
+                drops::Drop::Stack(stack) => {
+                    stacks.push(stack);
+                    ages.push(0);
+                }
+                drops::Drop::Aged(stack, age) => {
+                    stacks.push(to_stack(&stack));
+                    ages.push(age);
+                }
                 other => rest.push(other),
             }
         }
@@ -342,7 +353,7 @@ impl Game<'_> {
             used: false,
         });
         self.native_loot_drops(&context, &mut stacks);
-        stacks.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
+
         let mut experience = None;
         for d in rest {
             match d {
@@ -361,11 +372,18 @@ impl Game<'_> {
                     stacks.extend(drops.into_iter().filter(enderman::carried_block_drop_kept));
                 }
                 drops::Drop::Experience(reward) if !consumed => experience = Some(reward),
-                drops::Drop::Item(_) | drops::Drop::Stack(_) | drops::Drop::Experience(_) => {}
+                drops::Drop::Item(_)
+                | drops::Drop::Stack(_)
+                | drops::Drop::Aged(_, _)
+                | drops::Drop::Experience(_) => {}
             }
         }
-        let mut stacks: Vec<(ItemStack, [f64; 3])> =
-            stacks.into_iter().map(|stack| (stack, pos)).collect();
+        let mut stacks: Vec<(ItemStack, [f64; 3], i32)> = stacks
+            .into_iter()
+            .enumerate()
+            .filter(|(_, stack)| stack.count > 0 && &*stack.item != "minecraft:air")
+            .map(|(i, stack)| (stack, pos, ages.get(i).copied().unwrap_or(0)))
+            .collect();
         if m.species() == Species::CopperGolem {
             // CopperGolem.dropEquipment: the preserved equipment is part of
             // dropAllDeathLoot, so the mods hear it with the rest. It is
@@ -374,7 +392,7 @@ impl Game<'_> {
             stacks.extend(
                 Self::golem_preserved_equipment(m)
                     .into_iter()
-                    .map(|stack| (stack, feet)),
+                    .map(|stack| (stack, feet, 0)),
             );
         }
         // Every death drop is its own ItemEntity, and the drop entity's own
