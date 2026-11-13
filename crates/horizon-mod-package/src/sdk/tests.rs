@@ -319,6 +319,14 @@ fn removing_each_required_input_names_it_before_work() {
 }
 
 #[test]
+fn the_package_format_reads_with_any_line_ending() {
+    assert_eq!(number("6\n"), 6);
+    assert_eq!(number("6\r\n"), 6);
+    assert_eq!(number("16"), 16);
+    assert_eq!(PACKAGE_FORMAT, 6);
+}
+
+#[test]
 fn an_unknown_route_is_refused_not_a_panic() {
     let mut downloaded = inputs();
     downloaded.routes.remove("package");
@@ -353,6 +361,14 @@ fn how_to_make_an_input_uses_the_game_programs_profile_and_folder() {
             "target/fast",
             "cargo build --profile fast -p horizon-prepare",
         ),
+        (
+            "target/x86_64-pc-windows-gnu/release",
+            "cargo build --release -p horizon-prepare",
+        ),
+        (
+            "/opt/horizon",
+            "cargo build -p horizon-prepare, with the same profile as the game program",
+        ),
     ] {
         let program = Path::new(folder).join("horizon-client");
         assert_eq!(inputs.how("horizon-prepare", &program).unwrap(), flag);
@@ -363,6 +379,11 @@ fn how_to_make_an_input_uses_the_game_programs_profile_and_folder() {
         "cargo run --locked -p cargo-horizon-mod -- wasm-std target/release/horizon-wasm-std.wasm"
     );
 }
+
+/// The markers around the book's table of required inputs.
+const BOOK_START: &str =
+    "<!-- required inputs: crates/horizon-mod-package/src/sdk/inputs.json, checked by a test -->";
+const BOOK_END: &str = "<!-- end of required inputs -->";
 
 /// The book's table of required inputs, as `inputs.json` says it.
 fn book_table(inputs: &Inputs) -> String {
@@ -405,10 +426,17 @@ fn every_named_input_has_a_way_to_make_it_and_the_book_shows_the_list() {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../docs/modding/src/how-to/native-mods/07-local-developer-builds.md"),
     )
-    .unwrap();
+    .unwrap()
+    .replace("\r\n", "\n");
+    let section = page
+        .split_once(BOOK_START)
+        .and_then(|(_, rest)| rest.split_once(BOOK_END))
+        .map(|(section, _)| section.trim())
+        .expect("the book page marks its table of required inputs");
     let table = book_table(&inputs);
-    assert!(
-        page.contains(&table),
+    assert_eq!(
+        section,
+        table.trim(),
         "the book's table differs from sdk/inputs.json; it should read:\n{table}"
     );
 }
@@ -533,6 +561,117 @@ mod unpack {
             };
             assert!(found.contains(why), "{found}");
             assert_eq!(left(&folder), Vec::<String>::new(), "{why}");
+        }
+    }
+
+    #[test]
+    fn an_existing_destination_is_refused_and_a_crashed_partial_is_replaced() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("download");
+        std::fs::write(&file, FIXTURE).unwrap();
+        let listed = index(&[(ENGINE, FIXTURE)]);
+        let into = folder.path().join("sdk");
+        std::fs::create_dir(&into).unwrap();
+        assert_eq!(
+            unpack(&listed, ENGINE, &file, &into, 1 << 20).unwrap_err(),
+            Refusal::Exists(into.display().to_string())
+        );
+        std::fs::remove_dir(&into).unwrap();
+        let partial = folder.path().join(format!("sdk{PARTIAL_SUFFIX}"));
+        std::fs::create_dir_all(partial.join("deps")).unwrap();
+        std::fs::write(partial.join("deps/stale"), b"crash").unwrap();
+        unpack(&listed, ENGINE, &file, &into, 1 << 20).unwrap();
+        assert!(!into.join("deps/stale").exists());
+        assert!(into.join("deps/a.rmeta").is_file());
+        assert_eq!(left(&folder), ["sdk"]);
+    }
+
+    #[test]
+    fn a_busy_rename_is_retried_then_refused() {
+        let denied = || std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let tick = std::time::Duration::from_millis(1);
+        let mut calls = 0;
+        rename_retrying(Path::new("a"), Path::new("b"), tick, |_, _| {
+            calls += 1;
+            if calls < 3 { Err(denied()) } else { Ok(()) }
+        })
+        .unwrap();
+        assert_eq!(calls, 3);
+        let mut calls = 0;
+        let refused = rename_retrying(Path::new("a"), Path::new("b"), tick, |_, _| {
+            calls += 1;
+            Err(denied())
+        });
+        assert!(
+            matches!(refused, Err(Refusal::Rename { .. })),
+            "{refused:?}"
+        );
+        assert_eq!(calls, 6);
+        let mut calls = 0;
+        let refused = rename_retrying(Path::new("a"), Path::new("b"), tick, |_, _| {
+            calls += 1;
+            Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+        });
+        assert!(
+            matches!(refused, Err(Refusal::Rename { .. })),
+            "{refused:?}"
+        );
+        assert_eq!(calls, 1);
+    }
+
+    fn tar_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut builder = tar::Builder::new(Vec::new());
+        for (path, bytes) in entries {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o644);
+            builder.append_data(&mut header, path, *bytes).unwrap();
+        }
+        builder.into_inner().unwrap()
+    }
+
+    #[test]
+    fn long_names_unpack_and_an_oversized_extension_is_refused_before_it_is_read() {
+        let long = format!("deps/{}/lib.rmeta", "d".repeat(150));
+        let into = tempfile::tempdir().unwrap();
+        untar(ENGINE, &tar_bytes(&[(&long, b"long")])[..], into.path()).unwrap();
+        assert_eq!(std::fs::read(into.path().join(&long)).unwrap(), b"long");
+        // A long-name header declaring 1 GiB, with no data behind it: refused on its size.
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::GNULongName);
+        header.set_path("././@LongLink").unwrap();
+        header.set_size(1 << 30);
+        header.set_cksum();
+        let mut bytes = header.as_bytes().to_vec();
+        bytes.extend([0u8; 1024]);
+        let refused = untar(ENGINE, &bytes[..], into.path());
+        assert!(
+            matches!(&refused, Err(Refusal::Archive { why, .. }) if why.contains("extension entry")),
+            "{refused:?}"
+        );
+    }
+
+    #[test]
+    fn damaged_archives_end_in_a_refusal_never_a_panic() {
+        // Truncations at every length, then bit flips at positions from a fixed-seed generator.
+        let mut variants: Vec<Vec<u8>> =
+            (0..FIXTURE.len()).map(|n| FIXTURE[..n].to_vec()).collect();
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        for _ in 0..3000 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let mut bytes = FIXTURE.to_vec();
+            let at = (state % bytes.len() as u64) as usize;
+            bytes[at] ^= 1 << ((state >> 32) % 8);
+            variants.push(bytes);
+        }
+        let folder = tempfile::tempdir().unwrap();
+        for (n, bytes) in variants.into_iter().enumerate() {
+            let into = folder.path().join(n.to_string());
+            std::fs::create_dir(&into).unwrap();
+            // Ok when the flip landed where nothing checks it; otherwise a refusal.
+            let _ = extract(ENGINE, std::io::Cursor::new(bytes), &into, 1 << 20);
         }
     }
 

@@ -19,6 +19,7 @@ commands, `PROFILE` is the cargo flag of the profile the game program was built 
 for `target/release`, nothing for `target/debug`), `PROGRAM_FOLDER` its folder, and on Windows the
 programs end in `.exe`:
 
+<!-- required inputs: crates/horizon-mod-package/src/sdk/inputs.json, checked by a test -->
 | File | Where | Needed by | How to make it |
 |---|---|---|---|
 | `horizon-ctl` | beside the game program | `package` | cargo build PROFILE -p horizon-client-lib --bin horizon-ctl |
@@ -26,6 +27,7 @@ programs end in `.exe`:
 | `horizon-server` | beside the game program | `package`, `package-server` | cargo build PROFILE -p horizon-server |
 | `horizon-wasm-std.wasm` | beside the game program | `package`, `package-server` | cargo run --locked -p cargo-horizon-mod -- wasm-std PROGRAM_FOLDER/horizon-wasm-std.wasm |
 | `exporters/manifest.json` | in the checkout | `package`, `package-server` | horizon-prepare compile-exporters --root CHECKOUT, then copy its server, client and manifest.json into CHECKOUT/exporters/ |
+<!-- end of required inputs -->
 
 The command returns a `developer-…` tag. Select that exact tag, prepare its resources, and pin an
 instance to it. Automatic updates do not replace a local unsigned base. Remove it with

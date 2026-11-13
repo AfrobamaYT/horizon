@@ -221,9 +221,10 @@ class AllocatorSelectionTests(unittest.TestCase):
             root = Path(directory)
             number = root / "crates/horizon-mod-package/src/sdk/package-format"
             number.parent.mkdir(parents=True)
-            number.write_text("7\n")
-            self.assertEqual(prebuilt_game.package_format(root), 7)
-            for broken in ("", "7", "v7\n", "7\n8\n"):
+            for good in ("7\n", "7\r\n", "7"):
+                number.write_bytes(good.encode())
+                self.assertEqual(prebuilt_game.package_format(root), 7, repr(good))
+            for broken in ("", "\n", "v7\n", "7\n8\n"):
                 number.write_text(broken)
                 with self.subTest(broken), self.assertRaisesRegex(ValueError, "one number"):
                     prebuilt_game.package_format(root)

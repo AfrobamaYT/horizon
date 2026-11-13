@@ -22,7 +22,7 @@ root=$(git rev-parse --show-toplevel)
 revision=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['commit'])" "$2/horizon-prebuilt.json")
 mixins=$(sed -n 's/^pub const REV: &str = "\(.*\)";$/\1/p' "$root/crates/horizon-mod-package/src/mixins_tool.rs")
 # The launcher's cache folder name: the package layout is numbered in one place.
-format=$(cat "$root/crates/horizon-mod-package/src/sdk/package-format")
+format=$(tr -d '[:space:]' < "$root/crates/horizon-mod-package/src/sdk/package-format")
 case $format in ''|*[!0-9]*) echo "crates/horizon-mod-package/src/sdk/package-format must hold one number, not '$format'" >&2; exit 2;; esac
 archive=horizon-prebuilt-v$format-
 

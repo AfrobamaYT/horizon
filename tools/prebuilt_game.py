@@ -91,8 +91,8 @@ def rustc_host() -> str:
 
 def package_format(root: Path) -> int:
     """The package layout's one number, from its one place (`sdk::PACKAGE_FORMAT` includes the same file)."""
-    text = (root / "crates/horizon-mod-package/src/sdk/package-format").read_text()
-    if not re.fullmatch(r"[0-9]+\n", text):
+    text = (root / "crates/horizon-mod-package/src/sdk/package-format").read_text().rstrip()
+    if not re.fullmatch(r"[0-9]+", text):
         raise ValueError(f"sdk/package-format must hold one number, not {text!r}")
     return int(text)
 

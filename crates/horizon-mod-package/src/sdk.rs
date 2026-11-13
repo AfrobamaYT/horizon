@@ -22,13 +22,18 @@ pub const SCHEMA: u32 = 1;
 /// the archive name, the package's identity file, `sdk.json` and the scripts all read.
 pub const PACKAGE_FORMAT: u32 = number(include_str!("sdk/package-format"));
 
-/// A decimal number and a newline, at compile time: anything else fails the build.
+/// A decimal number, then any trailing whitespace (a CR included), at compile time: anything else
+/// fails the build. The scripts reading the same file trim the same way.
 const fn number(text: &str) -> u32 {
     let bytes = text.as_bytes();
-    assert!(bytes.len() > 1 && bytes[bytes.len() - 1] == b'\n');
+    let mut end = bytes.len();
+    while end > 0 && bytes[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    assert!(end > 0, "sdk/package-format holds one number");
     let mut value = 0u32;
     let mut at = 0;
-    while at < bytes.len() - 1 {
+    while at < end {
         assert!(
             bytes[at].is_ascii_digit(),
             "sdk/package-format holds one number"
@@ -250,15 +255,23 @@ impl Inputs {
     /// How to make `name` (as listed, without `.exe`) for the game program `program`: `PROFILE`
     /// becomes the cargo flag of the profile `program` was built with (its folder's name) and
     /// `PROGRAM_FOLDER` its folder, so the command makes the file where the check looks.
+    /// A program outside `target/<profile>/` (or `target/<triple>/<profile>/`) gets the command
+    /// with no flag and the words "with the same profile as the game program".
     pub fn how(&self, name: &str, program: &Path) -> Option<String> {
         let folder = program.parent().unwrap_or(Path::new(""));
-        let profile = match folder.file_name().and_then(|n| n.to_str()) {
-            Some("debug") | None => String::new(),
-            Some("release") => "--release".to_owned(),
-            Some(other) => format!("--profile {other}"),
-        };
+        fn named(path: Option<&Path>) -> Option<&str> {
+            path.and_then(Path::file_name).and_then(|n| n.to_str())
+        }
+        let in_target = named(folder.parent()) == Some("target")
+            || named(folder.parent().and_then(Path::parent)) == Some("target");
         let how = self.how.get(name)?;
-        let how = how.replace("PROFILE", &profile).replace("  ", " ");
+        let how = match named(Some(folder)).filter(|_| in_target) {
+            _ if !how.contains("PROFILE") => how.clone(),
+            Some("debug") => how.replace("PROFILE ", ""),
+            Some("release") => how.replace("PROFILE", "--release"),
+            Some(other) => how.replace("PROFILE", &format!("--profile {other}")),
+            None => how.replace("PROFILE ", "") + ", with the same profile as the game program",
+        };
         Some(how.replace("PROGRAM_FOLDER", &folder.display().to_string()))
     }
 
@@ -353,6 +366,10 @@ pub enum Refusal {
     Io(String),
     /// The input list has no such route.
     Route(String),
+    /// The folder an asset would unpack into already exists.
+    Exists(String),
+    /// The unpacked folder could not be moved into place.
+    Rename { to: String, why: String },
     /// Files a route needs are not there; how to make each.
     MissingInputs {
         missing: Vec<String>,
@@ -398,6 +415,8 @@ impl fmt::Display for Refusal {
             Self::Archive { asset, why } => write!(f, "{asset}: damaged archive: {why}"),
             Self::Io(why) => f.write_str(why),
             Self::Route(route) => write!(f, "the SDK's input list has no route {route}"),
+            Self::Exists(path) => write!(f, "{path} already exists"),
+            Self::Rename { to, why } => write!(f, "could not move the unpacked SDK to {to}: {why}"),
             Self::MissingInputs { missing, how } => {
                 write!(f, "missing required inputs: {}", missing.join(", "))?;
                 for line in how {
@@ -665,12 +684,22 @@ impl Index {
 #[cfg(feature = "prebuilt")]
 pub const DICTIONARY_LIMIT: usize = 64 << 20;
 
-/// Unpack the listed archive `name`, downloaded to the file `file`, into the new folder `into`.
-/// The file is checked against the index first ([`Index::verify`]), so nothing unverified is
-/// decoded. The archive streams through a bounded dictionary into a folder beside `into`, which is
-/// renamed into place only when every entry unpacked: a refusal partway leaves nothing. Refused:
-/// unpacked bytes past `limit` (a decompression bomb), and any entry that is not a plain file or
-/// folder inside the destination.
+/// The largest tar extension entry (a GNU long name or link, a PAX header) [`unpack`] reads.
+#[cfg(feature = "prebuilt")]
+pub const EXTENSION_LIMIT: u64 = 64 << 10;
+
+/// What [`unpack`] appends to the destination's name for the folder it unpacks into first: a
+/// leftover one is a crash's, removed before the next unpack (and by cache eviction).
+#[cfg(feature = "prebuilt")]
+pub const PARTIAL_SUFFIX: &str = ".partial";
+
+/// Unpack the listed archive `name`, downloaded to the file `file`, into the folder `into`, which
+/// must not exist yet: whether to reuse a folder is the caller's decision. From one open handle
+/// the file is checked against the index ([`Index::verify`]), then decoded, so nothing unverified
+/// is decoded. The archive streams through a bounded dictionary into `<into>.partial`
+/// ([`PARTIAL_SUFFIX`]), renamed into place only when every entry unpacked: a refusal partway
+/// leaves nothing. Refused: unpacked bytes past `limit` (a decompression bomb), extension entries
+/// past [`EXTENSION_LIMIT`], and any entry that is not a plain file or folder inside `into`.
 #[cfg(feature = "prebuilt")]
 pub fn unpack(
     index: &Index,
@@ -679,26 +708,64 @@ pub fn unpack(
     into: &Path,
     limit: u64,
 ) -> Result<(), Refusal> {
-    let open = || {
-        std::fs::File::open(file)
-            .map_err(|error| Refusal::Io(format!("{}: {error}", file.display())))
+    use std::io::{Seek, SeekFrom};
+    let io = |path: &Path| {
+        let path = path.display().to_string();
+        move |error: std::io::Error| Refusal::Io(format!("{path}: {error}"))
     };
-    index.verify(name, open()?)?;
+    if into.symlink_metadata().is_ok() {
+        return Err(Refusal::Exists(into.display().to_string()));
+    }
+    let mut body = std::fs::File::open(file).map_err(io(file))?;
+    index.verify(name, &mut body)?;
     if index.asset(name)?.codec != Codec::Xz {
         return Err(Refusal::Archive {
             asset: name.to_owned(),
             why: "not an archive".into(),
         });
     }
-    let io = |error: std::io::Error| Refusal::Io(format!("{}: {error}", into.display()));
-    let parent = into
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let partial = Partial::new(parent).map_err(io)?;
-    extract(name, open()?, &partial.0, limit)?;
-    // Once renamed, the partial folder's removal on drop finds nothing.
-    std::fs::rename(&partial.0, into).map_err(io)
+    body.seek(SeekFrom::Start(0)).map_err(io(file))?;
+    let mut partial = into.as_os_str().to_owned();
+    partial.push(PARTIAL_SUFFIX);
+    let partial = Partial(PathBuf::from(partial));
+    partial.clear().map_err(io(&partial.0))?;
+    std::fs::create_dir(&partial.0).map_err(io(&partial.0))?;
+    extract(name, body, &partial.0, limit)?;
+    rename_retrying(
+        &partial.0,
+        into,
+        std::time::Duration::from_millis(100),
+        |from, to| std::fs::rename(from, to),
+    )
+}
+
+/// Rename `from` to `to`, retrying an access-denied error (Windows, while a scanner or indexer
+/// holds a file just written) five times, waiting `delay`, then twice as long each time (about
+/// 3 s at 100 ms); then [`Refusal::Rename`].
+#[cfg(feature = "prebuilt")]
+fn rename_retrying(
+    from: &Path,
+    to: &Path,
+    mut delay: std::time::Duration,
+    mut rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), Refusal> {
+    let mut tries = 0;
+    loop {
+        match rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied && tries < 5 => {
+                tries += 1;
+                std::thread::sleep(delay);
+                delay *= 2;
+            }
+            Err(error) => {
+                return Err(Refusal::Rename {
+                    to: to.display().to_string(),
+                    why: error.to_string(),
+                });
+            }
+        }
+    }
 }
 
 /// Decode the xz tar `body` into the existing folder `into`, counting the decoded bytes as they
@@ -722,10 +789,6 @@ fn extract(name: &str, body: impl Read + 'static, into: &Path, limit: u64) -> Re
             Ok(read)
         }
     }
-    let damaged = |why: String| Refusal::Archive {
-        asset: name.to_owned(),
-        why,
-    };
     let decoder = xz4rust::XzDecoder::in_heap_with_alloc_dict_size(1 << 20, DICTIONARY_LIMIT);
     let buffer = std::num::NonZeroUsize::new(1 << 16).expect("non-zero");
     let read = Rc::new(Cell::new(0));
@@ -734,57 +797,119 @@ fn extract(name: &str, body: impl Read + 'static, into: &Path, limit: u64) -> Re
         read: read.clone(),
         limit,
     };
-    let over = |error: std::io::Error| {
-        if read.get() > limit {
-            Refusal::TooLarge {
-                asset: name.to_owned(),
-                limit,
-            }
-        } else {
-            damaged(error.to_string())
-        }
+    untar(name, capped, into).map_err(|refusal| match refusal {
+        Refusal::Archive { .. } if read.get() > limit => Refusal::TooLarge {
+            asset: name.to_owned(),
+            limit,
+        },
+        other => other,
+    })
+}
+
+/// Unpack the tar stream `body` into the existing folder `into`. Entries are read raw, so the tar
+/// reader never buffers an extension entry itself: a GNU long name or a PAX `path` is read here,
+/// capped at [`EXTENSION_LIMIT`], and applied to the entry after it. Only files and folders are
+/// written, each at a relative path with no `..`.
+#[cfg(feature = "prebuilt")]
+fn untar(name: &str, body: impl Read, into: &Path) -> Result<(), Refusal> {
+    use std::path::Component;
+    let damaged = |why: String| Refusal::Archive {
+        asset: name.to_owned(),
+        why,
     };
-    let mut archive = tar::Archive::new(capped);
-    for entry in archive.entries().map_err(over)? {
-        let mut entry = entry.map_err(over)?;
-        let path = entry.path().map_err(over)?.into_owned();
+    let error = |error: std::io::Error| damaged(error.to_string());
+    let mut archive = tar::Archive::new(body);
+    let mut long_name: Option<Vec<u8>> = None;
+    for entry in archive.entries().map_err(error)?.raw(true) {
+        let mut entry = entry.map_err(error)?;
         let kind = entry.header().entry_type();
+        let size = entry.header().entry_size().map_err(error)?;
+        if kind.is_gnu_longname()
+            || kind.is_gnu_longlink()
+            || kind.is_pax_local_extensions()
+            || kind.is_pax_global_extensions()
+        {
+            if size > EXTENSION_LIMIT {
+                return Err(damaged(format!(
+                    "a tar extension entry of {size} bytes, over {EXTENSION_LIMIT}"
+                )));
+            }
+            let mut data = Vec::with_capacity(size as usize);
+            entry.read_to_end(&mut data).map_err(error)?;
+            if kind.is_gnu_longname() {
+                long_name = Some(data.split(|b| *b == 0).next().unwrap_or_default().to_vec());
+            } else if kind.is_pax_local_extensions() {
+                for extension in tar::PaxExtensions::new(&data) {
+                    let extension = extension.map_err(error)?;
+                    if extension.key() == Ok("path") {
+                        long_name = Some(extension.value_bytes().to_vec());
+                    }
+                }
+            }
+            continue;
+        }
+        let path = match long_name.take() {
+            Some(bytes) => PathBuf::from(
+                String::from_utf8(bytes).map_err(|_| damaged("a path that is not UTF-8".into()))?,
+            ),
+            None => entry.path().map_err(error)?.into_owned(),
+        };
         if !kind.is_file() && !kind.is_dir() {
             return Err(damaged(format!(
                 "{} is not a file or folder",
                 path.display()
             )));
         }
-        if !entry.unpack_in(into).map_err(over)? {
-            return Err(damaged(format!("{} leaves the folder", path.display())));
+        let mut target = into.to_path_buf();
+        for component in path.components() {
+            match component {
+                Component::Normal(part) => target.push(part),
+                Component::CurDir => {}
+                _ => return Err(damaged(format!("{} leaves the folder", path.display()))),
+            }
+        }
+        if kind.is_dir() {
+            std::fs::create_dir_all(&target).map_err(error)?;
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(error)?;
+        }
+        let mut file = std::fs::File::create(&target).map_err(error)?;
+        std::io::copy(&mut entry, &mut file).map_err(error)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = entry.header().mode().map_err(error)? & 0o755;
+            file.set_permissions(std::fs::Permissions::from_mode(mode | 0o600))
+                .map_err(error)?;
         }
     }
     Ok(())
 }
 
-/// A new folder beside the destination, removed when dropped.
+/// The folder an unpack writes before its rename, removed when dropped.
 #[cfg(feature = "prebuilt")]
 struct Partial(PathBuf);
 
 #[cfg(feature = "prebuilt")]
 impl Partial {
-    fn new(parent: &Path) -> std::io::Result<Self> {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let path = parent.join(format!(
-            ".sdk-unpack.{}.{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir(&path)?;
-        Ok(Self(path))
+    /// Remove what a crashed unpack left here.
+    fn clear(&self) -> std::io::Result<()> {
+        match std::fs::symlink_metadata(&self.0) {
+            Ok(meta) if meta.is_dir() => std::fs::remove_dir_all(&self.0),
+            Ok(_) => std::fs::remove_file(&self.0),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
     }
 }
 
 #[cfg(feature = "prebuilt")]
 impl Drop for Partial {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        // After the rename there is nothing here to remove.
+        let _ = self.clear();
     }
 }
 

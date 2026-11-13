@@ -227,7 +227,7 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
 
 def package_format() -> int:
     """The prebuilt package's layout number, from its one place; anything but a number fails."""
-    return int((Path(__file__).resolve().parents[2] / "crates/horizon-mod-package/src/sdk/package-format").read_text())
+    return int((Path(__file__).resolve().parents[2] / "crates/horizon-mod-package/src/sdk/package-format").read_text().rstrip())
 
 
 def ready_sdk_shas() -> set[str]:
