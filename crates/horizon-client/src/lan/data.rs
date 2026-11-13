@@ -50,6 +50,26 @@ pub const SYNCHRONIZED: &[&str] = &[
     "minecraft:block_transformer",
     "minecraft:worldgen/block_state_provider",
 ];
+
+/// Append validated load declarations after vanilla, preserving its numeric IDs.
+/// Both the LAN server and a client's prepared built-ins use this same ordering.
+pub fn with_custom_stats(mut builtin: Builtin) -> Builtin {
+    let custom = mod_api::__private::custom_stat_declarations();
+    if !custom.is_empty() {
+        let ids = builtin
+            .registries
+            .entry("minecraft:custom_stat".into())
+            .or_default();
+        let mut names = std::mem::take(&mut ids.names);
+        for id in custom {
+            if !names.contains(id) {
+                names.push(id.clone());
+            }
+        }
+        *ids = horizon_protocol::registry::Ids::from_names(names);
+    }
+    builtin
+}
 pub const BIOME_REGISTRY: &str = "minecraft:worldgen/biome";
 /// The table a client plays a server with: `known`, the biomes of the
 /// server's biome registry that it lacks built from their data, and the ones
@@ -393,9 +413,11 @@ impl SyncData {
             horizon_world::json_folder::read(&resources.join("data/minecraft/recipe"))
         });
         let registries_step = startup::step("sync.registries");
-        let builtin = Builtin::find(resources)
-            .and_then(|p| Builtin::load(&p).ok())
-            .ok_or("registries.json not found next to the resources")?;
+        let builtin = with_custom_stats(
+            Builtin::find(resources)
+                .and_then(|p| Builtin::load(&p).ok())
+                .ok_or("registries.json not found next to the resources")?,
+        );
         let root: PathBuf = resources.join("data/minecraft");
         let mut registries = Vec::new();
         let mut dynamic = Dynamic {
@@ -558,7 +580,7 @@ impl SyncData {
         Self::merge_damage_tags(&mut tags, resources, overlay, &builtin, &dynamic)?;
         drop(tags_step);
         let content_identity = if resources.join(crate::content_identity::MARKER).exists()
-            || horizon_protocol::item::custom::entries().next().is_some()
+            || crate::content_identity::requires_horizon()
         {
             Some(
                 startup::time("sync.content_identity", || {

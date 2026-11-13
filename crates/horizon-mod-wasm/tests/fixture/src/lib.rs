@@ -58,6 +58,27 @@ impl Hooks for Mod {
         };
     }
 
+    fn player_stat_award(
+        &self,
+        _: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::PlayerStatAwardEvent<'_>,
+    ) -> mod_api::Flow {
+        // A named acceptance actor keeps this fixture inert for unrelated Game tests.
+        if event.name != "stat_award_fixture" {
+            return mod_api::Flow::Continue;
+        }
+        if event.stat_type.as_str() == "minecraft:mined" && event.stat.as_str() == "minecraft:stone"
+        {
+            event.value *= 2;
+        } else if event.stat_type.as_str() == "minecraft:custom"
+            && event.stat.as_str() == "minecraft:jump"
+        {
+            *event.stat = "wasm_fixture:steps".into();
+            event.value = 3;
+        }
+        mod_api::Flow::Continue
+    }
+
     fn server_tick(
         &self,
         host: &mut dyn mod_api::ServerHost,
@@ -240,6 +261,7 @@ impl Hooks for Mod {
         interaction::register(registrar);
         cauldron::register(registrar);
         tick_reply::register(registrar);
+        registrar.register_custom_stat("steps").unwrap();
         registrar
             .declare_datapack_registry(
                 "spell",

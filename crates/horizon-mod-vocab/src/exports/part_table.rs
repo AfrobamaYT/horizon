@@ -22,7 +22,7 @@ mod __private {
         HookParts, ItemKeyError, KnownIds, PartsRef, ResolvePartsError, SpawnPlacementDeclaration,
         TooltipAppenderPart, attribute_declarations, biome_modifier_declarations,
         biome_region_declarations, block_entity_transform, block_entity_transforms,
-        block_entity_types, block_key_listens, clear_game_parts, datapack_registry_declarations,
+        block_entity_types, block_key_listens, clear_game_parts, custom_stat_declarations, datapack_registry_declarations,
         declared_world_fluids, entity_attribute_declarations, entity_attribute_modifications,
         entity_parts, game_rule_bool_slot, game_rule_categories, game_rules,
         general_entity_type_declarations, has_entity_parts, has_part_hook, has_scoped_hook,
