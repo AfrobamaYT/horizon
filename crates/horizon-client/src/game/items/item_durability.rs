@@ -1,6 +1,8 @@
-use super::api_values::TryIntoApi;
-use super::{Game, answered_wear, armor_slot, durability_damage};
-use horizon_client::{items::ItemStack, motion::MotionEvent};
+//! Durability lost by what the player wears and holds: armour hurt with its wearer
+//! (`wear_armor`, `hurt_armor`, `hurt_equipment`, `hurt_player_equipment`) and the held stack's wear
+//! (`damage_held`, `damage_held_in_slot`, `hurt_held_without_breaking`).
+use super::*;
+use horizon_client::motion::MotionEvent;
 
 impl Game<'_> {
     /// Run equipment continuations with the acting player installed on the real host.
@@ -105,6 +107,7 @@ impl Game<'_> {
     ) {
         self.hurt_equipment(source, damage, &[3, 2, 1, 0]);
     }
+
     /// `Player.hurtHelmet`: the head slot alone wears.
     pub(in crate::game) fn hurt_helmet(
         &mut self,
@@ -113,6 +116,7 @@ impl Game<'_> {
     ) {
         self.hurt_equipment(source, damage, &[0]);
     }
+
     /// `LivingEntity.doHurtEquipment` of the `slots` of `armor`: each worn piece that
     /// wears when its wearer is hurt loses max(1, damage / 4) durability, except
     /// to a fire source when the piece resists fire (`ItemStack.canBeHurtBy`).
@@ -216,5 +220,67 @@ impl Game<'_> {
                 }
             }
         }
+    }
+    pub(super) fn damage_held(&mut self, amount: u32) {
+        self.damage_held_in_slot(
+            amount,
+            horizon_core::equipment_slot::EquipmentSlot::MainHand,
+        );
+    }
+    /// Hurt the acting hand's stack through ordinary wear/criterion/break handling,
+    /// reporting its break in the caller's explicit equipment slot.
+    pub(super) fn damage_held_in_slot(
+        &mut self,
+        amount: u32,
+        break_slot: horizon_core::equipment_slot::EquipmentSlot,
+    ) {
+        let Some(stack) = self.held().cloned() else {
+            return;
+        };
+        let (updated, broken) = self.damage_stack(&stack, amount.min(i32::MAX as u32) as i32, true);
+        if self.held() != Some(&stack) {
+            return;
+        }
+        self.edit_block_use_stack(|slot| {
+            if let Some(original) = slot.as_mut() {
+                if let Some(updated) = &updated {
+                    original.damage = original
+                        .damage
+                        .saturating_add(updated.damage.saturating_sub(stack.damage))
+                        .saturating_sub(stack.damage.saturating_sub(updated.damage));
+                    original.count = original
+                        .count
+                        .saturating_sub(stack.count.saturating_sub(updated.count));
+                    if original.count == 0 {
+                        *slot = None;
+                    }
+                } else {
+                    *slot = None;
+                }
+            }
+        });
+        if let Some(broken) = broken {
+            self.player_equipment_broke(break_slot, &broken);
+        }
+    }
+    /// `ItemStack.hurtWithoutBreaking`: Unbreaking applies, but the stack stops at
+    /// one point of durability left instead of breaking.
+    pub(super) fn hurt_held_without_breaking(&mut self, amount: u32) {
+        if self.creative {
+            return;
+        }
+        let Some(held) = self.held().cloned() else {
+            return;
+        };
+        let amount = self.wear(&held, amount);
+        let max = self.trident_max_damage(&held);
+        if amount == 0 || max == 0 {
+            return;
+        }
+        self.edit_block_use_stack(|slot| {
+            if let Some(stack) = slot.as_mut() {
+                stack.damage = (stack.damage + amount).min(max - 1);
+            }
+        });
     }
 }
