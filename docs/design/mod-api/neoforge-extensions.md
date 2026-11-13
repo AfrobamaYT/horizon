@@ -138,6 +138,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 
 | Method | Verdict | Horizon | Notes |
 | --- | --- | --- | --- |
+| `MutableDataComponentHolder`: `set`, `remove`, `update`, `applyComponents`, `copyFrom` | Covered | `ItemStack::set`, `remove`, `get`, `apply_components`, `copy_component_from`; `ItemPlace::edit` | `update` is `get` then `set`. Patch merges retain unrelated overrides and normalize damage atomically; copying preserves the source's own value/removal or clears the target override when the source inherits. Server-side `edit` writes the whole slot without changing its item/count or splitting one off, and a transaction abort restores it. [#3339](https://github.com/arismoko/horizon/issues/3339). |
 | `getDefaultAttributeModifiers(stack)` | Partial | `item_attribute_modifier` (`hooks/item_attribute_modifier.rs`) | Global `ItemAttributeModifierEvent` edits the stack's modifiers; the stack filters it, but it is not a Part method. |
 | `onDroppedByPlayer(stack, player)` | Partial | `item_toss` (`hooks/item_toss.rs`) | Global `ItemTossEvent`, cancellable; the item is not a Part attachment. |
 | `getHighlightTip(stack, name)` | Missing | — | No highlight-name hook. |
