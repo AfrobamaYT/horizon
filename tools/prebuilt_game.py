@@ -458,6 +458,8 @@ def start(out: Path) -> None:
         scratch = Path(scratch)
         # Never a real player's folders: lab.game_env gives the game fresh homes and no audio.
         environment = lab.game_env(RUST_BACKTRACE="1")
+        for name in ("HORIZON_HOME", "HORIZON_LAUNCHER_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME"):
+            environment[name] = str(scratch / name.lower())
         game = scratch / "game"
         game.mkdir()
         command = [str(installed / EXECUTABLE), "--resources", str(scratch / "no-resources"), "--dedicated", "--nogui"]
@@ -466,7 +468,7 @@ def start(out: Path) -> None:
                                 encoding="utf-8", errors="replace", timeout=300)
     print(result.stdout, end="")
     print(f"start: exit {result.returncode}")
-    if result.returncode < 0 or NO_RESOURCES not in result.stdout or "panicked" in result.stdout:
+    if result.returncode != 1 or NO_RESOURCES not in result.stdout or "panicked" in result.stdout:
         sys.exit(f"start: the executable stopped before the prepared-files check (exit {result.returncode})")
     print(f"start: the executable loaded the game's libraries and the mods' runtime and stopped at: {NO_RESOURCES}")
 
