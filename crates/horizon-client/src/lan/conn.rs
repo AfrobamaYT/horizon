@@ -291,6 +291,9 @@ pub struct PlayerSender {
     pub announced: Arc<super::announced_channels::AnnouncedChannels>,
     /// Its `horizon:levels` answer: its revision and the levels besides its own it can view.
     pub viewed_levels: horizon_protocol::viewed_levels::Answer,
+    /// The `horizon:menu_extra` payload layout the client reads: its revision answer,
+    /// 0 for one that did not answer (the legacy layout, a menu of a block only).
+    pub menu_extra_rev: u8,
 }
 #[derive(Clone)]
 enum To {
@@ -362,6 +365,7 @@ impl PlayerSender {
             datapack_offer: None,
             announced: Arc::default(),
             viewed_levels: Default::default(),
+            menu_extra_rev: 0,
         }
     }
     #[cfg(test)]
@@ -399,6 +403,7 @@ impl PlayerSender {
             datapack_offer: None,
             announced: Arc::default(),
             viewed_levels: Default::default(),
+            menu_extra_rev: 0,
         };
         (sender, move || inspect.queued_contents())
     }
@@ -415,6 +420,7 @@ impl PlayerSender {
             datapack_offer: None,
             announced: Arc::default(),
             viewed_levels: Default::default(),
+            menu_extra_rev: 0,
         }
     }
     /// The bytes received from and sent to the client on the wire so far.
@@ -1404,6 +1410,7 @@ fn login_and_configure(
             }),
         )?;
         c.ask_viewed_levels().map_err(e)?;
+        c.ask_menu_extra_rev().map_err(e)?;
     }
     // And how far it samples far terrain for it (crate::lod_net).
     if brand == "horizon" && shared.config.lod_distance > 0 {
@@ -1971,6 +1978,7 @@ fn play(
         datapack_offer: parts.datapack_offer.map(Into::into),
         announced: parts.channels.announced.clone().unwrap_or_default(),
         viewed_levels: parts.channels.viewed_levels.answer(),
+        menu_extra_rev: parts.channels.menu_extra_rev.revision(),
     };
     let required_pack = shared
         .config
@@ -3654,6 +3662,7 @@ mod outgoing_budget_tests {
             datapack_offer: None,
             announced: Arc::default(),
             viewed_levels: Default::default(),
+            menu_extra_rev: 0,
         }
     }
     #[test]
