@@ -394,6 +394,19 @@ jobs:
       - name: The mod API builds for wasm32
         if: needs.changes.outputs.rust_required != 'false'
         run: cargo check $JOBS -p horizon-mod-api --target wasm32-unknown-unknown --locked
+      # The prebuilt SDK's own feature graph: a release host --lib build with prefer-dynamic and warnings denied,
+      # as tools/prebuilt_game.py builds it. The checks above unify test and dev features (test-support) into the
+      # workspace build, which hid an unused import from everything but the SDK build on main. Its own target
+      # folder: these flags would otherwise invalidate the workspace's artifacts for the steps above and below.
+      - name: The prebuilt SDK's library builds without warnings
+        if: needs.changes.outputs.rust_required != 'false'
+        run: |
+          host=$(rustc -vV | awk '/^host:/ {print $2}')
+          start=$SECONDS
+          env -u CARGO_ENCODED_RUSTFLAGS RUSTFLAGS='-C prefer-dynamic -D warnings' \
+            cargo check $JOBS --locked -p horizon-mod-host --lib --target "$host" --profile release \
+            --target-dir target/sdk-check
+          echo "SDK library check: $((SECONDS - start)) s" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Propagate formatting failure
         if: ${{ always() && steps.formatting.outcome == 'failure' }}
         run: |
