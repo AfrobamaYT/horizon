@@ -327,6 +327,9 @@ jobs:
           find crates/horizon-mod-api/src crates/horizon-mod-vocab/src -name '*.rs' -print0 | xargs -0 rustfmt --edition 2024 --check --config skip_children=true
           find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustfmt --edition 2024 --config skip_children=true --check
           rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs
+      # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
+      - name: Cap build parallelism to the runner
+        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       - name: Lint native targets
         if: needs.changes.outputs.rust_required != 'false'
         id: native-lint
@@ -475,6 +478,9 @@ jobs:
       - name: Restore unchanged source timestamps
         if: needs.changes.outputs.rust_required != 'false'
         run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes-v2.json | tee -a "$GITHUB_STEP_SUMMARY"
+      # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
+      - name: Cap build parallelism to the runner
+        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       # horizon-client rustc processes take several GB each; $JOBS (chosen above) fits them in the runner's
       # memory. Formatting and lint run in parallel (the lint job), so this job only tests.
       # Libraries, binaries and integration tests, then doc tests: not the ~275 examples, which the lint job already
@@ -749,6 +755,9 @@ jobs:
       # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
       - name: Restore unchanged source timestamps
         run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
+      # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
+      - name: Cap build parallelism to the runner
+        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       # Missing data must fail on both main pushes and nightly dispatches.
       - name: Prepare checkout-keyed vanilla data
         id: data
@@ -882,6 +891,9 @@ jobs:
       # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
       - name: Restore unchanged source timestamps
         run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
+      # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
+      - name: Cap build parallelism to the runner
+        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       - name: Check the launcher's formatting, lint and tests
         if: needs.changes.outputs.launcher_required != 'false'
         working-directory: launcher
@@ -949,6 +961,9 @@ jobs:
       # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
       - name: Restore unchanged source timestamps
         run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
+      # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
+      - name: Cap build parallelism to the runner
+        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       - name: Check prepared output digest
         run: |
           # Never reuse a completed preparation for this diagnostic, including a retry.
@@ -999,6 +1014,9 @@ jobs:
       # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
       - name: Restore unchanged source timestamps
         run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
+      # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
+      - name: Cap build parallelism to the runner
+        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       - name: Set up disk-backed parity scratch and prepared vanilla data
         run: |
           rm -rf "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp"
