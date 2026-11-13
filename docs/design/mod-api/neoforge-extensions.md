@@ -72,7 +72,7 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `isFertile(state, level, pos)` | Missing | — | No fertile-block query; bonemeal hooks fire later. |
 | `getExpDrop(state, level, pos, blockEntity, breaker, tool)` | Partial | `break_block.exp_to_drop` (`hooks/base.rs`) | Replaces the XP sample for a player break; global, not per-block, and the block entity/tool/breaker are not arguments. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `rotate(state, level, pos, rotation)` | Missing | — | Structure rotation is engine behaviour; no callback. |
-| `getEnchantPowerBonus(state, level, pos)` | Partial | `BlockPart::enchant_power_bonus` (`hooks/enchant_power_bonus.rs`) | Asked for each bookshelf offset with a clear transmitter as a single-player world or a LAN host makes the table's offers, with the table's position; the sum is truncated as NeoForge does and a negative one counts as 0. The table's enchant particles still read `#minecraft:enchantment_power_provider`: they are drawn inside the particle pass, which can lend no host. |
+| `getEnchantPowerBonus(state, level, pos)` | Covered | `BlockPart::enchant_power_bonus` (`hooks/enchant_power_bonus.rs`, contract v2, both sides) | Offers query each bookshelf offset with a clear transmitter; the sum is truncated and a negative one counts as 0. Client enchant particles use the same power source: any nonzero answer is a provider, subject to the same transmitter check. Particle answers are cached once per state at world entry, parts reload and received-server-tag publication, after tags, rebound parts and tag-update listeners are published. This also rebuilds vanilla provider/transmitter answers without mods. Both hook positions are at the origin, so particle answers must be state-only; a mod answer change needs that rebuild. No dispatch occurs per frame. The provider tag supplies the vanilla default only. |
 | `onNeighborChange(state, level, pos, fromPos)` | Missing | — | `neighbor_changed` is `Block.neighborChanged`, a different callback. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `shouldCheckWeakPower(state, level, pos, direction)` | Covered | `BlockPart::should_check_weak_power` (`hooks/should_check_weak_power.rs`) | The argument direction is the input side, as NeoForge's. |
 | `getWeakChanges(state, level, pos)` | Missing | — | No weak-change observer query. [#1038](https://github.com/arismoko/horizon/issues/1038). |
@@ -409,3 +409,7 @@ The resource-backed `horizon-client` test
 exercises real Game publication, model-registry lookup, distinct full-block/slab geometry,
 missing-form refusal and stale/replacement handles. It requires `HORIZON_TEST_RESOURCES`
 and `--ignored`. These are CPU/model-registry proofs, not GPU rendering or screenshot proof.
+
+## Changes
+
+- `enchant_power_bonus` contract v2 widens server to both sides: client enchant particles now consume the shared power answer through a per-game cache, rebuilt after parts reload or complete server-tag publication, including tag-update listeners (#3749).
