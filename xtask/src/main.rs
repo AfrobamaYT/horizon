@@ -412,7 +412,8 @@ fn program_name(program: &Path, name: &str) -> String {
 /// runtime) into `out`.
 fn copy_runtime(route: &str, program: &Path, out: &Path) -> Result<(), String> {
     let inputs = horizon_mod_package::sdk::inputs();
-    for path in inputs.route(route).program_files(program) {
+    let route = inputs.route(route).map_err(|e| e.to_string())?;
+    for path in route.program_files(program) {
         copy_into(&path, out)?;
     }
     Ok(())

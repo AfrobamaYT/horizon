@@ -219,13 +219,14 @@ class AllocatorSelectionTests(unittest.TestCase):
     def test_package_format_comes_from_its_one_place(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            sdk = root / "crates/horizon-mod-package/src/sdk.rs"
-            sdk.parent.mkdir(parents=True)
-            sdk.write_text("pub const PACKAGE_FORMAT: u32 = 7;\n")
+            number = root / "crates/horizon-mod-package/src/sdk/package-format"
+            number.parent.mkdir(parents=True)
+            number.write_text("7\n")
             self.assertEqual(prebuilt_game.package_format(root), 7)
-            sdk.write_text("pub const OTHER: u32 = 7;\n")
-            with self.assertRaisesRegex(ValueError, "PACKAGE_FORMAT"):
-                prebuilt_game.package_format(root)
+            for broken in ("", "7", "v7\n", "7\n8\n"):
+                number.write_text(broken)
+                with self.subTest(broken), self.assertRaisesRegex(ValueError, "one number"):
+                    prebuilt_game.package_format(root)
         # The repository's own number is the one the archive gate compares against.
         self.assertEqual(prebuilt_game.package_format(prebuilt_game.ROOT), 6)
 

@@ -360,20 +360,22 @@ impl Identity {
 pub(super) fn identity(dir: &Path) -> Result<Identity, String> {
     let path = dir.join(IDENTITY);
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    // Formats up to 5 named the number `format_version` (before 5: nothing, so 0).
     #[derive(serde::Deserialize)]
     struct Format {
-        #[serde(default)]
-        package_format: u32,
+        package_format: Option<u32>,
+        format_version: Option<u32>,
     }
     let format: Format =
         serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let found = format.package_format.or(format.format_version).unwrap_or(0);
     let supported = horizon_mod_package::sdk::PACKAGE_FORMAT;
-    let (version, supported_text) = (format.package_format.to_string(), supported.to_string());
+    let (version, supported_text) = (found.to_string(), supported.to_string());
     let args = [
         ("version", version.as_str()),
         ("format", supported_text.as_str()),
     ];
-    match format.package_format {
+    match found {
         found if found == supported => {
             serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
         }
@@ -968,6 +970,22 @@ mod tests {
         ] {
             assert_eq!(refusal_of(cargo), Some(reason), "{cargo}");
         }
+    }
+
+    #[test]
+    fn an_older_package_names_its_own_format() {
+        let dir = super::super::tests::dir("prebuilt-older-format");
+        let refusal = |text: &str| {
+            fs::write(dir.join(IDENTITY), text).unwrap();
+            identity(&dir).err().unwrap()
+        };
+        let error = refusal(r#"{"format_version": 5}"#);
+        assert!(error.contains("SDK format 5 is too old"), "{error}");
+        let error = refusal("{}");
+        assert!(error.contains("SDK format 0 is too old"), "{error}");
+        let newer = horizon_mod_package::sdk::PACKAGE_FORMAT + 1;
+        let error = refusal(&format!(r#"{{"package_format": {newer}}}"#));
+        assert!(error.contains("update the launcher"), "{error}");
     }
 
     #[test]

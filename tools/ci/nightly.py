@@ -226,9 +226,8 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
 
 
 def package_format() -> int:
-    """The prebuilt package's layout number, kept in one place (`sdk.rs` PACKAGE_FORMAT)."""
-    source = (Path(__file__).resolve().parents[2] / "crates/horizon-mod-package/src/sdk.rs").read_text()
-    return int(re.search(r"^pub const PACKAGE_FORMAT: u32 = (\d+);$", source, re.MULTILINE).group(1))
+    """The prebuilt package's layout number, from its one place; anything but a number fails."""
+    return int((Path(__file__).resolve().parents[2] / "crates/horizon-mod-package/src/sdk/package-format").read_text())
 
 
 def ready_sdk_shas() -> set[str]:
@@ -269,14 +268,14 @@ def green_base(repo: str, issue: str) -> Ref:
     else:
         sha = train.green_main_head(parity=True)
     if not sha:
-        checks = "dyna-checks and has a complete published v5 SDK" if fork else "checks and parity-main"
+        checks = f"dyna-checks and has a complete published v{package_format()} SDK" if fork else "checks and parity-main"
         stop(repo, issue, f"the build stopped: no recent commit of main passed {checks}, so "
                           "none is green to build on. The next build after they pass takes it.")
     if not is_ancestor(sha, "refs/remotes/origin/main"):
         stop(repo, issue, f"the build stopped: {sha[:9]} is not on main.")
     sha = git("rev-parse", sha)
     if fork and explicit and not sdk_ready(sha):
-        stop(repo, issue, f"the build stopped: {sha} has no complete published v5 SDK pair.")
+        stop(repo, issue, f"the build stopped: {sha} has no complete published v{package_format()} SDK pair.")
     return Ref("main", sha, dt.datetime.fromisoformat(git("show", "-s", "--format=%cI", sha)))
 
 

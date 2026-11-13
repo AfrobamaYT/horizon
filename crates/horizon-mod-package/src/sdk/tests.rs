@@ -70,7 +70,7 @@ fn written_index_reads_back_and_unknown_fields_are_ignored() {
 #[test]
 fn each_bad_index_is_refused_by_name() {
     let good = json(&index(&[(ENGINE, b"engine")]));
-    let cases: [(&str, fn(&mut serde_json::Value), Refusal); 7] = [
+    let cases: [(&str, fn(&mut serde_json::Value), Refusal); 8] = [
         (
             "unknown schema",
             |v| v["schema"] = 2.into(),
@@ -112,6 +112,15 @@ fn each_bad_index_is_refused_by_name() {
                 v["assets"]["../engine-x86_64-unknown-linux-gnu.tar.xz"] = asset;
             },
             Refusal::AssetName("../engine-x86_64-unknown-linux-gnu.tar.xz".into()),
+        ),
+        (
+            "a path in the target",
+            |v| {
+                let mut asset = v["assets"].as_object_mut().unwrap().remove(ENGINE).unwrap();
+                asset["target"] = "a/../../evil".into();
+                v["assets"]["engine-a/../../evil.tar.xz"] = asset;
+            },
+            Refusal::AssetName("engine-a/../../evil.tar.xz".into()),
         ),
         (
             "a name that says another side",
@@ -256,6 +265,10 @@ fn asset_names_state_kind_target_and_side() {
         ("build-data-x.tar.xz", None),
         ("sdk/engine-x.tar.xz", None),
         ("surface.json.xz", None),
+        ("engine-a/../../evil.tar.xz", None),
+        ("engine-a\\..\\evil.tar.xz", None),
+        ("engine-x86.64.tar.xz", None),
+        ("engine-X86_64.tar.xz", None),
     ] {
         assert_eq!(Asset::parts_of(name), parts, "{name}");
     }
@@ -268,7 +281,7 @@ fn removing_each_required_input_names_it_before_work() {
         let folder = tempfile::tempdir().unwrap();
         let checkout = folder.path().join("checkout");
         let program = folder.path().join("bin/horizon-client.exe");
-        let listed = inputs.route(route);
+        let listed = inputs.route(route).unwrap();
         let files: Vec<(String, PathBuf)> = listed
             .program_files(&program)
             .into_iter()
@@ -306,113 +319,238 @@ fn removing_each_required_input_names_it_before_work() {
 }
 
 #[test]
-fn every_named_input_has_a_way_to_make_it_and_the_book_lists_it() {
+fn an_unknown_route_is_refused_not_a_panic() {
+    let mut downloaded = inputs();
+    downloaded.routes.remove("package");
+    let folder = tempfile::tempdir().unwrap();
+    assert_eq!(
+        downloaded
+            .check(
+                "package",
+                &folder.path().join("horizon-client"),
+                folder.path()
+            )
+            .unwrap_err(),
+        Refusal::Route("package".into())
+    );
+    let mut listed = index(&[(ENGINE, b"engine")]);
+    listed.inputs = downloaded;
+    assert_eq!(
+        listed
+            .route_assets("package", "x86_64-unknown-linux-gnu", Side::Client)
+            .unwrap_err(),
+        Refusal::Route("package".into())
+    );
+}
+
+#[test]
+fn how_to_make_an_input_uses_the_game_programs_profile_and_folder() {
     let inputs = inputs();
-    let page = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../docs/modding/src/how-to/native-mods/07-local-developer-builds.md"),
-    )
-    .unwrap();
+    for (folder, flag) in [
+        ("target/release", "cargo build --release -p horizon-prepare"),
+        ("target/debug", "cargo build -p horizon-prepare"),
+        (
+            "target/fast",
+            "cargo build --profile fast -p horizon-prepare",
+        ),
+    ] {
+        let program = Path::new(folder).join("horizon-client");
+        assert_eq!(inputs.how("horizon-prepare", &program).unwrap(), flag);
+    }
+    let program = Path::new("target/release/horizon-client");
+    assert_eq!(
+        inputs.how("horizon-wasm-std.wasm", program).unwrap(),
+        "cargo run --locked -p cargo-horizon-mod -- wasm-std target/release/horizon-wasm-std.wasm"
+    );
+}
+
+/// The book's table of required inputs, as `inputs.json` says it.
+fn book_table(inputs: &Inputs) -> String {
+    let mut rows: Vec<(String, &str, Vec<&str>)> = Vec::new();
+    for route in ["package", "package-server"] {
+        let listed = inputs.route(route).unwrap();
+        let files = listed
+            .program
+            .iter()
+            .map(|name| (name, "beside the game program"))
+            .chain(listed.checkout.iter().map(|name| (name, "in the checkout")));
+        for (name, place) in files {
+            match rows.iter_mut().find(|row| &row.0 == name) {
+                Some(row) => row.2.push(route),
+                None => rows.push((name.clone(), place, vec![route])),
+            }
+        }
+    }
+    let mut table = "| File | Where | Needed by | How to make it |\n|---|---|---|---|\n".to_owned();
+    for (name, place, routes) in rows {
+        let routes: Vec<String> = routes.iter().map(|route| format!("`{route}`")).collect();
+        let how = &inputs.how[&name];
+        table += &format!("| `{name}` | {place} | {} | {how} |\n", routes.join(", "));
+    }
+    table
+}
+
+#[test]
+fn every_named_input_has_a_way_to_make_it_and_the_book_shows_the_list() {
+    let inputs = inputs();
     for route in inputs.routes.values() {
         for name in route.program.iter().chain(&route.checkout) {
             assert!(inputs.how.contains_key(name), "{name}");
-            assert!(page.contains(&format!("`{name}`")), "the book omits {name}");
         }
         for kind in &route.sdk {
             assert!(inputs.how.contains_key(kind.name()), "{}", kind.name());
         }
     }
+    let page = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/modding/src/how-to/native-mods/07-local-developer-builds.md"),
+    )
+    .unwrap();
+    let table = book_table(&inputs);
+    assert!(
+        page.contains(&table),
+        "the book's table differs from sdk/inputs.json; it should read:\n{table}"
+    );
 }
 
 #[cfg(feature = "prebuilt")]
 mod unpack {
     use super::*;
 
-    fn tar(entries: &[(&str, &[u8])], link: Option<&str>) -> Vec<u8> {
-        let mut builder = tar::Builder::new(Vec::new());
-        for (path, bytes) in entries {
-            let mut header = tar::Header::new_gnu();
-            header.set_size(bytes.len() as u64);
-            header.set_mode(0o644);
-            header.set_cksum();
-            builder.append_data(&mut header, path, *bytes).unwrap();
-        }
-        if let Some(target) = link {
-            let mut header = tar::Header::new_gnu();
-            header.set_entry_type(tar::EntryType::Symlink);
-            header.set_size(0);
-            builder.append_link(&mut header, "link", target).unwrap();
-        }
-        builder.into_inner().unwrap()
+    // Fixtures written by Python's `lzma` and `tarfile`, as `tools/prebuilt_game.py` writes the
+    // assets: `fixture.tar.xz` is `tar_xz`'s own output (tests/test_prebuilt_game.py checks it);
+    // `bomb.tar.xz` is 9.7 KiB holding one 64 MiB file of zeros; `link.tar.xz` holds a file then
+    // a symlink; `escape.tar.xz` a file then `../x`.
+    const FIXTURE: &[u8] = include_bytes!("fixture.tar.xz");
+    const BOMB: &[u8] = include_bytes!("bomb.tar.xz");
+    const LINK: &[u8] = include_bytes!("link.tar.xz");
+    const ESCAPE: &[u8] = include_bytes!("escape.tar.xz");
+
+    /// Unpack `bytes`, listed as the engine asset, into `<temp>/sdk`; the temp folder too.
+    fn unpacked(bytes: &[u8], limit: u64) -> (tempfile::TempDir, Result<(), Refusal>) {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("download");
+        std::fs::write(&file, bytes).unwrap();
+        let listed = index(&[(ENGINE, bytes)]);
+        let result = unpack(&listed, ENGINE, &file, &folder.path().join("sdk"), limit);
+        (folder, result)
     }
 
-    fn xz(bytes: &[u8]) -> Vec<u8> {
-        let mut packed = Vec::new();
-        lzma_rs::xz_compress(&mut &bytes[..], &mut packed).unwrap();
-        packed
+    /// What is left in the temp folder besides the download.
+    fn left(folder: &tempfile::TempDir) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(folder.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name != "download")
+            .collect();
+        names.sort();
+        names
     }
 
     #[test]
-    fn an_archive_unpacks_within_its_limit_and_a_bomb_is_refused() {
-        let packed = xz(&tar(&[("deps/a.rmeta", &[0u8; 1 << 16])], None));
-        let listed = index(&[(ENGINE, &packed)]);
-        let folder = tempfile::tempdir().unwrap();
-        let into = folder.path().join("sdk");
-        unpack(&listed, ENGINE, &packed[..], &into, 1 << 20).unwrap();
+    fn an_archive_the_packager_wrote_unpacks_into_place() {
+        let (folder, result) = unpacked(FIXTURE, 1 << 20);
+        result.unwrap();
         assert_eq!(
-            std::fs::read(into.join("deps/a.rmeta")).unwrap().len(),
-            1 << 16
-        );
-        // Only the destination is left: the scratch tar is gone.
-        assert_eq!(std::fs::read_dir(folder.path()).unwrap().count(), 1);
-        let small = folder.path().join("small");
-        assert_eq!(
-            unpack(&listed, ENGINE, &packed[..], &small, 1 << 12).unwrap_err(),
-            Refusal::TooLarge {
-                asset: ENGINE.into(),
-                limit: 1 << 12,
-            }
-        );
-    }
-
-    #[test]
-    fn an_archive_the_packager_wrote_unpacks() {
-        // Written by `tools/prebuilt_game.py`'s `tar_xz` (tests/test_prebuilt_game.py checks it still is).
-        let packed = include_bytes!("fixture.tar.xz");
-        let listed = index(&[(ENGINE, packed)]);
-        let folder = tempfile::tempdir().unwrap();
-        unpack(&listed, ENGINE, &packed[..], folder.path(), 1 << 20).unwrap();
-        assert_eq!(
-            std::fs::read_to_string(folder.path().join("deps/a.rmeta")).unwrap(),
+            std::fs::read_to_string(folder.path().join("sdk/deps/a.rmeta")).unwrap(),
             "metadata"
         );
+        assert_eq!(left(&folder), ["sdk"]);
     }
 
     #[test]
-    fn links_and_damaged_archives_are_refused() {
+    fn nothing_is_decoded_before_the_checksum_matches() {
         let folder = tempfile::tempdir().unwrap();
-        let packed = xz(&tar(&[("a", b"a")], Some("/etc/passwd")));
-        let listed = index(&[(ENGINE, &packed)]);
+        let file = folder.path().join("download");
+        std::fs::write(&file, FIXTURE).unwrap();
+        let mut listed = index(&[(ENGINE, FIXTURE)]);
+        listed.assets.get_mut(ENGINE).unwrap().sha256 = sha256_hex(b"other");
+        assert_eq!(
+            unpack(&listed, ENGINE, &file, &folder.path().join("sdk"), 1 << 20).unwrap_err(),
+            Refusal::Checksum {
+                asset: ENGINE.into()
+            }
+        );
+        assert_eq!(left(&folder), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_bomb_is_refused_while_it_streams() {
+        let (folder, result) = unpacked(BOMB, 1 << 20);
+        assert_eq!(
+            result.unwrap_err(),
+            Refusal::TooLarge {
+                asset: ENGINE.into(),
+                limit: 1 << 20,
+            }
+        );
+        assert_eq!(left(&folder), Vec::<String>::new());
+        // Fed a byte at a time, the decoder reaches the limit with most of the input unread: it
+        // hands decoded bytes on as it goes and never holds the whole output.
+        struct Trickle {
+            bytes: &'static [u8],
+            read: std::rc::Rc<std::cell::Cell<usize>>,
+        }
+        impl Read for Trickle {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                let at = self.read.get();
+                let Some(byte) = self.bytes.get(at) else {
+                    return Ok(0);
+                };
+                buffer[0] = *byte;
+                self.read.set(at + 1);
+                Ok(1)
+            }
+        }
+        let read = std::rc::Rc::new(std::cell::Cell::new(0));
+        let trickle = Trickle {
+            bytes: BOMB,
+            read: read.clone(),
+        };
+        let into = tempfile::tempdir().unwrap();
+        assert!(matches!(
+            extract(ENGINE, trickle, into.path(), 1 << 20),
+            Err(Refusal::TooLarge { .. })
+        ));
+        assert!(
+            read.get() < BOMB.len() / 4,
+            "{} of {}",
+            read.get(),
+            BOMB.len()
+        );
+    }
+
+    #[test]
+    fn links_escapes_and_damage_are_refused_and_leave_nothing() {
+        for (bytes, why) in [
+            (LINK, "link is not a file or folder"),
+            (ESCAPE, "../x leaves the folder"),
+            (b"not xz".as_slice(), ""),
+        ] {
+            let (folder, result) = unpacked(bytes, 1 << 20);
+            let Err(Refusal::Archive { why: found, .. }) = result else {
+                panic!("{why:?}: {result:?}");
+            };
+            assert!(found.contains(why), "{found}");
+            assert_eq!(left(&folder), Vec::<String>::new(), "{why}");
+        }
+    }
+
+    #[test]
+    fn a_plain_asset_is_not_unpacked() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("surface.json");
+        std::fs::write(&file, b"{}").unwrap();
+        let listed = index(&[("surface.json", b"{}")]);
         let refused = unpack(
             &listed,
-            ENGINE,
-            &packed[..],
-            &folder.path().join("l"),
+            "surface.json",
+            &file,
+            &folder.path().join("s"),
             1 << 20,
         );
         assert!(
-            matches!(&refused, Err(Refusal::Archive { why, .. }) if why.contains("not a file or folder")),
-            "{refused:?}"
-        );
-        let refused = unpack(
-            &listed,
-            ENGINE,
-            &b"not xz"[..],
-            &folder.path().join("d"),
-            1 << 20,
-        );
-        assert!(
-            matches!(refused, Err(Refusal::Archive { .. })),
+            matches!(&refused, Err(Refusal::Archive { why, .. }) if why == "not an archive"),
             "{refused:?}"
         );
     }

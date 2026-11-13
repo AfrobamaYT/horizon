@@ -90,12 +90,11 @@ def rustc_host() -> str:
 
 
 def package_format(root: Path) -> int:
-    """The package layout's one number (`sdk::PACKAGE_FORMAT`), read without a package dependency."""
-    source = (root / "crates/horizon-mod-package/src/sdk.rs").read_text()
-    matches = re.findall(r"^pub const PACKAGE_FORMAT: u32 = (\d+);$", source, re.MULTILINE)
-    if len(matches) != 1:
-        raise ValueError("expected one PACKAGE_FORMAT in sdk.rs")
-    return int(matches[0])
+    """The package layout's one number, from its one place (`sdk::PACKAGE_FORMAT` includes the same file)."""
+    text = (root / "crates/horizon-mod-package/src/sdk/package-format").read_text()
+    if not re.fullmatch(r"[0-9]+\n", text):
+        raise ValueError(f"sdk/package-format must hold one number, not {text!r}")
+    return int(text)
 
 
 def head() -> str:

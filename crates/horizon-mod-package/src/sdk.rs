@@ -18,9 +18,26 @@ use std::{
 pub const INDEX: &str = "sdk.json";
 /// The index schema this reader knows.
 pub const SCHEMA: u32 = 1;
-/// The one place the prebuilt package's layout is numbered: the archive name, the package's
-/// identity file and `sdk.json` all take it from here.
-pub const PACKAGE_FORMAT: u32 = 6;
+/// The prebuilt package's layout number. Its one place is the file `sdk/package-format`, which
+/// the archive name, the package's identity file, `sdk.json` and the scripts all read.
+pub const PACKAGE_FORMAT: u32 = number(include_str!("sdk/package-format"));
+
+/// A decimal number and a newline, at compile time: anything else fails the build.
+const fn number(text: &str) -> u32 {
+    let bytes = text.as_bytes();
+    assert!(bytes.len() > 1 && bytes[bytes.len() - 1] == b'\n');
+    let mut value = 0u32;
+    let mut at = 0;
+    while at < bytes.len() - 1 {
+        assert!(
+            bytes[at].is_ascii_digit(),
+            "sdk/package-format holds one number"
+        );
+        value = value * 10 + (bytes[at] - b'0') as u32;
+        at += 1;
+    }
+    value
+}
 /// The game version every build of this source implements.
 pub const GAME: &str = horizon_core::version::VERSION_ID;
 /// Files a release folder holds besides its assets: the index and its signed sums.
@@ -158,7 +175,8 @@ pub enum Side {
 impl Asset {
     /// The kind, codec, target and side an asset's file name states:
     /// `surface.json`, `build-data.tar.xz`, `api-source.tar.xz` and
-    /// `<runtime|api|engine>-<target>[-server].tar.xz`. `None` for any other name.
+    /// `<runtime|api|engine>-<target>[-server].tar.xz`, where a target is made of `a-z`, `0-9`,
+    /// `_` and `-` only. `None` for any other name, so a name this accepts is a plain file name.
     pub fn parts_of(name: &str) -> Option<(Kind, Codec, Option<String>, Option<Side>)> {
         if name == "surface.json" {
             return Some((Kind::Surface, Codec::None, None, None));
@@ -179,7 +197,9 @@ impl Asset {
             Some(target) => (target, Side::Server),
             None => (rest, Side::Client),
         };
-        (!target.is_empty()).then(|| (kind, Codec::Xz, Some(target.to_owned()), Some(side)))
+        let plain = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-';
+        (!target.is_empty() && target.chars().all(plain))
+            .then(|| (kind, Codec::Xz, Some(target.to_owned()), Some(side)))
     }
 
     /// A per-target asset's file name, as [`Asset::parts_of`] reads it.
@@ -219,17 +239,33 @@ pub fn inputs() -> Inputs {
 }
 
 impl Inputs {
-    /// The route named `name`; the names are this crate's own, so an unknown one is a caller bug.
-    pub fn route(&self, name: &str) -> &Route {
+    /// The route named `name`. The list may come from a downloaded `sdk.json`, so an unknown
+    /// name is a refusal.
+    pub fn route(&self, name: &str) -> Result<&Route, Refusal> {
         self.routes
             .get(name)
-            .unwrap_or_else(|| panic!("no route {name} in sdk/inputs.json"))
+            .ok_or_else(|| Refusal::Route(name.to_owned()))
+    }
+
+    /// How to make `name` (as listed, without `.exe`) for the game program `program`: `PROFILE`
+    /// becomes the cargo flag of the profile `program` was built with (its folder's name) and
+    /// `PROGRAM_FOLDER` its folder, so the command makes the file where the check looks.
+    pub fn how(&self, name: &str, program: &Path) -> Option<String> {
+        let folder = program.parent().unwrap_or(Path::new(""));
+        let profile = match folder.file_name().and_then(|n| n.to_str()) {
+            Some("debug") | None => String::new(),
+            Some("release") => "--release".to_owned(),
+            Some(other) => format!("--profile {other}"),
+        };
+        let how = self.how.get(name)?;
+        let how = how.replace("PROFILE", &profile).replace("  ", " ");
+        Some(how.replace("PROGRAM_FOLDER", &folder.display().to_string()))
     }
 
     /// Every file of `route` that is missing, beside `program` or in `checkout`, together with
     /// how to make each, in one message; `Ok` when nothing is missing.
     pub fn check(&self, route: &str, program: &Path, checkout: &Path) -> Result<(), Refusal> {
-        let route = self.route(route);
+        let route = self.route(route)?;
         let missing: Vec<String> = route
             .program_files(program)
             .into_iter()
@@ -253,7 +289,8 @@ impl Inputs {
             .iter()
             .filter_map(|name| {
                 let listed = name.strip_suffix(".exe").unwrap_or(name);
-                self.how.get(listed).map(|how| format!("{name}: {how}"))
+                self.how(listed, program)
+                    .map(|how| format!("{name}: {how}"))
             })
             .collect();
         Err(Refusal::MissingInputs { missing, how })
@@ -314,6 +351,8 @@ pub enum Refusal {
     Archive { asset: String, why: String },
     /// Reading or writing failed.
     Io(String),
+    /// The input list has no such route.
+    Route(String),
     /// Files a route needs are not there; how to make each.
     MissingInputs {
         missing: Vec<String>,
@@ -358,6 +397,7 @@ impl fmt::Display for Refusal {
             }
             Self::Archive { asset, why } => write!(f, "{asset}: damaged archive: {why}"),
             Self::Io(why) => f.write_str(why),
+            Self::Route(route) => write!(f, "the SDK's input list has no route {route}"),
             Self::MissingInputs { missing, how } => {
                 write!(f, "missing required inputs: {}", missing.join(", "))?;
                 for line in how {
@@ -539,11 +579,7 @@ impl Index {
         target: &str,
         side: Side,
     ) -> Result<Vec<String>, Refusal> {
-        let route = self
-            .inputs
-            .routes
-            .get(route)
-            .ok_or_else(|| Refusal::Missing(vec![format!("route {route}")]))?;
+        let route = self.inputs.route(route)?;
         let names: Vec<String> = route
             .sdk
             .iter()
@@ -624,116 +660,131 @@ impl Index {
     }
 }
 
-/// Unpack the listed archive `name` from `body` into the folder `into`, refusing once the
-/// unpacked bytes pass `limit` (a decompression bomb) and any entry that is not a plain file or
-/// folder inside `into`. `body` is checked against the index first ([`Index::verify`]) by the
-/// caller, who owns the download.
+/// The largest xz dictionary [`unpack`] decodes with: `xz -9`'s. The decoder's memory is this plus
+/// fixed buffers, whatever the archive holds; an archive asking for more is refused as damaged.
+#[cfg(feature = "prebuilt")]
+pub const DICTIONARY_LIMIT: usize = 64 << 20;
+
+/// Unpack the listed archive `name`, downloaded to the file `file`, into the new folder `into`.
+/// The file is checked against the index first ([`Index::verify`]), so nothing unverified is
+/// decoded. The archive streams through a bounded dictionary into a folder beside `into`, which is
+/// renamed into place only when every entry unpacked: a refusal partway leaves nothing. Refused:
+/// unpacked bytes past `limit` (a decompression bomb), and any entry that is not a plain file or
+/// folder inside the destination.
 #[cfg(feature = "prebuilt")]
 pub fn unpack(
     index: &Index,
     name: &str,
-    body: impl Read,
+    file: &Path,
     into: &Path,
     limit: u64,
 ) -> Result<(), Refusal> {
-    use std::io::{BufReader, Write};
-    let asset = index.asset(name)?;
+    let open = || {
+        std::fs::File::open(file)
+            .map_err(|error| Refusal::Io(format!("{}: {error}", file.display())))
+    };
+    index.verify(name, open()?)?;
+    if index.asset(name)?.codec != Codec::Xz {
+        return Err(Refusal::Archive {
+            asset: name.to_owned(),
+            why: "not an archive".into(),
+        });
+    }
+    let io = |error: std::io::Error| Refusal::Io(format!("{}: {error}", into.display()));
+    let parent = into
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let partial = Partial::new(parent).map_err(io)?;
+    extract(name, open()?, &partial.0, limit)?;
+    // Once renamed, the partial folder's removal on drop finds nothing.
+    std::fs::rename(&partial.0, into).map_err(io)
+}
+
+/// Decode the xz tar `body` into the existing folder `into`, counting the decoded bytes as they
+/// are read.
+#[cfg(feature = "prebuilt")]
+fn extract(name: &str, body: impl Read + 'static, into: &Path, limit: u64) -> Result<(), Refusal> {
+    use std::{cell::Cell, rc::Rc};
+    /// A reader that fails once more than `limit` bytes came through it.
+    struct Capped<R> {
+        inner: R,
+        read: Rc<Cell<u64>>,
+        limit: u64,
+    }
+    impl<R: Read> Read for Capped<R> {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            let read = self.inner.read(buffer)?;
+            self.read.set(self.read.get() + read as u64);
+            if self.read.get() > self.limit {
+                return Err(std::io::Error::other("over the limit"));
+            }
+            Ok(read)
+        }
+    }
     let damaged = |why: String| Refusal::Archive {
         asset: name.to_owned(),
         why,
     };
-    if asset.codec != Codec::Xz {
-        return Err(damaged("not an archive".into()));
-    }
-    let io = |error: std::io::Error| Refusal::Io(format!("{}: {error}", into.display()));
-    std::fs::create_dir_all(into).map_err(io)?;
-    // The tar stream goes to a scratch file in the destination, never memory: a writer that
-    // stops at the limit is what refuses a bomb.
-    struct Capped {
-        file: std::fs::File,
-        written: u64,
-        limit: u64,
-    }
-    impl Write for Capped {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.written += bytes.len() as u64;
-            if self.written > self.limit {
-                return Err(std::io::Error::other("over the limit"));
-            }
-            self.file.write(bytes)
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            self.file.flush()
-        }
-    }
-    let beside = into
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let scratch = tempfile_in(beside).map_err(io)?;
-    let mut capped = Capped {
-        file: scratch.reopen().map_err(io)?,
-        written: 0,
+    let decoder = xz4rust::XzDecoder::in_heap_with_alloc_dict_size(1 << 20, DICTIONARY_LIMIT);
+    let buffer = std::num::NonZeroUsize::new(1 << 16).expect("non-zero");
+    let read = Rc::new(Cell::new(0));
+    let capped = Capped {
+        inner: xz4rust::XzReader::new_with_buffer_size_and_decoder(body, buffer, decoder),
+        read: read.clone(),
         limit,
     };
-    let decoded = lzma_rs::xz_decompress(&mut BufReader::new(body), &mut capped);
-    if capped.written > limit {
-        return Err(Refusal::TooLarge {
-            asset: name.to_owned(),
-            limit,
-        });
-    }
-    decoded.map_err(|error| damaged(error.to_string()))?;
-    let mut archive = tar::Archive::new(std::fs::File::open(scratch.path()).map_err(io)?);
-    for entry in archive.entries().map_err(|e| damaged(e.to_string()))? {
-        let mut entry = entry.map_err(|e| damaged(e.to_string()))?;
+    let over = |error: std::io::Error| {
+        if read.get() > limit {
+            Refusal::TooLarge {
+                asset: name.to_owned(),
+                limit,
+            }
+        } else {
+            damaged(error.to_string())
+        }
+    };
+    let mut archive = tar::Archive::new(capped);
+    for entry in archive.entries().map_err(over)? {
+        let mut entry = entry.map_err(over)?;
+        let path = entry.path().map_err(over)?.into_owned();
         let kind = entry.header().entry_type();
         if !kind.is_file() && !kind.is_dir() {
-            let path = entry.path().map_err(|e| damaged(e.to_string()))?;
             return Err(damaged(format!(
                 "{} is not a file or folder",
                 path.display()
             )));
         }
-        if !entry.unpack_in(into).map_err(|e| damaged(e.to_string()))? {
-            let path = entry.path().map_err(|e| damaged(e.to_string()))?;
+        if !entry.unpack_in(into).map_err(over)? {
             return Err(damaged(format!("{} leaves the folder", path.display())));
         }
     }
     Ok(())
 }
 
-/// A scratch file in `folder`, removed when dropped.
+/// A new folder beside the destination, removed when dropped.
 #[cfg(feature = "prebuilt")]
-fn tempfile_in(folder: &Path) -> std::io::Result<Scratch> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let path = folder.join(format!(
-        ".sdk-unpack.{}.{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::File::create_new(&path)?;
-    Ok(Scratch(path))
-}
+struct Partial(PathBuf);
 
 #[cfg(feature = "prebuilt")]
-struct Scratch(PathBuf);
-
-#[cfg(feature = "prebuilt")]
-impl Scratch {
-    fn path(&self) -> &Path {
-        &self.0
-    }
-    fn reopen(&self) -> std::io::Result<std::fs::File> {
-        std::fs::OpenOptions::new().write(true).open(&self.0)
+impl Partial {
+    fn new(parent: &Path) -> std::io::Result<Self> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let path = parent.join(format!(
+            ".sdk-unpack.{}.{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&path)?;
+        Ok(Self(path))
     }
 }
 
 #[cfg(feature = "prebuilt")]
-impl Drop for Scratch {
+impl Drop for Partial {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
