@@ -55,6 +55,9 @@ impl LevelAccess for GameLevel<'_> {
             self.native_block_changed(self.dimension, pos, old, new);
         }
     }
+    fn observe_block_state_change(&self, pos: BlockPos, old: BlockStateId, new: BlockStateId) {
+        self.block_state_change(pos, old, new);
+    }
     fn neighbor_notify(&self, pos: BlockPos, skipped: Option<Direction>) -> bool {
         if !self.native_authoritative
             || !mod_api::__private::listened(mod_api::HookId::NeighborNotify)
