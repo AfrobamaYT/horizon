@@ -357,6 +357,7 @@ impl Islands<'_> {
         let (first, first_ticking) = parts.next().expect("a plan has groups");
         #[cfg(test)]
         let failure = FAIL_THREADS.with(|f| f.borrow().clone());
+        let sampling = super::super::tick_profile::sampling();
         std::thread::scope(|s| {
             // Guards for every not-yet-started lane live inside the scope's callback. If the
             // OS refuses a spawn, they drop before scope joins any started, waiting threads.
@@ -403,7 +404,9 @@ impl Islands<'_> {
                             }
                         }
                         horizon_client::mobs::sulfur_cube::set_tnt_explodes(tnt);
+                        super::super::tick_profile::begin_helper(sampling);
                         horizon_client::block_contact::in_level(level, || run(g, ticking));
+                        super::super::tick_profile::end_helper()
                     })
                     .expect("a mob island's thread starts");
                 handles.push(handle);
@@ -412,10 +415,13 @@ impl Islands<'_> {
             drop(first_done);
             let mut panic = None;
             for handle in handles {
-                if let Err(payload) = handle.join()
-                    && panic.is_none()
-                {
-                    panic = Some(payload);
+                match handle.join() {
+                    Ok(costs) => super::super::tick_profile::merge(costs),
+                    Err(payload) => {
+                        if panic.is_none() {
+                            panic = Some(payload);
+                        }
+                    }
                 }
             }
             if let Some(payload) = panic {

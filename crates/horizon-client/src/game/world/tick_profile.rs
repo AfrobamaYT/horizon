@@ -1,10 +1,9 @@
 //! What each kind of mob costs the server tick, for `horizon-report` (dedicated/report.rs): while
 //! a report records, one tick in [`SAMPLE_EVERY`] times every mob's own tick and adds it up by
 //! level and mob type.
-//! sums of its own, so neither takes the other's. Off, a mob costs one thread-local read;
-//! sampled, two clock reads and a map update for each who samples. A mob's riders tick inside
-//! its own tick, so they count for it. The server tick's spans are shared the same way
-//! ([`want_spans`]).
+//! Off, a mob costs one thread-local read; sampled, two clock reads and a map update.
+//! A mob's riders tick inside its own tick, so they count for it. The server tick's
+//! spans stay enabled while the report or slow-tick ring needs them ([`want_spans`]).
 use horizon_client::{fast_hash::FxHashMap, mobs::MobType};
 use std::{
     cell::{Cell, RefCell},
