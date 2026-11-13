@@ -1157,6 +1157,76 @@ fn rows() -> Vec<Row> {
             DimsField,
             Fits,
         ),
+        // 6db10aa (round 8).
+        row(
+            "6db10aa B1: a constructor compared in `assert!`",
+            one("use mod_api::Pos;\npub fn check(p: Pos) { assert!(p < Pos(10, 0)); }"),
+            PosField,
+            Refused,
+        ),
+        row(
+            "6db10aa B1: a tuple struct pattern after `for` in a macro",
+            one("use mod_api::Pos;\nmacro_rules! sum { ($v:expr) => {{ let mut s = 0; for Pos(x, y) in $v { s += x + y; } s }}; }\npub fn total(v: Vec<Pos>) -> i32 { sum!(v) }"),
+            PosField,
+            Refused,
+        ),
+        row(
+            "6db10aa B1: a struct pattern after `for` in a macro",
+            one(in_macro("for mod_api::DimensionSettings { min_y, height, logical_height } in v {}")),
+            DimsField,
+            Refused,
+        ),
+        row(
+            "6db10aa B2: a bare `Self` in an impl a macro writes",
+            one("trait Make { fn make() -> Self; }\nmacro_rules! make { () => { impl Make for mod_api::Marker { fn make() -> Self { Self } } }; }\nmake!();"),
+            MarkerSealed,
+            Refused,
+        ),
+        row(
+            "6db10aa B2: `Self` as a constructor in an impl a macro writes",
+            one("trait Ctor { fn ctor() -> fn(i32, i32) -> Self; }\nmacro_rules! make { () => { impl Ctor for mod_api::Pos { fn ctor() -> fn(i32, i32) -> Self { Self } } }; }\nmake!();"),
+            PosField,
+            Refused,
+        ),
+        row(
+            "6db10aa B2: `.map(Self)` in an impl a macro writes",
+            one("macro_rules! make { () => { impl mod_api::Pos { fn all(v: Vec<(i32, i32)>) -> Vec<Self> { v.into_iter().map(|(a, b)| (a, b)).map(Self::from).collect() } fn one(v: Option<i32>) -> Option<Self> { v.map(Self) } } }; }\nmake!();"),
+            PosField,
+            Refused,
+        ),
+        row(
+            "6db10aa S1: a glob of the mod's own module trusts standard macros",
+            files(&[
+                ("src/lib.rs", "mod util;\nuse util::*;\npub fn h(d: &mod_api::world::DimensionSettings) -> i32 { println!(\"{}\", d.height); d.min_y }"),
+                ("src/util.rs", "pub fn helper() {}"),
+            ]),
+            DimsField,
+            Fits,
+        ),
+        row(
+            "6db10aa S2: a parameter's type in a macro",
+            one(in_macro("fn on(p: mod_api::Pos) -> i32 { p.0 }")),
+            PosField,
+            Fits,
+        ),
+        row(
+            "6db10aa S2: a closure parameter's type behind `&` in a macro",
+            one(in_macro("let f = |p: &mod_api::Pos| p.0;")),
+            PosField,
+            Fits,
+        ),
+        row(
+            "6db10aa S2: a `let` type in a macro",
+            one(in_macro("let mut p: mod_api::Pos = make();")),
+            PosField,
+            Fits,
+        ),
+        row(
+            "6db10aa S2: a field's type in a macro",
+            one(in_macro("struct Row { id: mod_api::Pos, other: &'static mod_api::Pos }")),
+            PosField,
+            Fits,
+        ),
         row(
             "bc51218 note: `..` in a macro body's parentheses is a range",
             one(in_macro("let p = mod_api::Pos(0, ..);")),
