@@ -154,7 +154,7 @@ impl Game<'_> {
 mod tests {
     use crate::game::native_entity_refs::tests::with_game;
     use horizon_client::mobs::Mob;
-    use horizon_core::geometry::Vec3;
+    use horizon_core::{geometry::Vec3, random::RandomSource};
     use mod_api::{EntityRef, ExplosionDetonateEvent, Hooks, ServerHost};
     use std::sync::{Arc, Mutex};
 
