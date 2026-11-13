@@ -108,6 +108,21 @@ fn acquire_standalone(
     }))
 }
 
+/// The installation a program in `folder` belongs to: `folder`, or, for a program inside a macOS
+/// app bundle (`<installation>/<Name>.app/Contents/MacOS`, where the launcher starts the game from
+/// on macOS), the folder holding the bundle, which has the installation's `.installed` marker.
+fn installation(folder: &Path) -> &Path {
+    let mut up = folder.ancestors();
+    let names = [up.next(), up.next(), up.next()].map(|path| path.and_then(Path::file_name));
+    let bundled = names[0].is_some_and(|name| name == "MacOS")
+        && names[1].is_some_and(|name| name == "Contents")
+        && names[2].is_some_and(|name| Path::new(name).extension().is_some_and(|e| e == "app"));
+    match (bundled, up.next()) {
+        (true, Some(parent)) => parent,
+        _ => folder,
+    }
+}
+
 /// Canonical managed units and their enclosing units, shared by launcher and game.
 /// Cleanup locks unit identities, so a child must also protect deletable ancestors.
 pub fn lease_paths(
@@ -119,11 +134,11 @@ pub fn lease_paths(
     // Normalize both sides, including Windows' extended-path prefix and macOS /tmp aliases.
     let data = data.canonicalize()?;
     let data = data.as_path();
-    let install = executable
+    let program = executable
         .parent()
         .ok_or(io::ErrorKind::InvalidInput)?
         .canonicalize()?;
-    let install = install.as_path();
+    let install = installation(&program);
     if install.ancestors().any(|path| {
         path.file_name()
             .is_some_and(|name| name.to_string_lossy().starts_with(".trash-"))
@@ -137,6 +152,10 @@ pub fn lease_paths(
                 .any(|part| part.as_os_str() == "target")
     });
     let mut paths = vec![(install.to_path_buf(), complete)];
+    // The holder checks that the program's own folder is leased (`Entry::check_image`).
+    if program != install {
+        paths.push((program.clone(), false));
+    }
     let mut candidates = vec![
         selection.context.game_dir.clone(),
         selection.context.home.clone(),
@@ -332,6 +351,40 @@ mod tests {
             };
             let _prepared = Prepared::new(data, trees, program, &selection.context).unwrap();
         }
+    }
+
+    #[test]
+    fn managed_launch_from_a_macos_app_bundle_leases_the_installation() {
+        // The launcher starts the game on macOS from <version>/Horizon.app/Contents/MacOS, whose
+        // programs are hard links to the version's: the marker stays in the version folder (#3812).
+        let root = tempfile::tempdir().unwrap();
+        let root_path = root.path().canonicalize().unwrap();
+        let data = root_path.join("launcher");
+        let install = data.join("versions/game");
+        let programs = install.join("Horizon.app/Contents/MacOS");
+        let game = root_path.join("instance");
+        for directory in [&programs, &game] {
+            std::fs::create_dir_all(directory).unwrap();
+        }
+        std::fs::write(install.join(".installed"), "").unwrap();
+        let executable = programs.join("game");
+        std::fs::write(&executable, "test image").unwrap();
+        let mut command = Command::new(&executable);
+        command.current_dir(&game).env("HORIZON_HOME", &game);
+        let selection = LaunchArguments::for_command(&command).unwrap();
+        let trees = managed_lease_paths(&executable, &selection, &data, &game).unwrap();
+        let complete: Vec<_> = trees.iter().filter(|(_, complete)| *complete).collect();
+        assert_eq!(complete, [&(install.clone(), true)]);
+        // The holder's image check asks for the program's own folder.
+        assert!(trees.contains(&(programs.clone(), false)));
+        let program = Program {
+            executable: executable.into_os_string(),
+            arguments: vec![],
+            environment: vec![],
+            directory: game,
+            raw_windows: None,
+        };
+        let _prepared = Prepared::new(data, trees, program, &selection.context).unwrap();
     }
 
     #[test]
