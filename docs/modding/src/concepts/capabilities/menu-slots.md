@@ -40,6 +40,9 @@ The server reads its owning load; the client reads local preload sets before its
 generation, including an empty one. Closing a screen or changing dimension retains it;
 disconnecting discards it. Reads allocate nothing and do not rescan recipes or registries.
 
+Parts that read `context.setting(..)` or `side()` have no counterpart on the Host.
+Named injections for `menu_slot_rules` request `hook_version = 3`.
+
 ## Keeping a block menu open
 
 The server closes a player's block menu when `AbstractContainerMenu.stillValid` says no: by default when the
