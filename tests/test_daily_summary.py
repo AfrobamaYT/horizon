@@ -24,6 +24,8 @@ GREEN_JOBS = [job("shards / plan"), job("shards / ignored-tests-shards (horizon-
               job("wasm-mods / fixture"), job("wasm-mods / Guest stack / ubuntu-latest"),
               job("fn-replace-check / route"), job("fn-replace-check / fn-replace-check"),
               job("linkage / route"), job("linkage / linkage x86_64-unknown-linux-gnu"),
+              job("windows-runtime-leases / gate"), job("windows-runtime-leases / test", "skipped"),
+              job("windows-runtime-leases / runtime-leases"),
               job("sdk / fresh"), job("sdk / build linux"), job("sdk / publish", "skipped")]
 
 

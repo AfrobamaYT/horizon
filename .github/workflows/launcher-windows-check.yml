@@ -1,7 +1,15 @@
 name: launcher-windows-check
 # The launcher's tests on Windows x64, for pull requests that change it. Nothing is built for release or published:
-# the release workflow (launcher.yml) stays off. GitHub-hosted, so it needs no runner of ours.
+# the release workflow (launcher.yml) stays off. GitHub-hosted, so it needs no runner of ours. The runtime-leases
+# job starts child processes, so it runs in the daily run (daily.yml calls this workflow with a commit) and by
+# dispatch, never on pushes or pull requests (CI tiers, owner 2026-11-13).
 on:
+  workflow_call:
+    inputs:
+      commit:
+        description: The commit to check (the daily run's)
+        type: string
+        default: ''
   # Main pushes publish the cache that pull requests restore (pull requests never save one).
   push:
     branches: [main]
@@ -31,7 +39,8 @@ permissions:
 # Finish running main checks; keep only the newest pending push. Obsolete PR runs still cancel.
 concurrency:
   # Each main push runs at once, beside any other (it publishes nothing that needs an order).
-  group: launcher-windows-check-${{ github.event.pull_request.number || github.sha }}
+  # A daily run's call is grouped by that run.
+  group: launcher-windows-check-${{ github.event.pull_request.number || inputs.commit && github.run_id || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -53,9 +62,10 @@ jobs:
         run: python3 tools/ci/pr_gate.py >> "$GITHUB_OUTPUT"
 
   test:
-    # Only same-repository rollups and syncs compile on PR events; main and dispatch stay unchanged.
+    # Only same-repository rollups and syncs compile on PR events; main and dispatch stay unchanged. The daily run's
+    # call runs runtime-leases only.
     needs: gate
-    if: needs.gate.outputs.heavy == 'true'
+    if: inputs.commit == '' && needs.gate.outputs.heavy == 'true'
     runs-on: windows-latest
     timeout-minutes: 40
     defaults:
@@ -88,15 +98,15 @@ jobs:
       - run: cargo test --no-fail-fast --release --locked
 
   runtime-leases:
-    # Only same-repository rollups and syncs compile on PR events; main and dispatch stay unchanged.
-    needs: gate
-    if: needs.gate.outputs.heavy == 'true'
+    # The daily run's call (and a hand dispatch): it starts child processes, so it is a daily test.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          ref: ${{ inputs.commit }}
       - name: The pinned Rust (tools/ci/rust-version)
         id: rust
         shell: bash

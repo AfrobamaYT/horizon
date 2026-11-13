@@ -36,8 +36,10 @@ PREFIX = "Daily: "
 UNFINISHED = " did not complete"
 DISCLOSURE = "> 🤖 Filed by Aria's agent swarm, Dyna, not by Aria."
 # daily.yml's leg jobs (each a called workflow), and the called workflows' own routing jobs, which test nothing.
-LEGS = ("shards", "wasm-mods", "fn-replace-check", "linkage", "sdk")
-HELPERS = ("plan", "route", "fresh")
+LEGS = ("shards", "wasm-mods", "fn-replace-check", "linkage", "windows-runtime-leases", "sdk")
+HELPERS = ("plan", "route", "fresh", "gate")
+# Jobs of a called workflow that the daily run does not use: launcher-windows-check's push and pull-request tests.
+NOT_DAILY = ("windows-runtime-leases / test",)
 # Legs whose skipped jobs are not missing coverage: the SDK skips its build when prebuilt-<sha> already exists, and
 # its own publish job always when called (daily.yml publishes after a green summary).
 SKIP_IS_FINE = ("sdk",)
@@ -80,7 +82,7 @@ def leg_jobs(jobs):
     """This run's leg jobs (`<leg> / <job>`), without the called workflows' routing jobs."""
     return [job for job in jobs
             if job["name"].split(" / ", 1)[0] in LEGS and " / " in job["name"]
-            and job["name"].split(" / ", 1)[1] not in HELPERS]
+            and job["name"].split(" / ", 1)[1] not in HELPERS and job["name"] not in NOT_DAILY]
 
 
 def job_green(job):

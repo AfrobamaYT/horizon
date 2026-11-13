@@ -209,7 +209,8 @@ dispatches it (`-f commit=<sha>`, `-f dry_run=false` to write). One run runs and
 dispatch replaces an older waiting one. The schedule stops when main's head already has a completed real daily run;
 a hand dispatch never does, so it retries a run whose tag move, issues or nightly failed. Its legs are the workflows that left main pushes:
 the ignored-tests data shards (`ignored-tests.yml`), the wasm fixture and guest stacks (`wasm-mods.yml`),
-`fn-replace-check.yml`, the native linkage probe (`native-dylib-probe.yml`) and the prebuilt SDK of the commit
+`fn-replace-check.yml`, the native linkage probe (`native-dylib-probe.yml`), the launcher's Windows runtime-lease
+tests (`launcher-windows-check.yml`) and the prebuilt SDK of the commit
 (`prebuilt-game.yml`; its archives are published as `prebuilt-<sha>` by `sdk-publish` only after a green summary on a real run on main, before the Nightly that needs them), each called
 with the commit. Its
 summary (`tools/ci/daily_summary.py`) reads each leg's result and its sanitised verdict file, never a log:

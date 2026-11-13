@@ -160,10 +160,10 @@ class WorkflowTests(unittest.TestCase):
             "HEAD_REF": "${{ github.event.pull_request.head.ref }}",
         })
         self.assertEqual(gate["outputs"]["heavy"], "${{ steps.gate.outputs.heavy }}")
-        for name in ("test", "runtime-leases"):
-            with self.subTest(job=name):
-                self.assertEqual(jobs[name]["needs"], "gate")
-                self.assertEqual(jobs[name]["if"], "needs.gate.outputs.heavy == 'true'")
+        self.assertEqual(jobs["test"]["needs"], "gate")
+        self.assertEqual(jobs["test"]["if"], "inputs.commit == '' && needs.gate.outputs.heavy == 'true'")
+        # It starts child processes: the daily run calls it, and a hand dispatch runs it; never pushes or PRs.
+        self.assertEqual(jobs["runtime-leases"]["if"], "github.event_name == 'workflow_dispatch'")
 
     def test_other_pull_request_workflows_skip_what_compiles_for_forks(self):
         for workflow, jobs in (("cargo-horizon-mod.yml", ("build",)), ("modding-book.yml", ("book",))):
