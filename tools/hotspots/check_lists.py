@@ -2,12 +2,13 @@
 """A `pub use` under crates/horizon-mod-vocab/src/exports/ names at most 12 items in braces.
 
 rustfmt re-wraps a brace list on every added name, so two PRs that each add a name to one long list always
-conflict (tools/hotspots/README.md). A file a switch removed (RETIRED) may not come back. Export a module's items with a glob, or put the new names in a fragment of
+conflict (tools/hotspots/README.md). Export a module's items with a glob, or put the new names in a fragment of
 their own. A list's length is the number of names in the whole `pub use` (any visibility), nested braces included.
+A fragment a switch removed (RETIRED) may not come back.
 
 The lists that are longer today are in LONG_LISTS with their length on main as a ceiling: the check fails when a
-listed file's longest list is longer than its entry, so shortening a list needs no change here. Two files a planned
-PR removes have no ceiling. The table is edited only to remove an entry, which the check asks for once the file has
+listed file's longest list is longer than its entry, so shortening a list needs no change here. A file a planned
+PR removes has no ceiling. The table is edited only to remove an entry, which the check asks for once the file has
 no list over 12 names.
 
     python3 tools/hotspots/check_lists.py
