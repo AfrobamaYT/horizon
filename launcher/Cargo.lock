@@ -2917,6 +2917,7 @@ dependencies = [
  "keyring",
  "libc",
  "objc2-app-kit 0.3.2",
+ "object 0.39.1",
  "oo7",
  "png 0.18.1",
  "proc-macro2",

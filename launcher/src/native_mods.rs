@@ -16,6 +16,7 @@ use std::sync::Arc;
 use horizon_mod_package::dependencies;
 
 mod api;
+mod api_route;
 mod inject;
 mod planning;
 mod slots;
@@ -1771,10 +1772,17 @@ fn pipeline(
         let rust = rust_toolchain::install(|f| progress(Step::Rust(f)))?;
         progress(Step::PrebuiltMods);
         let compiling = std::time::Instant::now();
+        let route = prebuilt::Route::of(&projects);
+        append_log(&trf(
+            "Native mods route: {route}.",
+            &[("route", route.name())],
+        ))
+        .map_err(blame)?;
         let (binary, libraries) = prebuilt::compile(
             &rust,
             game,
             &root().join("prebuilt-build"),
+            route,
             &projects,
             &declared,
             &resolution,
@@ -1798,7 +1806,7 @@ fn pipeline(
             target,
             &binary,
             &libraries,
-            &about("prebuilt", &internals::Catalog::read(game)?),
+            &about(route.name(), &internals::Catalog::read(game)?),
             &ordered,
         )?;
     } else {

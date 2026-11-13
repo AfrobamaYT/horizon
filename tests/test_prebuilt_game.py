@@ -283,6 +283,31 @@ class SdkAssetTests(unittest.TestCase):
             self.assertEqual((root / "fixture.tar.xz").read_bytes(), fixture.read_bytes())
 
 
+class PointCatalogTests(unittest.TestCase):
+    def test_the_api_slice_holds_one_crate_defining_point_id(self):
+        """A crate defines `PointId` when its source has the enum, or its build script runs a point generator and it
+        does not re-export another crate's. Two in the slice would be #3643's index mismatch: whichever of #3643 and
+        the slices merges second re-exports `horizon-engine-slots`' from `mod_points`."""
+        import re
+        metadata = json.loads(subprocess.run(
+            ["cargo", "metadata", "--locked", "--offline", "--format-version", "1"],
+            cwd=prebuilt_game.ROOT, capture_output=True, text=True, check=True).stdout)
+        closure = prebuilt_game.api_closure(metadata)
+        definers = []
+        for package in metadata["packages"]:
+            if package["id"] not in closure or package["source"] is not None:
+                continue
+            folder = Path(package["manifest_path"]).parent
+            sources = {path: path.read_text() for path in folder.rglob("*.rs") if "target" not in path.parts}
+            text = "\n".join(text for path, text in sources.items() if path.name != "build.rs")
+            build = sources.get(folder / "build.rs", "")
+            generated = re.search(r"horizon_mod_api_gen::\w*points\w*\(", build)
+            reexported = re.search(r"pub use [^;]*\bPointId\b", text)
+            if re.search(r"\benum PointId\b", text) or (generated and not reexported):
+                definers.append(package["name"])
+        self.assertEqual(definers, ["horizon-mod-points"])
+
+
 class AllocatorSelectionTests(unittest.TestCase):
     def test_package_format_comes_from_its_one_place(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -53,7 +53,7 @@ pub(super) fn main_rs(
         .map(|(i, m)| format!("        {:?} => mod_{i}::hooks,\n", m.id))
         .collect::<String>();
     let inventory = mods.iter().map(|m| format!(
-        "    horizon_mod_package::runtime::BuiltMod {{ id: {:?}, version: {:?}, side: horizon_mod_package::Side::{:?} }},\n",
+        "    mod_api::__private::native::BuiltMod {{ id: {:?}, version: {:?}, side: mod_api::__private::native::Side::{:?} }},\n",
         m.id, m.version, m.side,
     )).collect::<String>();
     let api_points = listed
@@ -701,8 +701,8 @@ mod tests {
             assert_eq!(
                 inventory,
                 &[
-                    "    horizon_mod_package::runtime::BuiltMod { id: \"base\", version: \"1.2.3\", side: horizon_mod_package::Side::Both },",
-                    "    horizon_mod_package::runtime::BuiltMod { id: \"extra\", version: \"2.0.0\", side: horizon_mod_package::Side::Client },",
+                    "    mod_api::__private::native::BuiltMod { id: \"base\", version: \"1.2.3\", side: mod_api::__private::native::Side::Both },",
+                    "    mod_api::__private::native::BuiltMod { id: \"extra\", version: \"2.0.0\", side: mod_api::__private::native::Side::Client },",
                 ][..count]
             );
         }

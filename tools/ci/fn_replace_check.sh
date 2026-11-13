@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Function replacement end to end (fn-replace): two native mods' `[[native.mixin]]` rows built by the
+# Function replacement end to end (fn-replace): native mods' `[[native.mixin]]` rows (and API-only mods) built by the
 # launcher's normal native build against a PREBUILT game, with no game rebuild, then run on a
 # dedicated server.
-#   [FNR_MODS="alpha beta"] [FNR_MOD_ROOT=DIR] tools/ci/fn_replace_check.sh LAUNCHER SDK SCRATCH [RESOURCES]
+#   [FNR_MODS="alpha beta"] [FNR_MOD_ROOT=DIR] [FNR_ROUTE=prebuilt|prebuilt-api] tools/ci/fn_replace_check.sh LAUNCHER SDK SCRATCH [RESOURCES]
 # FNR_WASM_LAYOUT_PACKAGE=valid.hmod FNR_WASM_STD=std.wasm adds a wasm point-layout refusal check
 # to the with-RESOURCES server run (not the build/link-only CI mode):
 # its exported layout fingerprint is changed to zero, and its integrity hash is updated.
@@ -110,8 +110,10 @@ if grep -qs '^\[\[native\.' "$mods"/*/horizon-mod.toml; then
 elif grep -sF 'Function replacement:' "$log"; then
   echo "a set with no [[native.*]] row logged a function replacement"; exit 1
 fi
-# The prebuilt route, and no game source compiled.
-grep -F '"route": "prebuilt"' "$data"/versions/*/native-mods.json > /dev/null || grep -rF 'prebuilt' "$log" > /dev/null
+# The prebuilt route, and no game source compiled. FNR_ROUTE names the route the whole set must
+# take: `prebuilt-api` (every mod API-only) or `prebuilt` (a mod with a `[native]` table row).
+grep -F '"route": "prebuilt' "$data"/versions/*/native-mods.json > /dev/null || grep -rF 'prebuilt' "$log" > /dev/null
+if [ -n "${FNR_ROUTE:-}" ]; then grep -F "Native mods route: $FNR_ROUTE." "$log"; fi
 test ! -d "$data/native/stage/crates/horizon-client" || { echo "the game was staged for a source build"; exit 1; }
 test "$(sha256sum "$(game_library)" | cut -d' ' -f1)" = "$game_hash"
 
@@ -179,6 +181,10 @@ fill 0 100 0 9 100 9 minecraft:hopper[facing=east]{Items:[{Slot:0b,id:"minecraft
     # The slot's panic is the server's crash, and its report names the mod and the loop.
     grep -F 'in native mod fnr_loop_panic, hook loop block_entities.tick, part fnr_loop_panic::Tenth' "$run"/crash-reports/*.txt
     grep -F 'Saving chunks for level' "$scratch/server.log"
+  fi
+  if [[ " ${FNR_MODS:-alpha beta} " == *" api_only "* ]]; then
+    grep -F 'fnr: api_only server_started' "$scratch/server.log"
+    grep -F 'fnr: api_only listener at tick_block_entities' "$scratch/server.log"
   fi
   if [[ " ${FNR_MODS:-alpha beta} " == *" fdshape "* ]]; then
     grep -F 'fnr: native_server_started dedicated=true' "$scratch/server.log"

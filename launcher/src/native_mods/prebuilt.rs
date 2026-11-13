@@ -340,6 +340,24 @@ pub(super) struct Identity {
     /// source is compiled under the same `cfg`s.
     #[serde(default)]
     game_features: Vec<String>,
+    /// The API route's mods library: its crate name and the metadata both builds of it use.
+    #[serde(default)]
+    pub(super) native_mods: Option<NativeMods>,
+    /// Which package files each archive holds; the API route reads only the `api` list.
+    #[serde(default)]
+    pub(super) slices: Option<Slices>,
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct NativeMods {
+    #[serde(rename = "crate")]
+    pub(super) krate: String,
+    pub(super) metadata: String,
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct Slices {
+    pub(super) api: Vec<String>,
 }
 
 impl Identity {
@@ -507,6 +525,18 @@ fn standard_library(rust: &Toolchain) -> Result<PathBuf, String> {
 /// native libraries the game's build scripts link (`native/`: the `windows` crates' import
 /// libraries).
 fn rustc(rust: &Toolchain, game: &Path, out: &Path, edition: &str) -> Command {
+    let mut cmd = rustc_with(
+        rust,
+        &[&game.join("deps"), &game.join("host"), out],
+        edition,
+    );
+    cmd.arg("-L")
+        .arg(format!("native={}", game.join("native").display()));
+    cmd
+}
+
+/// rustc with the prebuilt game's settings and only `search` as dependency search paths.
+pub(super) fn rustc_with(rust: &Toolchain, search: &[&Path], edition: &str) -> Command {
     let mut cmd = rust.command(&rust.rustc());
     rust_toolchain::low_priority(&mut cmd);
     cmd.args([
@@ -516,43 +546,99 @@ fn rustc(rust: &Toolchain, game: &Path, out: &Path, edition: &str) -> Command {
         "prefer-dynamic",
         "-C",
         OPT_LEVEL,
-    ])
-    .arg("-L")
-    .arg(format!("dependency={}", game.join("deps").display()))
-    .arg("-L")
-    .arg(format!("dependency={}", game.join("host").display()))
-    .arg("-L")
-    .arg(format!("native={}", game.join("native").display()))
-    .arg("-L")
-    .arg(format!("dependency={}", out.display()));
+    ]);
+    for folder in search {
+        cmd.arg("-L")
+            .arg(format!("dependency={}", folder.display()));
+    }
     cmd
 }
 
+/// How an instance's native mods are built against the prebuilt game: chosen once, from the whole
+/// set of mods, and never changed after a failure (SDK design §1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Route {
+    /// Every mod is API-only: the mods become the `horizon_native_mods` library, built from the
+    /// package's `api` files alone and installed beside its prebuilt API executable
+    /// ([`super::api_route`]). The `engine` archive is never read.
+    Api,
+    /// A mod has a `[native]` table row (mixin, module, bridge, state, loop) or game internals:
+    /// the executable is generated and linked against the whole package.
+    Engine,
+    /// A mod depends on a crate outside the game's: the executable is built with Cargo against
+    /// the whole package ([`super::registry_compile`]).
+    Registry,
+}
+
+impl Route {
+    /// The route of the set `projects`: the strongest one any of its mods needs.
+    pub(super) fn of(projects: &[api::Project<'_>]) -> Self {
+        if projects.iter().any(registry_dependency) {
+            Self::Registry
+        } else if projects.iter().any(|project| {
+            let manifest = &project.bundle.manifest;
+            internals::needed(manifest)
+                || manifest.native.as_ref().is_some_and(|native| {
+                    !(native.mixin.is_empty()
+                        && native.module.is_empty()
+                        && native.bridge.is_empty()
+                        && native.state.is_empty()
+                        && native.r#loop.is_empty())
+                })
+                || project
+                    .api_dependencies()
+                    .iter()
+                    .any(|(_, package)| *package == "internals")
+        }) {
+            Self::Engine
+        } else {
+            Self::Api
+        }
+    }
+
+    /// The route as the build record (`native-mods.json`) names it.
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Self::Api => "prebuilt-api",
+            Self::Engine | Self::Registry => "prebuilt",
+        }
+    }
+}
+
+/// Whether `project` depends on a crate that is not one of the game's own packages.
+fn registry_dependency(project: &api::Project<'_>) -> bool {
+    project.dependency_tables().any(|(_, dependencies)| {
+        dependencies.iter().any(|(key, value)| {
+            let name = value
+                .get("package")
+                .and_then(toml::Value::as_str)
+                .unwrap_or(key);
+            !api::PACKAGES.iter().any(|(package, _)| *package == name)
+        })
+    })
+}
+
 /// Compiles the mods (`resolution`'s order, each with its installed mod dependencies) and the
-/// launcher's executable against the prebuilt game in `game`, into `out`. Returns the executable
-/// and the dynamic libraries it loads, to be installed beside it.
+/// launcher's executable against the prebuilt game in `game`, into `out`, by `route`
+/// ([`Route::of`] the same `projects`). Returns the executable and the dynamic libraries it
+/// loads, to be installed beside it.
 // Unlike the source workspace, this route invokes rustc with only selected --extern
 // libraries; it does not resolve or compile arbitrary transitive Cargo dependencies.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn compile(
     rust: &Toolchain,
     game: &Path,
     out: &Path,
+    route: Route,
     projects: &[api::Project<'_>],
     declared: &[Vec<dependencies::Dependency>],
     resolution: &dependencies::Resolution,
     consent: Option<&dyn Fn(&super::RegistryInventory) -> bool>,
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
-    if projects.iter().any(|project| {
-        project.dependency_tables().any(|(_, dependencies)| {
-            dependencies.iter().any(|(key, value)| {
-                let name = value
-                    .get("package")
-                    .and_then(toml::Value::as_str)
-                    .unwrap_or(key);
-                !api::PACKAGES.iter().any(|(package, _)| *package == name)
-            })
-        })
-    }) {
+    if route == Route::Api {
+        return super::api_route::compile(rust, game, out, projects, declared, resolution);
+    }
+    if route == Route::Registry {
         return super::registry_compile::compile(
             rust,
             game,
@@ -590,23 +676,6 @@ pub(super) fn compile(
     for &index in &resolution.order {
         let project = &projects[index];
         let id = project.bundle.manifest.id.as_str();
-        let edition = project
-            .cargo
-            .get("package")
-            .and_then(|p| p.get("edition"))
-            .and_then(toml::Value::as_str)
-            .unwrap_or("2015");
-        let lib = project.cargo.get("lib");
-        let krate = project.crate_name();
-        // Compile an isolated copy of the mod crate.
-        let staged = out.join("staged").join(id);
-        super::copy_bundle(project.bundle, &staged)?;
-
-        let source = staged.join(
-            lib.and_then(|l| l.get("path"))
-                .and_then(toml::Value::as_str)
-                .unwrap_or("src/lib.rs"),
-        );
         let api_dependencies = project.api_dependencies();
         if internals::needed(&project.bundle.manifest)
             || api_dependencies
@@ -641,36 +710,18 @@ pub(super) fn compile(
             )?;
             facades.insert(id, rlib);
         }
-        let mut cmd = rustc(rust, game, out, edition);
-        cmd.args(["--crate-type", "rlib", "--crate-name", &krate])
-            .arg("-C")
-            .arg(format!("metadata={id}"));
-        for (name, package) in api_dependencies {
-            let library = if package == "internals" {
-                &facades[id]
-            } else {
-                &libraries[package]
-            };
-            cmd.arg("--extern")
-                .arg(format!("{name}={}", library.display()));
-        }
-        for dependency in &declared[index] {
-            let Some(rlib) = rlibs.get(dependency.id.as_str()) else {
-                continue;
-            };
-            cmd.arg("--extern").arg(format!(
-                "{}={}",
-                dependency.id.replace('-', "_"),
-                rlib.display()
-            ));
-            if dependency.optional {
-                cmd.arg("--cfg")
-                    .arg(format!("feature=\"{}\"", dependency.id));
-            }
-        }
-        cmd.arg("--out-dir").arg(out).arg(&source);
-        super::run(cmd, &format!("Compiling {id}"), |_| {})?;
-        rlibs.insert(id, out.join(format!("lib{krate}.rlib")));
+        let (rlib, krate) = compile_mod(
+            project,
+            &declared[index],
+            out,
+            |edition| rustc(rust, game, out, edition),
+            |package| match package {
+                "internals" => &facades[id],
+                _ => &libraries[package],
+            },
+            &rlibs,
+        )?;
+        rlibs.insert(id, rlib);
         crate_names.insert(id, krate);
     }
     // `[[native.mixin]]` rows: their functions copied, patched and compiled beside the mods.
@@ -735,7 +786,64 @@ pub(super) fn compile(
     Ok((binary, runtime_libraries(rust, &deps)?))
 }
 
-/// The runtime shipped beside the prebuilt executable, for both native build routes.
+/// Compiles `project`'s crate as an rlib into `out` with `rustc` (given the edition: rustc with
+/// the route's search paths), its game packages from `library` and its installed mod dependencies
+/// from `rlibs`. Returns the rlib and the crate's name.
+pub(super) fn compile_mod<'a>(
+    project: &api::Project<'_>,
+    declared: &[dependencies::Dependency],
+    out: &Path,
+    rustc: impl Fn(&str) -> Command,
+    library: impl Fn(&str) -> &'a PathBuf,
+    rlibs: &std::collections::HashMap<&str, PathBuf>,
+) -> Result<(PathBuf, String), String> {
+    let id = project.bundle.manifest.id.as_str();
+    let edition = project
+        .cargo
+        .get("package")
+        .and_then(|p| p.get("edition"))
+        .and_then(toml::Value::as_str)
+        .unwrap_or("2015");
+    let krate = project.crate_name();
+    // Compile an isolated copy of the mod crate.
+    let staged = out.join("staged").join(id);
+    super::copy_bundle(project.bundle, &staged)?;
+    let source = staged.join(
+        project
+            .cargo
+            .get("lib")
+            .and_then(|l| l.get("path"))
+            .and_then(toml::Value::as_str)
+            .unwrap_or("src/lib.rs"),
+    );
+    let mut cmd = rustc(edition);
+    cmd.args(["--crate-type", "rlib", "--crate-name", &krate])
+        .arg("-C")
+        .arg(format!("metadata={id}"));
+    for (name, package) in project.api_dependencies() {
+        cmd.arg("--extern")
+            .arg(format!("{name}={}", library(package).display()));
+    }
+    for dependency in declared {
+        let Some(rlib) = rlibs.get(dependency.id.as_str()) else {
+            continue;
+        };
+        cmd.arg("--extern").arg(format!(
+            "{}={}",
+            dependency.id.replace('-', "_"),
+            rlib.display()
+        ));
+        if dependency.optional {
+            cmd.arg("--cfg")
+                .arg(format!("feature=\"{}\"", dependency.id));
+        }
+    }
+    cmd.arg("--out-dir").arg(out).arg(&source);
+    super::run(cmd, &format!("Compiling {id}"), |_| {})?;
+    Ok((out.join(format!("lib{krate}.rlib")), krate))
+}
+
+/// The runtime shipped beside the prebuilt executable, for every native build route.
 pub(super) fn runtime_libraries(rust: &Toolchain, deps: &Path) -> Result<Vec<PathBuf>, String> {
     let mut runtime = game_dylibs(deps)?;
     runtime.push(standard_library(rust)?);
@@ -785,6 +893,101 @@ fn game_dylibs(deps: &Path) -> Result<Vec<PathBuf>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_route_is_chosen_once_from_the_whole_set() {
+        use horizon_mod_package::manifest::{loops, mixin, Internal, Module};
+        let folder = super::super::tests::dir("prebuilt-route");
+        let write = |name: &str, dependencies: &str| {
+            let dir = folder.join(name);
+            super::super::tests::write_bundle(&dir, name, "");
+            fs::write(
+                dir.join("Cargo.toml"),
+                format!(
+                    "[package]\nname='{name}'\nversion='0.1.0'\n[dependencies]\n{dependencies}\n"
+                ),
+            )
+            .unwrap();
+            super::super::bundle_in(&dir).unwrap().unwrap()
+        };
+        let api_only = write(
+            "api_only",
+            "horizon-mod-api='0.1'\nhorizon-mod-points='0.1'",
+        );
+        let facade = write("facade", "horizon-mod-api='0.1'\nhorizon-internals='0.1'");
+        let registry = write("registry", "horizon-mod-api='0.1'\nserde='1'");
+        let with = |change: &dyn Fn(&mut horizon_mod_package::manifest::Manifest)| {
+            let mut bundle = api_only.clone();
+            change(&mut bundle.manifest);
+            bundle
+        };
+        let native = |change: &dyn Fn(&mut horizon_mod_package::manifest::Native)| {
+            with(&|manifest| change(manifest.native.as_mut().unwrap()))
+        };
+        let forwarded = || mixin::Forwarded {
+            id: "f".into(),
+            fields: toml::Table::new(),
+        };
+        let engine = [
+            native(&|n| {
+                n.mixin.push(mixin::Mixin {
+                    id: "m".into(),
+                    target: "Game::tick".into(),
+                    kind: mixin::Kind::Head,
+                    helper: "m.rs".into(),
+                    options: toml::Table::new(),
+                })
+            }),
+            native(&|n| {
+                n.module.push(Module {
+                    id: "m".into(),
+                    file: "game.rs".into(),
+                    name: "m".into(),
+                    source: "m.rs".into(),
+                    visibility: None,
+                })
+            }),
+            native(&|n| n.bridge.push(forwarded())),
+            native(&|n| n.state.push(forwarded())),
+            native(&|n| {
+                n.r#loop.push(
+                    toml::from_str::<loops::Loop>("id='l'\nloop='x.tick'\nhelper='l.rs'\nwith='L'")
+                        .unwrap(),
+                )
+            }),
+            with(&|m| {
+                m.internals.push(Internal {
+                    path: "horizon_client::Game".into(),
+                    kind: None,
+                    hash: None,
+                })
+            }),
+            facade,
+        ];
+        let route = |bundles: &[&super::super::Bundle]| {
+            let projects: Vec<_> = bundles
+                .iter()
+                .map(|bundle| api::Project::read(bundle).unwrap())
+                .collect();
+            Route::of(&projects)
+        };
+        assert_eq!(route(&[&api_only, &api_only]), Route::Api);
+        assert_eq!(route(&[]), Route::Api);
+        for needs in &engine {
+            // One mod that needs the engine sends the whole set there, whichever its place.
+            assert_eq!(
+                route(&[&api_only, needs]),
+                Route::Engine,
+                "{:?}",
+                needs.manifest
+            );
+            assert_eq!(route(&[needs, &api_only]), Route::Engine);
+            assert_eq!(route(&[needs, &registry]), Route::Registry);
+        }
+        assert_eq!(route(&[&api_only, &registry]), Route::Registry);
+        assert_eq!(Route::Api.name(), "prebuilt-api");
+        assert_eq!(Route::Engine.name(), "prebuilt");
+    }
 
     #[test]
     fn facades_refuse_build_only_crates_and_ambiguous_runtime_metadata() {
