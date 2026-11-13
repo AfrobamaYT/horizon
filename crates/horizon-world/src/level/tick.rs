@@ -649,12 +649,20 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             self.remove_block(pos, false);
         }
         let below_state = self.below_state(pos);
-        let infiniburn = match self.level.dimension_type().infiniburn.as_str() {
-            "#minecraft:infiniburn_nether" => &b.tags.infiniburn_nether,
-            "#minecraft:infiniburn_end" => &b.tags.infiniburn_end,
-            _ => &b.tags.infiniburn_overworld,
-        };
-        let infini = b.in_set(below_state, infiniburn);
+        static EMPTY: std::sync::LazyLock<super::data::BlockSet> =
+            std::sync::LazyLock::new(super::data::BlockSet::default);
+        let infiniburn = self
+            .level
+            .infiniburn()
+            .or_else(|| {
+                let name = &self.level.dimension_type().infiniburn;
+                b.tag(name.strip_prefix('#').unwrap_or(name))
+            })
+            .unwrap_or(&EMPTY);
+        let mut infini = None;
+        self.level
+            .before_is_fire_source(below_state, below(pos), &mut infini);
+        let infini = infini.unwrap_or_else(|| b.in_set(below_state, infiniburn));
         let age = b.table.int(state, p.age);
         let raining = self.level.is_raining();
         if !infini
@@ -678,7 +686,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
                 return;
             }
-            if age == 15 && self.rand_int(4) == 0 && !self.can_burn(self.below_state(pos)) {
+            if age == 15
+                && self.rand_int(4) == 0
+                && !self.can_burn(self.below_state(pos), below(pos), Direction::Up)
+            {
                 self.remove_block(pos, false);
                 return;
             }
@@ -694,7 +705,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             (Direction::North, 300),
             (Direction::South, 300),
         ] {
-            self.fire_check_burn_out(pos, rel(pos, direction), chance + extra, age);
+            self.fire_check_burn_out(pos, direction, chance + extra, age);
         }
         for xx in -1..=1 {
             for zz in -1..=1 {
@@ -709,7 +720,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     let test = pos.offset(xx, yy, zz);
                     let ignite = self.fire_ignite_odds_at(test);
                     if ignite > 0 {
-                        let mut odds = (ignite + 40 + self.level.difficulty() * 7) / (age + 30);
+                        let mut odds = (ignite
+                            .saturating_add(40)
+                            .saturating_add(self.level.difficulty() * 7))
+                            / (age + 30);
                         if burnout {
                             odds /= 2;
                         }
@@ -737,7 +751,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
         Direction::ALL
             .into_iter()
-            .map(|d| self.ignite_odds(self.rel_state(pos, d)))
+            .map(|d| {
+                let at = rel(pos, d);
+                self.ignite_odds(self.state(at), at, d.opposite())
+            })
             .max()
             .unwrap_or(0)
     }
@@ -748,12 +765,14 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             || self.level.is_raining_at(rel(pos, Direction::North))
             || self.level.is_raining_at(rel(pos, Direction::South))
     }
-    /// `FireBlock.checkBurnOut` of the block at `pos` by the fire at `fire`.
-    fn fire_check_burn_out(&mut self, fire: BlockPos, pos: BlockPos, chance: i32, age: i32) {
+    /// `FireBlock.checkBurnOut` of the block beside the fire at `fire` in
+    /// `direction`: notify after the cancel gates, before replacing the block.
+    fn fire_check_burn_out(&mut self, fire: BlockPos, direction: Direction, chance: i32, age: i32) {
         let b = self.b;
-        let odds = self.burn_odds(self.state(pos));
+        let (pos, face) = (rel(fire, direction), direction.opposite());
+        let old = self.state(pos);
+        let odds = self.burn_odds(old, pos, face);
         if self.rand_int(chance) < odds {
-            let old = self.state(pos);
             let allowed = self.level.allow_spread(Spread::Fire, fire, pos);
             let mut burned = false;
             if self.rand_int(age + 10) < 5 && !self.level.is_raining_at(pos) {
@@ -763,10 +782,12 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     && self.level.allow_block_ignite(pos, "spread")
                 {
                     let next = self.fire_state_with_age(pos, new_age);
+                    self.level.on_caught_fire(self.ticks, old, pos, face);
                     self.set_block_and_update(pos, next);
                     burned = true;
                 }
             } else if allowed && self.level.allow_block_burn(pos) {
+                self.level.on_caught_fire(self.ticks, old, pos, face);
                 self.remove_block(pos, false);
                 burned = true;
             }
@@ -841,13 +862,20 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let b = self.b;
         let mut speed = 1.0f32;
         let under = below(pos);
+        let asks = self.level.asks_is_fertile();
         for xx in -1..=1 {
             for zz in -1..=1 {
                 let mut block_speed = 0.0f32;
-                let state = self.state(under.offset(xx, 0, zz));
+                let at = under.offset(xx, 0, zz);
+                let state = self.state(at);
                 if b.in_set(state, &b.tags.grows_crops) {
                     block_speed = 1.0;
-                    if b.table.int(state, b.props.moisture) > 0 {
+                    // IBlockExtension.isFertile: vanilla's moisture, as a part leaves it.
+                    let mut fertile = b.table.int(state, b.props.moisture) > 0;
+                    if asks {
+                        self.level.before_is_fertile(state, at, &mut fertile);
+                    }
+                    if fertile {
                         block_speed = 3.0;
                     }
                 }
@@ -1025,16 +1053,28 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
         self.level.crop_grow_post(pos, state);
     }
+    /// `FarmlandBlock.randomTick`, with session-only watered areas before `isNearWater`.
     fn farmland_random_tick(&mut self, state: BlockStateId, pos: BlockPos) {
         let b = self.b;
         let moisture = b.table.int(state, b.props.moisture);
-        let mut near_water = false;
-        'search: for x in -4..=4 {
-            for y in 0..=1 {
-                for z in -4..=4 {
-                    if b.is_water_fluid(self.fluid_at(pos.offset(x, y, z)).kind()) {
-                        near_water = true;
-                        break 'search;
+        let mut near_water = self.level.has_water_ticket(pos);
+        // IBlockExtension.canBeHydrated: the farmland's parts, looked up once.
+        let asks = !near_water && self.level.asks_can_be_hydrated(state);
+        if !near_water {
+            'search: for x in -4..=4 {
+                for y in 0..=1 {
+                    for z in -4..=4 {
+                        let at = pos.offset(x, y, z);
+                        let fluid = self.fluid_at(at);
+                        let mut hydrates = None;
+                        if asks && fluid.kind() != FluidKind::Empty {
+                            self.level
+                                .before_can_be_hydrated(state, pos, fluid, at, &mut hydrates);
+                        }
+                        if hydrates.unwrap_or_else(|| b.is_water_fluid(fluid.kind())) {
+                            near_water = true;
+                            break 'search;
+                        }
                     }
                 }
             }
@@ -2048,3 +2088,7 @@ impl RandomTickMask {
         self.0[i >> 6] >> (i & 63) & 1 != 0
     }
 }
+
+#[cfg(test)]
+#[path = "fire_tick_tests.rs"]
+mod fire_tick_tests;

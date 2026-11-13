@@ -2,6 +2,9 @@
 use super::*;
 
 impl LevelAccess for GameLevel<'_> {
+    fn infiniburn(&self) -> Option<&horizon_world::level::data::BlockSet> {
+        self.world.infiniburn.as_deref()
+    }
     fn cake_can_eat(&self, vanilla: bool) -> bool {
         if self.cake_probe {
             self.cake_requested.set(true);
@@ -51,6 +54,9 @@ impl LevelAccess for GameLevel<'_> {
         if self.native_authoritative {
             self.native_block_changed(self.dimension, pos, old, new);
         }
+    }
+    fn observe_block_state_change(&self, pos: BlockPos, old: BlockStateId, new: BlockStateId) {
+        self.block_state_change(pos, old, new);
     }
     fn neighbor_notify(&self, pos: BlockPos, skipped: Option<Direction>) -> bool {
         if !self.native_authoritative
@@ -169,11 +175,7 @@ impl LevelAccess for GameLevel<'_> {
         })
     }
     fn allow_block_ignite(&self, pos: BlockPos, cause: &'static str) -> bool {
-        let mut cancel = false;
-        if self.native_authoritative {
-            self.native_block_ignite(self.dimension, self.native_player, pos, cause, &mut cancel);
-        }
-        !cancel
+        self.block_ignite_allowed(pos, cause)
     }
     fn block_grow_feature<'a>(
         &mut self,
@@ -207,11 +209,7 @@ impl LevelAccess for GameLevel<'_> {
         }
     }
     fn allow_block_burn(&self, pos: BlockPos) -> bool {
-        let mut cancel = false;
-        if self.native_authoritative {
-            self.native_block_burn(self.dimension, pos, &mut cancel);
-        }
-        !cancel
+        self.block_burn_allowed(pos)
     }
     fn allow_leaves_decay(&self, pos: BlockPos) -> bool {
         let mut cancel = false;
@@ -219,6 +217,9 @@ impl LevelAccess for GameLevel<'_> {
             self.native_leaves_decay(self.dimension, pos, &mut cancel);
         }
         !cancel
+    }
+    fn has_water_ticket(&self, pos: BlockPos) -> bool {
+        self.world.water_tickets.contains([pos.x, pos.y, pos.z])
     }
     fn allow_moisture_change(&self, pos: BlockPos, from: i32, to: i32) -> bool {
         let mut cancel = false;
@@ -359,6 +360,16 @@ impl LevelAccess for GameLevel<'_> {
     ) -> bool {
         self.piston_move_allowed(piston, direction, extending, push, destroy)
     }
+    fn on_destroyed_by_push_reaction(
+        &mut self,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Direction,
+        fluid: FluidState,
+    ) {
+        self.destroyed_by_push_reaction(ticks, pos, state, direction, fluid);
+    }
     fn observe_piston_moved(
         &self,
         piston: BlockPos,
@@ -400,6 +411,36 @@ impl LevelAccess for GameLevel<'_> {
         self.native_should_check_weak_power(self.dimension, pos, state, direction, &mut check);
         check
     }
+    fn has_rail_hook(&self) -> bool {
+        self.rail_hooked()
+    }
+    fn adjust_rail_direction(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        vanilla: horizon_world::level::RailShape,
+    ) -> horizon_world::level::RailShape {
+        self.part_rail_direction(pos, state, vanilla)
+    }
+    fn adjust_rail_can_make_slopes(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        vanilla: bool,
+    ) -> bool {
+        self.part_rail_can_make_slopes(pos, state, vanilla)
+    }
+    fn adjust_rail_flexible(&self, pos: BlockPos, state: BlockStateId, vanilla: bool) -> bool {
+        self.part_rail_flexible(pos, state, vanilla)
+    }
+    fn adjust_rail_valid_shape(
+        &self,
+        state: BlockStateId,
+        shape: horizon_world::level::RailShape,
+        vanilla: bool,
+    ) -> bool {
+        self.part_rail_valid_shape(state, shape, vanilla)
+    }
     fn has_redstone_wire_connection_hook(&self) -> bool {
         self.native_authoritative
             && mod_api::__private::has_scoped_hook(mod_api::HookId::ShouldRedstoneWireConnectTo)
@@ -432,7 +473,20 @@ impl LevelAccess for GameLevel<'_> {
     }
     fn has_connection_hook(&self) -> bool {
         self.native_authoritative
-            && mod_api::__private::has_scoped_hook(mod_api::HookId::ConnectsTo)
+            && (mod_api::__private::has_scoped_hook(mod_api::HookId::ConnectsTo)
+                || mod_api::__private::has_scoped_hook(mod_api::HookId::CanBeConnectedTo))
+    }
+    fn adjust_can_be_connected_to(
+        &self,
+        kind: horizon_core::connection_kind::ConnectionKind,
+        pos: BlockPos,
+        state: BlockStateId,
+        connector: BlockStateId,
+        direction: Direction,
+        face_solid: bool,
+        vanilla: bool,
+    ) -> bool {
+        self.can_be_connected_to(kind, pos, state, connector, direction, face_solid, vanilla)
     }
     fn adjust_connects_to(
         &self,
@@ -578,6 +632,31 @@ impl LevelAccess for GameLevel<'_> {
             self.native_can_sustain_plant(self.dimension, state, ground, ground_pos, sustains);
         }
     }
+    fn asks_is_fertile(&self) -> bool {
+        self.native_authoritative && mod_api::__private::has_scoped_hook(mod_api::HookId::IsFertile)
+    }
+    fn before_is_fertile(&self, state: BlockStateId, pos: BlockPos, fertile: &mut bool) {
+        self.native_is_fertile(self.dimension, state, pos, fertile);
+    }
+    fn asks_can_be_hydrated(&self, state: BlockStateId) -> bool {
+        self.native_authoritative
+            && crate::game::api_values::block_state::block_listens(
+                mod_api::HookId::CanBeHydrated,
+                state,
+            )
+    }
+    fn before_can_be_hydrated(
+        &self,
+        state: BlockStateId,
+        pos: BlockPos,
+        fluid: FluidState,
+        fluid_pos: BlockPos,
+        hydrates: &mut Option<bool>,
+    ) {
+        if let Some(fluid) = native_world_read::api_fluid_state(fluid) {
+            self.native_can_be_hydrated(self.dimension, state, pos, fluid, fluid_pos, hydrates);
+        }
+    }
     fn before_may_place_on(
         &self,
         state: BlockStateId,
@@ -611,15 +690,38 @@ impl LevelAccess for GameLevel<'_> {
             self.native_perform_bonemeal(ticks, self.dimension, pos, state);
         }
     }
-    fn before_fire_odds(&self, state: BlockStateId, odds: &mut Option<(i32, i32)>) {
-        if self.native_authoritative {
-            self.native_fire_odds(self.dimension, state, odds);
-        }
+    fn before_fire_odds(
+        &self,
+        state: BlockStateId,
+        pos: BlockPos,
+        face: Direction,
+        odds: &mut Option<(i32, i32)>,
+    ) {
+        self.answer_fire_odds(state, pos, face, odds);
+    }
+    fn before_is_fire_source(&self, state: BlockStateId, pos: BlockPos, source: &mut Option<bool>) {
+        self.answer_is_fire_source(state, pos, source);
+    }
+    fn before_ignited_by_lava(
+        &self,
+        state: BlockStateId,
+        pos: BlockPos,
+        face: Direction,
+        ignites: &mut Option<bool>,
+    ) {
+        self.answer_ignited_by_lava(state, pos, face, ignites);
+    }
+    fn on_caught_fire(
+        &mut self,
+        ticks: &mut Ticks,
+        state: BlockStateId,
+        pos: BlockPos,
+        face: Direction,
+    ) {
+        self.caught_fire(ticks, state, pos, face);
     }
     fn before_smoke_source(&self, state: BlockStateId, smoke: &mut Option<bool>) {
-        if self.native_authoritative {
-            self.native_smoke_source(self.dimension, state, smoke);
-        }
+        self.answer_smoke_source(state, smoke);
     }
     fn world_surface(&self, x: i32, z: i32) -> i32 {
         self.world.world_surface(x, z, |s| self.facts.is_air(s))
@@ -656,7 +758,7 @@ impl LevelAccess for GameLevel<'_> {
     }
 
     fn block_entity_analog_signal(
-        &self,
+        &mut self,
         pos: BlockPos,
         state: BlockStateId,
         direction: Direction,
@@ -748,26 +850,10 @@ impl LevelAccess for GameLevel<'_> {
     /// than the `fire_spread_radius_around_player` rule to the block's corner
     /// (`ChunkMap.anyPlayerCloseEnoughTo`); -1 spreads everywhere.
     fn can_spread_fire_around(&self, pos: BlockPos) -> bool {
-        let radius = self.rules.fire_spread_radius_around_player;
-        radius == -1
-            || self.fire_players.iter().any(|p| {
-                let d = [
-                    p[0] - f64::from(pos.x),
-                    p[1] - f64::from(pos.y),
-                    p[2] - f64::from(pos.z),
-                ];
-                d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < f64::from(radius) * f64::from(radius)
-            })
+        self.player_near_fire(pos)
     }
     fn increased_fire_burnout(&self, pos: BlockPos) -> bool {
-        self.world
-            .chunks
-            .get(&(pos.x >> 4, pos.z >> 4))
-            .is_some_and(|chunk| {
-                self.biomes
-                    .get(chunk.biome(pos.x, pos.y, pos.z))
-                    .increased_fire_burnout
-            })
+        self.biome_burns_out_fire(pos)
     }
     fn block_state(&self, pos: BlockPos) -> BlockStateId {
         self.world.block(pos.x, pos.y, pos.z)

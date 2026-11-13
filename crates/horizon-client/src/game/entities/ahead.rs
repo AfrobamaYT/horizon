@@ -72,6 +72,7 @@ impl ItemTables<'_> {
             entity_boxes,
             Some(self.border),
             Some(&self.motion.blocks),
+            self.context,
         );
         item.check_fall(&mut step, |fall, from, moved| {
             if fall == 0.0 || moved.length_squared() < 1.0 {
@@ -108,7 +109,7 @@ impl ItemTables<'_> {
             self.context,
         );
         item.push_by_bubble_column(self.world, self.registry, self.facts, self.collision);
-        let alive = item.tick_settle(self.world, self.facts, no_physics, step);
+        let alive = item.tick_settle(self.world, self.facts, no_physics, step, self.context);
         // ItemEntity.tick refreshes immersion and splashes on water entry.
         let before = item.velocity;
         let (water, _) = item.push_by_fluid(self.world, &self.motion.fluids, self.context);

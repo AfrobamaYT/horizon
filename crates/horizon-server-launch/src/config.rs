@@ -4,9 +4,12 @@
 //! start the supervisor writes them into `server.properties`, which the game reads exactly as vanilla's
 //! server does; what the game changes there itself (`/whitelist on`) is copied back afterwards.
 
-use horizon_platform::server_files::{
-    java_properties::{Properties, date_string, now_millis},
-    properties::{DIFFICULTIES, GAME_MODES, ServerProperties, SystemEntropy},
+use horizon_platform::java_properties::{Properties, date_string, now_millis};
+use horizon_platform::server_files::biome_regions::BiomeRegions;
+#[cfg(test)]
+use horizon_platform::server_files::biome_regions::MissingRegions;
+use horizon_platform::server_files::properties::{
+    DIFFICULTIES, GAME_MODES, ServerProperties, SystemEntropy,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path};
@@ -29,6 +32,10 @@ enforce_whitelist = false    # kick online players taken off the whitelist
 view_distance = 10           # chunks sent around each player
 simulation_distance = 10     # chunks around each player where mobs, crops and redstone tick
 max_view_distance = 0        # past view_distance, saved chunks only, up to this (never generated; 0: off)
+max_viewed_loaded_chunks = 2048             # chunks a mod may keep loaded for one player in another level (0: none; at most 2048 for now)
+max_viewed_ticking_chunks = 441             # of them, ticking (one player's simulation area at distance 10)
+max_viewed_loaded_chunks_per_level = 16384  # the same for all players together, per level
+max_viewed_ticking_chunks_per_level = 3528  # ticking, all players together, per level
 admin_feedback_to_ops = true # operators see each other's commands ([name: ...], vanilla); false: only the log
 accept_older_clients = false # true: 26.2 clients join too, their packets translated (docs/hosting.md)
 
@@ -108,10 +115,16 @@ enabled = true               # false pauses it and keeps the webhook
 # Fights follow 26.3's rules. For 1.8.9's (no attack cooldown or sweep, 1.8 weapon damage; docs/pvp.md):
 # [combat]
 # legacy = true
+
+# A world's biome regions from mods are fixed when it is made (docs/design/mod-api/mod-biome-regions.md).
+# When a mod with one is gone, the server refuses to start until you choose. To change it:
+# [biome_regions]
+# missing = "vanilla"        # generate vanilla's biomes where the missing mods' regions were; "refuse": don't start
+# adopt_installed = true     # new chunks use the installed mods' regions (the world keeps its saved weights)
 "##;
 
 /// Each typed setting: its section, its name, and the vanilla key it writes.
-pub const TYPED: [(&str, &str, &str); 17] = [
+pub const TYPED: [(&str, &str, &str); 21] = [
     ("server", "motd", "motd"),
     ("server", "port", "server-port"),
     ("server", "bind", "server-ip"),
@@ -122,6 +135,26 @@ pub const TYPED: [(&str, &str, &str); 17] = [
     ("server", "view_distance", "view-distance"),
     ("server", "simulation_distance", "simulation-distance"),
     ("server", "max_view_distance", "horizon-max-view-distance"),
+    (
+        "server",
+        "max_viewed_loaded_chunks",
+        "horizon-max-viewed-loaded-chunks",
+    ),
+    (
+        "server",
+        "max_viewed_ticking_chunks",
+        "horizon-max-viewed-ticking-chunks",
+    ),
+    (
+        "server",
+        "max_viewed_loaded_chunks_per_level",
+        "horizon-max-viewed-loaded-chunks-per-level",
+    ),
+    (
+        "server",
+        "max_viewed_ticking_chunks_per_level",
+        "horizon-max-viewed-ticking-chunks-per-level",
+    ),
     (
         "server",
         "admin_feedback_to_ops",
@@ -176,6 +209,10 @@ pub struct Config {
     /// The game reads this section itself (docs/pvp.md); written only when it isn't the default.
     #[serde(default, skip_serializing_if = "Combat::is_default")]
     pub combat: Combat,
+    /// The game reads this section itself (game/interface/dedicated/biome_regions.rs); written only when it
+    /// isn't the default.
+    #[serde(default, skip_serializing_if = "BiomeRegions::is_default")]
+    pub biome_regions: BiomeRegions,
 }
 
 /// `[combat]`: `legacy = true` resolves the players' melee hits by 1.8.9's rules (no attack cooldown or sweep,
@@ -263,6 +300,13 @@ pub struct Server {
     pub simulation_distance: u32,
     /// Horizon's far ring (docs/hosting.md): saved chunks sent past `view_distance`, up to this; 0 is off.
     pub max_view_distance: u32,
+    /// Viewed levels (docs/hosting.md): the chunks mods may keep loaded for one player in one other
+    /// level (fixed at 2048 for this protocol revision: the game lowers a higher value), the ticking
+    /// ones among them, and the same for all players together in one level.
+    pub max_viewed_loaded_chunks: u32,
+    pub max_viewed_ticking_chunks: u32,
+    pub max_viewed_loaded_chunks_per_level: u32,
+    pub max_viewed_ticking_chunks_per_level: u32,
     /// Whether operators get each other's command feedback (`[name: ...]`, vanilla's broadcastToAdmins);
     /// false leaves it to the console's log, so nobody in game sees an operator's commands.
     pub admin_feedback_to_ops: bool,
@@ -526,6 +570,10 @@ impl Default for Server {
             view_distance: 10,
             simulation_distance: 10,
             max_view_distance: 0,
+            max_viewed_loaded_chunks: 2048,
+            max_viewed_ticking_chunks: 441,
+            max_viewed_loaded_chunks_per_level: 2048 * 8,
+            max_viewed_ticking_chunks_per_level: 441 * 8,
             admin_feedback_to_ops: true,
             accept_older_clients: false,
         }
@@ -590,7 +638,7 @@ impl Config {
         Self::parse(&text).map_err(|e| format!("{}: {e}", path.display()))
     }
 
-    fn check(&self) -> Result<(), String> {
+    pub(crate) fn check(&self) -> Result<(), String> {
         let w = &self.world;
         if !GAME_MODES.contains(&w.game_mode.as_str()) {
             return Err(format!(
@@ -675,6 +723,18 @@ impl Config {
         Ok(written)
     }
 
+    /// The level `op` gives a new operator: `op-permission-level` as the game reads it at its next start,
+    /// that is `server.properties` with this configuration's keys written over it (as
+    /// [`Config::write_properties`] does). 4, vanilla's default, when the keys cannot be read.
+    pub fn op_permission_level(&self, dir: &Path) -> i32 {
+        let mut properties = read_properties(&dir.join(PROPERTIES)).unwrap_or_default();
+        for (key, value) in self.vanilla() {
+            properties.put(&key, value);
+        }
+        ServerProperties::new(properties, &mut SystemEntropy::default())
+            .map_or(4, |p| p.op_permission_level)
+    }
+
     /// A configuration from a vanilla `server.properties`: typed settings from their keys, and every other
     /// key the file sets to something other than vanilla's default under `[properties]`.
     pub fn import(source: &Properties) -> Result<Self, String> {
@@ -747,7 +807,13 @@ pub fn render(config: &Config) -> String {
         set(&mut doc, section, field, &table[section][field]);
     }
     let mut text = doc.to_string();
-    for section in ["anticheat", "chat_filter", "prune_chunks", "combat"] {
+    for section in [
+        "anticheat",
+        "chat_filter",
+        "prune_chunks",
+        "combat",
+        "biome_regions",
+    ] {
         if let Some(settings) = table.get(section) {
             let mut only = toml::Table::new();
             only.insert(section.into(), settings.clone());
@@ -1038,17 +1104,42 @@ mod tests {
     }
 
     #[test]
+    fn biome_regions_refuse_missing_mods_unless_their_section_says() {
+        assert_eq!(
+            Config::default().biome_regions.missing,
+            MissingRegions::Refuse
+        );
+        assert!(!Config::default().biome_regions.adopt_installed);
+        let set = Config::parse(&format!(
+            "{TEMPLATE}\n[biome_regions]\nmissing = \"vanilla\"\nadopt_installed = true\n"
+        ))
+        .unwrap();
+        assert_eq!(set.biome_regions.missing, MissingRegions::Vanilla);
+        assert!(set.biome_regions.adopt_installed);
+        // Kept when the file is written again, and left out while default.
+        assert_eq!(Config::parse(&render(&set)).unwrap(), set);
+        let off = render(&Config::default());
+        assert!(!off.lines().any(|l| l.trim() == "[biome_regions]"), "{off}");
+        assert!(Config::parse("[biome_regions]\nmissing = \"skip\"\n").is_err());
+    }
+
+    #[test]
     fn defaults_are_vanilla() {
         // Every typed default is what vanilla 26.3 writes for a missing key.
         let vanilla =
             ServerProperties::new(Properties::default(), &mut SystemEntropy::default()).unwrap();
         for (key, value) in Config::default().vanilla() {
             // Horizon's own, which vanilla doesn't have: their defaults behave as vanilla does
-            // (the far ring off, operators told of each other's commands, other releases turned away).
+            // (the far ring off, operators told of each other's commands, other releases turned away,
+            // and caps on viewed areas, which only a mod asks for).
             if key.starts_with("horizon-") {
                 let vanilla_like = match key.as_str() {
                     "horizon-admin-feedback-to-ops" => "true",
                     "horizon-accept-older-clients" => "false",
+                    "horizon-max-viewed-loaded-chunks" => "2048",
+                    "horizon-max-viewed-ticking-chunks" => "441",
+                    "horizon-max-viewed-loaded-chunks-per-level" => "16384",
+                    "horizon-max-viewed-ticking-chunks-per-level" => "3528",
                     _ => "0",
                 };
                 assert_eq!(value, vanilla_like, "{key}");
