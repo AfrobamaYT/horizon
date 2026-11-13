@@ -6,6 +6,7 @@ use mod_api::{
     Hooks, HostSide, LevelLoadEvent, LevelRef, LevelTickPostEvent, LevelUnloadEvent, ModEntry,
     RuntimeGenerator, RuntimeLevel, RuntimeLevelError,
 };
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 fn flat() -> RuntimeLevel {
@@ -86,10 +87,17 @@ fn a_level_is_open_after_its_request_is_applied_and_until_its_close_is() {
 
 type Seen<T> = Arc<Mutex<Vec<T>>>;
 
+/// What the mod does in each level tick: open `id`, delete it, or nothing.
+const OPEN: u8 = 0;
+const DELETE: u8 = 1;
+const IDLE: u8 = 2;
+
 /// A mod that opens `id` in `level_tick_post` and says what each call answered.
 struct Opener {
     id: &'static str,
     level: RuntimeLevel,
+    mode: Arc<AtomicU8>,
+    deletes: Seen<Result<(), RuntimeLevelError>>,
     answers: Seen<Result<LevelRef, RuntimeLevelError>>,
     open_right_after: Seen<bool>,
     loads: Seen<String>,
@@ -103,6 +111,17 @@ impl Hooks for Opener {
         let HostSide::Server(host) = host else {
             return;
         };
+        match self.mode.load(Ordering::SeqCst) {
+            OPEN => {}
+            DELETE => {
+                let answer = host.runtime_levels().delete(self.id);
+                self.deletes.lock().unwrap().push(answer);
+                let open = host.runtime_levels().is_open(self.id);
+                self.open_right_after.lock().unwrap().push(open);
+                return;
+            }
+            _ => return,
+        }
         let answer = host.runtime_levels().open(self.id, self.level.clone());
         self.answers.lock().unwrap().push(answer);
         let open = host.runtime_levels().is_open(self.id);
@@ -125,6 +144,8 @@ impl Hooks for Opener {
 }
 
 struct Fixture {
+    mode: Arc<AtomicU8>,
+    deletes: Seen<Result<(), RuntimeLevelError>>,
     answers: Seen<Result<LevelRef, RuntimeLevelError>>,
     open_right_after: Seen<bool>,
     loads: Seen<String>,
@@ -140,6 +161,8 @@ fn with_opener(
     test: impl FnOnce(&mut super::Game<'_>, &Fixture),
 ) {
     let fixture = Fixture {
+        mode: Arc::new(AtomicU8::new(OPEN)),
+        deletes: Seen::default(),
         answers: Seen::default(),
         open_right_after: Seen::default(),
         loads: Seen::default(),
@@ -149,6 +172,8 @@ fn with_opener(
     let opener = Opener {
         id,
         level,
+        mode: fixture.mode.clone(),
+        deletes: fixture.deletes.clone(),
         answers: fixture.answers.clone(),
         open_right_after: fixture.open_right_after.clone(),
         loads: fixture.loads.clone(),
@@ -201,6 +226,63 @@ fn unload_as(
         part: None,
     });
     game.runtime_level_unload(id)
+}
+
+/// `RuntimeLevels::delete` as the mod `name` calls it.
+fn delete_as(
+    game: &mut super::Game<'_>,
+    name: &'static str,
+    id: &str,
+) -> Result<(), RuntimeLevelError> {
+    let _call = mod_api::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
+        id: name,
+        hook: "level_tick_post",
+        part: None,
+    });
+    game.runtime_level_delete(id)
+}
+
+/// Generate the chunk (0, 0) of the open level `id`, put `block` at (1, -50, 1) and leave the
+/// level again.
+fn place_block(game: &mut super::Game<'_>, id: &str, block: &str) {
+    let state = game.pack.assets.registry.default_state(block).unwrap();
+    let dim = super::Dim::extra(id).unwrap();
+    game.enter_level(dim).unwrap();
+    game.streaming.forced.insert((0, 0));
+    for _ in 0..2000 {
+        game.update_world();
+        if game.world.chunks.contains_key(&(0, 0)) {
+            break;
+        }
+        game.streaming.wait(std::time::Duration::from_millis(5));
+    }
+    assert!(game.world.chunks.contains_key(&(0, 0)), "the chunk generated");
+    game.world.set(1, -50, 1, state).unwrap();
+    game.enter_level(super::Dim::Overworld).unwrap();
+}
+
+/// The block at (1, -50, 1) of the open level `id`, loading it as `place_block` does.
+fn block_at(game: &mut super::Game<'_>, id: &str) -> horizon_world::registry::BlockStateId {
+    let dim = super::Dim::extra(id).unwrap();
+    game.enter_level(dim).unwrap();
+    game.streaming.forced.insert((0, 0));
+    for _ in 0..2000 {
+        game.update_world();
+        if game.world.chunks.contains_key(&(0, 0)) {
+            break;
+        }
+        game.streaming.wait(std::time::Duration::from_millis(5));
+    }
+    assert!(game.world.chunks.contains_key(&(0, 0)), "the chunk loaded");
+    let block = game.world.block(1, -50, 1);
+    game.enter_level(super::Dim::Overworld).unwrap();
+    block
+}
+
+/// A file with some bytes in it, its folders made.
+fn write_file(path: &std::path::Path) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, b"x").unwrap();
 }
 
 fn tick_post(game: &mut super::Game<'_>) {
@@ -468,4 +550,253 @@ fn failed_construction_rolls_back_every_published_table() {
         unload_as(game, "rollback", "rollback:a").unwrap();
         game.apply_runtime_levels();
     });
+}
+
+/// Deleting an open, empty level closes it, then removes its folder and the structure references
+/// kept beside the world, and the folders they leave empty.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_delete_closes_the_level_and_removes_its_folder_and_references_file() {
+    with_opener("erase", "erase:instance/ab", flat(), |game, seen| {
+        tick_post(game);
+        game.apply_runtime_levels();
+        place_block(game, "erase:instance/ab", "minecraft:stone");
+        let folder = game.world_root.join("dimensions/erase/instance/ab");
+        let references = game
+            .world_root
+            .join("data/horizon_structure_references_erase_instance/ab.json");
+        write_file(&references);
+        // The save of the unload writes the folder; a stray file is in it too.
+        write_file(&folder.join("data/minecraft/raids.dat"));
+        assert_eq!(delete_as(game, "erase", "erase:instance/ab"), Ok(()));
+        assert!(
+            game.runtime_level_is_open("erase:instance/ab"),
+            "open until the delete is applied"
+        );
+        assert!(folder.is_dir() && references.is_file());
+        game.apply_runtime_levels();
+        assert!(!game.runtime_level_is_open("erase:instance/ab"));
+        assert!(!folder.exists(), "the folder is gone");
+        assert!(!references.exists(), "the references file is gone");
+        assert!(
+            !game
+                .world_root
+                .join("data/horizon_structure_references_erase_instance")
+                .exists(),
+            "so is the folder it left empty"
+        );
+        assert!(!game.world_root.join("dimensions/erase").exists());
+        assert!(game.world_root.join("dimensions").is_dir());
+        assert!(game.world_root.join("data").is_dir());
+        assert_eq!(*seen.unloads.lock().unwrap(), ["erase:instance/ab"]);
+    });
+}
+
+/// A level that is not open, in the mod's namespace, is only files: what a crash left.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_delete_of_a_level_that_is_not_open_removes_its_leftovers() {
+    with_opener("left", "left:room", flat(), |game, seen| {
+        let folder = game.world_root.join("dimensions/left/room");
+        let sibling = game.world_root.join("dimensions/left/other");
+        let references = game
+            .world_root
+            .join("data/horizon_structure_references_left_room.json");
+        write_file(&folder.join("region/r.0.0.mca"));
+        write_file(&sibling.join("region/r.0.0.mca"));
+        write_file(&references);
+        assert!(!game.runtime_level_is_open("left:room"));
+        assert_eq!(delete_as(game, "left", "left:room"), Ok(()));
+        assert!(folder.is_dir(), "nothing is removed before the queue is applied");
+        game.apply_runtime_levels();
+        assert!(!folder.exists() && !references.exists());
+        assert!(
+            sibling.join("region/r.0.0.mca").is_file(),
+            "another level of the namespace stays"
+        );
+        // Nothing left to remove is nothing to refuse.
+        assert_eq!(delete_as(game, "left", "left:room"), Ok(()));
+        game.apply_runtime_levels();
+        assert!(seen.unloads.lock().unwrap().is_empty(), "it was never open");
+    });
+}
+
+/// The folder of another mod's level, of a vanilla level and of a path that leaves the world is
+/// never touched.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_delete_outside_the_mods_namespace_is_refused_and_removes_nothing() {
+    with_opener("mine", "mine:a", flat(), |game, _| {
+        let other = game.world_root.join("dimensions/other/x/region/r.0.0.mca");
+        let vanilla = game.world_root.join("dimensions/minecraft/overworld/region/r.0.0.mca");
+        let escape = game.world_root.join("dimensions/mine/x");
+        write_file(&other);
+        write_file(&vanilla);
+        write_file(&escape.join("keep.txt"));
+        for (id, expected) in [
+            ("other:x", RuntimeLevelError::OutsideNamespace),
+            ("minecraft:overworld", RuntimeLevelError::OutsideNamespace),
+            ("mine:../other/x", RuntimeLevelError::InvalidId),
+            ("mine:x/../../other/x", RuntimeLevelError::InvalidId),
+            ("mine:con", RuntimeLevelError::InvalidId),
+        ] {
+            assert_eq!(delete_as(game, "mine", id), Err(expected), "{id}");
+        }
+        game.apply_runtime_levels();
+        assert!(other.is_file() && vanilla.is_file() && escape.join("keep.txt").is_file());
+    });
+}
+
+/// A level deleted and opened again starts empty: the block placed before is gone.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_level_opened_again_after_a_delete_starts_empty() {
+    with_opener("fresh", "fresh:a", flat(), |game, seen| {
+        let stone = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:stone")
+            .unwrap();
+        tick_post(game);
+        game.apply_runtime_levels();
+        let first = seen.answers.lock().unwrap()[0].unwrap();
+        place_block(game, "fresh:a", "minecraft:stone");
+        assert_eq!(block_at(game, "fresh:a"), stone);
+        assert_eq!(delete_as(game, "fresh", "fresh:a"), Ok(()));
+        // The open waits for the delete to be applied.
+        seen.answers.lock().unwrap().clear();
+        tick_post(game);
+        assert_eq!(
+            seen.answers.lock().unwrap()[0],
+            Err(RuntimeLevelError::AlreadyOpen)
+        );
+        game.apply_runtime_levels();
+        assert!(!game.world_root.join("dimensions/fresh/a").exists());
+        seen.answers.lock().unwrap().clear();
+        tick_post(game);
+        game.apply_runtime_levels();
+        let second = seen.answers.lock().unwrap()[0].unwrap();
+        assert_ne!(first, second);
+        assert!(!game.level_handle_current(first));
+        let air = game.pack.assets.registry.default_state("minecraft:air").unwrap();
+        assert_eq!(block_at(game, "fresh:a"), air, "the stone is not there");
+        delete_as(game, "fresh", "fresh:a").unwrap();
+        game.apply_runtime_levels();
+    });
+}
+
+/// An open made after the delete of a level that is not open is applied after it: the leftovers
+/// are gone before the level opens.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn an_open_queued_behind_a_delete_of_leftovers_finds_no_folder() {
+    with_opener("behind", "behind:a", flat(), |game, seen| {
+        let leftover = game.world_root.join("dimensions/behind/a/region/r.0.0.mca");
+        write_file(&leftover);
+        assert_eq!(delete_as(game, "behind", "behind:a"), Ok(()));
+        tick_post(game);
+        assert!(seen.answers.lock().unwrap()[0].is_ok());
+        game.apply_runtime_levels();
+        assert!(game.runtime_level_is_open("behind:a"));
+        assert!(!leftover.exists());
+        delete_as(game, "behind", "behind:a").unwrap();
+        game.apply_runtime_levels();
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_level_with_a_player_in_it_is_not_deleted() {
+    with_opener("guest", "guest:a", flat(), |game, _| {
+        tick_post(game);
+        game.apply_runtime_levels();
+        let dim = super::Dim::extra("guest:a").unwrap();
+        game.enter_level(dim).unwrap();
+        game.player = Some(
+            horizon_client::motion::PlayerMotion::new(
+                game.motion,
+                horizon_core::geometry::Vec3::new(0.5, 80.0, 0.5),
+            )
+            .unwrap(),
+        );
+        let marker = game.world_root.join("dimensions/guest/a/marker.txt");
+        write_file(&marker);
+        assert_eq!(
+            delete_as(game, "guest", "guest:a"),
+            Err(RuntimeLevelError::PlayersInside)
+        );
+        game.apply_runtime_levels();
+        assert!(game.runtime_level_is_open("guest:a"));
+        assert!(marker.is_file());
+        game.enter_level(super::Dim::Overworld).unwrap();
+        assert_eq!(delete_as(game, "guest", "guest:a"), Ok(()));
+        game.apply_runtime_levels();
+        assert!(!marker.exists());
+        assert!(!game.runtime_level_is_open("guest:a"));
+    });
+}
+
+/// A delete asked inside a level's tick leaves the level and its files as they are until the
+/// queue is applied after the levels.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_delete_is_applied_after_the_levels_and_not_inside_a_tick() {
+    with_opener("later", "later:a", flat(), |game, seen| {
+        tick_post(game);
+        game.apply_runtime_levels();
+        let marker = game.world_root.join("dimensions/later/a/marker.txt");
+        write_file(&marker);
+        seen.open_right_after.lock().unwrap().clear();
+        seen.mode.store(DELETE, Ordering::SeqCst);
+        tick_post(game);
+        assert_eq!(*seen.deletes.lock().unwrap(), [Ok(())]);
+        assert_eq!(*seen.open_right_after.lock().unwrap(), [true]);
+        assert!(marker.is_file(), "nothing is removed inside the tick");
+        assert!(seen.unloads.lock().unwrap().is_empty());
+        seen.mode.store(IDLE, Ordering::SeqCst);
+        game.tick_server(false).unwrap();
+        assert!(!marker.exists());
+        assert!(!game.runtime_level_is_open("later:a"));
+        assert_eq!(*seen.unloads.lock().unwrap(), ["later:a"]);
+    });
+}
+
+/// A delete of a level whose open is still waiting is refused: its open comes first.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_delete_of_a_level_still_waiting_to_open_is_refused() {
+    with_opener("wait", "wait:a", flat(), |game, _| {
+        tick_post(game);
+        assert_eq!(
+            delete_as(game, "wait", "wait:a"),
+            Err(RuntimeLevelError::AlreadyOpen)
+        );
+        game.apply_runtime_levels();
+        assert!(game.runtime_level_is_open("wait:a"));
+        delete_as(game, "wait", "wait:a").unwrap();
+        game.apply_runtime_levels();
+    });
+}
+
+#[test]
+fn a_delete_marks_an_open_level_closing_and_a_second_unload_finds_it_not_open() {
+    let mut table = RuntimeTable::default();
+    table.queue_open("test", "del:a", flat()).unwrap();
+    assert_eq!(
+        table.queue_delete("test", "del:a"),
+        Err(RuntimeLevelError::AlreadyOpen)
+    );
+    table.mark_open("del:a");
+    assert_eq!(table.queue_delete("test", "del:a"), Ok(()));
+    assert!(table.is_open("del:a"));
+    assert_eq!(table.queue_unload("del:a"), Err(RuntimeLevelError::NotOpen));
+    assert_eq!(
+        table.queue_open("test", "del:a", flat()),
+        Err(RuntimeLevelError::AlreadyOpen),
+        "no reopen until the delete is applied"
+    );
+    // A level the table does not hold has only files to delete.
+    assert_eq!(table.queue_delete("test", "del:none"), Ok(()));
+    assert!(!table.holds("del:none"));
 }

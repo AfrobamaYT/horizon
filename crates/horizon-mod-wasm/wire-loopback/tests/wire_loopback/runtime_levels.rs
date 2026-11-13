@@ -6,6 +6,7 @@ use mod_api::{LevelRef, RuntimeGenerator, RuntimeLevel, RuntimeLevelError};
 struct World {
     generation: u32,
     open: bool,
+    deletes: u32,
 }
 impl mod_api::Host for World {}
 mod_api::impl_host_areas!(World);
@@ -37,6 +38,16 @@ impl mod_api::RuntimeLevels for World {
         assert_eq!(id, "wire:room");
         if !self.open {
             return Err(RuntimeLevelError::NotOpen);
+        }
+        self.open = false;
+        Ok(())
+    }
+    fn delete(&mut self, id: &str) -> Result<(), RuntimeLevelError> {
+        assert_eq!(id, "wire:room");
+        self.deletes += 1;
+        // The first answers as a level with a player in it does.
+        if self.deletes == 1 {
+            return Err(RuntimeLevelError::PlayersInside);
         }
         self.open = false;
         Ok(())
@@ -88,7 +99,16 @@ fn runtime_level_hostcalls_preserve_requests_refusals_and_generations() {
         1,
         "the old handle never adopts the reopened generation"
     );
+    // A delete crosses the wire as its own call, and so does its refusal.
+    assert_eq!(
+        host.runtime_levels().delete("wire:room"),
+        Err(RuntimeLevelError::PlayersInside)
+    );
+    assert!(host.runtime_levels().is_open("wire:room"));
+    assert_eq!(host.runtime_levels().delete("wire:room"), Ok(()));
+    assert!(!host.runtime_levels().is_open("wire:room"));
     guest::set_transport(None);
     assert_eq!(world.generation, 2);
-    assert!(world.open);
+    assert_eq!(world.deletes, 2);
+    assert!(!world.open);
 }

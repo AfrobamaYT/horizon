@@ -231,8 +231,26 @@ pub trait RuntimeLevels {
         )
     }
     /// Side: server.
+    /// Remove the level `id` the calling mod owns, folder and all, once this server tick's levels
+    /// have ticked. A level that is open is saved and closed first (`level_unload` fires), as by
+    /// `unload`; a level that is not open, such as the leftovers of a crash, only has its files
+    /// removed, and a level with no files is nothing to delete. The structure references the
+    /// game keeps beside the world for the level go with its folder. Refused with
+    /// [`RuntimeLevelError::PlayersInside`] while a player or an arrival not yet landed is in
+    /// the level, now and again when it is applied, and with [`RuntimeLevelError::AlreadyOpen`]
+    /// for a level still waiting to open. An `open` of a level that is open and being deleted is
+    /// `AlreadyOpen` until the delete is applied; one of a level that was not open, made after
+    /// the `delete`, is applied after it and starts empty.
+    fn delete(&mut self, id: &str) -> Result<(), RuntimeLevelError> {
+        crate::world::phase::unprovided(
+            "RuntimeLevels::delete",
+            "delete",
+            crate::world::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: server.
     /// Whether the level `id` is open: false until a queued `open` is applied, true until a
-    /// queued `unload` is. Takes `&mut self` as the service's other methods do: a frame
+    /// queued `unload` or `delete` is. Takes `&mut self` as the service's other methods do: a frame
     /// resource is reached one way.
     fn is_open(&mut self, id: &str) -> bool {
         crate::world::phase::unprovided(

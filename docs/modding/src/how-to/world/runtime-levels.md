@@ -1,8 +1,8 @@
 # Runtime levels
 
 A mod opens a level of its own while the server runs and closes it again: an instanced dungeon, a
-minigame arena, a pocket dimension per player. `host.runtime_levels()` has `open`, `unload` and
-`is_open`, the same on a native and a wasm mod.
+minigame arena, a pocket dimension per player. `host.runtime_levels()` has `open`, `unload`, `delete`
+and `is_open`, the same on a native and a wasm mod.
 
 ```rust,ignore
 fn run_mod_command(&self, host: &mut dyn ServerHost, event: &mut RunModCommandEvent<'_>) -> Flow {
@@ -39,10 +39,10 @@ fn run_mod_command(&self, host: &mut dyn ServerHost, event: &mut RunModCommandEv
 
 ## When it happens
 
-`open` and `unload` check the request when they are called and return the refusal at once. The
+`open`, `unload` and `delete` check the request when they are called and return the refusal at once. The
 change itself waits: the server applies the queue after its levels have ticked in the server
 tick, never inside a level's tick, so no hook sees a level appear or vanish under it. Until then
-`is_open` is false after an `open` and true after an `unload`. A request made while the queue is
+`is_open` is false after an `open` and true after an `unload` or a `delete`. A request made while the queue is
 applied waits for the next tick. `level_load` and `level_unload` fire as for any level the game
 opens or closes, once each.
 
@@ -72,11 +72,40 @@ no forced chunk holds is saved and dropped from memory after 300 ticks (`level_u
 it stays open: `is_open` still says true, and the level opens again from its folder, with
 `level_load`, when a player or a mod enters it. Only `unload` closes it for good.
 
+## Deleting
+
+`delete(id)` removes a level for good: its folder `dimensions/<namespace>/<path>/` and the
+structure references the game keeps beside the world for it
+(`data/horizon_structure_references_<namespace>_<path>.json`), then the folders those leave
+empty. It works for the levels of the calling mod's namespace only, with the same refusals as
+`unload` (`InvalidId`, `OutsideNamespace`, `ReservedId`), and the folder it removes comes from
+the validated id and nothing else.
+
+- A level that is **open** is unloaded first, as by `unload` (saved, `level_unload` fires), and
+  its files are removed in the same pass. It refuses with `PlayersInside` while a player or an
+  arrival that has not landed is in the level, when called and again when applied: move the
+  players out first. `is_open` stays true until the delete is applied.
+- A level that is **not open** is only files, the leftovers of a crash or of an earlier
+  `unload`. They are removed, and a level with no files is not an error. Nothing fires, since
+  nothing was open.
+- A level still **waiting to open** refuses with `AlreadyOpen`: its `open` comes first.
+
+The removal happens on the server thread, in the pass that applies the queue, after the level
+has been saved and dropped, so no save is running against the files. A request in the queue is
+applied in the order it was made. A reopen therefore waits for the removal: an `open` of a level
+that is open and being deleted is `AlreadyOpen` until the delete is applied; an `open` of a level
+that was not open, made after the `delete`, is applied after it and starts from nothing. A save a
+mod asked for with `level_request_save` is dropped with the level. If a file cannot be removed (another
+program holds it open), the level stays closed, the failure is logged with the mod and the id, and a
+second `delete` removes what is left.
+
+A handle from before the delete reads as stale, as after an `unload`.
+
 ## The cap
 
 A server keeps at most 64 runtime levels open or waiting, whichever mods opened them: the
 65th `open` is `CapReached`. A server sets another number with `horizon-max-runtime-levels` in
 `server.properties`; a server run by `horizon-server` sets it under `[properties]` in `server.toml`
-([hosting](https://github.com/arismoko/horizon/blob/main/docs/hosting.md)). An unloaded level frees its place when the unload is applied; the idle close does not free it.
+([hosting](https://github.com/arismoko/horizon/blob/main/docs/hosting.md)). An unloaded or deleted level frees its place when the request is applied; the idle close does not free it.
 
 Every refusal is also logged with the name of the mod that asked.

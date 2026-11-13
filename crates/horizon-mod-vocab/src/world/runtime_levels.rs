@@ -43,7 +43,7 @@ impl RuntimeLevel {
     }
 }
 
-/// Why `RuntimeLevels::open` or `unload` refused. The game logs the mod that asked.
+/// Why `RuntimeLevels::open`, `unload` or `delete` refused. The game logs the mod that asked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]

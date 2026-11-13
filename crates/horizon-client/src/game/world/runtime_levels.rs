@@ -5,7 +5,8 @@
 //! tick's level loop (`apply_runtime_levels`), never inside a level's tick, so no hook ever sees a
 //! level appear or vanish under it. The table below holds what is open, waiting or closing, and
 //! the generation each open of an id was given: a `LevelRef` from before an unload never names a
-//! later open of the same id.
+//! later open of the same id. A delete is an unload and then the removal of the level's files, on
+//! the server thread in the same pass, so a reopen is applied only after the files are gone.
 use super::{Dim, Game};
 use horizon_client::chunk::{ExtraLevel, LevelShape};
 use horizon_core::LevelKey;
@@ -18,6 +19,7 @@ use horizon_world::{
 };
 use mod_api::{LevelRef, RuntimeGenerator, RuntimeLevel, RuntimeLevelError};
 use std::collections::BTreeMap;
+use std::path::Path;
 
 /// How many runtime levels a server keeps open unless `horizon-max-runtime-levels` says otherwise.
 pub(in crate::game) const DEFAULT_CAP: usize = 64;
@@ -42,6 +44,8 @@ struct Entry {
 enum Request {
     Open(String),
     Unload(String),
+    /// The mod that asked, which a level with no entry cannot name any other way.
+    Delete(&'static str, String),
 }
 
 /// The runtime levels of one world open: pure bookkeeping, which the game applies.
@@ -120,6 +124,24 @@ impl RuntimeTable {
         }
     }
 
+    /// Queue the removal of `id`, which the caller has checked except against the table. A level
+    /// that is open is marked closing until the removal is applied; one that is not in the table
+    /// has only files to remove. A level waiting to open is refused: its open comes first.
+    pub(in crate::game) fn queue_delete(
+        &mut self,
+        owner: &'static str,
+        id: &str,
+    ) -> Result<(), RuntimeLevelError> {
+        if let Some(entry) = self.entries.get_mut(id) {
+            if entry.state == State::Opening {
+                return Err(RuntimeLevelError::AlreadyOpen);
+            }
+            entry.state = State::Closing;
+        }
+        self.queue.push(Request::Delete(owner, id.to_owned()));
+        Ok(())
+    }
+
     /// Whether `id` is open: a level waiting to open is not, one waiting to close still is, and so
     /// is one the idle close dropped from memory (it opens again when entered).
     pub(in crate::game) fn is_open(&self, id: &str) -> bool {
@@ -140,6 +162,14 @@ impl RuntimeTable {
 
     pub(in crate::game) fn level_of(&self, id: &str) -> Option<&RuntimeLevel> {
         self.entries.get(id).map(|entry| &entry.level)
+    }
+
+    /// Whether `id` is a runtime level that is open or closing: a level whose open is still
+    /// waiting has nothing to close.
+    fn is_live(&self, id: &str) -> bool {
+        self.entries
+            .get(id)
+            .is_some_and(|entry| entry.state != State::Opening)
     }
 
     /// The mod that opened `id`, or "?" for a level the table no longer holds.
@@ -245,6 +275,40 @@ fn portable_level_id(id: &str) -> bool {
         });
         !component.ends_with(['.', ' ']) && !DEVICES.contains(&stem.as_str()) && !numbered
     })
+}
+
+/// Remove the files of the level `id` from the world `root`: its folder, and the structure
+/// references kept beside the world for it, with the folders they leave empty. Whatever is not
+/// there is not an error. `id` has passed `owned_level_id`; the folder comes from it alone.
+fn erase_level_files(root: &Path, id: &str) -> std::io::Result<()> {
+    let dimensions = root.join("dimensions");
+    let folder = horizon_client::save::dimension_dir(root, id);
+    // Never the folder of anything but a level: `dimension_dir` gives one under `dimensions/`.
+    if folder == dimensions || !folder.starts_with(&dimensions) {
+        return Err(std::io::Error::other("not a level folder"));
+    }
+    let references = super::world_loading::structure_references_file(root, id);
+    let folder_gone = ignore_missing(std::fs::remove_dir_all(&folder));
+    let file_gone = ignore_missing(std::fs::remove_file(&references));
+    prune_empty_parents(&folder, &dimensions);
+    prune_empty_parents(&references, &root.join("data"));
+    folder_gone.and(file_gone)
+}
+
+fn ignore_missing(result: std::io::Result<()>) -> std::io::Result<()> {
+    match result {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
+/// Remove the folders above `path` that are empty, up to but not including `stop`.
+fn prune_empty_parents(path: &Path, stop: &Path) {
+    for parent in path.ancestors().skip(1) {
+        if parent == stop || !parent.starts_with(stop) || std::fs::remove_dir(parent).is_err() {
+            break;
+        }
+    }
 }
 
 /// What `make_streaming` generates a runtime level with.
@@ -382,6 +446,30 @@ impl Game<'_> {
         self.levels.runtime.queue_unload(id)
     }
 
+    /// `RuntimeLevels::delete`: check the request now, queue it for after the level loop.
+    pub(in crate::game) fn runtime_level_delete(
+        &mut self,
+        id: &str,
+    ) -> Result<(), RuntimeLevelError> {
+        let result = self.runtime_level_queue_delete(id);
+        if let Err(error) = &result {
+            self.runtime_refusal("delete", id, *error);
+        }
+        result
+    }
+
+    fn runtime_level_queue_delete(&mut self, id: &str) -> Result<(), RuntimeLevelError> {
+        let owner = self.runtime_caller()?;
+        Self::owned_level_id(owner, id)?;
+        if !self.levels.runtime.holds(id) && Dim::exists(id) {
+            return Err(RuntimeLevelError::ReservedId);
+        }
+        if self.levels.runtime.is_open(id) && self.level_has_players(Dim::from_id(id)) {
+            return Err(RuntimeLevelError::PlayersInside);
+        }
+        self.levels.runtime.queue_delete(owner, id)
+    }
+
     /// `RuntimeLevels::is_open`.
     pub(in crate::game) fn runtime_level_is_open(&self, id: &str) -> bool {
         self.levels.runtime.is_open(id)
@@ -443,6 +531,13 @@ impl Game<'_> {
                         log::warn!(
                             "mod {owner}: runtime level {id} stays open, its close failed: {why}"
                         );
+                    }
+                }
+                Request::Delete(owner, id) => {
+                    if let Err(why) = self.apply_runtime_delete(owner, &id) {
+                        // A level that could not close is still open, for another try.
+                        self.levels.runtime.keep_open(&id);
+                        log::warn!("mod {owner}: runtime level {id} was not deleted: {why}");
                     }
                 }
             }
@@ -510,6 +605,25 @@ impl Game<'_> {
         }
         self.unpublish_runtime_level(id);
         Ok(())
+    }
+
+    /// Close the level `id` if it is open, then remove its files. A failure to remove them leaves
+    /// the level closed, and a `delete` asked again removes what is left.
+    fn apply_runtime_delete(
+        &mut self,
+        owner: &'static str,
+        id: &str,
+    ) -> horizon_client::Result<()> {
+        // The request passed this when it was made; the folder is derived from nothing less.
+        Self::owned_level_id(owner, id).map_err(|error| format!("{error:?}"))?;
+        if !self.levels.runtime.holds(id) && Dim::exists(id) {
+            return Err("a level every world has".into());
+        }
+        // A level whose open is still waiting comes after this request: only files are removed.
+        if self.levels.runtime.is_live(id) {
+            self.apply_runtime_unload(id)?;
+        }
+        Ok(erase_level_files(&self.world_root, id)?)
     }
 
     /// The runtime level `id` was unloaded, or failed to open: it leaves every table it was added
