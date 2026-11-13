@@ -6,6 +6,9 @@ native trait mods against it with rustc alone, in seconds, without the game's so
     python3 tools/prebuilt_game.py smoke OUT              # build the starter mod and the game executable against OUT only
     python3 tools/prebuilt_game.py start OUT              # start smoke's executable, as installed, as far as no game data allows
     python3 tools/prebuilt_game.py exports OUT            # each DLL's exported names, toward Windows' limit
+    python3 tools/prebuilt_game.py pack OUT DIST          # the SDK's assets from OUT: engine-<target>[-server].tar.xz,
+                                                          # build-data.tar.xz and surface.json, in DIST
+    python3 tools/prebuilt_game.py index DIST [--nightly NAME]  # DIST/sdk.json over every asset in DIST
 
 Each OS's folder is built on that OS: the proc-macro libraries in it run inside the player's own rustc.
 The folder holds compiler outputs and game-owned registry patch crates, never vanilla data; `build` refuses any other file.
@@ -14,11 +17,13 @@ The folder holds compiler outputs and game-owned registry patch crates, never va
 import argparse
 import hashlib
 import json
+import lzma
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import tomllib
 import time
@@ -52,11 +57,18 @@ NATIVE = "native"
 NATIVE_SUFFIXES = (".a", ".lib")
 # The game's injection points, listed by the staging pass: the launcher routes mods' point injections by it.
 POINTS = "points.json"
-CATALOG = "mod-catalog.json"
 # The staged internals signatures, checked against a mod's declared access list.
 INTERNALS = "internals.json"
 # The published loops (`#[horizon_loop]`), which a mod's `[[native.loop]]` rows name.
 LOOPS = "loops.json"
+# The SDK's build data (`point_shape::build_data`): each file opens with `schema` and `build.commit`.
+BUILD_DATA = (INTERNALS, LOOPS, POINTS)
+BUILD_DATA_SCHEMA = 1
+BUILD_DATA_ARCHIVE = "build-data.tar.xz"
+# The surface export (`horizon-stage surface`), an SDK asset of its own.
+SURFACE = "surface.json"
+# xz's default preset: the dictionary covers the large metadata files; the publish legs' time is measured by PR 5.
+XZ_PRESET = 6
 
 
 def run(command: list[str], **kwargs) -> str:
@@ -77,18 +89,23 @@ def rustc_host() -> str:
     return next(line.split(": ", 1)[1] for line in verbose.splitlines() if line.startswith("host: "))
 
 
-def api_version(root: Path) -> str:
-    """Read the owning manifest's API constant without a generator/package dependency."""
-    source = (root / "crates/horizon-mod-package/src/manifest.rs").read_text()
-    matches = re.findall(r'^pub const API: &str = ("[^"\n]*");$', source, re.MULTILINE)
+def package_format(root: Path) -> int:
+    """The package layout's one number (`sdk::PACKAGE_FORMAT`), read without a package dependency."""
+    source = (root / "crates/horizon-mod-package/src/sdk.rs").read_text()
+    matches = re.findall(r"^pub const PACKAGE_FORMAT: u32 = (\d+);$", source, re.MULTILINE)
     if len(matches) != 1:
-        raise ValueError("expected one manifest API version")
-    return json.loads(matches[0])
+        raise ValueError("expected one PACKAGE_FORMAT in sdk.rs")
+    return int(matches[0])
+
+
+def head() -> str:
+    return run(["git", "rev-parse", "HEAD"], cwd=ROOT).strip()
 
 
 def stage(target_dir: Path, stage_tool: Path | None = None) -> Path:
     """A copy of the tracked source with the staging pass run over it (#589): every point method gets its
-    `#[point]`, internals become public, and both manifests are written. The working tree is never rewritten."""
+    `#[point]`, internals become public, and the build data is written with HEAD's commit in its header.
+    The working tree is never rewritten."""
     setup_started = time.monotonic()
     staged = target_dir / "stage"
     if staged.exists():
@@ -99,7 +116,7 @@ def stage(target_dir: Path, stage_tool: Path | None = None) -> Path:
         if source.is_file():
             (staged / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, staged / name)
-    arguments = [str(staged), str(staged / POINTS), str(staged / INTERNALS), api_version(staged)]
+    arguments = [str(staged), str(staged / POINTS), str(staged / INTERNALS), head()]
     command = ([str(stage_tool.resolve())] if stage_tool is not None else
                ["cargo", "run", "--locked", "--release", "-q", "-p", "horizon-mod-api-gen", "--bin", "horizon-stage", "--"])
     print(f"stage_phase=copy_setup seconds={time.monotonic() - setup_started:.3f}", flush=True)
@@ -201,7 +218,18 @@ def assert_externs(out: Path, eligible: list[str]) -> None:
         extern_args(out / "deps", crate)
 
 
+def refuse_old_archive_name(layout: int) -> None:
+    """The daily workflow names its archive `horizon-prebuilt-v<N>-…` by hand (its ARCHIVE). A source whose layout
+    is another number must not publish under that name: the publishing workflow switches with it (PR 5)."""
+    archive = os.environ.get("ARCHIVE")
+    if archive and not archive.startswith(f"horizon-prebuilt-v{layout}-"):
+        sys.exit(f"{archive} names another package layout than this source's {layout}: "
+                 "the workflow publishing it must switch to the SDK release first")
+
+
 def build(out: Path, server: bool) -> None:
+    layout = package_format(ROOT)
+    refuse_old_archive_name(layout)
     # Resolved here: the staging and build steps run from the staged copy.
     target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "prebuilt"
     staged = stage(target_dir)
@@ -262,14 +290,14 @@ def build(out: Path, server: bool) -> None:
             shutil.copy2(source, out / name)
     patches = carry_patches(staged, out)
     game = next(script for script in scripts if script["package_id"].split("#")[0].endswith("/horizon-client"))
-    for manifest in (POINTS, INTERNALS, CATALOG, LOOPS):
+    for manifest in BUILD_DATA:
         shutil.copy2(staged / manifest, out / manifest)
     output = Path(game["out_dir"]).parent / "output"
     link_args = executable_link_args(output)
     files = {str(path.relative_to(out).as_posix()): sha256(path) for path in sorted(out.rglob("*")) if path.is_file()}
     identity = {
-        "format_version": 5,
-        "commit": run(["git", "rev-parse", "HEAD"], cwd=ROOT).strip(),
+        "package_format": layout,
+        "commit": head(),
         "rustc": run(["rustc", "-vV"]).strip(),
         "target": host,
         "profile": PROFILE,
@@ -356,7 +384,7 @@ def check(out: Path) -> None:
             sys.exit(f"prebuilt patch inventory mismatch: {name}")
     stray = [
         path for path in out.rglob("*")
-        if path.is_file() and not (path.parent == out and (path.name in CARRIED or path.name in (POINTS, INTERNALS, CATALOG, LOOPS)))
+        if path.is_file() and not (path.parent == out and (path.name in CARRIED or path.name in BUILD_DATA))
         and str(path.relative_to(out).as_posix()) not in patch_files
         and not (path.parent == out / "deps" and path.name.endswith(SUFFIXES))
         and not (path.parent == out / "host" and path.name.endswith((".so", ".dll", ".dylib", ".dll.a")))
@@ -368,10 +396,14 @@ def check(out: Path) -> None:
         if dylib(out / "deps", crate) is None:
             sys.exit(f"prebuilt folder has no {crate.replace('_', '-')} dylib")
 
-    identity = json.loads((out / IDENTITY).read_text())
-    expected = identity.get("files", {}).get(CATALOG)
-    if not expected or not (out / CATALOG).is_file() or sha256(out / CATALOG) != expected:
-        sys.exit("prebuilt catalog is missing or does not match its identity")
+    commit = identity.get("commit")
+    for name in BUILD_DATA:
+        path = out / name
+        header = json.loads(path.read_text()) if path.is_file() else {}
+        header = header if isinstance(header, dict) else {}
+        build = header.get("build")
+        if header.get("schema") != BUILD_DATA_SCHEMA or not isinstance(build, dict) or build.get("commit") != commit:
+            sys.exit(f"prebuilt {name} is missing or has no build-data header for commit {commit}")
 
 
 def smoke(out: Path) -> None:
@@ -453,6 +485,51 @@ def start(out: Path) -> None:
     print(f"start: the executable loaded the game's libraries and the mods' runtime and stopped at: {NO_RESOURCES}")
 
 
+def tar_xz(folder: Path, names: list[str], archive: Path) -> None:
+    """A tar of `names` (paths under `folder`, folders included) the same on every OS and run: sorted `./` entries,
+    zero times and owners, GNU format, xz-compressed with no timestamp of its own."""
+    def clean(info: tarfile.TarInfo) -> tarfile.TarInfo:
+        info.mtime, info.uid, info.gid, info.uname, info.gname = 0, 0, 0, "", ""
+        return info
+    with lzma.open(archive, "wb", format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC64, preset=XZ_PRESET) as xz, \
+            tarfile.open(fileobj=xz, mode="w", format=tarfile.GNU_FORMAT) as tar:
+        for name in sorted(set(names)):
+            arcname = "." if name == "." else "./" + name
+            tar.add(folder / name, arcname=arcname, recursive=False, filter=clean)
+
+
+def tree(folder: Path) -> list[str]:
+    """Every path under `folder`, relative, with `/`, and `.` itself."""
+    return ["."] + [path.relative_to(folder).as_posix() for path in folder.rglob("*")]
+
+
+def pack(out: Path, dist: Path, stage_tool: Path | None = None) -> None:
+    """The SDK release's assets from a checked folder OUT, into DIST: the whole package as one `engine` archive for
+    its target and side (one until the package is sliced), the build data, and the surface export of this source."""
+    check(out)
+    identity = json.loads((out / IDENTITY).read_text())
+    if identity.get("package_format") != package_format(ROOT) or identity.get("commit") != head():
+        sys.exit(f"{out} is not this source's package (format {package_format(ROOT)}, commit {head()})")
+    dist.mkdir(parents=True, exist_ok=True)
+    suffix = "-server" if identity["side"] == "server" else ""
+    tar_xz(out, tree(out), dist / f"engine-{identity['target']}{suffix}.tar.xz")
+    tar_xz(out, [".", *BUILD_DATA], dist / BUILD_DATA_ARCHIVE)
+    command = ([str(stage_tool.resolve())] if stage_tool is not None else
+               ["cargo", "run", "--locked", "--release", "-q", "-p", "horizon-mod-api-gen", "--bin", "horizon-stage", "--"])
+    run(command + ["surface", str(ROOT), str(dist / SURFACE)], cwd=ROOT)
+    for asset in sorted(dist.iterdir()):
+        print(f"{asset.name}: {asset.stat().st_size} bytes")
+
+
+def index(dist: Path, nightly: str | None) -> None:
+    """DIST/sdk.json over every asset in DIST, written and checked by the one implementation (`horizon_mod_package::sdk`)."""
+    commit = head()
+    date = run(["git", "log", "-1", "--format=%cd", "--date=format-local:%Y-%m-%d"], cwd=ROOT,
+               env={**os.environ, "TZ": "UTC"}).strip()
+    run(["cargo", "run", "--locked", "-q", "-p", "xtask", "--", "sdk-index", str(dist), commit, date,
+         *([nightly] if nightly else [])], cwd=ROOT)
+
+
 # Warns here, ahead of Windows' hard 65,535 (the linker's own failure), so a growing export list is seen first.
 EXPORT_WARNING = 49_000
 
@@ -502,6 +579,12 @@ def main() -> None:
     start_parser.add_argument("out", type=Path)
     exports_parser = commands.add_parser("exports")
     exports_parser.add_argument("out", type=Path)
+    pack_parser = commands.add_parser("pack")
+    pack_parser.add_argument("out", type=Path)
+    pack_parser.add_argument("dist", type=Path)
+    index_parser = commands.add_parser("index")
+    index_parser.add_argument("dist", type=Path)
+    index_parser.add_argument("--nightly", help="the Nightly name that ships this build")
     args = parser.parse_args()
     if args.command == "build":
         build(args.out.resolve(), args.server)
@@ -509,6 +592,10 @@ def main() -> None:
         exports(args.out.resolve())
     elif args.command == "start":
         start(args.out.resolve())
+    elif args.command == "pack":
+        pack(args.out.resolve(), args.dist.resolve())
+    elif args.command == "index":
+        index(args.dist.resolve(), args.nightly)
     else:
         smoke(args.out.resolve())
 

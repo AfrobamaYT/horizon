@@ -14,6 +14,15 @@ from pathlib import Path
 from tools import prebuilt_game
 from tests.test_ci_concurrency import yaml
 
+COMMIT = "c" * 40
+
+
+def write_build_data(root: Path, identity: dict | None = None, commit: str = COMMIT) -> None:
+    """The three build-data files with their header for `commit`, and an identity naming it."""
+    for name in prebuilt_game.BUILD_DATA:
+        (root / name).write_text(json.dumps({"schema": 1, "build": {"commit": commit}}))
+    (root / prebuilt_game.IDENTITY).write_text(json.dumps({**(identity or {}), "commit": commit}))
+
 
 class StageToolTests(unittest.TestCase):
     def test_prebuilt_tool_stages_fresh_tracked_copy_without_cargo(self):
@@ -32,11 +41,13 @@ class StageToolTests(unittest.TestCase):
 
             def capture(command, **kwargs):
                 calls.append(command)
+                if command[:2] == ["git", "rev-parse"]:
+                    return COMMIT + "\n"
                 if command[0] == "git":
                     return "tracked.rs\0crates/horizon-mod-wasm/Cargo.toml\0"
                 self.assertEqual(command, [str(tool.resolve()), str(target / "stage"),
                                           str(target / "stage/points.json"),
-                                          str(target / "stage/internals.json"), "fixture-api"])
+                                          str(target / "stage/internals.json"), COMMIT])
                 self.assertEqual(kwargs["cwd"], target / "stage")
                 self.assertIsNone(kwargs["env"])
                 self.assertEqual((target / "stage/tracked.rs").read_text(), "original")
@@ -45,12 +56,12 @@ class StageToolTests(unittest.TestCase):
                 return "staged fixture\n"
 
             with patch.object(prebuilt_game, "ROOT", source), \
-                 patch.object(prebuilt_game, "api_version", return_value="fixture-api"), \
                  patch.object(prebuilt_game, "run", side_effect=capture):
                 prebuilt_game.stage(target, stage_tool=tool)
                 # A second call must replace the mutated stage with fresh tracked source.
                 prebuilt_game.stage(target, stage_tool=tool)
-            self.assertEqual([call[0] for call in calls], ["git", str(tool.resolve()), "git", str(tool.resolve())])
+            self.assertEqual([call[0] for call in calls if call[:2] != ["git", "rev-parse"]],
+                             ["git", str(tool.resolve()), "git", str(tool.resolve())])
             self.assertEqual((source / "tracked.rs").read_text(), "original")
 
 
@@ -98,10 +109,8 @@ class RegistryPatchTests(unittest.TestCase):
             (sdk / "deps").mkdir()
             for crate in ("horizon_mod_wasm", "horizon_mod_host"):
                 (sdk / "deps" / f"lib{crate}.so").write_bytes(b"")
-            (sdk / prebuilt_game.CATALOG).write_text("{}")
-            (sdk / prebuilt_game.IDENTITY).write_text(json.dumps({"patch_files": {
-                "patches/allocator-sys/Cargo.toml": prebuilt_game.sha256(declared)}, "files": {
-                prebuilt_game.CATALOG: prebuilt_game.sha256(sdk / prebuilt_game.CATALOG)}}))
+            write_build_data(sdk, {"patch_files": {
+                "patches/allocator-sys/Cargo.toml": prebuilt_game.sha256(declared)}})
             prebuilt_game.check(sdk)
             extra = patch / "extra.rs"
             extra.write_text("not inventoried")
@@ -147,17 +156,92 @@ class DeterministicArchiveTests(unittest.TestCase):
             self.assertEqual(archives[0], archives[1])
 
 
-class AllocatorSelectionTests(unittest.TestCase):
-    def test_staging_api_version_comes_from_the_package_manifest(self):
+class SdkAssetTests(unittest.TestCase):
+    def out(self, root: Path, mtime: int) -> Path:
+        out = root / "prebuilt"
+        for name in ("deps/libhorizon_mod_host.so", "deps/libhorizon_mod_wasm.so", "host/libserde_derive.so"):
+            (out / name).parent.mkdir(parents=True, exist_ok=True)
+            (out / name).write_bytes(name.encode())
+        write_build_data(out, {"package_format": 6, "side": "server", "target": "x86_64-unknown-linux-gnu"})
+        for path in out.rglob("*"):
+            os.utime(path, (mtime, mtime))
+        return out
+
+    def pack(self, out: Path, dist: Path) -> None:
+        def run(command, **kwargs):
+            self.assertEqual(command[-3:], ["surface", str(prebuilt_game.ROOT), str(dist / "surface.json")])
+            (dist / "surface.json").write_text('{"hash": "ab"}')
+        with patch.object(prebuilt_game, "head", return_value=COMMIT), patch.object(prebuilt_game, "run", side_effect=run):
+            prebuilt_game.pack(out, dist, stage_tool=Path("horizon-stage"))
+
+    def test_pack_writes_the_engine_build_data_and_surface_the_same_every_run(self):
+        import lzma
+        import tarfile
+        archives = []
+        for mtime in (1000, 2000):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                dist = root / "dist"
+                self.pack(self.out(root, mtime), dist)
+                names = sorted(path.name for path in dist.iterdir())
+                self.assertEqual(names, ["build-data.tar.xz", "engine-x86_64-unknown-linux-gnu-server.tar.xz", "surface.json"])
+                with tarfile.open(dist / "build-data.tar.xz") as tar:
+                    self.assertEqual(tar.getnames(), [".", "./internals.json", "./loops.json", "./points.json"])
+                with lzma.open(dist / "engine-x86_64-unknown-linux-gnu-server.tar.xz") as xz, tarfile.open(fileobj=xz) as tar:
+                    self.assertIn("./deps/libhorizon_mod_host.so", tar.getnames())
+                    self.assertEqual({member.mtime for member in tar.getmembers()}, {0})
+                archives.append([(dist / name).read_bytes() for name in names])
+        self.assertEqual(archives[0], archives[1])
+
+    def test_pack_refuses_another_commits_package(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            manifest = root / "crates/horizon-mod-package/src/manifest.rs"
-            manifest.parent.mkdir(parents=True)
-            manifest.write_text('pub const API: &str = "7.3";\n')
-            self.assertEqual(prebuilt_game.api_version(root), "7.3")
-            manifest.write_text('pub const OTHER: &str = "7.3";\n')
-            with self.assertRaisesRegex(ValueError, "manifest API"):
-                prebuilt_game.api_version(root)
+            out = self.out(root, 1000)
+            with patch.object(prebuilt_game, "head", return_value="d" * 40), \
+                    self.assertRaisesRegex(SystemExit, "not this source's package"):
+                prebuilt_game.pack(out, root / "dist")
+            self.assertFalse((root / "dist").exists())
+
+    def test_the_rust_reader_fixture_is_what_pack_writes(self):
+        # crates/horizon-mod-package/src/sdk/fixture.tar.xz is unpacked by the Rust reader's test: the two agree.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "deps").mkdir()
+            (root / "deps/a.rmeta").write_text("metadata")
+            for path in (root / "deps", root / "deps/a.rmeta"):
+                os.utime(path, (0, 0))
+            prebuilt_game.tar_xz(root, prebuilt_game.tree(root), root / "fixture.tar.xz")
+            fixture = prebuilt_game.ROOT / "crates/horizon-mod-package/src/sdk/fixture.tar.xz"
+            self.assertEqual((root / "fixture.tar.xz").read_bytes(), fixture.read_bytes())
+
+
+class AllocatorSelectionTests(unittest.TestCase):
+    def test_package_format_comes_from_its_one_place(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sdk = root / "crates/horizon-mod-package/src/sdk.rs"
+            sdk.parent.mkdir(parents=True)
+            sdk.write_text("pub const PACKAGE_FORMAT: u32 = 7;\n")
+            self.assertEqual(prebuilt_game.package_format(root), 7)
+            sdk.write_text("pub const OTHER: u32 = 7;\n")
+            with self.assertRaisesRegex(ValueError, "PACKAGE_FORMAT"):
+                prebuilt_game.package_format(root)
+        # The repository's own number is the one the archive gate compares against.
+        self.assertEqual(prebuilt_game.package_format(prebuilt_game.ROOT), 6)
+
+    def test_an_archive_named_for_another_layout_is_refused_before_building(self):
+        for archive, refused in (("horizon-prebuilt-v5-x86_64-unknown-linux-gnu.tar.gz", True),
+                                 ("horizon-prebuilt-v6-x86_64-unknown-linux-gnu.tar.gz", False),
+                                 (None, False)):
+            environment = {"ARCHIVE": archive} if archive else {}
+            with self.subTest(archive), patch.dict(os.environ, environment, clear=False):
+                if not archive:
+                    os.environ.pop("ARCHIVE", None)
+                if refused:
+                    with self.assertRaisesRegex(SystemExit, "another package layout"):
+                        prebuilt_game.refuse_old_archive_name(6)
+                else:
+                    prebuilt_game.refuse_old_archive_name(6)
 
     def test_windows_and_macos_archives_use_the_system_allocator(self):
         for platform in ("win32", "darwin"):
@@ -344,9 +428,7 @@ class PrebuiltContentsTests(unittest.TestCase):
     def test_host_macros_pass_but_host_dependency_metadata_is_refused(self):
         root = self.folder("deps/libhorizon_client.so", "deps/libhorizon_mod_wasm.so", "deps/libhorizon_mod_host.so",
                            "host/libderive.so", "host/derive.dll", "host/libderive.dylib")
-        (root / prebuilt_game.CATALOG).write_bytes(b"{}")
-        (root / prebuilt_game.IDENTITY).write_text(json.dumps({"files": {
-            prebuilt_game.CATALOG: prebuilt_game.sha256(root / prebuilt_game.CATALOG)}}))
+        write_build_data(root)
         prebuilt_game.check(root)
         (root / "host/libshared-host.rmeta").write_bytes(b"")
         with self.assertRaisesRegex(SystemExit, "aren't compiler outputs"):
@@ -361,19 +443,26 @@ class PrebuiltContentsTests(unittest.TestCase):
     def test_compiler_outputs_pass(self):
         root = self.folder(
             "horizon-prebuilt.json", "Cargo.lock", "native_main.rs.template", "deps/libhorizon_client.so", "deps/libmod_api-1.rmeta",
-            "native/libwindows.0.52.0.a", "points.json", "internals.json", "mod-catalog.json",
+            "native/libwindows.0.52.0.a",
             "deps/libserde_derive-2.so", "deps/libhorizon_client.dll.a", "deps/libhorizon_mod_wasm.so",
             "deps/horizon_mod_wasm.dll", "deps/libhorizon_mod_wasm.dylib", "deps/libhorizon_mod_host.so",
         )
-        (root / prebuilt_game.IDENTITY).write_text(json.dumps({"files": {
-            prebuilt_game.CATALOG: prebuilt_game.sha256(root / prebuilt_game.CATALOG)}}))
+        write_build_data(root)
         prebuilt_game.check(root)
-        (root / prebuilt_game.CATALOG).write_text("changed")
-        with self.assertRaisesRegex(SystemExit, "catalog"):
-            prebuilt_game.check(root)
-        (root / prebuilt_game.CATALOG).unlink()
-        with self.assertRaisesRegex(SystemExit, "catalog"):
-            prebuilt_game.check(root)
+
+    def test_build_data_without_its_header_for_this_commit_is_refused(self):
+        root = self.folder("deps/libhorizon_mod_host.so", "deps/libhorizon_mod_wasm.so")
+        for name in prebuilt_game.BUILD_DATA:
+            for broken in ('{"build": {"commit": "%s"}}' % COMMIT, '{"schema": 2, "build": {"commit": "%s"}}' % COMMIT,
+                           '{"schema": 1, "build": {"commit": "%s"}}' % ("d" * 40), '{"schema": 1}', "[]", None):
+                with self.subTest(name=name, broken=broken):
+                    write_build_data(root)
+                    if broken is None:
+                        (root / name).unlink()
+                    else:
+                        (root / name).write_text(broken)
+                    with self.assertRaisesRegex(SystemExit, name):
+                        prebuilt_game.check(root)
 
     def test_anything_else_is_refused(self):
         for stray in ("assets/minecraft/lang/en_us.json", "deps/Cargo.lock", "deps/client.jar", "deps/libmod_api-3.rlib", "native/libfoo.so", "deps/internals.json", "notes.txt"):
@@ -386,9 +475,8 @@ class PrebuiltContentsTests(unittest.TestCase):
                 prebuilt_game.check(self.folder(f"deps/lib{present}.so"))
 
     def test_host_carries_engine_code_with_engine_metadata_for_mods(self):
-        root = self.folder("deps/libhorizon_mod_host.so", "deps/libhorizon_mod_wasm.so", "deps/libhorizon_client-123.rmeta", "mod-catalog.json")
-        (root / prebuilt_game.IDENTITY).write_text(json.dumps({"files": {
-            prebuilt_game.CATALOG: prebuilt_game.sha256(root / prebuilt_game.CATALOG)}}))
+        root = self.folder("deps/libhorizon_mod_host.so", "deps/libhorizon_mod_wasm.so", "deps/libhorizon_client-123.rmeta")
+        write_build_data(root)
         prebuilt_game.check(root)
 
     def test_engine_and_wasm_without_host_are_refused(self):

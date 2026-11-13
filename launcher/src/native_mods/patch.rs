@@ -238,8 +238,17 @@ fn loop_slots(game: &Path, bundles: &[&Bundle]) -> Result<Vec<api_gen::patch::Lo
         .collect();
     let path = game.join(api_gen::loops::FILE);
     // A game built before published loops has no list, and so no loop a row can name.
-    let published: Vec<api_gen::loops::PublishedLoop> = match fs::read_to_string(&path) {
-        Ok(text) => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?,
+    #[derive(serde::Deserialize)]
+    struct Loops {
+        loops: Vec<api_gen::loops::PublishedLoop>,
+    }
+    let published = match fs::read_to_string(&path) {
+        Ok(text) => {
+            horizon_mod_package::build_data::read::<Loops>(api_gen::loops::FILE, &text)
+                .map_err(|e| format!("{}: {e}", path.display()))?
+                .1
+                .loops
+        }
         Err(_) => Vec::new(),
     };
     let mut refusals = Vec::new();

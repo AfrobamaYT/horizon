@@ -363,14 +363,25 @@ pub(super) fn identity(dir: &Path) -> Result<Identity, String> {
     #[derive(serde::Deserialize)]
     struct Format {
         #[serde(default)]
-        format_version: u32,
+        package_format: u32,
     }
     let format: Format =
         serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-    match format.format_version {
-        5 => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display())),
-        0..=4 => Err(trf("SDK format {version} is too old; install a newer SDK (format 5)", &[("version", &format.format_version.to_string())])),
-        version => Err(trf("SDK format {version} is newer than this launcher's supported format 5; update the launcher", &[("version", &version.to_string())])),
+    let supported = horizon_mod_package::sdk::PACKAGE_FORMAT;
+    let (version, supported_text) = (format.package_format.to_string(), supported.to_string());
+    let args = [("version", version.as_str()), ("format", supported_text.as_str())];
+    match format.package_format {
+        found if found == supported => {
+            serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
+        }
+        found if found < supported => Err(trf(
+            "SDK format {version} is too old; install a newer SDK (format {format})",
+            &args,
+        )),
+        _ => Err(trf(
+            "SDK format {version} is newer than this launcher's supported format {format}; update the launcher",
+            &args,
+        )),
     }
 }
 
@@ -882,7 +893,7 @@ mod tests {
         let dir = super::super::tests::dir("prebuilt-exact-build");
         let check = |commit: &str, rustc: &str, target: &str, side: &str| {
             let identity = serde_json::json!({
-                "format_version": 5,
+                "package_format": horizon_mod_package::sdk::PACKAGE_FORMAT,
                 "commit": commit, "rustc": rustc, "target": target, "side": side, "link_args": [],
             });
             fs::write(dir.join(IDENTITY), identity.to_string()).unwrap();

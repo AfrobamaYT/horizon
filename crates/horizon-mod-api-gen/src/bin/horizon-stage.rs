@@ -1,5 +1,6 @@
-//! `horizon-stage ROOT POINTS_JSON INTERNALS_JSON API_VERSION`: expose internals, mark points and give functions their replacement slots in a staged
-//! source copy, then write both manifests (#589). Never run on a working tree.
+//! `horizon-stage ROOT POINTS_JSON INTERNALS_JSON COMMIT`: expose internals, mark points and give functions their replacement slots in a staged
+//! source copy, then write the build data (`points.json`, `internals.json`, `loops.json`) with the
+//! header naming COMMIT, the source's full commit sha (#589). Never run on a working tree.
 //!
 //! `horizon-stage surface ROOT OUT`: write the surface export (`surface.json`) of the source tree
 //! at ROOT to OUT, and nothing else. It only reads the tree, so a working tree is fine.
@@ -56,11 +57,11 @@ fn main() {
     }
     let usage = || {
         eprintln!(
-            "usage: horizon-stage ROOT POINTS_JSON INTERNALS_JSON API_VERSION [--sync-internals]\n       horizon-stage surface ROOT OUT"
+            "usage: horizon-stage ROOT POINTS_JSON INTERNALS_JSON COMMIT [--sync-internals]\n       horizon-stage surface ROOT OUT"
         );
         std::process::exit(2)
     };
-    let [root, list, internals, api_version, options @ ..] = &args[..] else {
+    let [root, list, internals, commit, options @ ..] = &args[..] else {
         usage()
     };
     // Discovery never builds or publishes a game.
@@ -69,10 +70,13 @@ fn main() {
         [flag] if flag == "--sync-internals" => Mode::Discovery,
         _ => usage(),
     };
-    let Some(api_version) = api_version.to_str() else {
+    let Some(commit) = commit.to_str() else {
         usage()
     };
-    match staging::stage(root, list, internals, mode, api_version) {
+    let build = point_shape::build_data::Build {
+        commit: commit.to_owned(),
+    };
+    match staging::stage(root, list, internals, mode, &build) {
         Ok(staging::Staged {
             points: staged,
             replace,

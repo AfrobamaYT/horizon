@@ -11,6 +11,26 @@ from your own Minecraft installation before installing:
 horizon-launcher developer-install CHECKOUT --program CHECKOUT/target/debug/horizon-client --trust-unsigned
 ```
 
+The install needs these files, and checks them all before it runs the checkout's packager.
+Every missing one is named in one message, with the command that makes it. The list is the
+packager's own (`crates/horizon-mod-package/src/sdk/inputs.json`, route `package`), so the two
+never disagree. Beside the game program (`PROGRAM_FOLDER`; on Windows the programs end in `.exe`):
+
+| File | How to make it |
+|---|---|
+| `horizon-ctl` | `cargo build -p horizon-client-lib --bin horizon-ctl` |
+| `horizon-prepare` | `cargo build -p horizon-prepare` |
+| `horizon-server` | `cargo build -p horizon-server` |
+| `horizon-wasm-std.wasm` | `cargo run --locked -p cargo-horizon-mod -- wasm-std PROGRAM_FOLDER/horizon-wasm-std.wasm` |
+
+In the checkout:
+
+| File | How to make it |
+|---|---|
+| `exporters/manifest.json` | `horizon-prepare compile-exporters --root CHECKOUT`, then copy its `server`, `client` and `manifest.json` into `CHECKOUT/exporters/` |
+
+A server folder (`cargo run -p xtask -- package-server`) needs the same files except `horizon-ctl`.
+
 The command returns a `developer-…` tag. Select that exact tag, prepare its resources, and pin an
 instance to it. Automatic updates do not replace a local unsigned base. Remove it with
 `horizon-launcher remove DEVELOPER_TAG` when no instance needs it.

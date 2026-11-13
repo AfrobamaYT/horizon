@@ -1332,7 +1332,7 @@
   "Install a release or Nightly, or explicitly select a local unsigned developer base first: an imported build reuses its game files.": "Install a release or Nightly, or explicitly select a local unsigned developer base first: an imported build reuses its game files.",
   "Invalid developer build revision.": "Invalid developer build revision.",
   "Local unsigned developer build · {commit} · {id}": "Local unsigned developer build · {commit} · {id}",
-  "Missing developer packaging inputs: {files}. Build companions with cargo build -p horizon-client-lib --bin horizon-ctl -p horizon-prepare -p horizon-server. Run horizon-prepare compile-exporters --root CHECKOUT, then copy its server, client and manifest.json into CHECKOUT/exporters/.": "Missing developer packaging inputs: {files}. Build companions with cargo build -p horizon-client-lib --bin horizon-ctl -p horizon-prepare -p horizon-server. Run horizon-prepare compile-exporters --root CHECKOUT, then copy its server, client and manifest.json into CHECKOUT/exporters/.",
+  "Missing developer packaging inputs: {files}. Make them first:\n{how}": "Missing developer packaging inputs: {files}. Make them first:\n{how}",
   "The checkout's release packager failed; no developer build was installed.": "The checkout's release packager failed; no developer build was installed.",
   "The developer checkout has dirty tracked inputs. Commit your changes first, then rebuild the game and retry.": "The developer checkout has dirty tracked inputs. Commit your changes first, then rebuild the game and retry.",
   "The developer checkout has no HEAD commit.": "The developer checkout has no HEAD commit.",

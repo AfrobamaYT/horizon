@@ -13,7 +13,7 @@ in their order and pushed as nightly/build-<date>-<n>; with no set, main alone. 
 this repository's checks passed (`dyna-checks` on the fork, `checks` and `parity-main` upstream), as for a release
 (release_train.green_main_head), or NIGHTLY_BASE when the caller gives that commit. It is published as the
 `nightly` pre-release; the previous one stays a week as nightly-<date>.
-On arismoko/horizon only, automatic selection additionally requires a complete published v5 SDK for the
+On arismoko/horizon only, automatic selection additionally requires a complete published SDK for the
 exact SHA. Explicit bases without it fail; PR picks are disabled, and the final SHA is rechecked before pushing.
 Its notes list what reached main since the previous nightly, then the picked pull requests. Runs from main's
 checkout with `gh`; it reads and merges the branches with git and never runs anything from them.
@@ -225,12 +225,18 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
           + "".join(f" + #{e['number']}" for e in kept))
 
 
+def package_format() -> int:
+    """The prebuilt package's layout number, kept in one place (`sdk.rs` PACKAGE_FORMAT)."""
+    source = (Path(__file__).resolve().parents[2] / "crates/horizon-mod-package/src/sdk.rs").read_text()
+    return int(re.search(r"^pub const PACKAGE_FORMAT: u32 = (\d+);$", source, re.MULTILINE).group(1))
+
+
 def ready_sdk_shas() -> set[str]:
-    """Snapshot complete published v4 pairs; API failures fail closed."""
+    """Snapshot complete published pairs of the current package format; API failures fail closed."""
     releases = train.gh_json("api", "--paginate", "--slurp",
                              f"repos/arismoko/horizon/releases?per_page=100")
     required = {"SHA256SUMS"} | {
-        f"horizon-prebuilt-v5-{target}.tar.gz" for target in (
+        f"horizon-prebuilt-v{package_format()}-{target}.tar.gz" for target in (
             "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu-server",
             "x86_64-pc-windows-gnu", "aarch64-apple-darwin")}
     return {release["tag_name"].removeprefix("prebuilt-")
@@ -247,7 +253,7 @@ def sdk_ready(sha: str) -> bool:
 def require_sdk(sha: str) -> None:
     """Refuse before rotating/publishing Nightly if its SDK disappeared."""
     if os.environ.get("GITHUB_REPOSITORY") == "arismoko/horizon" and not sdk_ready(sha):
-        raise SystemExit(f"Nightly publication refused: {sha} has no complete published v5 SDK pair")
+        raise SystemExit(f"Nightly publication refused: {sha} has no complete published v{package_format()} SDK pair")
 
 
 def green_base(repo: str, issue: str) -> Ref:

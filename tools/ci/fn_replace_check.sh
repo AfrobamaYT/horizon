@@ -21,7 +21,8 @@ root=$(git rev-parse --show-toplevel)
 # The game revision is the SDK's: its source is what a patched function is copied out of.
 revision=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['commit'])" "$2/horizon-prebuilt.json")
 mixins=$(sed -n 's/^pub const REV: &str = "\(.*\)";$/\1/p' "$root/crates/horizon-mod-package/src/mixins_tool.rs")
-archive=$(sed -n 's/^pub const PREBUILT_ARCHIVE: &str = "\(.*\)";$/\1/p' "$root/crates/horizon-mod-package/src/index/native.rs")
+# The launcher's cache folder name: the package layout is numbered in one place (sdk.rs PACKAGE_FORMAT).
+archive=horizon-prebuilt-v$(sed -n 's/^pub const PACKAGE_FORMAT: u32 = \([0-9]*\);$/\1/p' "$root/crates/horizon-mod-package/src/sdk.rs")-
 
 # FNR_KEEP=1 keeps the launcher's folder (toolchain, horizon-mixins, source): a warm build.
 # FNR_MIXINS_FROM_SOURCE=1 builds horizon-mixins from its pinned source, dropping a kept tool: the
