@@ -204,10 +204,17 @@ mod tests {
     fn the_host_caps_and_cuts_what_a_guest_sends() {
         use crate::RegistrationRefusalRegistrar;
         let mut registrar = super::PartRegistrar::new("guest");
+        use crate::wire::{Reader, Wire, Writer};
         let long = format!("{}é", "a".repeat(4095));
+        let args = vec![long.clone(); 20];
+        let mut wire = Writer::new();
+        long.put(&mut wire);
+        args.put(&mut wire);
+        let bytes = wire.into_bytes();
         for _ in 0..=mod_vocab::__private::MAX_LOADING_WARNINGS {
             // As the guest dispatch arm delivers it: the owner is the registrar's mod, not the message's.
-            registrar.registration_warning(crate::LoadingMessage::new("guest.warn", &[&long]));
+            let message = crate::LoadingMessage::take(&mut Reader::new(&bytes)).unwrap();
+            registrar.registration_warning(message);
         }
         assert_eq!(
             registrar.warnings.len(),
@@ -217,7 +224,9 @@ mod tests {
             registrar
                 .warnings
                 .iter()
-                .all(|(owner, warning)| owner == "guest" && warning.args() == ["a".repeat(4095)])
+                .all(|(owner, warning)| owner == "guest"
+                    && warning.key() == "a".repeat(4095)
+                    && warning.args() == vec!["a".repeat(4095); 20])
         );
     }
 
