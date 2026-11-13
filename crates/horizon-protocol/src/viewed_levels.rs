@@ -238,6 +238,18 @@ impl<'a> Message<'a> {
     /// Reads a play payload's data at `revision`: a kind that revision does not have, such as a
     /// sound below [`REVISION_3`], is refused as not level-scoped.
     pub fn decode_in(data: &'a [u8], revision: u8) -> Result<Self, ViewedLevelsError> {
+        Self::decode_with(data, revision, true)
+    }
+
+    /// [`Message::decode_in`], keeping a run's [`SOUNDS`] only when `sounds`: otherwise each one's
+    /// kind is checked against `revision` and its bytes are skipped unread, so a run of sounds
+    /// nobody hears decodes and allocates nothing. A run of only such sounds is not empty: it
+    /// comes back with no packet.
+    pub fn decode_with(
+        data: &'a [u8],
+        revision: u8,
+        sounds: bool,
+    ) -> Result<Self, ViewedLevelsError> {
         let mut r = Reader::new(data);
         let kind = r.u8()?;
         let level = r.varint()?;
@@ -248,16 +260,24 @@ impl<'a> Message<'a> {
             },
             RUN => {
                 let mut packets = Vec::new();
+                let mut entries = 0;
                 while r.remaining() > 0 {
                     let len =
                         usize::try_from(r.varint()?).map_err(|_| ViewedLevelsError::CutShort)?;
                     let mut entry = Reader::new(r.bytes(len)?);
                     let id = entry.varint()?;
                     let body = entry.rest();
+                    entries += 1;
+                    if !sounds && SOUNDS.contains(&id) {
+                        if revision < REVISION_3 {
+                            return Err(ViewedLevelsError::NotLevelScoped(id));
+                        }
+                        continue;
+                    }
                     check_level_scoped(id, body, revision)?;
                     packets.push((id, body));
                 }
-                if packets.is_empty() {
+                if entries == 0 {
                     return Err(ViewedLevelsError::EmptyRun);
                 }
                 Message::Run { level, packets }
@@ -634,16 +654,39 @@ mod tests {
             118, 6, 4, 9, 0x3f, 0x80, 0, 0, 0x3f, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ];
         assert!(Run::new(1, &bound).is_ok());
-        // Below revision 3 either one is a protocol error.
+        // Below revision 3 either one is a protocol error, heard or not.
         let bound = Run::new(1, &bound).unwrap().finish();
         for (data, id) in [(&run.data, 119), (&received(&bound).data, 118)] {
             assert!(Message::decode_in(data, 3).is_ok());
             for revision in [1, 2] {
-                assert_eq!(
-                    Message::decode_in(data, revision),
-                    Err(ViewedLevelsError::NotLevelScoped(id))
-                );
+                for sounds in [true, false] {
+                    assert_eq!(
+                        Message::decode_with(data, revision, sounds),
+                        Err(ViewedLevelsError::NotLevelScoped(id))
+                    );
+                }
             }
         }
+        // Not heard: skipped unread, even cut short; the block update beside it is kept.
+        let block = [8, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        let wire = [&[1, 1, 2, 119, 0][..], &[10], &block].concat();
+        assert_eq!(
+            Message::decode_with(&wire, 3, false),
+            Ok(Message::Run {
+                level: 1,
+                packets: vec![(8, &block[1..])]
+            })
+        );
+        assert!(
+            Message::decode_with(&wire, 3, true).is_err(),
+            "heard, it is read"
+        );
+        assert_eq!(
+            Message::decode_with(&run.data, 3, false),
+            Ok(Message::Run {
+                level: 1,
+                packets: Vec::new()
+            })
+        );
     }
 }

@@ -523,8 +523,9 @@ mod tests {
         });
     }
 
-    /// With no listener a viewed level's sound costs one `listened` check, allocates nothing and
-    /// plays nothing.
+    /// With no listener a run of a viewed level's sounds, as the client's own decoder reads it,
+    /// costs one `listened` check, allocates nothing and plays nothing: both sounds carry their
+    /// event inline, which decoding them would allocate.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn with_no_listener_a_viewed_sound_is_dropped_after_one_check() {
@@ -533,18 +534,22 @@ mod tests {
         game.handle_packet(open(1, "minecraft:the_nether")).unwrap();
         game.audio.capture = Some(Vec::new());
         let anvil = sound("minecraft:block.anvil.land", [452, 512, 66], 2.0, 0.5, 42);
-        let encoded = anvil.encode();
-        let mut r = Reader::new(&encoded);
-        let id = r.varint().unwrap();
-        let body = r.rest();
+        let bound = C::SoundEntity(play::SoundEntity {
+            sound: (-1, Some(("minecraft:block.bell.use".into(), None))),
+            source: SoundSource::Blocks.index() as i32,
+            id: 40,
+            volume: 1.0,
+            pitch: 1.0,
+            seed: 9,
+        });
+        let payload = run(1, &[anvil, bound]);
         let checks = || super::sounds::LISTENED_CHECKS.with(std::cell::Cell::get);
         let before = checks();
         let (routed, allocations) =
-            horizon_threads::allocation_count::measure(|| game.viewed_level_sound(1, id, body));
+            horizon_threads::allocation_count::measure(|| game.route_viewed_levels(data(&payload)));
         assert_eq!(routed, Ok(()));
         assert_eq!(allocations, 0);
         assert_eq!(checks() - before, 1);
-        game.handle_packet(run(1, &[anvil])).unwrap();
         assert_eq!(
             game.audio.capture.take().map(|played| played.len()),
             Some(0)

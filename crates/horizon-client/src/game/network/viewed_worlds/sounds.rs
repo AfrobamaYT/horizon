@@ -17,8 +17,9 @@ thread_local! {
     pub(super) static LISTENED_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// Whether a mod listens to `viewed_level_sound`: the one check a viewed sound costs without.
-fn listened() -> bool {
+/// Whether a mod listens to `viewed_level_sound`, asked once per payload before it is decoded:
+/// without one, the decoder skips a run's sounds unread (`Message::decode_with`).
+pub(super) fn listened() -> bool {
     #[cfg(test)]
     LISTENED_CHECKS.with(|n| n.set(n.get() + 1));
     mod_api::__private::listened(HookId::ViewedLevelSound)
@@ -62,9 +63,8 @@ pub(super) struct ViewedPlay {
 }
 
 impl Game<'_> {
-    /// A sound in a `run` of viewed level `level`: its play clientbound id and bytes, which the
-    /// codec read exactly. With no listener it is dropped after one check, decoded and allocated
-    /// nothing. One bound to an entity is at its emitter in the viewed world, and plays nothing
+    /// A sound in a `run` of viewed level `level`, kept by the decoder because a mod listens: its
+    /// play clientbound id and bytes, which the codec read exactly. One bound to an entity is at its emitter in the viewed world, and plays nothing
     /// when the world holds no such entity; it plays where the listener puts it, and does not
     /// follow the emitter.
     pub(super) fn viewed_level_sound(
@@ -73,16 +73,6 @@ impl Game<'_> {
         id: i32,
         body: &[u8],
     ) -> Result<(), RouteError> {
-        if !self
-            .remote
-            .as_ref()
-            .is_some_and(|r| r.viewed.contains(level))
-        {
-            return Err(RouteError::NotOpen(level));
-        }
-        if !listened() {
-            return Ok(());
-        }
         let packet = C::decode(id, body).map_err(|_| ViewedLevelsError::MalformedPacket(id))?;
         let play = match &packet {
             C::Sound(p) => self.ask_viewed_level_sound(level, ViewedSound::at_position(p)),
