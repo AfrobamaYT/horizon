@@ -1401,7 +1401,6 @@ impl Game<'_> {
     }
     /// Detach a travelling entity without discarding its in-memory attachments.
     pub(super) fn detach_entity(&mut self, id: u32) {
-        self.combat.death_weapons.remove(&id);
         self.persist.score_destroyed.remove(&id);
         self.persist.uuids.remove(&id);
         self.persist.raw.remove(&id);

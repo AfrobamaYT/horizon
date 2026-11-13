@@ -557,8 +557,12 @@ impl Game<'_> {
         // are still considered individually in preorder.
         let refused = self.uuid_admission_refused(uuid);
 
-        if let Some(state) = transferred {
+        if let Some(mut state) = transferred {
+            state.restore_mob(&mut m);
             self.adopt_transferred_entity_state(id, state);
+        } else if m.health <= 0.0 {
+            // A saved dying body has already passed die; loading only resumes tickDeath.
+            self.died.insert(id);
         }
         self.remember(id, uuid, tag);
         if refused {

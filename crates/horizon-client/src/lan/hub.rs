@@ -3605,7 +3605,7 @@ impl Hub {
         let modified_particles =
             mod_api::__private::listened(mod_api::HookId::EffectParticleModification);
         let placed: Vec<usize> = (0..self.guests.len())
-            .filter(|&i| self.here(&self.guests[i]))
+            .filter(|&i| self.here(&self.guests[i]) && self.guests[i].body_present())
             .collect();
         let guest_states: Vec<_> = placed
             .into_iter()

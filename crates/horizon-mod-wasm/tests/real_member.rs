@@ -219,7 +219,11 @@ fn real_member() {
                 mod_api::ModBlockEntity::new("wasm_fixture:counter".into(), Default::default());
             mod_api::dispatch_block_entity_tick(&mut Quiet, [0, 64, 0], &mut entity);
             assert_eq!(entity.data, [23]);
-            mod_api::__private::resolve_items(["minecraft:snowball"]).unwrap();
+            mod_api::__private::resolve_items(["minecraft:snowball", "minecraft:bow"]).unwrap();
+            lending::check_death(
+                &mut Quiet,
+                mod_api::__private::item_key("minecraft:bow").unwrap(),
+            );
             let mut launch = mod_api::ModBlockEntity::new(
                 "wasm_fixture:owner_launch".into(),
                 Default::default(),

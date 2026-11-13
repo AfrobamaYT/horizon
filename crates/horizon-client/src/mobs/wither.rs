@@ -3,7 +3,7 @@
 //! skulls, breaking blocks around it when hurt, immune to arrows and a
 //! player's wind charges below half health.
 use super::{
-    DamageKind, Mob, MobEvent, MobWorld, Species, Who,
+    Mob, MobEvent, MobWorld, Species, Who,
     anim::{Poses, State},
     control::MoveKind,
     goals::{
@@ -491,16 +491,21 @@ pub fn custom_server_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEven
         m.heal(w.loop_context, 1.0);
     }
 }
-/// `WitherBoss.hurtServer` filter: not while charging, no arrows once
-/// powered, nothing from the undead.
-pub fn accepts(m: &mut Mob, kind: DamageKind, attacker: Option<Who>, others_undead: bool) -> bool {
-    if m.extra.counter > 0 && !kind.bypasses_invulnerability() {
+/// `WitherBoss.hurtServer` filter: not while charging, no direct AbstractArrow
+/// (including ThrownTrident) once powered, nothing from the undead.
+pub fn accepts(
+    m: &mut Mob,
+    source: &super::Damage,
+    attack: &crate::health::Attack,
+    others_undead: bool,
+) -> bool {
+    if m.extra.counter > 0 && !source.kind.bypasses_invulnerability() {
         return false;
     }
-    if powered(m) && kind == DamageKind::Arrow {
+    if powered(m) && attack.direct_is_arrow(source) {
         return false;
     }
-    if others_undead || matches!(attacker, Some(Who::Mob(id)) if id == m.id) {
+    if others_undead || matches!(source.attacker, Some(Who::Mob(id)) if id == m.id) {
         return false;
     }
     if m.extra.counter2 <= 0 {
@@ -687,8 +692,8 @@ mod upstream_sync_tests {
     /// a sibling class, has to keep hurting it.
     #[test]
     fn only_a_powered_withers_armor_refuses_a_wind_charge() {
-        use crate::mobs::Damage;
         use crate::mobs::sensor_scan_tests::kind;
+        use crate::mobs::{Damage, DamageKind};
         use std::sync::Arc;
         let mob = |species, health: f32| {
             let mut kind = kind();
@@ -714,7 +719,16 @@ mod upstream_sync_tests {
         assert!(m.health < 150.0);
         // ...and arrows stay refused by the damage filter.
         let mut m = mob(Species::Wither, 150.0);
-        assert!(!m.damage(&mut test_level.level(), 1.0, Damage::of(DamageKind::Arrow)));
+        let attack = crate::health::Attack {
+            projectile: Some(2),
+            projectile_is_arrow: true,
+            ..Default::default()
+        };
+        assert!(!m.damage(
+            &mut test_level.level().attacked_by(&attack),
+            1.0,
+            Damage::of(DamageKind::Arrow),
+        ));
         assert_eq!(m.health, 150.0);
     }
     /// A spawning wither rolled the three particles of `aiStep`'s

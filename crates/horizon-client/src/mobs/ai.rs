@@ -3573,17 +3573,17 @@ pub fn accepts_damage(
     m: &mut Mob,
     source: &Damage,
     _amount: f32,
-    player_uuid: Option<[i32; 4]>,
+    attack: &crate::health::Attack,
 ) -> bool {
     match m.species() {
         Species::Breeze => super::breeze::accepts_damage(m, source),
-        Species::Allay => {
-            !player_uuid.is_some_and(|uuid| super::allay::is_liked_player(m, source.attacker, uuid))
-        }
+        Species::Allay => !attack
+            .player_uuid
+            .is_some_and(|uuid| super::allay::is_liked_player(m, source.attacker, uuid)),
         Species::Creaking => super::creaking::accepts_damage(m, source),
-        Species::Wither => super::wither::accepts(m, source.kind, source.attacker, false),
+        Species::Wither => super::wither::accepts(m, source, attack, false),
         Species::Warden => super::warden::accepts_damage(m, source),
-        Species::Shulker => super::shulker::accepts(m, source),
+        Species::Shulker => super::shulker::accepts(m, source, attack),
         // Bat.hurtServer: a hit wakes it.
         Species::Bat => {
             super::bat::hurt(m);

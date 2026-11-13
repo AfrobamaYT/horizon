@@ -28,6 +28,14 @@ pub struct Mod;
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
+    fn living_death(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::LivingDeathEvent<'_>,
+    ) -> mod_api::Flow {
+        lending::Lender.living_death(host, event)
+    }
+
     fn movement_input(&self, _: &dyn mod_api::ClientHost, event: &mut mod_api::MovementInputEvent) {
         movement::movement_input(event);
     }
