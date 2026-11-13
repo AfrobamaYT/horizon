@@ -902,9 +902,6 @@ impl LootData {
             let mut raw = HashMap::new();
             load_kind(&all, &format!("tags/{registry}"), &mut raw)?;
             for (name, value) in raw {
-                if !overlay.conditions.allows_tag(&value, registry, &name) {
-                    continue;
-                }
                 let layers = crate::tag_layers::TagLayers::from_file(&value);
                 tags.insert((registry.to_owned(), name), layers);
             }
@@ -916,9 +913,6 @@ impl LootData {
                     let Ok(v) = serde_json::from_slice::<Value>(bytes) else {
                         continue;
                     };
-                    if !overlay.conditions.allows_tag(&v, registry, &id) {
-                        continue;
-                    }
                     let slot = tags.entry((registry.to_owned(), id.clone())).or_default();
                     slot.push(&v);
                 }
@@ -2288,12 +2282,11 @@ mod namespace_tests {
         assert_eq!(
             loot.tags[&("item".into(), "demo:food".into())],
             crate::tag_layers::TagLayers::from_file(
-                &serde_json::json!({"values": ["minecraft:bread"]})
+                &serde_json::json!({"values": ["minecraft:stone"]})
             )
         );
         assert!(
-            !loot
-                .tags
+            loot.tags
                 .contains_key(&("item".into(), "demo:absent".into()))
         );
         fs::remove_dir_all(root).unwrap();

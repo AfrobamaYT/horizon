@@ -650,24 +650,12 @@ pub(crate) fn load_tag_lists(
     kind: &str,
     overlay: &PackOverlay,
 ) -> Result<HashMap<String, Vec<String>>> {
-    let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
-    let conditions = overlay
-        .conditions
-        .with_mod_inventory(inventory.server_ids());
     let mut raw: HashMap<String, TagLayers> = HashMap::new();
     /// Through `json_folder`: from the prepared data file, and read once for
     /// the tables a load builds from the same tags.
-    fn walk(
-        dir: &Path,
-        namespace: &str,
-        raw: &mut HashMap<String, TagLayers>,
-        conditions: &horizon_world::conditions::LoadConditions,
-    ) -> Result<()> {
+    fn walk(dir: &Path, namespace: &str, raw: &mut HashMap<String, TagLayers>) -> Result<()> {
         for file in &horizon_world::json_folder::read(dir)?.files {
             let v: Value = serde_json::from_slice(file.bytes()?)?;
-            if !conditions.allows_path(&v, dir, &file.name) {
-                continue;
-            }
             raw.insert(
                 format!("{namespace}:{}", file.name),
                 TagLayers::from_file(&v),
@@ -679,7 +667,7 @@ pub(crate) fn load_tag_lists(
     for namespace in crate::content_namespaces::tag_namespaces(root) {
         let dir = root.join(format!("data/{namespace}/tags/{kind}"));
         if dir.exists() {
-            walk(&dir, &namespace, &mut raw, &conditions)?;
+            walk(&dir, &namespace, &mut raw)?;
         }
     }
     // The packs' entries join the game's own, in pack order; a `replace`
@@ -693,9 +681,6 @@ pub(crate) fn load_tag_lists(
             let Ok(v) = serde_json::from_slice::<Value>(bytes) else {
                 continue;
             };
-            if !conditions.allows_tag(&v, kind, &id) {
-                continue;
-            }
             raw.entry(id.to_owned()).or_default().push(&v);
         }
     }
@@ -3259,12 +3244,7 @@ mod tests {
             ),
         ];
         let overlay = PackOverlay::new(&files);
-        for (side, expected) in [
-            (None, "minecraft:stone"),
-            (Some(Side::Client), "minecraft:stone"),
-            (Some(Side::Both), "minecraft:dirt"),
-            (None, "minecraft:stone"),
-        ] {
+        for side in [None, Some(Side::Client), Some(Side::Both), None] {
             let inventory = EnabledMods::new(side.map(|side| ("code_only".into(), side)));
             fs::write(
                 root.join(horizon_mod_package::enabled::MARKER),
@@ -3272,18 +3252,18 @@ mod tests {
             )
             .unwrap();
             let loaded = load_tag_lists(&root, "block", &overlay).unwrap();
-            assert_eq!(loaded["visuals:layers"], [expected, "minecraft:gold_block"]);
             assert_eq!(
-                loaded.contains_key("visuals:base"),
-                side == Some(Side::Both)
+                loaded["visuals:layers"],
+                ["minecraft:iron_block", "minecraft:gold_block"]
+            );
+            assert_eq!(loaded["visuals:base"], ["minecraft:stone"]);
+            assert!(
+                loaded.contains_key("visuals:namespace"),
+                "tag conditions are not evaluated"
             );
             assert!(
-                !loaded.contains_key("visuals:namespace"),
-                "namespaces are not mod IDs"
-            );
-            assert!(
-                !loaded.contains_key("visuals:absent"),
-                "a skipped layer creates no tag"
+                loaded.contains_key("visuals:absent"),
+                "tag conditions do not skip layers"
             );
         }
         fs::remove_dir_all(root).unwrap();
@@ -3310,7 +3290,7 @@ mod tests {
             ),
         ];
         let loaded = load_tag_lists(&root, "item", &PackOverlay::new(&files)).unwrap();
-        assert_eq!(loaded["test:things"], ["minecraft:stone"]);
+        assert!(loaded["test:things"].is_empty());
         assert_eq!(loaded["test:other"], ["minecraft:sand"]);
         fs::remove_dir_all(root).unwrap();
     }
