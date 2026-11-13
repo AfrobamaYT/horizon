@@ -8,6 +8,7 @@ use super::codec::{either, is_number, not_map, snbt};
 use super::packrat::{Grammar, Reason, State, Sugg, Term, Value, alt, ch, opt, seq};
 use super::{CmdResult, CommandError, Reader, SuggestionsBuilder};
 use horizon_core::nbt::{Compound, Tag};
+use horizon_world::datafix::dynamic::as_number;
 use std::rc::Rc;
 
 fn int_of(t: &Tag) -> Option<i64> {
@@ -33,6 +34,7 @@ pub const DECODED_COMPONENTS: &[&str] = &[
     "minecraft:custom_name",
     "minecraft:item_name",
     "minecraft:block_entity_data",
+    "minecraft:minimum_attack_charge",
 ];
 
 /// Validate and decode a component into the value representation shared with stacks.
@@ -58,6 +60,12 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
         | "minecraft:max_stack_size" => {
             Tag::Int(int_of(value).expect("validated numeric component") as i32)
         }
+        "minecraft:minimum_attack_charge" => Tag::Float(
+            as_number(value)
+                .expect("validated numeric component")
+                .float_value()
+                .to_bits(),
+        ),
         "minecraft:enchantments" | "minecraft:stored_enchantments" => {
             let Tag::Compound(entries) = value else {
                 unreachable!("validated enchantment map")
@@ -101,6 +109,18 @@ pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), Strin
             let v = int_of(t).ok_or("Not a number")?;
             if !(1..=99).contains(&v) {
                 return Err(format!("Value must be within range [1;99]: {v}"));
+            }
+            Ok(())
+        }
+        // DataComponents.MINIMUM_ATTACK_CHARGE / ExtraCodecs.floatRange:
+        // validate Number.floatValue with Float.compareTo, which rejects -0.0 and NaN.
+        "minecraft:minimum_attack_charge" => {
+            let value = as_number(t).ok_or("Not a number")?.float_value();
+            if value.is_sign_negative() || !(0.0..=1.0).contains(&value) {
+                return Err(format!(
+                    "Value must be within range [0.0;1.0]: {}",
+                    horizon_core::java_number::java_float(value)
+                ));
             }
             Ok(())
         }
