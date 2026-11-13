@@ -310,7 +310,7 @@ fn a_new_hook_argument_is_conditional_and_a_removed_one_breaks() {
             ChangeKind::Added,
             Class::Conditional,
             vec![
-                "argument `phase: u8` added to `tick`: breaks only a mod that builds this hook's event field by field, without `..`"
+                "argument `phase: u8` added to `tick`: breaks only a mod that builds this hook's event with a full literal or matches it with an exhaustive pattern (no `..`)"
             ],
             vec![]
         )
@@ -426,7 +426,7 @@ fn a_field_on_a_constructible_struct_is_conditional_and_named() {
             ChangeKind::Added,
             Class::Conditional,
             vec![
-                "field `y: i32` added to `Pos`: breaks only a mod that builds `Pos` field by field, without `..`"
+                "field `y: i32` added to `Pos`: breaks only a mod that builds `Pos` with a full literal or matches it with an exhaustive pattern (no `..`)"
             ],
             vec![]
         )
@@ -760,7 +760,7 @@ fn a_folded_member_can_make_its_container_breaking() {
             "trait:Part",
             ChangeKind::Changed,
             Class::Breaking,
-            vec!["`tick` is no longer required"],
+            vec!["`tick` is no longer required", "`save`: removed"],
             vec!["method:Part::save", "method:Part::tick"]
         )
     );
@@ -809,4 +809,325 @@ fn a_public_path_that_goes_is_conditional_and_a_new_one_adds() {
             vec![]
         )
     );
+}
+
+#[test]
+fn a_called_trait_losing_a_supertrait_breaks_and_gaining_one_adds() {
+    let host = |bounds: &[&str]| {
+        traits(vec![Trait::new(
+            "trait:Host",
+            "",
+            TraitContract {
+                role: Role::Call,
+                side: Side::Both,
+                generics: String::new(),
+                bounds: bounds.iter().map(|b| (*b).into()).collect(),
+                required: vec![],
+                refs: vec![],
+            },
+            vec![],
+            vec![],
+        )])
+    };
+    let (send, plain) = (host(&["Send"]), host(&[]));
+    assert_eq!(
+        only(&diff(&send, &plain)),
+        (
+            "trait:Host",
+            ChangeKind::Changed,
+            Class::Breaking,
+            vec![
+                "no longer requires `Send`: a mod that relies on `Host: Send` or calls a method of `Send` through it no longer compiles"
+            ],
+            vec![]
+        )
+    );
+    let d = diff(&plain, &send);
+    let (_, _, class, what, _) = only(&d);
+    assert_eq!(
+        (class, what),
+        (Class::Additive, vec!["now also requires `Send`"])
+    );
+}
+
+#[test]
+fn a_hidden_field_on_a_constructible_struct_is_conditional() {
+    let old = types(vec![structure("Pos", true, &[("x", "i32")])]);
+    let mut new = old.clone();
+    new.types[0].fields_hash = Some("a field the docs hide".into());
+    assert_eq!(
+        only(&diff(&old, &new)),
+        (
+            "type:Pos",
+            ChangeKind::Changed,
+            Class::Conditional,
+            vec![
+                "its public field set changed in a field its records do not list: breaks only a mod that builds `Pos` with a full literal or matches it with an exhaustive pattern (no `..`)"
+            ],
+            vec![]
+        )
+    );
+    // A struct mods can't build has no literal to break.
+    let old = types(vec![structure("Pos", false, &[("x", "i32")])]);
+    let mut new = old.clone();
+    new.types[0].fields_hash = Some("a field the docs hide".into());
+    assert!(diff(&old, &new).changes.is_empty());
+}
+
+#[test]
+fn a_folded_member_that_changed_keeps_its_words() {
+    let mut retyped = method("Part", "save", false);
+    retyped = Method::new(
+        retyped.id.clone(),
+        "",
+        MethodContract {
+            signature: "fn save(&self, slot: u8)".into(),
+            ..retyped.contract.clone()
+        },
+    );
+    let old = traits(vec![implemented(
+        "Part",
+        vec![method("Part", "tick", true), method("Part", "save", false)],
+        &["tick"],
+    )]);
+    let new = traits(vec![implemented(
+        "Part",
+        vec![
+            method("Part", "tick", true),
+            retyped,
+            method("Part", "load", true),
+        ],
+        &["tick", "load"],
+    )]);
+    let d = diff(&old, &new);
+    let (_, _, _, what, members) = only(&d);
+    assert_eq!(
+        what,
+        vec![
+            "required `fn load(&self)` added: every implementation of `Part` must write it",
+            "`save`: signature: `fn save(&self)` → `fn save(&self, slot: u8)`"
+        ]
+    );
+    assert_eq!(members, vec!["method:Part::load", "method:Part::save"]);
+}
+
+#[test]
+fn an_enum_that_stops_being_non_exhaustive_adds() {
+    let open = types(vec![enumeration("Hand", false, &["Main", "Off"])]);
+    let closed = types(vec![enumeration("Hand", true, &["Main", "Off"])]);
+    assert_eq!(
+        only(&diff(&open, &closed)),
+        (
+            "type:Hand",
+            ChangeKind::Changed,
+            Class::Additive,
+            vec!["no longer `#[non_exhaustive]`"],
+            vec![]
+        )
+    );
+    let d = diff(&closed, &open);
+    let (_, _, class, what, _) = only(&d);
+    assert_eq!(
+        (class, what),
+        (Class::Breaking, vec!["now `#[non_exhaustive]`"])
+    );
+}
+
+/// A trait mods only call, with its supertraits and methods.
+fn called(name: &str, bounds: &[&str], methods: &[&str]) -> Trait {
+    Trait::new(
+        format!("trait:{name}"),
+        "",
+        TraitContract {
+            role: Role::Call,
+            side: Side::Both,
+            generics: String::new(),
+            bounds: bounds.iter().map(|b| (*b).into()).collect(),
+            required: vec![],
+            refs: vec![],
+        },
+        methods.iter().map(|m| method(name, m, false)).collect(),
+        vec![],
+    )
+}
+
+#[test]
+fn a_method_moved_to_a_supertrait_still_holding_is_not_a_break() {
+    let old = traits(vec![
+        called("Host", &[], &[]),
+        called("ServerHost", &["Host"], &["spawn"]),
+    ]);
+    let moved = traits(vec![
+        called("Host", &[], &["spawn"]),
+        called("ServerHost", &["Host"], &[]),
+    ]);
+    let d = diff(&old, &moved);
+    assert_eq!(d.verdict, Verdict::Additive, "{}", d.to_text());
+    let line = d
+        .changes
+        .iter()
+        .find(|c| c.id == "method:ServerHost::spawn")
+        .unwrap();
+    assert_eq!(
+        line.what,
+        ["moved to the supertrait `Host`: a call through `ServerHost` still compiles"]
+    );
+    // Without the bound, the calls through `ServerHost` break.
+    let cut = traits(vec![
+        called("Host", &[], &["spawn"]),
+        called("ServerHost", &[], &[]),
+    ]);
+    let d = diff(&old, &cut);
+    let gone = d
+        .changes
+        .iter()
+        .find(|c| c.id == "method:ServerHost::spawn")
+        .unwrap();
+    assert_eq!(
+        (gone.class, gone.what.as_slice()),
+        (Class::Breaking, &["removed".to_owned()][..])
+    );
+}
+
+#[test]
+fn a_struct_gaining_non_exhaustive_is_conditional_whatever_else_changed() {
+    let open = types(vec![structure("Pos", true, &[("x", "i32")])]);
+    let mut closed = types(vec![structure("Pos", false, &[("x", "i32")])]);
+    closed.types[0].contract.non_exhaustive = true;
+    closed.types[0].contract.generics = "<T>".into();
+    closed.types[0] = Type::new(
+        "type:Pos",
+        "",
+        None,
+        closed.types[0].contract.clone(),
+        closed.types[0].fields.clone(),
+        vec![],
+    );
+    let d = diff(&open, &closed);
+    let (_, _, _, what, _) = only(&d);
+    assert_eq!(
+        what,
+        vec![
+            "generics: none → `<T>`",
+            "no longer constructible: breaks only a mod that builds it with a literal"
+        ]
+    );
+}
+
+#[test]
+fn a_wire_layout_change_affects_wasm_mods_only() {
+    let at = |shape: &str| {
+        let mut s = types(vec![structure("Pos", false, &[("x", "i32")])]);
+        s.types[0].shape = Some(shape.into());
+        s
+    };
+    assert_eq!(
+        only(&diff(&at("aaaa"), &at("bbbb"))),
+        (
+            "type:Pos",
+            ChangeKind::Changed,
+            Class::Conditional,
+            vec!["wire layout: `aaaa` → `bbbb`: affects wasm mods only"],
+            vec![]
+        )
+    );
+}
+
+#[test]
+fn a_hash_change_no_field_explains_is_breaking() {
+    let old = functions(vec![function("now", "fn now() -> u64", true)]);
+    let mut new = old.clone();
+    new.functions[0].hash = "a newer writer's hash".into();
+    assert_eq!(
+        only(&diff(&old, &new)),
+        (
+            "fn:now",
+            ChangeKind::Changed,
+            Class::Breaking,
+            vec!["its contract changed in a field this tool does not know"],
+            vec![]
+        )
+    );
+}
+
+#[test]
+fn a_supertrait_added_to_an_implemented_trait_breaks() {
+    let old = traits(vec![implemented("Part", vec![], &[])]);
+    let mut new = old.clone();
+    new.traits[0].contract.bounds = vec!["Send".into()];
+    new.traits[0] = Trait::new(
+        "trait:Part",
+        "",
+        new.traits[0].contract.clone(),
+        vec![],
+        vec![],
+    );
+    let d = diff(&old, &new);
+    let (_, _, class, what, _) = only(&d);
+    assert_eq!(
+        (class, what),
+        (Class::Breaking, vec!["supertrait `Send` added"])
+    );
+}
+
+#[test]
+fn a_changed_required_signature_breaks() {
+    let old = traits(vec![implemented(
+        "Part",
+        vec![method("Part", "tick", true)],
+        &["tick"],
+    )]);
+    let mut new = old.clone();
+    new.traits[0].contract.required[0].signature = "fn tick(&mut self)".into();
+    new.traits[0] = Trait::new(
+        "trait:Part",
+        "",
+        new.traits[0].contract.clone(),
+        new.traits[0].methods.clone(),
+        vec![],
+    );
+    let d = diff(&old, &new);
+    let (id, _, class, what, _) = only(&d);
+    assert_eq!(
+        (id, class, what),
+        (
+            "trait:Part",
+            Class::Breaking,
+            vec!["required `tick`: `fn tick(&self)` → `fn tick(&mut self)`"]
+        )
+    );
+}
+
+#[test]
+fn a_field_whose_named_types_changed_breaks() {
+    let old = types(vec![structure("Pos", false, &[("x", "Unit")])]);
+    let mut new = old.clone();
+    let f = &new.types[0].fields[0];
+    new.types[0].fields[0] = Field::new(
+        f.id.clone(),
+        "",
+        FieldContract {
+            ty: "Unit".into(),
+            refs: vec!["type:other::Unit".into()],
+        },
+    );
+    let d = diff(&old, &new);
+    let (id, _, class, what, _) = only(&d);
+    assert_eq!(
+        (id, class, what),
+        (
+            "type:Pos.x",
+            Class::Breaking,
+            vec!["the API types it names changed"]
+        )
+    );
+}
+
+#[test]
+fn reordered_variants_of_an_exhaustive_enum_break() {
+    let old = types(vec![enumeration("Hand", true, &["Main", "Off"])]);
+    let new = types(vec![enumeration("Hand", true, &["Off", "Main"])]);
+    let d = diff(&old, &new);
+    let (_, _, class, what, _) = only(&d);
+    assert_eq!((class, what), (Class::Breaking, vec!["variants reordered"]));
 }

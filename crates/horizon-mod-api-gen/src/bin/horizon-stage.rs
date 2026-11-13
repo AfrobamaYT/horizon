@@ -6,9 +6,10 @@
 //!
 //! `horizon-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--json OUT] [--gate]`:
 //! print what changed between two surface exports, breaking changes first. `--notes` attaches
-//! the change notes of DIR (`crates/horizon-mod-vocab/changes`) that are not in `--base-notes`
-//! byte for byte. Exits 1 when a new note names an id that did not change, or with `--gate`
-//! when a breaking change has no note; 2 when an input cannot be read.
+//! the change notes of DIR (`crates/horizon-mod-vocab/changes`) whose file names are not in
+//! `--base-notes` (the base tree's folder; required with `--notes`). Exits 1 when a new note
+//! names an id that did not change, or with `--gate` when a breaking change has no note; 2 when
+//! an input cannot be read or the options are wrong.
 use horizon_mod_api_gen::staging::{self, Mode};
 use mod_surface::Surface;
 use std::path::PathBuf;
@@ -93,7 +94,9 @@ fn surface_diff(args: &[PathBuf]) -> ! {
     let mut diff = mod_surface::diff(&read_surface(old), &read_surface(new));
     let mut stale = Vec::new();
     if let Some(dir) = notes_dir {
-        let found = notes::read(dir, base_notes.map(PathBuf::as_path)).unwrap_or_else(|e| fail(e));
+        // Without the base's notes every older note would read as new, and stale.
+        let base = base_notes.unwrap_or_else(|| fail("--notes needs --base-notes"));
+        let found = notes::read(dir, base).unwrap_or_else(|e| fail(e));
         for file in found {
             for id in diff.attach(&file.note, &file.ids) {
                 stale.push(format!(

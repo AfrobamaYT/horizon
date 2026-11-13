@@ -11,22 +11,27 @@
 //!   A removed record; a changed contract (a hook's side or kind, a retyped field or argument, a
 //!   signature, a method no longer on wasm); a variant added to an exhaustive enum or a required
 //!   item added to a trait mods implement (the container's own hash covers those sets); an impl
-//!   a type no longer has.
+//!   a type no longer has; a supertrait a trait mods call no longer has.
 //! - **Conditional**: it breaks only some mods, which the fit test finds from each mod's source.
 //!   A field added to a struct mods can build, or an argument added to a hook (only a mod that
-//!   builds the value with a full literal, without `..`); a struct that is no longer
+//!   builds the value with a full literal or matches it with an exhaustive pattern, without
+//!   `..`), or a struct's public field set changing in a field its records do not list (its
+//!   `fields_hash`); a struct that is no longer
 //!   constructible (only a mod that builds it with a literal); a public path that goes (only a
 //!   mod that names the item by it); a hook's `version` (only a mod whose manifest names it); a
-//!   type's wire form (wasm mods only).
+//!   type's wire form or wire layout (`shape`; wasm mods only).
 //! - **Additive**: a new record (a field of a struct mods cannot build, a variant of a
 //!   `#[non_exhaustive]` enum, a defaulted method), and changes that only widen an item: now on
 //!   wasm, now crossing the wasm boundary, now constructible, an impl gained, a new public path,
-//!   an item no longer required.
+//!   a supertrait gained by a trait mods only call, an item no longer required, an enum no
+//!   longer `#[non_exhaustive]`, a method of a trait mods only call that moved unchanged to one
+//!   of its supertraits.
 //!
 //! A container's members are reported with it once: when a type, trait or hook is added or
 //! removed, or its hashed member set (`members`, `required`, whether a hook has an output)
-//! changed, its members' own changes are folded into its change (listed in `members`) and its
-//! class is the worst of all of them.
+//! changed, its members' own changes are folded into its change (listed in `members`, and a
+//! changed or removed member's lines repeated under the container with its name) and its class
+//! is the worst of all of them.
 //!
 //! Each change says what changed in words a mod author can act on, from the records' contract
 //! fields: `argument `player`: `PlayerRef` → `ServerPlayerRef``, `side: server → both`.
@@ -106,7 +111,8 @@ struct Entry {
     hash: String,
     /// The hashed part of its contract, as JSON.
     view: Value,
-    /// What the diff compares outside the hash: a type's `impls`, `wire` and `wire_form`, a
+    /// What the diff compares outside the hash: public `paths`; a type's `impls`, `wire`,
+    /// `wire_form`, `shape`, `constructible` and `fields_hash`; a called trait's `bounds`; a
     /// hook's `version`.
     extra: Map<String, Value>,
 }
@@ -154,10 +160,14 @@ fn entries(surface: &Surface) -> BTreeMap<String, Entry> {
     }
     for r in &surface.traits {
         let mut view = json(&r.contract);
+        let mut extra = paths(&r.paths);
+        // A trait mods only call keeps its supertraits out of the hash: one it gains asks
+        // nothing of a caller, but one it loses can break a caller that relied on it.
         if r.contract.role == Role::Call {
             take(&mut view, &["bounds", "refs"]);
+            extra.insert("bounds".into(), json(&r.contract.bounds));
         }
-        put(&r.id, &r.hash, view, paths(&r.paths));
+        put(&r.id, &r.hash, view, extra);
         for m in &r.methods {
             put(&m.id, &m.hash, json(&m.contract), Map::new());
         }
@@ -174,12 +184,19 @@ fn entries(surface: &Surface) -> BTreeMap<String, Entry> {
     for r in &surface.types {
         let mut view = json(&r.contract);
         let mut extra = take(&mut view, &["wire", "wire_form", "constructible"]);
-        // An enum's `constructible` is its `non_exhaustive`, which stays in the view.
         if r.contract.kind == TypeKind::Enum {
+            // An enum's `constructible` is its `non_exhaustive`, which stays in the view.
             extra.remove("constructible");
+        } else {
+            // A struct's `non_exhaustive` shows only through `constructible`, as in its hash.
+            take(&mut view, &["non_exhaustive"]);
         }
+        extra.insert("shape".into(), json(&r.shape));
         extra.insert("impls".into(), json(&r.impls));
         extra.extend(paths(&r.paths));
+        if let Some(fields) = &r.fields_hash {
+            extra.insert("fields_hash".into(), fields.as_str().into());
+        }
         put(&r.id, &r.hash, view, extra);
         for f in &r.fields {
             put(&f.id, &f.hash, json(&f.contract), Map::new());
@@ -206,6 +223,48 @@ fn container(id: &str) -> Option<String> {
         "type" | "hook" => Some(format!("{kind}:{}", rest.rsplit_once('.')?.0)),
         _ => None,
     }
+}
+
+/// For a method gone from a trait mods only call: the trait and the supertrait it moved to
+/// unchanged, when the trait still has that supertrait in `new`, so every call still compiles.
+fn moved_to(
+    id: &str,
+    old: &Entry,
+    new: &Surface,
+    after: &BTreeMap<String, Entry>,
+) -> Option<(String, String)> {
+    let (path, method) = id.strip_prefix("method:")?.rsplit_once("::")?;
+    let trait_of = |bound: &str| {
+        // A bound is written as the trait's path, perhaps with generics.
+        let bound = bound.split('<').next().unwrap_or(bound).trim();
+        new.traits
+            .iter()
+            .find(|t| t.id.strip_prefix("trait:") == Some(bound))
+    };
+    let start = new
+        .traits
+        .iter()
+        .find(|t| t.id.strip_prefix("trait:") == Some(path) && t.contract.role == Role::Call)?;
+    let mut seen = BTreeSet::new();
+    let mut queue: Vec<&crate::Trait> = vec![start];
+    while let Some(t) = queue.pop() {
+        for bound in &t.contract.bounds {
+            let Some(sup) = trait_of(bound) else { continue };
+            if !seen.insert(sup.id.as_str()) {
+                continue;
+            }
+            let sup_path = sup.id.strip_prefix("trait:").unwrap_or(&sup.id);
+            let moved = after.get(&format!("method:{sup_path}::{method}"));
+            if moved.is_some_and(|m| m.view == old.view) {
+                return Some((
+                    crate::leaf(&start.id).to_owned(),
+                    crate::leaf(&sup.id).to_owned(),
+                ));
+            }
+            queue.push(sup);
+        }
+    }
+    None
 }
 
 /// The containers in both surfaces whose new members a mod's full literal must name: every
@@ -235,10 +294,18 @@ pub fn diff(old: &Surface, new: &Surface) -> Diff {
     let mut changes: BTreeMap<String, Change> = BTreeMap::new();
     for id in ids {
         let (kind, lines) = match (before.get(id), after.get(id)) {
-            (Some(_), None) => (
-                ChangeKind::Removed,
-                vec![("removed".into(), Class::Breaking)],
-            ),
+            (Some(a), None) => {
+                let line = match moved_to(id, a, new, &after) {
+                    Some((from, to)) => (
+                        format!(
+                            "moved to the supertrait `{to}`: a call through `{from}` still compiles"
+                        ),
+                        Class::Additive,
+                    ),
+                    None => ("removed".into(), Class::Breaking),
+                };
+                (ChangeKind::Removed, vec![line])
+            }
             (None, Some(b)) => {
                 let line = match container(id).filter(|owner| owners.contains(owner)) {
                     Some(owner) => (literal_added(id, &owner, &b.view), Class::Conditional),
@@ -283,6 +350,38 @@ pub fn diff(old: &Surface, new: &Surface) -> Diff {
             },
         );
     }
+    // A constructible struct whose public field set changed with no field record to show it
+    // (a field mods can't see in the docs was added or removed): a full literal stops building.
+    let fields_moved: BTreeSet<String> = changes
+        .keys()
+        .filter(|id| id.starts_with("type:"))
+        .filter_map(|id| container(id))
+        .collect();
+    for (id, a) in &before {
+        let Some(b) = after.get(id) else { continue };
+        let open = |e: &Entry| e.extra.get("constructible") == Some(&Value::Bool(true));
+        if a.extra.get("fields_hash") == b.extra.get("fields_hash")
+            || !open(a)
+            || !open(b)
+            || fields_moved.contains(id)
+        {
+            continue;
+        }
+        let line = format!(
+            "its public field set changed in a field its records do not list: breaks only a mod that builds `{}` with a full literal or matches it with an exhaustive pattern (no `..`)",
+            crate::leaf(id)
+        );
+        let change = changes.entry(id.clone()).or_insert_with(|| Change {
+            id: id.clone(),
+            kind: ChangeKind::Changed,
+            class: Class::Conditional,
+            what: Vec::new(),
+            members: Vec::new(),
+            notes: Vec::new(),
+        });
+        change.class = change.class.max(Class::Conditional);
+        change.what.push(line);
+    }
     // Fold members into a container that was added or removed, or whose member set changed.
     let folds: BTreeSet<String> = changes
         .values()
@@ -305,6 +404,18 @@ pub fn diff(old: &Surface, new: &Surface) -> Diff {
         let member = changes.remove(&id).expect("listed above");
         let owner = changes.get_mut(&owner).expect("folds are changes");
         owner.class = owner.class.max(member.class);
+        // A member added with its container, or to a changed one, is told by the container's
+        // own lines; a member changed or removed keeps its words unless they already name it.
+        let name = crate::leaf(&id);
+        let told = owner
+            .what
+            .iter()
+            .any(|line| line.contains(&format!("`{name}`")));
+        if owner.kind == ChangeKind::Changed && member.kind != ChangeKind::Added && !told {
+            owner
+                .what
+                .extend(member.what.iter().map(|line| format!("`{name}`: {line}")));
+        }
         owner.members.push(id);
     }
     let mut changes: Vec<Change> = changes.into_values().collect();
@@ -329,11 +440,11 @@ fn literal_added(id: &str, owner: &str, view: &Value) -> String {
     let name = crate::leaf(owner);
     if owner.starts_with("hook:") {
         format!(
-            "argument `{member}` added to `{name}`: breaks only a mod that builds this hook's event field by field, without `..`"
+            "argument `{member}` added to `{name}`: breaks only a mod that builds this hook's event with a full literal or matches it with an exhaustive pattern (no `..`)"
         )
     } else {
         format!(
-            "field `{member}` added to `{name}`: breaks only a mod that builds `{name}` field by field, without `..`"
+            "field `{member}` added to `{name}`: breaks only a mod that builds `{name}` with a full literal or matches it with an exhaustive pattern (no `..`)"
         )
     }
 }
@@ -375,6 +486,20 @@ fn extras(id: &str, old: &Map<String, Value>, new: &Map<String, Value>) -> Vec<(
             Class::Conditional,
         ));
     }
+    if let (Some(Value::Array(_)), Some(Value::Array(_))) = (old.get("bounds"), new.get("bounds")) {
+        let (x, y) = (strings(old, "bounds"), strings(new, "bounds"));
+        for gained in y.iter().filter(|b| !x.contains(b)) {
+            lines.push((format!("now also requires `{gained}`"), Class::Additive));
+        }
+        for lost in x.iter().filter(|b| !y.contains(b)) {
+            lines.push((
+                format!(
+                    "no longer requires `{lost}`: a mod that relies on `{name}: {lost}` or calls a method of `{lost}` through it no longer compiles"
+                ),
+                Class::Breaking,
+            ));
+        }
+    }
     match (get(old, "constructible"), get(new, "constructible")) {
         (Value::Bool(false), Value::Bool(true)) => {
             lines.push(("now constructible with a literal".into(), Class::Additive))
@@ -392,6 +517,17 @@ fn extras(id: &str, old: &Map<String, Value>, new: &Map<String, Value>) -> Vec<(
                 "version {} → {}: affects only a mod that names this hook's version in its manifest",
                 show(&x),
                 show(&y)
+            ),
+            Class::Conditional,
+        ));
+    }
+    let (x, y) = (get(old, "shape"), get(new, "shape"));
+    if x != y {
+        lines.push((
+            format!(
+                "wire layout: {} → {}: affects wasm mods only",
+                quoted("shape", &x),
+                quoted("shape", &y)
             ),
             Class::Conditional,
         ));
@@ -494,9 +630,11 @@ fn describe(id: &str, old: &Value, new: &Value) -> Vec<(String, Class)> {
     let keys: BTreeSet<&String> = a.keys().chain(b.keys()).collect();
     let mut lines = Vec::new();
     let mut refs_changed = false;
+    // An enum lists its variants only while it is exhaustive.
+    let listing = get(a, b, "non_exhaustive") != get(b, a, "non_exhaustive");
     for key in keys {
         let (x, y) = (get(a, b, key), get(b, a, key));
-        if x == y {
+        if x == y || (listing && key == "members") {
             continue;
         }
         let key = key.as_str();
@@ -603,6 +741,9 @@ fn describe(id: &str, old: &Value, new: &Value) -> Vec<(String, Class)> {
             ("non_exhaustive", _, Value::Bool(true)) => {
                 lines.push(("now `#[non_exhaustive]`".into(), Breaking))
             }
+            ("non_exhaustive", _, Value::Bool(false)) => {
+                lines.push(("no longer `#[non_exhaustive]`".into(), Additive))
+            }
             ("output", _, Value::Bool(true)) => lines.push(("now has an output".into(), Breaking)),
             ("output", _, Value::Bool(false)) => {
                 lines.push(("no longer has an output".into(), Breaking))
@@ -665,13 +806,6 @@ fn pair<T>(
 }
 
 impl Diff {
-    /// Every id whose record differs, folded members included.
-    pub fn ids(&self) -> impl Iterator<Item = &str> {
-        self.changes.iter().flat_map(|c| {
-            std::iter::once(c.id.as_str()).chain(c.members.iter().map(String::as_str))
-        })
-    }
-
     /// Attaches a note to the changes it names; returns the ids it names that did not change.
     pub fn attach(&mut self, note: &Note, ids: &[String]) -> Vec<String> {
         let mut stale = Vec::new();

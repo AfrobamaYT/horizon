@@ -75,7 +75,7 @@ fn run(dir: &Path, extra: &[&str]) -> (i32, String, String) {
 #[test]
 fn without_the_gate_a_break_reports_and_passes() {
     let dir = folder();
-    let (code, out, _) = run(dir.path(), &["--notes", "changes"]);
+    let (code, out, _) = run(dir.path(), &["--notes", "changes", "--base-notes", "base"]);
     assert_eq!(code, 0);
     assert!(out.starts_with(
         "Surface: breaking (1 breaking, 0 conditional, 1 additive; 1 breaking without a note)"
@@ -98,7 +98,10 @@ fn the_gate_fails_an_undeclared_break_and_passes_a_declared_one() {
         "rename.toml",
         "ids = [\"fn:spawn\", \"fn:summon\"]\nwhy = \"Spawn reads as eggs.\"\nmigrate = \"Call `summon`.\"\n",
     );
-    let (code, out, err) = run(dir.path(), &["--gate", "--notes", "changes"]);
+    let (code, out, err) = run(
+        dir.path(),
+        &["--gate", "--notes", "changes", "--base-notes", "base"],
+    );
     assert_eq!(code, 0, "{err}");
     assert!(
         out.contains("    why (rename.toml): Spawn reads as eggs.\n    migrate: Call `summon`.\n")
@@ -106,11 +109,11 @@ fn the_gate_fails_an_undeclared_break_and_passes_a_declared_one() {
 }
 
 #[test]
-fn a_new_note_naming_an_unchanged_id_fails_and_an_old_one_is_ignored() {
+fn a_new_note_naming_an_unchanged_id_fails_and_an_old_or_edited_one_is_ignored() {
     let dir = folder();
     let stale = "ids = [\"fn:keep\"]\nwhy = \"Nothing.\"\n";
     note(dir.path(), "changes", "stale.toml", stale);
-    let (code, _, err) = run(dir.path(), &["--notes", "changes"]);
+    let (code, _, err) = run(dir.path(), &["--notes", "changes", "--base-notes", "base"]);
     assert_eq!(code, 1);
     assert!(
         err.contains("change note stale.toml names fn:keep, which did not change"),
@@ -121,7 +124,7 @@ fn a_new_note_naming_an_unchanged_id_fails_and_an_old_one_is_ignored() {
     let (code, out, err) = run(dir.path(), &["--notes", "changes", "--base-notes", "base"]);
     assert_eq!(code, 0, "{err}");
     assert!(!out.contains("Nothing."));
-    // Edited since the base: new again.
+    // Edited since the base: still an earlier change's note, so editing it never fails.
     note(
         dir.path(),
         "changes",
@@ -129,7 +132,11 @@ fn a_new_note_naming_an_unchanged_id_fails_and_an_old_one_is_ignored() {
         "ids = [\"fn:keep\"]\nwhy = \"Edited.\"\n",
     );
     let (code, ..) = run(dir.path(), &["--notes", "changes", "--base-notes", "base"]);
-    assert_eq!(code, 1);
+    assert_eq!(code, 0);
+    // Notes without the base's notes cannot tell new from old.
+    let (code, _, err) = run(dir.path(), &["--notes", "changes"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("--notes needs --base-notes"), "{err}");
 }
 
 #[test]
@@ -141,7 +148,7 @@ fn a_malformed_note_or_surface_is_refused_by_name() {
         "bad.toml",
         "ids = [\"fn:spawn\"]\nwhy = \"x\"\nreason = \"y\"\n",
     );
-    let (code, _, err) = run(dir.path(), &["--notes", "changes"]);
+    let (code, _, err) = run(dir.path(), &["--notes", "changes", "--base-notes", "base"]);
     assert_eq!(code, 2);
     assert!(
         err.contains("change note bad.toml has the unknown key `reason`"),

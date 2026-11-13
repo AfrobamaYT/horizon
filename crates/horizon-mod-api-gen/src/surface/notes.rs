@@ -153,16 +153,13 @@ fn files(dir: &Path) -> Result<Vec<(String, Vec<u8>)>, NoteError> {
     Ok(out)
 }
 
-/// The new notes of `dir`: every note when `base` is `None`, otherwise those whose file is not
-/// in `base` byte for byte.
-pub fn read(dir: &Path, base: Option<&Path>) -> Result<Vec<NoteFile>, NoteError> {
-    let old = match base {
-        Some(base) => files(base)?,
-        None => Vec::new(),
-    };
+/// The new notes of `dir`: those whose file name is not in `base`. A note already merged is an
+/// earlier change's, so editing it is neither read nor checked.
+pub fn read(dir: &Path, base: &Path) -> Result<Vec<NoteFile>, NoteError> {
+    let old: Vec<String> = files(base)?.into_iter().map(|(name, _)| name).collect();
     files(dir)?
         .into_iter()
-        .filter(|file| !old.contains(file))
+        .filter(|(name, _)| !old.contains(name))
         .map(|(name, bytes)| {
             let text = String::from_utf8(bytes).map_err(|_| NoteError::Toml {
                 file: name.clone(),
@@ -274,17 +271,19 @@ mod tests {
         let names = |found: Vec<NoteFile>| -> Vec<String> {
             found.into_iter().map(|n| n.note.file).collect()
         };
+        // An edited note keeps its name, and stays an earlier change's, even when it no longer
+        // parses.
+        std::fs::write(head.join("broken.toml"), "ids = [").unwrap();
+        std::fs::write(base.join("broken.toml"), note("d", "fine")).unwrap();
+        assert_eq!(names(read(&head, &base).unwrap()), ["added.toml"]);
+        std::fs::remove_file(head.join("broken.toml")).unwrap();
         assert_eq!(
-            names(read(&head, Some(&base)).unwrap()),
-            ["added.toml", "edited.toml"]
-        );
-        assert_eq!(
-            names(read(&head, None).unwrap()),
+            names(read(&head, &dir.path().join("none")).unwrap()),
             ["added.toml", "edited.toml", "old.toml"]
         );
         // An absent folder holds no notes, on either side.
         assert!(
-            read(&dir.path().join("none"), Some(&dir.path().join("none")))
+            read(&dir.path().join("none"), &dir.path().join("none"))
                 .unwrap()
                 .is_empty()
         );
