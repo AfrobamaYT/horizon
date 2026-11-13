@@ -194,22 +194,22 @@ fn owner(id: &str, ids: &BTreeMap<&str, &str>) -> Option<String> {
     }
 }
 
-/// A place in the mod's source.
-type Place = (String, usize);
+/// A place in the mod's source: a file's path and a line.
+type Place<'t> = (&'t str, usize);
 
 /// What the sources say about how a struct is built.
 #[derive(Default)]
-struct Building {
-    full: Option<Place>,
-    base: Option<Place>,
+struct Building<'t> {
+    full: Option<Place<'t>>,
+    base: Option<Place<'t>>,
     /// Some full build is a brace expression (`S { a: 1 }`), not a pattern or a call.
     brace_literal: bool,
 }
 
-impl Building {
-    fn record(&mut self, place: Place, full: bool, brace_literal: bool) {
+impl<'t> Building<'t> {
+    fn record(&mut self, place: Place<'t>, full: bool, brace_literal: bool) {
         let slot = if full { &mut self.full } else { &mut self.base };
-        if slot.as_ref().is_none_or(|old| place < *old) {
+        if slot.is_none_or(|old| place < old) {
             *slot = Some(place);
         }
         self.brace_literal |= full && brace_literal;
@@ -1435,20 +1435,6 @@ impl<'a, 's, 't> Resolver<'a, 's, 't> {
             && !file.imported.contains(name)
     }
 
-    /// The API structs a name in file `index` may be, as ids, whether an alias leads it
-    /// elsewhere, and whether it is the mod's own there.
-    fn resolve(
-        &mut self,
-        index: usize,
-        name: &'t str,
-        unqualified: bool,
-    ) -> (Vec<&'s str>, bool, bool) {
-        let resolved = self.lookup(name);
-        let (ids, aliased) = (resolved.ids.clone(), resolved.aliased);
-        let own = unqualified && !aliased && self.own_in(index, name);
-        (ids, aliased, own)
-    }
-
     /// Whether a name the scan cannot place may be an API struct by another name.
     fn unknown(&self, name: &str) -> bool {
         name.starts_with(|c: char| c.is_ascii_uppercase())
@@ -1507,23 +1493,29 @@ impl<'a, 's, 't> Resolver<'a, 's, 't> {
 /// What the walk over the mod's files finds: the records named directly, each with the first
 /// place that names it; how each named struct is built; the public paths the mod writes each
 /// by; and the first place of a literal the scan cannot place.
-#[derive(Default)]
-struct Found<'s> {
-    direct: BTreeMap<&'s str, Origin>,
-    building: BTreeMap<&'s str, Building>,
+struct Found<'s, 't> {
+    direct: BTreeMap<&'s str, Place<'t>>,
+    building: BTreeMap<&'s str, Building<'t>>,
     written: BTreeMap<&'s str, BTreeSet<String>>,
     named_structs: BTreeSet<&'s str>,
-    unsure: Option<Place>,
+    unsure: Option<Place<'t>>,
 }
 
-impl<'s> Found<'s> {
-    fn mark_unsure(&mut self, here: Place) {
-        if self.unsure.as_ref().is_none_or(|old| here < *old) {
+impl<'s, 't> Found<'s, 't> {
+    fn mark_unsure(&mut self, here: Place<'t>) {
+        if self.unsure.is_none_or(|old| here < old) {
             self.unsure = Some(here);
         }
     }
 
-    fn build(&mut self, id: &'s str, place: Place, full: bool, brace_literal: bool) {
+    fn name(&mut self, id: &'s str, here: Place<'t>) {
+        self.direct
+            .entry(id)
+            .and_modify(|first| *first = here.min(*first))
+            .or_insert(here);
+    }
+
+    fn build(&mut self, id: &'s str, place: Place<'t>, full: bool, brace_literal: bool) {
         self.building
             .entry(id)
             .or_default()
@@ -1534,36 +1526,40 @@ impl<'s> Found<'s> {
 /// The walk over one file.
 struct Walk<'r, 'a, 's, 't> {
     resolver: &'r mut Resolver<'a, 's, 't>,
-    found: &'r mut Found<'s>,
+    found: &'r mut Found<'s, 't>,
     index: usize,
-    path: &'r str,
+    path: &'t str,
 }
 
 impl<'s, 't> Walk<'_, '_, 's, 't> {
-    fn place(&self, line: usize) -> Place {
-        (self.path.to_owned(), line)
-    }
-
     /// Every name in the file: the records it names, and what a macro body builds with it.
     fn names(&mut self) {
-        let files = self.resolver.files;
-        let file = &files[self.index];
+        let Walk {
+            resolver,
+            found,
+            index,
+            path,
+        } = self;
+        let (index, path) = (*index, *path);
+        let files = resolver.files;
+        let file = &files[index];
         let tokens = &file.tokens;
         for (at, (token, line)) in tokens.iter().enumerate() {
             let Token::Ident(written_name) = token else {
                 continue;
             };
+            let place = (path, *line);
             let start = file.path_starts[at];
             let open = at + 1;
             let opens = punct(tokens, open, b'{') || punct(tokens, open, b'(');
             let (name, unqualified) = match *written_name {
-                "Self" => match self.resolver.impl_at(self.index, file.starts[at]) {
+                "Self" => match resolver.impl_at(index, file.starts[at]) {
                     Some(Some(target)) => (*target.last().unwrap_or(&"Self"), target.len() == 1),
                     // In a macro body the parser does not read, or in an impl of a type it
                     // cannot read, `Self { … }` builds a struct the scan cannot place.
                     _ => {
                         if file.in_macro[at] && opens {
-                            self.found.mark_unsure(self.place(*line));
+                            found.mark_unsure(place);
                         }
                         continue;
                     }
@@ -1574,8 +1570,10 @@ impl<'s, 't> Walk<'_, '_, 's, 't> {
                         && !(at >= 2 && punct(tokens, at - 1, b':') && punct(tokens, at - 2, b':')),
                 ),
             };
-            let (ids, aliased, own) = self.resolver.resolve(self.index, name, unqualified);
-            if ids.is_empty() {
+            resolver.lookup(name);
+            let resolver: &Resolver<'_, 's, 't> = resolver;
+            let resolved = &resolver.memo[name];
+            if resolved.ids.is_empty() {
                 // In a macro body, which the parser does not read: a literal of a name the
                 // scan cannot place, or a metavariable's `$name { … }` or `$name(…)`, which
                 // may be a struct's name.
@@ -1583,126 +1581,94 @@ impl<'s, 't> Walk<'_, '_, 's, 't> {
                 if file.in_macro[at]
                     && ((punct(tokens, open, b'{')
                         && !in_type_position(tokens, &file.path_starts, at)
-                        && self.resolver.unknown(name)
+                        && resolver.unknown(name)
                         && looks_like_fields(tokens, open))
                         || (metavariable
                             && opens
                             && !in_type_position(tokens, &file.path_starts, at - 1)))
                 {
-                    self.found.mark_unsure(self.place(*line));
+                    found.mark_unsure(place);
                 }
                 continue;
             }
-            let owners = &self.resolver.index.owners;
-            let qualifier = (start < at).then(|| ident(tokens, at - 3)).flatten();
-            let members: Vec<&str> = qualifier
-                .filter(|_| !aliased)
-                .map(|q| {
-                    ids.iter()
-                        .copied()
-                        .filter(|id| owners.get(id).is_some_and(|o| leaf(o) == q))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let named = if members.is_empty() { ids } else { members };
-            for id in named {
-                let here = Origin::Source {
-                    file: self.path.to_owned(),
-                    line: *line,
-                };
-                self.found
-                    .direct
-                    .entry(id)
-                    .and_modify(|origin| {
-                        if here < *origin {
-                            *origin = here.clone();
-                        }
-                    })
-                    .or_insert_with(|| here.clone());
-                if !self.resolver.index.struct_like(id) || own {
+            let own = unqualified && !resolved.aliased && resolver.own_in(index, name);
+            let api = resolver.index;
+            // After `X::`, where `X` owns a member of the name, the name is that member only.
+            let qualifier = (start < at && !resolved.aliased)
+                .then(|| ident(tokens, at - 3))
+                .flatten();
+            let member = |id: &&str| {
+                qualifier.is_some_and(|q| api.owners.get(id).is_some_and(|o| leaf(o) == q))
+            };
+            let members = resolved.ids.iter().any(member);
+            for &id in resolved.ids.iter().filter(|id| !members || member(id)) {
+                found.name(id, place);
+                if !api.struct_like(id) || own {
                     continue;
                 }
-                self.found.named_structs.insert(id);
-                if self.resolver.opaque[self.index] && self.resolver.index.buildable(id) {
+                found.named_structs.insert(id);
+                if resolver.opaque[index] && api.buildable(id) {
                     // An expansion the scan cannot follow may build any API struct the file
                     // names.
-                    self.found.build(id, self.place(*line), true, false);
+                    found.build(id, place, true, false);
                 }
                 if file.in_macro[at] {
-                    self.macro_body(id, at, *line);
+                    macro_body(found, api, file, id, at, place);
                 }
             }
-        }
-    }
-
-    /// What a macro body, which the parser does not read, builds with API struct `id` at `at`:
-    /// a name followed by `{` or `(` is a build, in full unless it ends in `..`; a tuple or
-    /// unit struct's name where a value starts is one too (`.map(Pos)`, `x = Marker`).
-    fn macro_body(&mut self, id: &'s str, at: usize, line: usize) {
-        let files = self.resolver.files;
-        let file = &files[self.index];
-        let tokens = &file.tokens;
-        let kind = self.resolver.index.kind(id);
-        let start = file.path_starts[at];
-        let open = at + 1;
-        if punct(tokens, open, b'{') || punct(tokens, open, b'(') {
-            let full = !file.rests[open] && kind != Some(TypeKind::Union);
-            self.found
-                .build(id, self.place(line), full, punct(tokens, open, b'{'));
-        } else if matches!(kind, Some(TypeKind::TupleStruct | TypeKind::UnitStruct))
-            && !(punct(tokens, open, b':') && punct(tokens, open + 1, b':'))
-            && !punct(tokens, open, b'!')
-            && start >= 1
-            && match tokens[start - 1].0 {
-                Token::Punct(b'(' | b',' | b'=' | b'[') => true,
-                Token::Punct(b'>') => punct(tokens, start.saturating_sub(2), b'='),
-                Token::Ident(word) => matches!(word, "return" | "break"),
-                _ => false,
-            }
-        {
-            self.found.build(id, self.place(line), true, false);
         }
     }
 
     /// Every place the parser reads a struct built or matched.
     fn builds(&mut self) {
-        let files = self.resolver.files;
-        let file = &files[self.index];
+        let Walk {
+            resolver,
+            found,
+            index,
+            path,
+        } = self;
+        let (index, path) = (*index, *path);
+        let files = resolver.files;
+        let file = &files[index];
         for build in &file.syntax.builds {
+            let place = (path, build.line);
             let (name, unqualified) = match &build.path[..] {
-                ["Self"] => match self.resolver.impl_at(self.index, build.byte) {
+                ["Self"] => match resolver.impl_at(index, build.byte) {
                     Some(Some(target)) => (*target.last().unwrap_or(&"Self"), target.len() == 1),
                     // Outside any impl the parser placed, or in one of a type it cannot read:
                     // a struct the scan cannot place.
                     _ => {
-                        self.found.mark_unsure(self.place(build.line));
+                        found.mark_unsure(place);
                         continue;
                     }
                 },
                 [.., last] => (*last, build.path.len() == 1 && !build.rooted),
                 [] => continue,
             };
-            let (ids, _, own) = self.resolver.resolve(self.index, name, unqualified);
-            if ids.is_empty() {
+            resolver.lookup(name);
+            let resolver: &Resolver<'_, 's, 't> = resolver;
+            let resolved = &resolver.memo[name];
+            if resolved.ids.is_empty() {
                 // A literal of a name the scan cannot place may be an API struct by another
                 // name; one written from the standard library is not.
                 let standard = matches!(build.path.first(), Some(&("std" | "core" | "alloc")));
-                if build.brace && self.resolver.unknown(name) && !standard {
-                    self.found.mark_unsure(self.place(build.line));
+                if build.brace && resolver.unknown(name) && !standard {
+                    found.mark_unsure(place);
                 }
                 continue;
             }
-            for id in ids {
-                let index = self.resolver.index;
-                if !index.struct_like(id) || own {
+            let own = unqualified && !resolved.aliased && resolver.own_in(index, name);
+            let api = resolver.index;
+            for &id in &resolved.ids {
+                if !api.struct_like(id) || own {
                     continue;
                 }
                 let full = match build.how {
-                    How::Full => index.kind(id) != Some(TypeKind::Union),
+                    How::Full => api.kind(id) != Some(TypeKind::Union),
                     How::Base => false,
                     How::Value => {
                         if !matches!(
-                            index.kind(id),
+                            api.kind(id),
                             Some(TypeKind::TupleStruct | TypeKind::UnitStruct)
                         ) {
                             continue;
@@ -1710,8 +1676,7 @@ impl<'s, 't> Walk<'_, '_, 's, 't> {
                         true
                     }
                 };
-                self.found
-                    .build(id, self.place(build.line), full, build.brace);
+                found.build(id, place, full, build.brace);
             }
         }
     }
@@ -1779,26 +1744,62 @@ impl<'s, 't> Walk<'_, '_, 's, 't> {
     }
 }
 
+/// What a macro body, which the parser does not read, builds with API struct `id` at `at`: a
+/// name followed by `{` or `(` is a build, in full unless it ends in `..`; a tuple or unit
+/// struct's name where a value starts is one too (`.map(Pos)`, `x = Marker`).
+fn macro_body<'s, 't>(
+    found: &mut Found<'s, 't>,
+    api: &Index<'s>,
+    file: &FileFacts<'t>,
+    id: &'s str,
+    at: usize,
+    place: Place<'t>,
+) {
+    let tokens = &file.tokens;
+    let kind = api.kind(id);
+    let start = file.path_starts[at];
+    let open = at + 1;
+    if punct(tokens, open, b'{') || punct(tokens, open, b'(') {
+        let full = !file.rests[open] && kind != Some(TypeKind::Union);
+        found.build(id, place, full, punct(tokens, open, b'{'));
+    } else if matches!(kind, Some(TypeKind::TupleStruct | TypeKind::UnitStruct))
+        && !(punct(tokens, open, b':') && punct(tokens, open + 1, b':'))
+        && !punct(tokens, open, b'!')
+        && start >= 1
+        && match tokens[start - 1].0 {
+            Token::Punct(b'(' | b',' | b'=' | b'[') => true,
+            Token::Punct(b'>') => punct(tokens, start.saturating_sub(2), b'='),
+            Token::Ident(word) => matches!(word, "return" | "break"),
+            _ => false,
+        }
+    {
+        found.build(id, place, true, false);
+    }
+}
+
 /// The records `sources` (each a path and its Rust text) and `manifest` bring in, with
 /// everything their signatures reference; [`ScanError`] when the source cannot be judged.
-pub fn uses<P: AsRef<str>, T: AsRef<str>>(
-    sources: impl IntoIterator<Item = (P, T)>,
+pub fn uses<'t>(
+    sources: impl IntoIterator<Item = (&'t str, &'t str)>,
     manifest: &ManifestFacts,
     surface: &Surface,
 ) -> Result<Uses, ScanError> {
     let index = Index::new(surface);
-    let sources: Vec<(String, String)> = sources
-        .into_iter()
-        .map(|(p, t)| (p.as_ref().to_owned(), t.as_ref().to_owned()))
-        .collect();
+    let sources: Vec<(&str, &str)> = sources.into_iter().collect();
     let files: Vec<FileFacts<'_>> = sources
         .iter()
         .map(|(file, text)| file_facts(file, text))
         .collect::<Result<_, _>>()?;
     let module = mod_facts(&files, &index.api_prefixes);
     let mut resolver = Resolver::new(&index, &module, &files);
-    let mut found = Found::default();
-    for (file, (path, _)) in sources.iter().enumerate() {
+    let mut found = Found {
+        direct: BTreeMap::new(),
+        building: BTreeMap::new(),
+        written: BTreeMap::new(),
+        named_structs: BTreeSet::new(),
+        unsure: None,
+    };
+    for (file, (path, _)) in sources.iter().copied().enumerate() {
         let mut walk = Walk {
             resolver: &mut resolver,
             found: &mut found,
@@ -1810,7 +1811,7 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
         walk.paths();
     }
     let Found {
-        mut direct,
+        direct,
         mut building,
         written,
         named_structs,
@@ -1820,12 +1821,16 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
     // names, anywhere: each counts as built field by field.
     if let Some(place) = unsure {
         for id in named_structs.into_iter().filter(|id| index.buildable(id)) {
-            building
-                .entry(id)
-                .or_default()
-                .record(place.clone(), true, false);
+            building.entry(id).or_default().record(place, true, false);
         }
     }
+    let mut direct: BTreeMap<&str, Origin> = direct
+        .into_iter()
+        .map(|(id, (file, line))| {
+            let file = file.to_owned();
+            (id, Origin::Source { file, line })
+        })
+        .collect();
     for name in &manifest.names {
         for id in [format!("hook:{name}"), format!("capability:{name}")] {
             if let Some((id, _)) = index.hashes.get_key_value(id.as_str()) {
@@ -1919,7 +1924,7 @@ fn list(
         })
         .collect();
 
-    let at = |(file, line): &Place| format!("{file}:{line}");
+    let at = |(file, line): &Place<'_>| format!("{file}:{line}");
     let hook_versions = &manifest.hook_versions;
     Uses {
         items: origins

@@ -100,7 +100,7 @@ fn uses_command(args: &[PathBuf]) {
         hook_versions: Default::default(),
     };
     let uses = uses(
-        input.sources.iter().map(|(p, t)| (p, t)),
+        input.sources.iter().map(|(p, t)| (p.as_str(), t.as_str())),
         &manifest,
         &surface,
     )

@@ -2077,12 +2077,16 @@ fn a_use_statement_nested_too_deep_cannot_be_judged() {
     };
     let surface = wider().build();
     let at_limit = uses(
-        [("src/lib.rs", nested(MAX_USE_NESTING))],
+        [("src/lib.rs", nested(MAX_USE_NESTING).as_str())],
         &manifest(&[]),
         &surface,
     );
     assert!(at_limit.is_ok());
-    let deep = uses([("src/lib.rs", nested(100_000))], &manifest(&[]), &surface);
+    let deep = uses(
+        [("src/lib.rs", nested(100_000).as_str())],
+        &manifest(&[]),
+        &surface,
+    );
     assert_eq!(
         deep.unwrap_err().to_string(),
         "src/lib.rs:1: a `use` statement nests its groups deeper than 64; the mod's source cannot be judged"
