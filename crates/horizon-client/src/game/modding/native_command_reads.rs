@@ -170,7 +170,10 @@ mod tests {
             .components()
             .expect("the icon keeps its components");
         assert!(
-            format!("{components:?}").contains("minecraft:enchantment_glint_override"),
+            components
+                .as_nbt()
+                .keys()
+                .any(|key| key.to_string_lossy() == "minecraft:enchantment_glint_override"),
             "{components:?}"
         );
     }

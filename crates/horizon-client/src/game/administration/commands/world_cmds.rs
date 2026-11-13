@@ -2267,7 +2267,9 @@ mod allay_owner_damage_tests {
                     let accepted = if melee {
                         game.hurt_by_player(0, 2.0, source)
                     } else {
-                        game.command_damage_mob(1, 2.0, source)
+                        // The command entry point lends its resolved attacker to the damage path.
+                        let attack = game.attack_of_who(source.attacker);
+                        game.with_attack(attack, |g| g.command_damage_mob(1, 2.0, source))
                     };
                     let expected = liked != Some(actual);
                     assert_eq!(accepted, expected, "melee={melee}, liked={liked:?}");

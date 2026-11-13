@@ -7,7 +7,7 @@ A test may be listed in one file only: a second listing fails naming both files.
 
 One row per line, `#` starts a comment line:
 
-    PACKAGE TEST REFERENCE [flaky|harness|gpu|needs] [# note]
+    PACKAGE TEST REFERENCE [flaky|harness|gpu|needs|needs-plain] [# note]
 
 REFERENCE is the issue or PR that tracks it (for `needs`, the environment variable). A listed test that passes
 fails the job until its row is removed, so a file only shrinks; `flaky` lets one pass. `harness` marks a parity
@@ -16,3 +16,7 @@ that needs a graphics adapter: it runs, and must pass, only where the runner has
 test that reads an input only its harness provides: refused by name when the variable is unset, run and required
 to pass when it is set. `ignored_tests.py --needs VARIABLE --one-process-each` runs one variable's tests, each
 alone in its own process (`wasm-mods.yml` does this for `HORIZON_WASM_FIXTURE`).
+
+`needs-plain` has the same variable and refusal policy as `needs`, but is not an ignored test or a known
+failure. The one-process runner selects it with `--exact` without `--ignored`; ordinary data shards skip it
+when the variable is absent and require it to pass when present.

@@ -1037,7 +1037,7 @@ mod tests {
             id: "test:tick".into(),
             parent: None,
             display: Some(Display {
-                icon: "minecraft:air".into(),
+                icon: crate::items::ItemStack::new("minecraft:air", 1),
                 title: serde_json::json!("Title"),
                 description: serde_json::json!("Description"),
                 frame: Frame::Task,

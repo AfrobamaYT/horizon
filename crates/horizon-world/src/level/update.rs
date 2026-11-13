@@ -337,6 +337,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 self.update_neighbour_shapes(state, pos, neighbour_flags, limit - 1);
                 self.update_indirect_neighbour_shapes(state, pos, neighbour_flags, limit - 1);
             }
+            // Level.setBlock ends with updatePOIOnBlockStateChange (NeoForge's onBlockStateChange).
+            self.level.observe_block_state_change(pos, old, state);
         }
         true
     }
