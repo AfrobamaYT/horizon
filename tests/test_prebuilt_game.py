@@ -235,7 +235,8 @@ class SdkAssetTests(unittest.TestCase):
                     {"id": name, "deps": [{"pkg": dep, "dep_kinds": [{"kind": dep_kind}]} for dep, dep_kind in deps]})
         packages, nodes = zip(
             package("horizon-mod-api", deps=[("vocab", None), ("macros", None), ("tool", "build")]),
-            package("horizon-mod-points", deps=[("vocab", None)]),
+            # A game library inside the closure stays the runtime archive's alone.
+            package("horizon-mod-points", deps=[("vocab", None), ("horizon-mod-wasm", None)]),
             package("vocab", deps=[("serde", None)]),
             package("serde"),
             package("macros", "proc-macro", deps=[("syn", None)]),
@@ -247,7 +248,7 @@ class SdkAssetTests(unittest.TestCase):
         )
         metadata = {"packages": list(packages), "resolve": {"nodes": list(nodes)}}
         self.assertEqual(prebuilt_game.api_closure(metadata),
-                         {"horizon-mod-api", "horizon-mod-points", "vocab", "serde", "macros"})
+                         {"horizon-mod-api", "horizon-mod-points", "vocab", "serde", "macros", "horizon-mod-wasm"})
         copied = {name: [f"deps/lib{name}-1.rmeta"] for name in ("horizon-mod-api", "horizon-mod-points", "vocab",
                                                                   "serde", "syn", "tool", "engine")}
         copied["macros"] = ["host/libmacros-1.so"]
