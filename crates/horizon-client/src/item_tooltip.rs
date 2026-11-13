@@ -2347,10 +2347,7 @@ mod tests {
         };
         let styled = search(&style);
         assert!(styled.iter().any(|l| l == "+5% Swim Speed"), "{styled:?}");
-        assert!(
-            styled.iter().any(|l| l == "Gliding: Disabled"),
-            "{styled:?}"
-        );
+        assert!(!styled.iter().any(|l| l.contains("Gliding")), "{styled:?}");
         // Without the catalog both read as plain numbers, as before.
         let plain = search(&|_| None);
         assert!(plain.iter().any(|l| l == "+0.05 Swim Speed"), "{plain:?}");
