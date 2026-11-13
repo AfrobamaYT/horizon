@@ -27,6 +27,10 @@ Known false negatives (these still surface only in the rollup's build):
 - an `impl` written by a macro in the loopback;
 - a required trait item with a `#[cfg(...)]` attribute: the check cannot evaluate the condition, so it never
   requires such an item.
+- names are matched by their last segment: a stand-in, trait or impl target is one name across the files read, so
+  two different types of the same name in different modules count as one;
+- the source scanner does not nest block comments: `/* a /* b */ c */` ends at the first `*/`, and its tail is
+  read as code.
 
 Every input path above must exist and yield at least one hook and one union member, or the check fails naming the
 path: a rename never turns a check off silently. To run it on a tree from before the loopback moved into its own
@@ -175,7 +179,8 @@ def module_body(text, name):
 
 def missing_inputs(root, loopback):
     """The input paths that do not exist: each would otherwise make its check find nothing."""
-    paths = [FIXTURES, *(f"{FIXTURES}/{folder}" for folder in FOLDERS), HOOKS, PARTS, loopback]
+    paths = [FIXTURES, *(f"{FIXTURES}/{folder}" for folder in FOLDERS), f"{FIXTURES}/shared.rs", HOOKS, PARTS,
+             loopback]
     return [f"{path}: missing; tools/hotspots/check_stand_ins.py reads it. If it moved, update the script's path."
             for path in paths if not (root / path).exists()]
 
@@ -198,18 +203,17 @@ def check_fixture_files(root):
                             "different types to the generated dispatch. Keep one and re-export it with `use` "
                             "from the other scope.")
     shared = fixtures / "shared.rs"
-    if shared.exists():
-        text = strip(shared.read_text())
-        stubs = module_body(text, "stubs")
-        if stubs is not None:
-            for item in top_level(stubs):
-                name = item_name(item)
-                if name:
-                    problems.append(f"{shared.relative_to(root)}: `mod stubs` defines `{name}`; only `use` lines "
-                                    f"stay there. Move it to {FIXTURES}/stubs/{name}.rs.")
-        if module_body(text, "api") is not None:
-            problems.append(f"{shared.relative_to(root)}: `mod api` is back; each API stand-in has its own file, "
-                            f"{FIXTURES}/api/<Name>.rs.")
+    text = strip(shared.read_text())
+    stubs = module_body(text, "stubs")
+    if stubs is not None:
+        for item in top_level(stubs):
+            name = item_name(item)
+            if name:
+                problems.append(f"{shared.relative_to(root)}: `mod stubs` defines `{name}`; only `use` lines "
+                                f"stay there. Move it to {FIXTURES}/stubs/{name}.rs.")
+    if module_body(text, "api") is not None:
+        problems.append(f"{shared.relative_to(root)}: `mod api` is back; each API stand-in has its own file, "
+                        f"{FIXTURES}/api/<Name>.rs.")
     return problems
 
 

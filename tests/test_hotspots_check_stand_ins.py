@@ -127,6 +127,12 @@ fn table() {
                                  "moved, update the script's path."])
         self.assertEqual(check.problems(self.root, "old/wire_loopback.rs")[0].split(":")[0], "old/wire_loopback.rs")
 
+    def test_a_missing_shared_rs_fails_naming_it(self):
+        (self.root / f"{check.FIXTURES}/shared.rs").unlink()
+        self.assertEqual(check.problems(self.root), [f"{check.FIXTURES}/shared.rs: missing; "
+                                                     "tools/hotspots/check_stand_ins.py reads it. If it moved, "
+                                                     "update the script's path."])
+
     def test_no_hooks_or_no_union_members_fail_instead_of_passing(self):
         self.write(f"{check.HOOKS}/placed.rs", "pub trait Hooks {}\n")
         self.write(f"{check.VOCAB}/parts/tools.rs", VOCAB_TRAITS)
