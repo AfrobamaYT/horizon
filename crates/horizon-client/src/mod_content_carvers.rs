@@ -28,10 +28,10 @@ pub(super) fn refresh(saved: &mut SavedModifiers, packs: &WorldgenOverrides) -> 
         } else {
             saved.carver_tags.get(id).map(String::as_str)
         };
+        let layers = [super::TagLayers { values, remove }];
         let merged = super::merge_tag(
             old,
-            values,
-            remove,
+            &layers,
             id,
             &horizon_world::conditions::LoadConditions::new(
                 saved.enabled_mods.iter().map(String::as_str),

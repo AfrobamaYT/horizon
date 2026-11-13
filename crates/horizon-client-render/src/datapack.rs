@@ -678,14 +678,14 @@ pub fn parse_function(id: &str, text: &str) -> Result<Function, String> {
 pub struct DataStore {
     pub functions: BTreeMap<String, Function>,
     /// Function tag id -> entries (`ns:f`, `#ns:tag`), with `required` flags.
-    pub function_tags: BTreeMap<String, Vec<(String, bool)>>,
+    pub function_tags: BTreeMap<String, Vec<TagEntryOf>>,
     pub predicates: BTreeMap<String, serde_json::Value>,
     /// `item_modifier` files, for `/item modify`.
     pub item_modifiers: BTreeMap<String, serde_json::Value>,
     /// `slot_source` definitions, evaluated against a command's live accessor.
     pub slot_sources: BTreeMap<String, serde_json::Value>,
     /// Slot-source tags belong to the same loaded snapshot as their definitions.
-    pub slot_source_tags: BTreeMap<String, Vec<(String, bool)>>,
+    pub slot_source_tags: BTreeMap<String, Vec<TagEntryOf>>,
     /// The content tables' raw files from the packs after the built-in one:
     /// Server JSON resources (recipes, loot, enchantments, songs, instruments,
     /// predicates, modifiers, advancements, registries, data maps and tags), by
@@ -882,7 +882,14 @@ impl DataStore {
                     if conditions.is_some_and(|conditions| !conditions.allows_file(&v, &f)) {
                         continue;
                     }
-                    let entries = tag_entries(&v);
+                    let mut entries = tag_entries(&v);
+                    if let Some(removes) = v["remove"].as_array() {
+                        entries.extend(
+                            tag_entries(&serde_json::json!({ "values": removes }))
+                                .into_iter()
+                                .map(|(id, required, _)| (id, required, true)),
+                        );
+                    }
                     let slot = s.function_tags.entry(id).or_default();
                     if v["replace"].as_bool() == Some(true) {
                         slot.clear();
@@ -902,7 +909,14 @@ impl DataStore {
                     && let Some(bytes) = pack.read(&f)
                     && let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes)
                 {
-                    let entries = tag_entries(&v);
+                    let mut entries = tag_entries(&v);
+                    if let Some(removes) = v["remove"].as_array() {
+                        entries.extend(
+                            tag_entries(&serde_json::json!({ "values": removes }))
+                                .into_iter()
+                                .map(|(id, required, _)| (id, required, true)),
+                        );
+                    }
                     let slot = s.slot_source_tags.entry(id).or_default();
                     if v["replace"].as_bool() == Some(true) {
                         slot.clear();
@@ -952,7 +966,7 @@ impl DataStore {
                 invalid.insert(tag);
                 continue;
             };
-            for (entry, required) in entries {
+            for (entry, required, _) in entries {
                 if let Some(child) = entry.strip_prefix('#') {
                     pending.push(child);
                     if *required {
@@ -989,7 +1003,45 @@ impl DataStore {
         let Some(entries) = self.function_tags.get(id) else {
             return;
         };
-        for (e, _) in entries {
+        for (e, required, remove) in entries {
+            // A removal (a `remove` list's entry, after the file's values)
+            // takes an id or a tag's members out of the set built so far; it
+            // is optional: an unknown id removes nothing and never
+            // invalidates the tag.
+            if *remove {
+                match e.strip_prefix('#') {
+                    Some(inner) => {
+                        // The members the tag holds as it built, each once.
+                        let mut stack = vec![hash_normalize(inner)];
+                        let mut walked = std::collections::HashSet::new();
+                        let mut members: Vec<String> = Vec::new();
+                        while let Some(next) = stack.pop() {
+                            if !walked.insert(next.clone()) {
+                                continue;
+                            }
+                            if let Some(entries) = self.function_tags.get(next.as_str()) {
+                                for (id, _, nested_remove) in entries {
+                                    if *nested_remove {
+                                        continue;
+                                    }
+                                    match id.strip_prefix('#') {
+                                        Some(nested) => stack.push(hash_normalize(nested)),
+                                        None => members.push(id.clone()),
+                                    }
+                                }
+                            }
+                        }
+                        out.retain(|f| !members.contains(f));
+                        seen_fns.retain(|f| !members.contains(&f.to_string()));
+                    }
+                    None => {
+                        out.retain(|f| f.as_str() != e.as_str());
+                        seen_fns.remove(e.as_str());
+                    }
+                }
+                continue;
+            }
+            let _ = required;
             match e.strip_prefix('#') {
                 Some(inner) => self.expand(inner, out, seen_fns, seen_tags, invalid),
                 None => {
@@ -1008,18 +1060,23 @@ fn normalize(id: &str) -> String {
         format!("minecraft:{id}")
     }
 }
-fn tag_entries(v: &serde_json::Value) -> Vec<(String, bool)> {
+/// An entry of a tag file's `values` or `remove`: its id, whether it is
+/// required, and whether it removes (`TagLoader.EntryWithSource.remove`).
+type TagEntryOf = (String, bool, bool);
+
+fn tag_entries(v: &serde_json::Value) -> Vec<TagEntryOf> {
     v["values"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(|e| match e {
-            serde_json::Value::String(s) => Some((hash_normalize(s), true)),
+            serde_json::Value::String(s) => Some((hash_normalize(s), true, false)),
             serde_json::Value::Object(o) => Some((
                 hash_normalize(o.get("id")?.as_str()?),
                 o.get("required")
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(true),
+                o.get("remove").and_then(serde_json::Value::as_bool) == Some(true),
             )),
             _ => None,
         })
@@ -1757,8 +1814,8 @@ mod tests {
                 },
             );
         }
-        let big: Vec<(String, bool)> = (0..50_000)
-            .map(|i| (format!("t:f{}", i % 25_000), true))
+        let big: Vec<TagEntryOf> = (0..50_000)
+            .map(|i| (format!("t:f{}", i % 25_000), true, false))
             .collect();
         store.function_tags.insert("t:big".into(), big);
         let start = std::time::Instant::now();
@@ -1769,22 +1826,23 @@ mod tests {
         // A cycle terminates and keeps first-seen order.
         store.function_tags.insert(
             "t:a".into(),
-            vec![("#t:b".into(), true), ("t:x".into(), true)],
+            vec![("#t:b".into(), true, false), ("t:x".into(), true, false)],
         );
         store.function_tags.insert(
             "t:b".into(),
-            vec![("#t:a".into(), true), ("t:y".into(), true)],
+            vec![("#t:a".into(), true, false), ("t:y".into(), true, false)],
         );
         assert_eq!(store.tag_functions("t:a"), ["t:y", "t:x"]);
         // Nesting deeper than the old cap of 16 still resolves.
         for i in 0..40 {
-            store
-                .function_tags
-                .insert(format!("d:{i}"), vec![(format!("#d:{}", i + 1), true)]);
+            store.function_tags.insert(
+                format!("d:{i}"),
+                vec![(format!("#d:{}", i + 1), true, false)],
+            );
         }
         store
             .function_tags
-            .insert("d:40".into(), vec![("t:deep".into(), true)]);
+            .insert("d:40".into(), vec![("t:deep".into(), true, false)]);
         assert_eq!(store.tag_functions("d:0"), ["t:deep"]);
     }
 
@@ -1880,13 +1938,19 @@ mod tests {
         );
         assert!(off.predicates.is_empty());
         assert!(off.item_modifiers.is_empty());
-        assert_eq!(off.function_tags["demo:load"], [("demo:low".into(), true)]);
+        assert_eq!(
+            off.function_tags["demo:load"],
+            [("demo:low".into(), true, false)]
+        );
         assert!(!off.function_tags.contains_key("demo:unknown"));
         let enabled = horizon_world::conditions::LoadConditions::new(["provider"]);
         let on = DataStore::load_with_conditions(&refs, &enabled);
         assert_eq!(on.predicates["demo:entry"]["layer"], "high");
         assert_eq!(on.item_modifiers["demo:entry"]["layer"], "high");
-        assert_eq!(on.function_tags["demo:load"], [("demo:high".into(), true)]);
+        assert_eq!(
+            on.function_tags["demo:load"],
+            [("demo:high".into(), true, false)]
+        );
         assert_eq!(on.files, off.files);
         std::fs::remove_dir_all(root).unwrap();
     }

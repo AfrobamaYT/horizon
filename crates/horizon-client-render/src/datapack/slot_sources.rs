@@ -18,7 +18,26 @@ impl DataStore {
                     .get(id)
                     .ok_or_else(|| format!("Unknown slot-source tag #{id}"))?;
                 let mut out = Vec::new();
-                for (entry, required) in entries {
+                for (entry, required, remove) in entries {
+                    // A removal (`TagLoader.EntryWithSource.remove`) takes an
+                    // id or a tag's members out of the set built so far, and
+                    // an unknown one removes nothing.
+                    if *remove {
+                        let known = |what: &str| {
+                            store.slot_sources.contains_key(what)
+                                || store.slot_source_tags.contains_key(what)
+                        };
+                        if let Some(tag) = entry.strip_prefix('#') {
+                            let mut members = Vec::new();
+                            if let Ok(found) = visit(store, tag, active) {
+                                members.extend(found);
+                            }
+                            out.retain(|kept| !members.contains(kept));
+                        } else if known(entry) {
+                            out.retain(|kept| kept != entry);
+                        }
+                        continue;
+                    }
                     let values = if let Some(tag) = entry.strip_prefix('#') {
                         visit(store, tag, active)
                     } else if store.slot_sources.contains_key(entry) {
@@ -61,14 +80,14 @@ mod tests {
         }
         store.slot_source_tags.insert(
             "t:child".into(),
-            vec![("t:b".into(), true), ("t:a".into(), true)],
+            vec![("t:b".into(), true, false), ("t:a".into(), true, false)],
         );
         store.slot_source_tags.insert(
             "t:all".into(),
             vec![
-                ("t:a".into(), true),
-                ("#t:child".into(), true),
-                ("t:absent".into(), false),
+                ("t:a".into(), true, false),
+                ("#t:child".into(), true, false),
+                ("t:absent".into(), false, false),
             ],
         );
         assert_eq!(store.slot_source_tag("t:all").unwrap(), ["t:a", "t:b"]);
@@ -76,11 +95,11 @@ mod tests {
             .slot_source_tags
             .get_mut("t:all")
             .unwrap()
-            .push(("t:absent".into(), true));
+            .push(("t:absent".into(), true, false));
         assert!(store.slot_source_tag("t:all").is_err());
         store
             .slot_source_tags
-            .insert("t:cycle".into(), vec![("#t:cycle".into(), true)]);
+            .insert("t:cycle".into(), vec![("#t:cycle".into(), true, false)]);
         assert!(store.slot_source_tag("t:cycle").is_err());
     }
 }

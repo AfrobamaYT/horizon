@@ -25,22 +25,32 @@ impl TagLayers {
 
     /// One more file, over the layers below it (conditions already
     /// checked): `replace` drops them, then its `values` and `remove` follow.
+    /// Inside `values`, an entry of `{"id": ..., "remove": true}`
+    /// (`TagLoader.EntryWithSource.remove`) removes like a `remove` entry,
+    /// so one merged file can carry adds and removals in file order.
     pub fn push(&mut self, file: &Value) {
         if file.get("replace").and_then(Value::as_bool) == Some(true) {
             self.0.clear();
         }
-        for (key, remove) in [("values", false), ("remove", true)] {
-            let entries = file
-                .get(key)
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten();
-            self.0.extend(
-                entries
-                    .filter_map(entry_id)
-                    .map(|id| (id.to_owned(), remove)),
-            );
+        let mut push_entry = |entry: &Value, remove: bool, out: &mut Vec<(String, bool)>| {
+            let Some(id) = entry_id(entry) else {
+                return;
+            };
+            let removes = remove || (entry.get("remove").and_then(Value::as_bool) == Some(true));
+            out.push((id.to_owned(), removes));
+        };
+        let mut next = Vec::new();
+        if let Some(values) = file.get("values").and_then(Value::as_array) {
+            values
+                .iter()
+                .for_each(|entry| push_entry(entry, false, &mut next));
         }
+        if let Some(entries) = file.get("remove").and_then(Value::as_array) {
+            entries
+                .iter()
+                .for_each(|entry| push_entry(entry, true, &mut next));
+        }
+        self.0.extend(next);
     }
 
     /// The `#tags` the entries name, adding or removing: what building
@@ -81,6 +91,19 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::collections::HashMap;
+
+    #[test]
+    fn one_file_adds_and_removes_the_same_entry_and_remove_objects_apply_in_order() {
+        let mut things = TagLayers::from_file(&json!({
+            "values": [
+                "minecraft:stone",
+                {"id": "minecraft:stone", "remove": true},
+                "minecraft:dirt",
+                {"id": "minecraft:gravel", "remove": true, "required": false}
+            ]
+        }));
+        assert_eq!(things.build(|_| Vec::new()), ["minecraft:dirt"]);
+    }
 
     #[test]
     fn removals_apply_in_layer_order_and_replace_drops_them() {

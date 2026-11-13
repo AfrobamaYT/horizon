@@ -596,7 +596,9 @@ impl Registry<'_> {
             }
         }
         // NeoForge's `remove` list, after the values: optional, so an
-        // unknown id or tag takes nothing out.
+        // unknown id or tag takes nothing out, and a tag a removal names
+        // that itself fails resolves to nothing — a removal never fails
+        // the tag that carries it.
         for v in doc["remove"].as_array().into_iter().flatten() {
             let Some(id) = horizon_world::tag_layers::entry_id(v) else {
                 continue;
@@ -604,8 +606,19 @@ impl Registry<'_> {
             let mut removed = Vec::new();
             match id.strip_prefix('#') {
                 Some(inner) if self.tags.contains_key(&full(inner)) => {
-                    let mut seen = BTreeSet::from([tag.to_owned()]);
-                    self.expand(&full(inner), &mut removed, &mut seen)?;
+                    let target = full(inner);
+                    if seen.contains(&target) {
+                        // A cycle through removal references: the closing
+                        // edge is dropped (the removal takes nothing) and
+                        // one warning names both tags.
+                        log::warn!(
+                            "Horizon: the tags {tag} and {target} remove                              each other; neither removal applies"
+                        );
+                        continue;
+                    }
+                    if self.expand(&target, &mut removed, seen).is_err() {
+                        continue;
+                    }
                 }
                 Some(_) => continue,
                 None => removed.push(full(id)),
@@ -1238,4 +1251,38 @@ pub fn modified(root: &Path) -> BTreeSet<String> {
         .and_then(|saved| saved.get("unmodified")?.as_object())
         .map(|ids| ids.keys().cloned().collect())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod removal_cycles {
+    use super::*;
+
+    /// Two tags that remove each other resolve without an overflow, and the
+    /// removal between them takes nothing out.
+    #[test]
+    fn mutual_removals_resolve_without_an_overflow() {
+        let tags: BTreeMap<String, String> = BTreeMap::from([
+            (
+                "test:a".into(),
+                r##"{"values": ["test:one"], "remove": ["#test:b"]}"##.into(),
+            ),
+            (
+                "test:b".into(),
+                r##"{"values": ["test:two"], "remove": ["#test:a"]}"##.into(),
+            ),
+        ]);
+        let ids: BTreeSet<String> = ["test:one", "test:two"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let registry = Registry {
+            what: "placed feature",
+            ids: &ids,
+            tags: &tags,
+        };
+        let out = registry.resolve(&serde_json::json!("#test:a")).unwrap();
+        assert_eq!(out, ["test:one"]);
+        let out = registry.resolve(&serde_json::json!("#test:b")).unwrap();
+        assert_eq!(out, ["test:two"]);
+    }
 }

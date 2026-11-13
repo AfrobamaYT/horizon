@@ -25,10 +25,20 @@ pub(super) fn tag_list<'a>(tag: &'a J, key: &str) -> &'a [J] {
 
 /// A tag file's accepted values with `more` appended (no repeats), and
 /// `remove` after its own `remove` entries (NeoForge's tag `remove` list).
+/// The mods' layers of one tag, in load order: each layer's `values` and,
+/// after them, its `remove` entries (`TagLoader`: a file adds, then removes).
+pub(super) struct TagLayers<'a> {
+    pub(super) values: &'a [J],
+    pub(super) remove: &'a [J],
+}
+
+/// `vanilla`'s tag file over what the mods made of it: the mods' layers join
+/// its `values` as ordered entries, a removal carried as `{"id": ..., "remove":
+/// true}` (`TagLoader.EntryWithSource.remove`), so the folder walks adds and
+/// removals in the mods' load order instead of all adds before all removals.
 pub(super) fn merge_tag(
     text: Option<&str>,
-    more: &[J],
-    remove: &[J],
+    layers: &[TagLayers<'_>],
     what: &str,
     conditions: &horizon_world::conditions::LoadConditions,
 ) -> Result<String> {
@@ -41,19 +51,56 @@ pub(super) fn merge_tag(
     }
     // These conditions selected one source layer, not the flattened result.
     doc.remove("neoforge:conditions");
+    // The vanilla file's own `remove` entries apply right after its values,
+    // before the mods' layers: they join `values` as removal objects.
+    let vanilla_remove = match doc.get("remove") {
+        Some(J::Arr(remove)) => Some(remove.clone()),
+        _ => None,
+    };
+    doc.remove("remove");
     let Some(J::Arr(values)) = doc.get_mut("values") else {
         return Err(format!("{what}: no values").into());
     };
-    for v in more {
-        if !values.contains(v) {
-            values.push(v.clone());
+    if let Some(remove) = vanilla_remove {
+        for r in &remove {
+            let removal = match r {
+                J::Str(id) => J::Obj(vec![
+                    ("id".into(), J::Str(id.clone())),
+                    ("remove".into(), J::Bool(true)),
+                ]),
+                other => {
+                    let mut entry = other.clone();
+                    entry.set("remove", J::Bool(true));
+                    entry
+                }
+            };
+            values.push(removal);
         }
     }
-    if !remove.is_empty() {
-        let mut list = tag_list(&doc, "remove").to_vec();
-        list.extend(remove.iter().cloned());
-        doc.set("remove", J::Arr(list));
+    for layer in layers {
+        for v in layer.values {
+            if !values.contains(v) {
+                values.push(v.clone());
+            }
+        }
+        for r in layer.remove {
+            let mut removal = match r {
+                J::Str(id) => J::Obj(vec![
+                    ("id".into(), J::Str(id.clone())),
+                    ("remove".into(), J::Bool(true)),
+                ]),
+                other => {
+                    let mut entry = other.clone();
+                    entry.set("remove", J::Bool(true));
+                    entry
+                }
+            };
+            if !values.contains(&removal) {
+                values.push(removal);
+            }
+        }
     }
+    doc.remove("remove");
     Ok(serde_json::to_string_pretty(&doc)?)
 }
 
@@ -66,9 +113,10 @@ pub(super) struct TagMerge {
     pub(super) replaced: bool,
     /// The mods whose values are in `values`.
     pub(super) mods: Vec<String>,
-    pub(super) values: Vec<J>,
-    /// The mods' `remove` entries since the last replace, in load order.
-    pub(super) remove: Vec<J>,
+    /// Each mod file's additions and, after them, its removals, in load
+    /// order (`TagLoader`: one file adds its values, then its `remove`
+    /// entries apply). A replace drops the layers below it.
+    pub(super) layers: Vec<(Vec<J>, Vec<J>)>,
 }
 
 impl TagMerge {
@@ -100,14 +148,26 @@ impl TagMerge {
             }
             self.replaced = true;
             self.mods.clear();
-            self.values.clear();
-            self.remove.clear();
+            self.layers.clear();
         }
         if !self.mods.iter().any(|m| m == id) {
             self.mods.push(id.to_owned());
         }
-        self.values.extend(values.iter().cloned());
+        self.layers.push((values.to_vec(), Vec::new()));
         warning
+    }
+
+    /// The last mod file's additions (an empty set after a replace).
+    pub(super) fn values(&self) -> &[J] {
+        self.layers.last().map_or(&[], |(values, _)| values)
+    }
+
+    /// The layers' entries for [`merge_tag`].
+    pub(super) fn layers(&self) -> Vec<TagLayers<'_>> {
+        self.layers
+            .iter()
+            .map(|(values, remove)| TagLayers { values, remove })
+            .collect()
     }
 }
 
@@ -218,9 +278,9 @@ pub fn build_with_conditions(
                     let shared = !m.content.namespaces.iter().any(|n| n == ns);
                     let merge = tags.entry(file.clone()).or_default();
                     warnings.extend(merge.add(&m.id, &file, replace, shared, values));
-                    merge
-                        .remove
-                        .extend(tag_list(&doc, "remove").iter().cloned());
+                    if let Some((_, remove)) = merge.layers.last_mut() {
+                        remove.extend(tag_list(&doc, "remove").iter().cloned());
+                    }
                 } else if !file.starts_with(&declarations) {
                     if structures::is_modifier(&file) {
                         let text = String::from_utf8(bytes).map_err(|e| format!("{file}: {e}"))?;
@@ -255,7 +315,9 @@ pub fn build_with_conditions(
     // entries are dropped instead, so the rest of the tag holds.
     let known = Known::new(base, &plan, &tags)?;
     for (file, merge) in &mut tags {
-        merge.values.retain(|v| known.keeps(file, v));
+        for (values, _) in &mut merge.layers {
+            values.retain(|v| known.keeps(file, v));
+        }
     }
     let mut bundles: Vec<(&str, J)> = Vec::new();
     for name in TAG_BUNDLES {
@@ -269,14 +331,7 @@ pub fn build_with_conditions(
             .filter(|_| !merge.replaced);
         overlay.write(
             file,
-            merge_tag(
-                vanilla.as_deref(),
-                &merge.values,
-                &merge.remove,
-                file,
-                conditions,
-            )?
-            .as_bytes(),
+            merge_tag(vanilla.as_deref(), &merge.layers(), file, conditions)?.as_bytes(),
         )?;
         // data/<ns>/tags/block/<path>.json is the block tag <ns>:<path>.
         let Some((ns, path)) = file
@@ -292,13 +347,7 @@ pub fn build_with_conditions(
                 Some(J::Str(t)) if !merge.replaced => Some(t.clone()),
                 _ => None,
             };
-            let merged = merge_tag(
-                text.as_deref(),
-                &merge.values,
-                &merge.remove,
-                name,
-                conditions,
-            )?;
+            let merged = merge_tag(text.as_deref(), &merge.layers(), name, conditions)?;
             doc.set(&id, J::Str(merged));
         }
     }
@@ -323,13 +372,7 @@ pub fn build_with_conditions(
                 Some(J::Str(t)) if !merge.replaced => Some(t.clone()),
                 _ => None,
             };
-            let merged = merge_tag(
-                text.as_deref(),
-                &merge.values,
-                &merge.remove,
-                BIOME_TAGS,
-                conditions,
-            )?;
+            let merged = merge_tag(text.as_deref(), &merge.layers(), BIOME_TAGS, conditions)?;
             doc.set(&id, J::Str(merged));
         }
         overlay.write(BIOME_TAGS, &serde_json::to_vec(&doc)?)?;

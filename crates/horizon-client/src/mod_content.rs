@@ -2697,10 +2697,10 @@ pub fn biome_modifiers_over_packs(
             Some(J::Bool(true)) => None,
             _ => biome_tags.get(id).map(String::as_str),
         };
+        let layers = [load_conditions::TagLayers { values, remove }];
         let merged = merge_tag(
             old,
-            values,
-            remove,
+            &layers,
             id,
             &horizon_world::conditions::LoadConditions::new(
                 saved.enabled_mods.iter().map(String::as_str),
@@ -2853,7 +2853,7 @@ mod root_lifetime;
 use root_lifetime::prune_roots;
 pub use root_lifetime::retain_root;
 mod load_conditions;
-use load_conditions::{TagMerge, merge_tag, tag_list};
+use load_conditions::{TagLayers, TagMerge, merge_tag, tag_list};
 pub use load_conditions::{build_with_conditions, resource_root_with_conditions};
 
 /// The block and item ids and tags a content root has, for tag entries.

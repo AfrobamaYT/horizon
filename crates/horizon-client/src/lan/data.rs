@@ -863,13 +863,27 @@ impl SyncData {
         }
     }
 
-    /// A tag file's values, after `"replace": true` empties the earlier ones.
+    /// A tag file's values, after `"replace": true` empties the earlier
+    /// ones. A `remove` list follows the values, and a `{"id", "remove":
+    /// true}` entry in `values` removes in order (`TagLoader.EntryWithSource`).
     fn add_tag_values(entries: &mut Vec<Value>, json: &Value) {
         if json["replace"].as_bool() == Some(true) {
             entries.clear();
         }
         if let Some(values) = json["values"].as_array() {
             entries.extend(values.iter().cloned());
+        }
+        if let Some(remove) = json["remove"].as_array() {
+            for r in remove {
+                let mut removal = r.clone();
+                if let Some(obj) = removal.as_object_mut() {
+                    obj.insert("remove".into(), Value::Bool(true));
+                } else {
+                    let id = r.as_str().map(str::to_owned).unwrap_or_default();
+                    removal = serde_json::json!({"id": id, "remove": true});
+                }
+                entries.push(removal);
+            }
         }
     }
 
@@ -892,12 +906,25 @@ impl SyncData {
                 .as_str()
                 .or_else(|| value["id"].as_str())
                 .unwrap_or_default();
+            let removes = value["remove"].as_bool() == Some(true);
             if let Some(reference) = id.strip_prefix('#') {
-                Self::expand_pack_tag(files, &qualified(reference), names, out, seen);
-            } else if let Some(&n) = names.get(qualified(id).as_str())
-                && !out.contains(&n)
-            {
-                out.push(n);
+                let mut members = Vec::new();
+                Self::expand_pack_tag(files, &qualified(reference), names, &mut members, seen);
+                if removes {
+                    out.retain(|n| !members.contains(n));
+                } else {
+                    for n in &members {
+                        if !out.contains(n) {
+                            out.push(*n);
+                        }
+                    }
+                }
+            } else if let Some(&n) = names.get(qualified(id).as_str()) {
+                if removes {
+                    out.retain(|kept| *kept != n);
+                } else if !out.contains(&n) {
+                    out.push(n);
+                }
             }
         }
     }

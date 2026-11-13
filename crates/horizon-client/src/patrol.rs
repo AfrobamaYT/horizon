@@ -219,7 +219,7 @@ impl GameplayAttributes {
         let mut out = Self::default();
         let timelines: std::collections::HashMap<String, Value> =
             list("timeline").into_iter().collect();
-        // Tag values with nested tags resolved.
+        // Tag values with nested tags and removals resolved.
         fn tag(data: &std::path::Path, name: &str, out: &mut Vec<String>) {
             let file = data.join(format!(
                 "tags/timeline/{}.json",
@@ -232,12 +232,34 @@ impl GameplayAttributes {
             else {
                 return;
             };
+            let mut items = Vec::new();
             for item in v["values"].as_array().into_iter().flatten() {
                 let s = item.as_str().or_else(|| item["id"].as_str()).unwrap_or("");
+                let removes = item["remove"].as_bool() == Some(true);
+                if s.is_empty() {
+                    continue;
+                }
                 if s.starts_with('#') {
-                    tag(data, s, out);
-                } else if !s.is_empty() {
-                    out.push(s.to_owned());
+                    let mut members = Vec::new();
+                    tag(data, s, &mut members);
+                    if removes {
+                        out.retain(|kept| !members.contains(kept));
+                    } else {
+                        for id in members {
+                            if !out.contains(&id) {
+                                out.push(id);
+                            }
+                        }
+                    }
+                } else if removes {
+                    out.retain(|kept| kept != s);
+                } else {
+                    items.push(s.to_owned());
+                }
+            }
+            for id in items {
+                if !out.contains(&id) {
+                    out.push(id);
                 }
             }
         }
