@@ -60,7 +60,7 @@ impl Endpoint {
         let parent = open_directory(parent).map_err(|error| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("open control socket parent {}: {error}", parent.display()),
+                format!("open control socket parent {}: {error:?}", parent.display()),
             )
         })?;
         check_directory(&parent, false)?;
