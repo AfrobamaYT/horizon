@@ -117,6 +117,8 @@ impl Game<'_> {
                             origin[1] + dir[1] * t,
                             origin[2] + dir[2] * t,
                         ],
+                        // No face entered: the eyes are in the shape.
+                        inside: face == [0; 3],
                     });
                 }
             }
@@ -133,6 +135,7 @@ impl Game<'_> {
                         origin[1] + dir[1] * t,
                         origin[2] + dir[2] * t,
                     ],
+                    inside: face == [0; 3],
                 });
             }
             let axis = if t_max[0] < t_max[1] {
