@@ -221,3 +221,53 @@ fn a_window_refuses_what_it_cannot_cross_and_keeps_the_servers_refusal() {
         assert_eq!(game.last_passage_refusal(), None);
     });
 }
+
+/// Cancels every custom payload the window sends.
+struct Silence;
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for Silence {
+    fn client_packet_send(
+        &self,
+        _: &dyn mod_api::ClientHost,
+        e: &mut mod_api::ClientPacketSendEvent<'_>,
+    ) -> mod_api::Flow {
+        if e.packet.id.path() == "custom_payload" {
+            mod_api::Flow::Cancel
+        } else {
+            mod_api::Flow::Continue
+        }
+    }
+}
+
+/// A mod cancels the crossing's payload: `Cancelled`, the player stays as it was, nothing
+/// waits, so the next crossing is tried afresh (and cancelled again, still not `Pending`).
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+fn a_crossing_a_mod_cancels_on_the_wire_moves_nothing() {
+    let mods = vec![mod_api::ModEntry::new("silence", Box::new(Silence))];
+    mod_platform::testing::with_mods(mods.into(), || {
+        with_client_game(|game| {
+            let (mut reader, _server) = scene(game, [0.5, 65.0, 8.25]);
+            let player = game.player.as_mut().unwrap();
+            player.velocity = Vec3::new(0.0, -0.0784, 0.25);
+            game.previous_position = Vec3::new(0.5, 65.0, 8.0);
+            for _ in 0..2 {
+                assert_eq!(
+                    game.cross_passage(PassageId::from_raw(1)),
+                    Err(PassageCrossError::Cancelled)
+                );
+                let player = game.player.as_ref().unwrap();
+                assert_eq!(player.position, Vec3::new(0.5, 65.0, 8.25));
+                assert_eq!(player.velocity, Vec3::new(0.0, -0.0784, 0.25));
+                assert_eq!(game.previous_position, Vec3::new(0.5, 65.0, 8.0));
+                assert_eq!(game.yaw, 0.0);
+                assert_eq!(game.passages.crossing, None);
+            }
+            assert!(
+                !sent(&mut reader).iter().any(
+                    |p| matches!(p, S::CustomPayload(p) if p.channel == "horizon:passage_cross")
+                )
+            );
+        });
+    });
+}

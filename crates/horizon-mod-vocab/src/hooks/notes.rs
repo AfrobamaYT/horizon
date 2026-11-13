@@ -1180,7 +1180,7 @@ it moves only what the player sees, not where they are or aim.
 
 - `cross_passage(passage)` (client) moves the window's player through a passage its server told it of (feet, last
   tick's place, velocity, look, turned) and sends `horizon:passage_cross` (the number, the feet before). Refused with
-  nothing moved or sent as a `PassageCrossError`. `last_passage_refusal()` (client) is the server's
+  nothing moved or sent as a `PassageCrossError`; a payload a mod's `client_packet_send` cancels is `Cancelled`. `last_passage_refusal()` (client) is the server's
   `PassageCrossRefusal` of the last crossing, until the next.
 - On the server the move to where it crossed from is checked as any move; the crossing then holds the guest's
   other packets until the game has decided it from its own `from`. The game checks eligibility, the passage, the

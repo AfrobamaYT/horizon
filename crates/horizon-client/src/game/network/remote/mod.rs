@@ -1657,13 +1657,13 @@ impl Game<'_> {
         }
     }
     /// `Connection.send` for the game's play packets: a mod may cancel one
-    /// (`client_packet_send`), and the server never hears of it.
-    fn send_play(&self, packet: S) {
-        if let Some(r) = &self.remote
-            && !self.client_packet_send_canceled(&packet)
-        {
+    /// (`client_packet_send`), and the server never hears of it. True when queued.
+    pub(super) fn send_play(&self, packet: S) -> bool {
+        let queued = self.remote.is_some() && !self.client_packet_send_canceled(&packet);
+        if let (true, Some(r)) = (queued, &self.remote) {
             r.session.send(packet);
         }
+        queued
     }
     fn send_action(&self, action: i32) {
         self.send(S::PlayerAction(play::PlayerAction {

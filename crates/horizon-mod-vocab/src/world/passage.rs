@@ -161,6 +161,8 @@ pub enum PassageCrossError {
         /// How far, in blocks: 20, Immersive Portals' limit.
         limit: u32,
     },
+    /// A mod's `client_packet_send` cancelled the crossing's payload to the server.
+    Cancelled,
 }
 
 impl crate::NoBackend for PassageCrossError {

@@ -46,8 +46,9 @@ pub trait PlayersClientHost {
     /// the dig). A refused crossing puts the player back where the server has it
     /// ([`Self::last_passage_refusal`] says why). One crossing at a time: the next waits
     /// for the server's answer. Refused, with nothing moved or sent, when not connected to
-    /// a server, with no player, while riding, for a passage the window does not hold, and
-    /// when the feet are more than 20 blocks from the opening.
+    /// a server, with no player, while riding, for a passage the window does not hold, when
+    /// the feet are more than 20 blocks from the opening, and when a mod's
+    /// `client_packet_send` cancels the crossing's payload.
     #[access(WorldOnly)]
     fn cross_passage(&mut self, passage: PassageId) -> Result<(), PassageCrossError>;
     /// Side: client.
