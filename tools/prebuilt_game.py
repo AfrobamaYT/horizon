@@ -410,7 +410,25 @@ def smoke(out: Path) -> None:
              "-o", str(installed / EXECUTABLE), str(scratch / "main.rs")])
     for library in runtime_libraries(deps):
         shutil.copy2(library, installed / library.name)
+    install_package(installed / "horizon-native-mods" / "smoke", starter.replace("{id}", "smoke"))
     print(f"smoke: the starter mod and the game executable built against {out} alone, installed in {installed}")
+
+
+def install_package(folder: Path, source: str) -> None:
+    """The mod's package as the launcher leaves it beside the executable, which reads it back at start
+    (horizon-mod-package `runtime::Runtime::load`): the starter manifest with its [native] pins, and its source."""
+    manifest = (ROOT / "crates/cargo-horizon-mod/template/native/horizon-mod.toml").read_text()
+    manifest = manifest.replace("{id}", "smoke").replace("{name}", "Smoke")
+    mixins = re.search(r'pub const REV: &str = "([0-9a-f]{40})";',
+                       (ROOT / "crates/horizon-mod-package/src/mixins_tool.rs").read_text())[1]
+    game = re.search(r'pub const VERSION_ID: &str = "([^"]+)";',
+                     (ROOT / "crates/horizon-core/src/version.rs").read_text())[1]
+    horizon = run(["git", "rev-parse", "HEAD"], cwd=ROOT).strip()
+    manifest += f'\n[native]\ngame = "{game}"\nhorizon = "{horizon}"\nmixins = "{mixins}"\n'
+    (folder / "src").mkdir(parents=True)
+    (folder / "horizon-mod.toml").write_text(manifest)
+    (folder / "Cargo.toml").write_text('[package]\nname = "smoke"\nversion = "0.1.0"\nedition = "2024"\n')
+    (folder / "src/lib.rs").write_text(source)
 
 
 def runtime_libraries(deps: Path) -> list[Path]:
