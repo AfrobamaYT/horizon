@@ -12,8 +12,8 @@ pub(crate) fn installed_chunk_generator_list()
 }
 
 /// The biome sources registered at startup, for the executable to hand to the engine.
-pub(crate) fn installed_biome_source_list()
--> &'static [crate::world::biome_source::BiomeSourceInfo] {
+pub(crate) fn installed_biome_source_list() -> &'static [crate::world::biome_source::BiomeSourceInfo]
+{
     installed().map_or(&[], |installed| installed.biome_sources.as_slice())
 }
 

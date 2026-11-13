@@ -277,6 +277,7 @@ impl Game<'_> {
         let mining = std::mem::replace(&mut self.mining, play.mining.take());
         let destroy_delay = std::mem::replace(&mut self.destroy_delay, play.destroy_delay);
         let using = std::mem::replace(&mut self.using, play.using.take());
+        let use_item = std::mem::replace(&mut self.use_item, play.use_item.take());
         let use_duration = std::mem::replace(&mut self.use_duration, play.use_duration);
         let use_ticks_set = std::mem::replace(&mut self.use_ticks_set, play.use_ticks_set);
         let use_delay = std::mem::replace(&mut self.use_delay, play.use_delay);
@@ -440,6 +441,7 @@ impl Game<'_> {
             mining,
             destroy_delay,
             using,
+            use_item,
             use_duration,
             use_ticks_set,
             use_delay,
@@ -570,6 +572,7 @@ impl Game<'_> {
             mining,
             destroy_delay,
             using,
+            use_item,
             use_duration,
             use_ticks_set,
             use_delay,
@@ -753,6 +756,7 @@ impl Game<'_> {
         play.mining = std::mem::replace(&mut self.mining, mining);
         play.destroy_delay = std::mem::replace(&mut self.destroy_delay, destroy_delay);
         play.using = std::mem::replace(&mut self.using, using);
+        play.use_item = std::mem::replace(&mut self.use_item, use_item);
         play.use_duration = std::mem::replace(&mut self.use_duration, use_duration);
         play.use_ticks_set = std::mem::replace(&mut self.use_ticks_set, use_ticks_set);
         play.use_delay = std::mem::replace(&mut self.use_delay, use_delay);

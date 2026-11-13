@@ -40,9 +40,17 @@ The following documented `Game` helpers are not in the trait yet:
   `server_block_in_tag`, `server_item_in_tag`, `server_block`,
   `set_display`, `sidebar`, `experience_orbs`,
   `item_entities`, `player`, `panel_recipes`, `recipes`, `component`,
-  `set_component`, `remove_component`, `spawn_falling_block`, `explode`,
+  `spawn_falling_block`, `explode`,
   `container_slots` uses gameplay-private types.
 - `with_mod_block_entity` is generic, so its signature cannot be called through `dyn Host`.
+
+Component writes live on `ItemPlace::edit(host, tx, |stack| { ... })`, not on
+`Host::set_component` or `remove_component`. The editor can use `ItemStack::set`,
+`remove`, `apply_components` and `copy_component_from`; `get` followed by `set`
+covers `update`. A successful edit exchanges the whole stack, preserving the slot's
+count rather than splitting off one item. Changing the item or count refuses the
+edit without changing the place. The write is server-side and journaled in the
+caller's transaction, so a parent abort restores it like other item-place writes.
 
 Experience-orb values use vanilla's signed `i32` representation in
 `ExperienceOrb`, `ServerHost::set_experience_orb`, and the pickup and merge hooks.
