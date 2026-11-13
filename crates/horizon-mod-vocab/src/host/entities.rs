@@ -606,17 +606,30 @@ pub trait EntitiesBackendMut {
     ) -> bool;
     /// Side: server.
     /// Sends the entity to `pos` in the level `dimension` (`minecraft:the_nether`,
-    /// or a level a mod registered), as `/execute in <dimension> run tp` does
-    /// (`Entity.teleportTo(ServerLevel, ..)`): `pos` is in that level's own
-    /// coordinates (nothing scales it by `coordinate_scale`), a level nobody has
-    /// entered opens first, and a vehicle takes its passengers along. A player
-    /// arrives after the current tick, and `player_teleported` and
-    /// `player_changed_dimension` report the move. In the entity's own level
-    /// it is `entity_teleport_to`. False for what `entity_teleport_to` refuses,
-    /// a dimension that isn't registered, and kinds that cannot change level
-    /// (all but a player, a mob, a boat or a minecart). A fake player stays
-    /// where it is, and the call is still true. Nothing builds ground at the
-    /// destination.
+    /// or a level a mod registered), as `Entity.teleport` does with a portal's
+    /// transition: `pos` is in that level's own coordinates (nothing scales it
+    /// by `coordinate_scale`), a level nobody has entered opens first, and the
+    /// entity keeps its motion as it is, unturned (`Relative.DELTA`; a
+    /// minecart's is clamped to 0.4 along x and z, its `getKnownMovement`). A
+    /// mod that wants it stopped or turned sets its velocity first
+    /// (`entity_set_velocity`). It takes a player, a mob, a boat, a minecart (a
+    /// vehicle takes its passengers along), an item, a primed TNT, an experience
+    /// orb, an arrow, a trident, a firework and the thrown items and fireballs a
+    /// chunk saves. Into another level anything but a player is recreated there
+    /// with its stack, owner, thrower and portal cooldown, under a new handle:
+    /// the old one is stale. That move is a change of level, not a section
+    /// crossing: the section-crossing report (`entity_entering_section`) does not
+    /// tell it, the entity's later moves there are told as any entity's, and this
+    /// call adds no report of its own. A player arrives after the current tick,
+    /// still (its client holds its motion), and `player_teleported` and
+    /// `player_changed_dimension` report the move. In the entity's own level it
+    /// moves as `entity_teleport_to` does, keeping its motion. False for a stale
+    /// handle, what `entity_teleport_to` refuses, a dimension that isn't
+    /// registered, a primed TNT a mob rides, and the kinds it cannot move into
+    /// another level (armor stands, falling blocks, ender pearls, wind charges,
+    /// entities Horizon doesn't simulate). A fake player stays where it is, and
+    /// so does an entity whose travel a mod cancels (`entity_travel_to_dimension`);
+    /// the call is still true. Nothing builds ground at the destination.
     #[access(WorldOnly)]
     fn entity_teleport_to_level(
         &mut self,
@@ -625,6 +638,31 @@ pub trait EntitiesBackendMut {
         pos: [f64; 3],
         rotation: Option<[f32; 2]>,
     ) -> bool;
+    /// Side: server.
+    /// Runs the command `line` (a leading slash allowed) with the entity as
+    /// its source, as vanilla runs a portal's or a sign's command:
+    /// `ServerPlayer.createCommandSourceStack` (another entity:
+    /// `Entity.createCommandSourceStackForNameResolution`), `.withPermission(level)`,
+    /// then `Commands.performPrefixedCommand`. `level` is the mod's choice, taken
+    /// as given whether it is above or below the entity's own: the line is parsed
+    /// and checked at it. `@s` is the entity, and the command runs from its
+    /// position and rotation in its level. A player is answered as for their own
+    /// command: its feedback and failures reach their chat, and the other
+    /// operators hear of it (`broadcastToAdmins`). Another entity's source is
+    /// silent: nothing reaches anyone (`CommandSource.NULL`). A command a mod
+    /// registered hears a player as `CommandSource::Player` and another entity as
+    /// `CommandSource::Console`, both at `level`. A teleport to another level
+    /// happens at the next tick's start, as `Commands::run_command`'s. Whether
+    /// the command ran: false for a line that fails to parse or to run, and,
+    /// with nothing run, for a stale or removed entity, an entity outside the
+    /// level in place (a player in another level included: that level is
+    /// parked while the hook runs), and on a client.
+    /// During a guest's turn, live players (the acting one included) can run it
+    /// and are reachable; displaced outer players are neither, as on
+    /// `Commands::run_command`.
+    #[access(WorldOnly)]
+    fn entity_run_command(&mut self, entity: EntityRef, line: &str, level: PermissionLevel)
+    -> bool;
     /// Side: server.
     /// Turns the entity to `yaw` and `pitch` in degrees (`Entity.setYRot`,
     /// `setXRot`): the pitch wraps and is clamped to -90..90. False for kinds

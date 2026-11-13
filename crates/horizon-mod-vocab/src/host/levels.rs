@@ -705,6 +705,16 @@ pub trait LevelsBackend {
     /// nothing. None on a client and for a stale handle.
     #[access(WorldOnly)]
     fn level_can_spawn_entities_in_chunk(&self, level: LevelRef, pos: [i32; 2]) -> Option<bool>;
+    /// Side: server.
+    /// The capability generation at `pos`: a number that changes when a provider says its
+    /// answer there changed ([`LevelRef::invalidate_capabilities`]) and when the chunk of a
+    /// position a provider invalidated unloads, and never comes back to a number it was while
+    /// the level is open. [`BlockCapabilityCache`] compares it with the block entity and the
+    /// block state there. Only the change means anything, not the number. Reads parked
+    /// levels. None for a stale handle, a client, an unloaded position and one outside build
+    /// height. Constant time, no allocation.
+    #[access(WorldOnly)]
+    fn level_capability_generation(&self, level: LevelRef, pos: [i32; 3]) -> Option<u64>;
 }
 /// The handles' writes of the `levels` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
@@ -813,6 +823,17 @@ pub trait LevelsBackendMut {
     /// handle, on a client and for a position that isn't loaded.
     #[access(WorldOnly)]
     fn level_check_light(&mut self, level: LevelRef, pos: [i32; 3]) -> bool;
+    /// Side: server.
+    /// Tells kept capabilities at `pos` that a provider's answer there changed with no change
+    /// of block or block entity (NeoForge's `invalidateCapabilities`), such as a machine whose
+    /// side configuration changed: the capability generation there moves on
+    /// ([`LevelRef::capability_generation`]), so a [`BlockCapabilityCache`] there looks again
+    /// at its next `get`. Inside a transaction it happens at the root commit, and an aborted
+    /// one changes nothing. Block and block entity changes, chunk unloads and mod switches
+    /// need no call: the cache sees them itself. False, with nothing changed, off the level in
+    /// place, for a stale handle, on a client and for a position that isn't loaded.
+    #[access(WorldOnly)]
+    fn level_invalidate_capabilities(&mut self, level: LevelRef, pos: [i32; 3]) -> bool;
     /// Side: server.
     /// Destroy a block in the level in place (`Level.destroyBlock`), optionally dropping
     /// resources with `tool` (None is an empty hand). With `collect`, return the dropped
@@ -1062,6 +1083,29 @@ pub trait LevelsBackendMut {
     /// 3008) when `data` isn't one.
     #[access(WorldOnly)]
     fn level_level_event(&mut self, level: LevelRef, id: i32, pos: [i32; 3], data: i32) -> bool;
+    /// Side: server.
+    /// Plays level event `id` at `pos` with `data` for every player on the
+    /// server, in every level and at any distance (`ServerLevel.globalLevelEvent`).
+    /// Vanilla's ids are the wither's spawn (`1023`), the dragon's death
+    /// (`1028`) and an End portal opening (`1038`): the client has a sound for
+    /// them only through this global form, played two blocks from the camera
+    /// towards the position the player is sent. Each player gets a position
+    /// of their own: `pos` in this level within 32 blocks of its centre, the
+    /// block 32 blocks from them towards that centre further away, and the
+    /// block they stand in for a player in another level.
+    /// With the `global_sound_events` game rule off it is a plain
+    /// [`level_event`](Self::level_level_event), as vanilla falls back: only
+    /// the players of this level near `pos` get it. False for the same events
+    /// and data `level_event` refuses, a parked level, a stale handle or a
+    /// client.
+    #[access(WorldOnly)]
+    fn level_global_level_event(
+        &mut self,
+        level: LevelRef,
+        id: i32,
+        pos: [i32; 3],
+        data: i32,
+    ) -> bool;
     /// Side: server.
     /// Sends game event `event` (`minecraft:block_change`...) from `at`, as
     /// `Level.gameEvent(event, at, context)` does: sculk sensors, shriekers,
