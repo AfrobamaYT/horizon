@@ -13,6 +13,7 @@ pub use jar::{
 };
 pub use wasm::{MAX_WASM, Wasm, WasmError, sha512_of};
 
+use mod_surface::uses::USES_FILE;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
@@ -24,12 +25,8 @@ use std::{
 pub const MANIFEST: &str = "horizon-mod.toml";
 /// Executable components are not content and are refused in a `.hmod`.
 pub const WASM: &str = "mod.wasm";
-/// The uses table a code mod's package carries: what it uses of the surface, with each item's
-/// hash at the build it was made for (`horizon-mod-surface`'s `UsesTable`, which the reader
-/// parses). The package only bounds it.
-pub const USES: &str = "uses.json";
-/// The largest uses table a package may carry: `horizon-mod-surface`'s `MAX_USES_BYTES`.
-pub const MAX_USES: u64 = 4 << 20;
+/// The largest uses table ([`USES_FILE`]) a package may carry: what the surface crate reads.
+pub const MAX_USES: u64 = mod_surface::uses::MAX_USES_BYTES as u64;
 /// The content manifest API this build loads.
 pub const API: &str = "0.2";
 /// Namespaces no mod may claim: vanilla's, the convention tags' (mods add
@@ -769,12 +766,12 @@ impl Package {
                 layouts = Some(crate::layouts::Layouts::read(&mut entry)?);
                 continue;
             }
-            if name == USES && matches!(mode & 0o170000, 0 | 0o100000) {
+            if name == USES_FILE && matches!(mode & 0o170000, 0 | 0o100000) {
                 if uses {
-                    return Err(format!("duplicate {USES}"));
+                    return Err(format!("duplicate {USES_FILE}"));
                 }
                 if entry.size() > MAX_USES {
-                    return Err(format!("{USES} exceeds {} MiB", MAX_USES >> 20));
+                    return Err(format!("{USES_FILE} exceeds {} MiB", MAX_USES >> 20));
                 }
                 uses = true;
                 continue;
@@ -808,7 +805,7 @@ impl Package {
         }
         let mut package = Self::from_parts(&toml, icon, has_cargo, has_source, has_wasm)?;
         if uses && package.manifest.native.is_none() && package.manifest.wasm.is_none() {
-            return Err(format!("a content mod has no code, so no {USES}"));
+            return Err(format!("a content mod has no code, so no {USES_FILE}"));
         }
         if let Some(wasm) = &package.manifest.wasm {
             let mut bytes = Vec::new();
@@ -838,7 +835,7 @@ impl Package {
                 if !directory {
                     if name != MANIFEST
                         && name != crate::layouts::FILE
-                        && name != USES
+                        && name != USES_FILE
                         && name != "icon.png"
                         && !(name == WASM && package.manifest.wasm.is_some())
                         && !name.starts_with("assets/")
@@ -1025,13 +1022,13 @@ impl Package {
         Ok(Some(bytes))
     }
 
-    /// [`Package::pack_directory`], carrying `uses` as the package's [`USES`] table when given.
+    /// [`Package::pack_directory`], carrying `uses` as the package's [`USES_FILE`] table when given.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn pack_directory_with(root: &Path, uses: Option<&[u8]>) -> Result<Vec<u8>, String> {
         let package = Self::read(root)?;
         let mut files = package.directory_files(root)?;
         if let Some(uses) = uses {
-            files.insert(USES.to_owned(), uses.to_vec());
+            files.insert(USES_FILE.to_owned(), uses.to_vec());
         }
         let text = String::from_utf8(files.remove(MANIFEST).expect("selected manifest"))
             .map_err(|e| e.to_string())?;
@@ -1067,9 +1064,9 @@ impl Package {
                 put(name, bytes)?;
                 continue;
             }
-            if *name == USES && code {
+            if *name == USES_FILE && code {
                 if bytes.len() as u64 > MAX_USES {
-                    return Err(format!("{USES} exceeds {} MiB", MAX_USES >> 20));
+                    return Err(format!("{USES_FILE} exceeds {} MiB", MAX_USES >> 20));
                 }
                 put(name, bytes)?;
                 continue;
@@ -1484,34 +1481,49 @@ capabilities = ["registries"]
         let table = br#"{"schema":1,"made_for":"x","entries":[]}"#.as_slice();
         let bytes = Package::write_files(
             &native,
-            &[("Cargo.toml", cargo), ("src/lib.rs", lib), (USES, table)],
+            &[
+                ("Cargo.toml", cargo),
+                ("src/lib.rs", lib),
+                (USES_FILE, table),
+            ],
         )
         .unwrap();
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         Package::read_zip(&mut zip).unwrap();
         let mut read = Vec::new();
-        zip.by_name(USES).unwrap().read_to_end(&mut read).unwrap();
+        zip.by_name(USES_FILE)
+            .unwrap()
+            .read_to_end(&mut read)
+            .unwrap();
         assert_eq!(read, table);
         let large = vec![b' '; MAX_USES as usize + 1];
         assert!(
             Package::write_files(
                 &native,
-                &[("Cargo.toml", cargo), ("src/lib.rs", lib), (USES, &large)],
+                &[
+                    ("Cargo.toml", cargo),
+                    ("src/lib.rs", lib),
+                    (USES_FILE, &large)
+                ],
             )
             .unwrap_err()
-            .contains(USES)
+            .contains(USES_FILE)
         );
         // A content mod has no code to scan, so no table either, written or read.
-        assert!(Package::write_files(EXAMPLE, &[(USES, table)]).is_err());
+        assert!(Package::write_files(EXAMPLE, &[(USES_FILE, table)]).is_err());
         use std::io::Write;
         let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-        for (name, bytes) in [(MANIFEST, EXAMPLE.as_bytes()), (USES, table)] {
+        for (name, bytes) in [(MANIFEST, EXAMPLE.as_bytes()), (USES_FILE, table)] {
             zip.start_file(name, zip::write::SimpleFileOptions::default())
                 .unwrap();
             zip.write_all(bytes).unwrap();
         }
         let mut archive = zip::ZipArchive::new(zip.finish().unwrap()).unwrap();
-        assert!(Package::read_zip(&mut archive).unwrap_err().contains(USES));
+        assert!(
+            Package::read_zip(&mut archive)
+                .unwrap_err()
+                .contains(USES_FILE)
+        );
     }
 
     #[test]

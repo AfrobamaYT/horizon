@@ -6,10 +6,10 @@ use crate::sdk_fetch::{PinnedSdk, ensure_sdk, fetch_build};
 use crate::uses_table::{self, Scanned, surface_of};
 use horizon_mod_package::{
     Manifest, Package,
-    manifest::{MANIFEST, MAX_MANIFEST, MAX_USES, USES},
+    manifest::{MANIFEST, MAX_MANIFEST, MAX_USES},
 };
 use mod_surface::child::ChildEntry;
-use mod_surface::uses::{Change, Fit, UsesTable, fits as fit};
+use mod_surface::uses::{Change, Fit, USES_FILE, UsesTable, fits as fit};
 use mod_surface::{Surface, leaf};
 use std::path::Path;
 use std::process::{Command, ExitCode};
@@ -225,12 +225,12 @@ fn package_subject(path: &Path) -> Result<Subject, String> {
     if package.manifest.native.is_none() && package.manifest.wasm.is_none() {
         return Ok(Subject::NotApplicable(content_text(&name)));
     }
-    let Some(bytes) = Package::entry(path, USES, MAX_USES)? else {
+    let Some(bytes) = Package::entry(path, USES_FILE, MAX_USES)? else {
         return Ok(Subject::NotApplicable(format!(
             "{name}'s package was made by an older tool and doesn't say what it uses, so it works on the build it was made for only. Rebuild it with the current `cargo horizon-mod`."
         )));
     };
-    let table = UsesTable::read(&bytes).map_err(|e| format!("{USES}: {e}"))?;
+    let table = UsesTable::read(&bytes).map_err(|e| format!("{USES_FILE}: {e}"))?;
     Ok(Subject::Table { name, table })
 }
 

@@ -2559,3 +2559,6 @@ impl UsesTable {
         text
     }
 }
+
+/// The name of the uses table in a package.
+pub const USES_FILE: &str = "uses.json";
