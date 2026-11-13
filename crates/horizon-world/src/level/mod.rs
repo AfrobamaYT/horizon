@@ -510,6 +510,10 @@ pub trait LevelAccess: BlockEntityNeighbors {
     fn allow_leaves_decay(&self, _pos: BlockPos) -> bool {
         true
     }
+    /// Session-only watered areas, checked before vanilla's farmland water scan.
+    fn has_water_ticket(&self, _pos: BlockPos) -> bool {
+        false
+    }
     fn allow_moisture_change(&self, _pos: BlockPos, _from: i32, _to: i32) -> bool {
         true
     }

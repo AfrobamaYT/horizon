@@ -1041,16 +1041,19 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
         self.level.crop_grow_post(pos, state);
     }
+    /// `FarmlandBlock.randomTick`, with session-only watered areas before `isNearWater`.
     fn farmland_random_tick(&mut self, state: BlockStateId, pos: BlockPos) {
         let b = self.b;
         let moisture = b.table.int(state, b.props.moisture);
-        let mut near_water = false;
-        'search: for x in -4..=4 {
-            for y in 0..=1 {
-                for z in -4..=4 {
-                    if b.is_water_fluid(self.fluid_at(pos.offset(x, y, z)).kind()) {
-                        near_water = true;
-                        break 'search;
+        let mut near_water = self.level.has_water_ticket(pos);
+        if !near_water {
+            'search: for x in -4..=4 {
+                for y in 0..=1 {
+                    for z in -4..=4 {
+                        if b.is_water_fluid(self.fluid_at(pos.offset(x, y, z)).kind()) {
+                            near_water = true;
+                            break 'search;
+                        }
                     }
                 }
             }

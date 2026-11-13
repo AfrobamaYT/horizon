@@ -62,7 +62,7 @@ pub use world::types::{
     MapState, MobCategory, PlayerRespawnConfig, PortalShape, ProgressType, RaidRef, RaidStatus,
     RespawnData, ServerTickPhase, SpawnCheck, SpawnFlags, SpawnLight, SpawnLimits,
     SpawnPlacementError, SpawnPlacementRule, SpawnPlacementType, SpawnReason, SpawnSource, Spawner,
-    TagsUpdateCause, TickId, TriState, UnresolvedFluid, Vec3, WorldEpoch, WorldPhase,
+    TagsUpdateCause, TickId, TriState, UnresolvedFluid, Vec3, WaterTicket, WorldEpoch, WorldPhase,
 };
 #[doc(hidden)]
 pub(crate) mod built;

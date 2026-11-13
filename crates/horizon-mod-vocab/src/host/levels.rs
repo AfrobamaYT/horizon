@@ -22,6 +22,12 @@ pub trait LevelsHost {
 #[horizon_mod_api_macros::host_area]
 pub trait LevelsBackend {
     /// Side: server.
+    /// Whether any watered-area ticket covers this block. Minimum bounds are inclusive and
+    /// maximum bounds exclusive on all three axes. Reads active and parked levels, loads no
+    /// chunks, and calls no mod predicates. False on clients or for a stale/unavailable level.
+    #[access(WorldOnly)]
+    fn level_has_water_ticket(&self, level: LevelRef, pos: [i32; 3]) -> bool;
+    /// Side: server.
     /// `ServerLevel.findClosestBiome3d`: search this level's generator for an id or `#tag`.
     /// The result follows vanilla's sampled spiral and vertical order; it is not a search
     /// through edited biome cells. Does not load resident chunks or switch parked levels.
@@ -711,6 +717,27 @@ pub trait LevelsBackend {
 #[doc(hidden)]
 #[horizon_mod_api_macros::host_area]
 pub trait LevelsBackendMut {
+    /// Side: server.
+    /// Mark the half-open box `min <= pos < max` as watered (`FarmlandWaterManager.addAABBTicket`).
+    /// For 5x1x5 farmland starting at [0, 64, 0], use min [0, 64, 0], max [5, 65, 5].
+    /// Farmland checks tickets before its vanilla water scan; rain and water still hydrate it.
+    /// The calling mod owns this ticket; overlaps are independent. Remove it when the sprinkler
+    /// stops. It is also removed on owner disable and level unload, never saved: re-add in
+    /// `level_load` or the block entity's load listener. Reads/writes reach parked server levels.
+    /// None outside an enabled mod call, on clients, for stale/unavailable levels, empty or
+    /// reversed bounds, or a box spanning more than 65,536 x/z chunks. Does not load chunks.
+    #[access(WorldOnly)]
+    fn level_add_water_ticket(
+        &mut self,
+        level: LevelRef,
+        min: [i32; 3],
+        max: [i32; 3],
+    ) -> Option<WaterTicket>;
+    /// Side: server.
+    /// Remove this watered area, leaving overlapping tickets intact. Only the owning enabled
+    /// mod can remove it. False if already removed, stale, unloaded, or called on a client.
+    #[access(WorldOnly)]
+    fn water_ticket_remove(&mut self, water_ticket: WaterTicket) -> bool;
     /// Side: server.
     /// Spawns a mob of `kind` (`minecraft:zombie`) at `pos` in the level as
     /// `EntityType.spawn` does with `reason`: the entity type creates it (its

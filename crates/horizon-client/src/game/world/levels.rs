@@ -1480,6 +1480,11 @@ impl Game<'_> {
             self.levels.heard_open.remove(i);
             self.native_level_unload(dim.id());
         }
+        if dim == self.dim {
+            self.world.water_tickets.clear();
+        } else if let Some(world) = self.levels.parked_world_mut_of(dim.id()) {
+            world.water_tickets.clear();
+        }
         self.attachment_indexes.remove(&dim);
     }
 

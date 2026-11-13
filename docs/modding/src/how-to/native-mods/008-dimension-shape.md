@@ -169,6 +169,30 @@ synchronous, `/locate`-cost search, not a cheap loaded-chunk lookup: cache resul
 per-tick use. The radius counts placement-cell rings (at most 100); stronghold rings are
 checked regardless of radius. It does not load or generate chunks.
 
+### Watered-area tickets
+
+On the server, `level.add_water_ticket(host, min, max)` returns an `Option<WaterTicket>`
+for a sprinkler's watered area. Bounds are integer and half-open on **all three axes**:
+`min` is included, `max` is excluded. For 5×1×5 farmland beginning at `[4, 64, 4]`,
+use `[4, 64, 4]` and `[9, 65, 9]`; `[8, 64, 8]` is inside, `[9, 64, 4]` is outside.
+Empty or reversed boxes and boxes covering more than 65,536 x/z chunks are refused.
+
+Keep the handle, then call `ticket.remove(host)` when the sprinkler stops or breaks.
+Removal returns whether that ticket was removed; overlapping tickets remain independent.
+Only the mod that added a ticket can remove it. `level.has_water_ticket(host, pos)` tests
+whether any ticket covers a block. Both calls reach active or parked server levels without
+loading chunks; unavailable/stale handles and clients answer `false` (adding answers `None`).
+Adding requires an enabled mod call, and native and wasm use the same generated boundary.
+
+Tickets are chunk-indexed, in memory only, and never force chunks to load. They are removed
+on explicit removal, level unload, or their owner's disable; re-enabling does not restore
+them. A reopened world starts empty: re-add from `level_load` or a block entity's load
+listener. Several boxes can describe a shape without a per-position mod predicate.
+Farmland checks the ticket before its vanilla water scan, so dry farmland inside moistens
+to 7. Removing the last covering ticket restores normal drying, while nearby water and
+rain continue working normally and the moisture-change veto still applies. Empty levels
+pay only the empty-index guard, not a mod scan or callback.
+
 ### Saving a level
 
 `level.request_save(host)` asks the server to save a level, as the autosave and `/save-all` do, with its

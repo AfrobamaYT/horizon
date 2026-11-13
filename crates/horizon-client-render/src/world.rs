@@ -61,6 +61,8 @@ impl DirtySections {
 pub struct World {
     /// Server-owned mod data attached to this dimension.
     pub attachments: horizon_mod_runtime::attachments::Attachments,
+    /// Mod-owned watered areas; never serialized with the world.
+    pub water_tickets: horizon_mod_runtime::water_tickets::WaterTickets,
     /// The holders lent to mods since the last flush, whose synced changes
     /// `flush_attachment_sync` sends.
     pub attachment_syncs: FxHashSet<horizon_mod_runtime::attachments::Holder>,
@@ -268,6 +270,7 @@ impl World {
             loaded_chunks: Vec::new(),
             modified: ModifiedChunks::default(),
             attachments: Default::default(),
+            water_tickets: Default::default(),
             attachment_syncs: FxHashSet::default(),
             attachment_landings: FxHashSet::default(),
             block_entities: Default::default(),
