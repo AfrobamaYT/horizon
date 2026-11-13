@@ -617,6 +617,7 @@ pub(super) fn wrapper_externs(
     for name in [
         "horizon_client",
         "mod_api",
+        "mod_vocab",
         "mod_points",
         "horizon_mod_package",
     ] {
@@ -842,7 +843,6 @@ pub(super) fn compile(
     for project in projects {
         catalog.log_mixins(&project.bundle.manifest)?;
     }
-    let _ = fs::remove_dir_all(out);
     fs::create_dir_all(out).map_err(|e| e.to_string())?;
     crate::storage::mark_used(out).map_err(super::cache_error)?;
     let deps = game.join("deps");
@@ -855,6 +855,7 @@ pub(super) fn compile(
     }
     let game_library = library(&deps, "horizon_client")?;
     let mut facades = std::collections::HashMap::new();
+    libraries.insert("mod_vocab", library(&deps, "mod_vocab")?);
     let mut rlibs: std::collections::HashMap<&str, PathBuf> = std::collections::HashMap::new();
     let mut crate_names: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
     for &index in &resolution.order {
@@ -904,6 +905,16 @@ pub(super) fn compile(
                 _ => &libraries[package],
             },
             &rlibs,
+            &library_entry(
+                &api::template(&game.join(super::api_route::TEMPLATE))?,
+                &[&project.bundle.manifest],
+                &catalog,
+                sdk.commit(),
+                id,
+                &project.bundle.manifest.version.to_string(),
+                &[],
+            ),
+            sdk.commit(),
         )?;
         rlibs.insert(id, rlib);
         crate_names.insert(id, krate);
@@ -919,55 +930,75 @@ pub(super) fn compile(
         &sdk,
         |edition| rustc(rust, game, out, edition),
     )?;
-    let template = api::template(&game.join(TEMPLATE))?;
-    let manifests: Vec<_> = resolution
-        .order
-        .iter()
-        .map(|&i| &projects[i].bundle.manifest)
-        .collect();
-    let main = out.join("main.rs");
-    let mut main_text = api::main_rs(&template, &manifests, &catalog);
-    if let Some(patch) = &patch {
-        let installs: String = patch
-            .installs
-            .iter()
-            .map(|install| format!("        {install},\n"))
-            .collect();
-        main_text = main_text.replace("/* MOD_REDIRECTS */", installs.trim_end());
+    let mut installed = runtime_libraries(rust, &deps)?;
+    for &index in &resolution.order {
+        installed.push(rlibs[projects[index].bundle.manifest.id.as_str()].clone());
     }
-    fs::write(&main, main_text).map_err(|e| e.to_string())?;
-    let binary = out.join(crate::backend::CLIENT);
-    let mut cmd = rustc(rust, game, out, "2024");
-    cmd.args(["--crate-type", "bin", "--crate-name", "horizon_native_game"]);
-    for (name, path) in wrapper_externs(&deps, &template)? {
-        cmd.arg("--extern")
-            .arg(format!("{name}={}", path.display()));
-    }
-    for (name, rlib) in patch.iter().flat_map(|patch| &patch.rlibs) {
-        cmd.arg("--extern")
-            .arg(format!("{name}={}", rlib.display()));
-    }
-    for (position, &index) in resolution.order.iter().enumerate() {
-        let id = projects[index].bundle.manifest.id.as_str();
-        cmd.arg("--extern")
-            .arg(format!("mod_{position}={}", rlibs[id].display()));
-        if let Some(facade) = facades.get(id) {
+    if let Some(patch) = patch {
+        let source = out.join("horizon_patch.rs");
+        let template = api::template(&game.join(super::api_route::TEMPLATE))?;
+        let entry = library_entry(
+            &template,
+            &[],
+            &catalog,
+            sdk.commit(),
+            "horizon_patch",
+            "0",
+            &patch.installs,
+        );
+        fs::write(&source, entry).map_err(|e| e.to_string())?;
+        let library = out.join(dylib_name("horizon_patch"));
+        let mut cmd = rustc(rust, game, out, "2024");
+        cmd.args(["--crate-type", "dylib", "--crate-name", "horizon_patch"]);
+        for (name, path) in wrapper_externs(&deps, &template)? {
             cmd.arg("--extern")
-                .arg(format!("mod_{position}_internals={}", facade.display()));
+                .arg(format!("{name}={}", path.display()));
         }
+        for (name, path) in &patch.rlibs {
+            cmd.arg("--extern")
+                .arg(format!("{name}={}", path.display()));
+        }
+        cmd.arg("-o").arg(&library).arg(source);
+        super::run(cmd, "Compiling the patch library", |_| {})?;
+        super::library_record::stamp(&library, sdk.commit(), "horizon_patch", "0", true)?;
+        installed.push(library);
     }
-    // The game's libraries load from beside the executable.
-    let origin = match std::env::consts::OS {
-        "linux" => Some("-Wl,-rpath,$ORIGIN"),
-        "macos" => Some("-Wl,-rpath,@executable_path"),
-        _ => None,
-    };
-    for arg in origin.into_iter().map(str::to_owned).chain(sdk.link_args) {
-        cmd.arg("-C").arg(format!("link-arg={arg}"));
-    }
-    cmd.arg("-o").arg(&binary).arg(&main);
-    super::run(cmd, "Linking the game", |_| {})?;
-    Ok((binary, runtime_libraries(rust, &deps)?))
+    Ok((
+        package.runtime.join("bin").join(crate::backend::CLIENT),
+        installed,
+    ))
+}
+
+pub(super) fn dylib_name(krate: &str) -> String {
+    format!(
+        "{}{krate}{}",
+        std::env::consts::DLL_PREFIX,
+        std::env::consts::DLL_SUFFIX
+    )
+}
+
+pub(super) fn library_entry(
+    template: &str,
+    mods: &[&horizon_mod_package::Manifest],
+    catalog: &internals::Catalog,
+    build: &str,
+    id: &str,
+    version: &str,
+    installs: &[String],
+) -> String {
+    api::main_rs(template, mods, catalog)
+        .replace("mod_0::", "crate::")
+        .replace(
+            "/* NATIVE_BUILD */",
+            &format!("{build} {id} {version} {}", crate::rust_toolchain::VERSION),
+        )
+        .replace(
+            "/* MOD_REDIRECTS */",
+            &installs
+                .iter()
+                .map(|i| format!("{i},\n"))
+                .collect::<String>(),
+        )
 }
 
 /// Compiles `project`'s crate as an rlib into `out` with `rustc` (given the edition: rustc with
@@ -980,6 +1011,8 @@ pub(super) fn compile_mod<'a>(
     rustc: impl Fn(&str) -> Command,
     library: impl Fn(&str) -> &'a PathBuf,
     rlibs: &std::collections::HashMap<&str, PathBuf>,
+    entry: &str,
+    build: &str,
 ) -> Result<(PathBuf, String), String> {
     let id = project.bundle.manifest.id.as_str();
     let edition = project
@@ -1001,9 +1034,16 @@ pub(super) fn compile_mod<'a>(
             .unwrap_or("src/lib.rs"),
     );
     let mut cmd = rustc(edition);
-    cmd.args(["--crate-type", "rlib", "--crate-name", &krate])
+    fs::write(source.with_file_name("__horizon_entry.rs"), entry).map_err(|e| e.to_string())?;
+    let mut root = fs::read_to_string(&source).map_err(|e| e.to_string())?;
+    root.push_str("\n#[path = \"__horizon_entry.rs\"] mod __horizon_entry;\n");
+    fs::write(&source, root).map_err(|e| e.to_string())?;
+    cmd.args(["--crate-type", "dylib", "--crate-name", &krate])
         .arg("-C")
         .arg(format!("metadata={id}"));
+    for name in ["mod_api", "mod_vocab", "mod_points"] {
+        cmd.arg("--extern").arg(format!("{name}={}", library(name).display()));
+    }
     for (name, package) in project.api_dependencies() {
         cmd.arg("--extern")
             .arg(format!("{name}={}", library(package).display()));
@@ -1022,9 +1062,32 @@ pub(super) fn compile_mod<'a>(
                 .arg(format!("feature=\"{}\"", dependency.id));
         }
     }
+    let library = out.join(dylib_name(&krate));
+    let mut hash = Sha256::new();
+    hash.update(build);
+    hash.update(entry);
+    hash.update(super::source_digest(project.bundle).unwrap_or_default());
+    for dependency in declared {
+        if let Some(path) = rlibs.get(dependency.id.as_str()) {
+            hash.update(fs::read(path).map_err(|e| e.to_string())?);
+        }
+    }
+    let fingerprint = format!("{:x}", hash.finalize());
+    let saved = library.with_extension("fingerprint");
+    if library.is_file() && fs::read_to_string(&saved).ok().as_deref() == Some(&fingerprint) {
+        return Ok((library, krate));
+    }
     cmd.arg("--out-dir").arg(out).arg(&source);
     super::run(cmd, &format!("Compiling {id}"), |_| {})?;
-    Ok((out.join(format!("lib{krate}.rlib")), krate))
+    fs::write(saved, fingerprint).map_err(|e| e.to_string())?;
+    super::library_record::stamp(
+        &library,
+        build,
+        id,
+        &project.bundle.manifest.version.to_string(),
+        false,
+    )?;
+    Ok((library, krate))
 }
 
 /// The launcher's settings for a kept registry build: bumped whenever the launcher changes the
