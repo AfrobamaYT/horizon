@@ -1376,7 +1376,7 @@ impl Game<'_> {
     /// compass a mob holds in its main hand or wears loses its target when
     /// the lodestone is gone. (A mob keeps no components for its off hand.)
     fn tick_mob_compasses(&mut self) {
-        use horizon_client::mobs::gear;
+        use horizon_items::equipment;
         const TRACKER: &str = "minecraft:lodestone_tracker";
         let dim = self.dimension_id();
         let gone_in = |stack: Option<&ItemStack>| {
@@ -1386,32 +1386,25 @@ impl Game<'_> {
         };
         let mut gone: Vec<(usize, usize)> = Vec::new();
         for (i, m) in self.mobs.iter().enumerate() {
-            if gone_in(m.extra.main_hand_stack()) {
-                gone.push((i, gear::MAIN));
-            }
-            if let Some(g) = m.extra.gear.as_deref() {
-                for slot in [gear::HEAD, gear::CHEST, gear::LEGS, gear::FEET] {
-                    if gone_in(g.stacks[slot].as_ref()) {
-                        gone.push((i, slot));
-                    }
+            for slot in [
+                equipment::MAINHAND,
+                equipment::HEAD,
+                equipment::CHEST,
+                equipment::LEGS,
+                equipment::FEET,
+            ] {
+                if gone_in(m.extra.slot_stack(slot)) {
+                    gone.push((i, slot));
                 }
             }
         }
         for (i, slot) in gone {
             let m = &mut self.mobs[i];
-            if slot == gear::MAIN {
-                if let Some(mut stack) = m.extra.main_hand_stack().cloned() {
-                    stack
-                        .data_mut()
-                        .set_other(TRACKER, Some(Tag::Compound(Default::default())));
-                    m.extra.set_main_hand_stack(Some(stack));
-                }
-            } else if let Some(Some(stack)) =
-                m.extra.gear.as_deref_mut().map(|g| &mut g.stacks[slot])
-            {
+            if let Some(mut stack) = m.extra.slot_stack(slot).cloned() {
                 stack
                     .data_mut()
                     .set_other(TRACKER, Some(Tag::Compound(Default::default())));
+                m.extra.set_slot_stack(slot, Some(stack));
             }
         }
     }
