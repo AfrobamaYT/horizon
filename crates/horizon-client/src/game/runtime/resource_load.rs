@@ -640,6 +640,18 @@ pub(super) fn load_resources(
     } = core;
     let assets = Arc::new(assets);
     let render = Arc::new(render);
+    // The namespaces of the mod block states registered now: what every level.dat saved from
+    // here on records, and what a world is checked against before it opens (`level_mods`). A
+    // launch world's data preload, which may already have started, reads no mod records; its
+    // open, which checks them, waits for these resources.
+    {
+        use horizon_client::save::level_mods;
+        let registry = assets.registry;
+        let names = (0..registry.len() as u32)
+            .filter_map(|id| registry.state(horizon_world::registry::BlockStateId(id)))
+            .map(|state| state.name.as_str());
+        level_mods::set_block_namespaces(Some(level_mods::mod_namespaces(names)));
+    }
     if let Some(folder) = launch_world {
         world_loading::preload_launch_world(
             folder,

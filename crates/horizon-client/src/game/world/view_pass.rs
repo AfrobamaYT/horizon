@@ -5,7 +5,8 @@
 //! rebuilds `Streaming.extra` (`lan_update_streaming`, where the areas are added: no `tick_lan`
 //! runs here to call it), collects the finished columns (`update_world`), postprocesses them as
 //! vanilla does before a chunk is sent (`postprocess_chunks`: what it schedules waits for a tick),
-//! then runs only the hub's viewed-level sending. Nothing ticks there: no block, fluid, scheduled or random ticks, no
+//! then runs only the hub's viewed-level sending, with the level's entities as they stand for its
+//! viewers to track. Nothing ticks there: no block, fluid, scheduled or random ticks, no
 //! entities, no weather cycle, no level tick hooks and no player work. Its time is the server's,
 //! as in 26.3, where no level but the Overworld runs a clock of its own: `enter_level` gives it
 //! the clocks as they are, and its viewers get its game time every 20 ticks. A level whose last
@@ -56,6 +57,7 @@ impl Game<'_> {
 
     /// The hub's viewed-level sending for the level in place, without its tick.
     fn view_pass_send(&mut self) {
+        let states = self.view_pass_states();
         let spawn = self.world_spawn_position();
         let clock_rate = self.network_clock_rate();
         let sea_level = self.end.locator().map_or(63, |terrain| terrain.sea_level());
@@ -65,7 +67,7 @@ impl Game<'_> {
         let mut ctx = TickCtx {
             sea_level,
             world: &mut self.world,
-            entities: &[],
+            entities: states.as_slice(),
             next_entity: &mut self.next_entity,
             spawn,
             spawn_angle: self.level.world_spawn_angle,
@@ -80,6 +82,29 @@ impl Game<'_> {
             streaming: Some(&self.streaming),
         };
         host.hub.viewed_pass(&mut ctx);
+    }
+
+    /// The level's entities as `tick_lan` describes them for the tracking pass: nobody is in the
+    /// level, so no player rides one.
+    fn view_pass_states(&mut self) -> horizon_client::lan::entity::States {
+        let mut states = horizon_client::lan::entity::States::default();
+        if !self.lan.as_ref().is_some_and(|h| h.hub.viewed_here()) {
+            return states;
+        }
+        self.lan_assign_ids();
+        let Some(host) = self.lan.as_mut() else {
+            return states;
+        };
+        let mut riding = std::mem::take(&mut host.hub.riding);
+        self.lan_riding(&[], &mut riding);
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.riding = riding;
+        }
+        self.lan_entities(&mut states, true, 0, None);
+        self.lan_hook_states(&mut states);
+        self.lan_entity_uuids(&mut states);
+        self.lan_syncs_looked();
+        states
     }
 }
 
@@ -212,6 +237,8 @@ pub(in crate::game) mod tests {
         pub(in crate::game) forgotten: Vec<(i32, i32)>,
         pub(in crate::game) closed: bool,
         times: Vec<i64>,
+        /// The other packets of its runs, in order.
+        others: Vec<C>,
     }
 
     pub(in crate::game) fn sent(rx: &std::sync::mpsc::Receiver<horizon_client::lan::Out>) -> Sent {
@@ -241,7 +268,8 @@ pub(in crate::game) mod tests {
                             Ok(C::SetTime(t)) if t.clocks.is_empty() => {
                                 sent.times.push(t.game_time)
                             }
-                            _ => {}
+                            Ok(other) => sent.others.push(other),
+                            Err(_) => {}
                         }
                     }
                 }
@@ -269,7 +297,22 @@ pub(in crate::game) mod tests {
         std::sync::mpsc::Receiver<horizon_client::lan::Out>,
         Sent,
     ) {
+        use horizon_client::lan::viewed_levels::areas::ChunkAreaMode;
+        stream_the_nether_in(resources, name, ChunkAreaMode::Loaded)
+    }
+
+    /// [`stream_the_nether`] with an area of `mode`: a `Ticking` one ticks the Nether.
+    fn stream_the_nether_in<'a>(
+        resources: &'a mut Option<std::sync::Arc<crate::game::Resources>>,
+        name: &str,
+        mode: horizon_client::lan::viewed_levels::areas::ChunkAreaMode,
+    ) -> (
+        Game<'a>,
+        std::sync::mpsc::Receiver<horizon_client::lan::Out>,
+        Sent,
+    ) {
         use horizon_client::lan::viewed_levels::areas::{ChunkArea, ChunkAreaMode};
+        let ticking = mode == ChunkAreaMode::Ticking;
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let home = std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap()).join(name);
         let _ = std::fs::remove_dir_all(&home);
@@ -279,7 +322,7 @@ pub(in crate::game) mod tests {
             level: Dim::Nether.id().into(),
             center: (40, 40),
             radius: 1,
-            mode: ChunkAreaMode::Loaded,
+            mode,
         };
         let hub = &mut game.lan.as_mut().unwrap().hub;
         hub.set_viewed_areas(2, "test:portal", vec![area]).unwrap();
@@ -287,9 +330,10 @@ pub(in crate::game) mod tests {
         let deadline = Instant::now() + Duration::from_secs(120);
         while all.chunks.len() < 9 && Instant::now() < deadline {
             game.tick_server(false).unwrap();
-            assert!(
-                !game.levels_to_tick().contains(&Dim::Nether),
-                "never ticked"
+            assert_eq!(
+                game.levels_to_tick().contains(&Dim::Nether),
+                ticking,
+                "ticked only for a Ticking area"
             );
             let s = sent(&rx);
             all.opened |= s.opened;
@@ -379,5 +423,174 @@ pub(in crate::game) mod tests {
         assert!(viewer.viewed.view(nether).is_none());
         assert!(!hub.viewed.active());
         assert!(!game.needs_view_pass(Dim::Nether), "no more passes");
+    }
+
+    /// What the viewer was sent of entity `id` in the Nether's runs: where `AddEntity` put it and
+    /// where each move after took it (the client's `VecDeltaCodec`), and whether it was removed.
+    #[derive(Debug, Default)]
+    struct Tracked {
+        added: Option<(i32, [f64; 3])>,
+        moves: Vec<[f64; 3]>,
+        /// Its entity events (`EntityEvent`).
+        events: Vec<i8>,
+        removed: bool,
+    }
+
+    fn tracked(packets: &[C], id: i32) -> Tracked {
+        use horizon_protocol::packets::play;
+        let mut t = Tracked::default();
+        let mut base = [0.0; 3];
+        for packet in packets {
+            match packet {
+                C::AddEntity(p) if p.id == id => {
+                    t.added = Some((p.kind, p.position));
+                    base = p.position;
+                }
+                C::MoveEntityPos(play::MoveEntityPos(m))
+                | C::MoveEntityPosRot(play::MoveEntityPosRot(m))
+                    if m.id == id =>
+                {
+                    base = m.delta.as_ref().unwrap().end(base);
+                    t.moves.push(base);
+                }
+                C::EntityPositionSync(p) if p.id == id => {
+                    base = p.path.end();
+                    t.moves.push(base);
+                }
+                C::EntityEvent(p) if p.id == id => t.events.push(p.event),
+                C::RemoveEntities(p) if p.ids.contains(&id) => t.removed = true,
+                _ => {}
+            }
+        }
+        t
+    }
+
+    /// Summons `entity` in the Nether, at chunk (40, 40) above its bedrock roof, and gives its id.
+    fn summon_in_the_nether(game: &mut Game<'_>, entity: &str) -> i32 {
+        game.enter_level(Dim::Nether).unwrap();
+        game.set_allow_commands(true);
+        assert!(game.run_command(&format!("summon {entity} 648.5 130 648.5")));
+        let summoned = game.mobs.iter().find(|m| m.kind.id == entity).unwrap();
+        summoned.id as i32
+    }
+
+    /// An entity in a viewed `Ticking` Nether area reaches the viewer as a wrapped `AddEntity`,
+    /// then its fall onto the bedrock roof (y 128) as wrapped moves, and once killed its death
+    /// event (3) and, its death animation over, its removal.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    fn an_entity_in_a_ticking_viewed_area_is_added_moved_and_removed_wrapped() {
+        use horizon_client::lan::viewed_levels::areas::ChunkAreaMode;
+        let mut resources = None;
+        let (mut game, rx, _) =
+            stream_the_nether_in(&mut resources, "view-entities", ChunkAreaMode::Ticking);
+        let pig = summon_in_the_nether(&mut game, "minecraft:pig");
+        let mut packets = Vec::new();
+        for _ in 0..60 {
+            game.tick_server(false).unwrap();
+            packets.extend(sent(&rx).others);
+        }
+        let t = tracked(&packets, pig);
+        let (_, at) = t.added.expect("added, wrapped in a Nether run");
+        assert_eq!(at, [648.5, 130.0, 648.5]);
+        let last = *t.moves.last().expect("its fall, wrapped");
+        // It may walk off once it landed.
+        assert_eq!(last[1], 128.0, "on the bedrock roof: {:?}", t.moves);
+        assert!(!t.removed);
+        game.enter_level(Dim::Nether).unwrap();
+        assert!(game.run_command("kill @e[type=minecraft:pig]"));
+        for _ in 0..40 {
+            game.tick_server(false).unwrap();
+            packets.extend(sent(&rx).others);
+        }
+        let t = tracked(&packets, pig);
+        assert!(t.events.contains(&3), "its death, wrapped: {:?}", t.events);
+        assert!(t.removed, "removed, wrapped");
+        let viewer = game
+            .lan
+            .as_ref()
+            .unwrap()
+            .hub
+            .guests
+            .iter()
+            .find(|g| g.uuid == 2);
+        assert!(
+            !viewer.unwrap().tracker.is_tracking(pig),
+            "not the player's own"
+        );
+    }
+
+    /// An entity in a viewed `Loaded` Nether area is added, wrapped, and stands still in the air:
+    /// nothing ticks there, and a position sync, if any, gives the same place.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    fn an_entity_in_a_loaded_viewed_area_is_added_and_stands_still() {
+        let mut resources = None;
+        let (mut game, rx, _) = stream_the_nether(&mut resources, "view-entities-loaded");
+        let pig = summon_in_the_nether(&mut game, "minecraft:pig");
+        let mut packets = Vec::new();
+        for _ in 0..60 {
+            game.tick_server(false).unwrap();
+            packets.extend(sent(&rx).others);
+        }
+        let t = tracked(&packets, pig);
+        assert_eq!(t.added.map(|(_, at)| at), Some([648.5, 130.0, 648.5]));
+        assert!(
+            t.moves.iter().all(|&at| at == [648.5, 130.0, 648.5]),
+            "no move: {:?}",
+            t.moves
+        );
+    }
+
+    /// Runs `command` in the Overworld, where the player is, then a tick: what the viewer's Nether
+    /// was told of its clocks meanwhile, each update's clocks as their totals and rates.
+    fn clocks_after(
+        game: &mut Game<'_>,
+        rx: &std::sync::mpsc::Receiver<horizon_client::lan::Out>,
+        command: &str,
+    ) -> Vec<Vec<(i64, f32)>> {
+        game.enter_level(Dim::Overworld).unwrap();
+        assert!(game.run_command(command), "{command}");
+        game.tick_server(false).unwrap();
+        (sent(rx).others.into_iter())
+            .filter_map(|p| match p {
+                C::SetTime(t) => Some(t.clocks.iter().map(|c| (c.total_ticks, c.rate)).collect()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The server's clocks reach a viewer of a level nobody is in when they change, not only at
+    /// `open`: `time set`, `time add` and the day stopping each send the clocks, wrapped.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    fn clock_changes_reach_the_viewer_of_a_level_nobody_is_in() {
+        let mut resources = None;
+        let (mut game, rx, _) = stream_the_nether(&mut resources, "view-clocks");
+        game.set_allow_commands(true);
+        let told = clocks_after(&mut game, &rx, "time set 1234");
+        assert_eq!(told.len(), 1, "{told:?}");
+        assert!(
+            told[0]
+                .iter()
+                .any(|&(total, rate)| (1234..=1235).contains(&total) && rate == 1.0),
+            "{told:?}"
+        );
+        let told = clocks_after(&mut game, &rx, "time add 1000");
+        assert!(
+            told[0]
+                .iter()
+                .any(|&(total, _)| (2234..=2236).contains(&total)),
+            "{told:?}"
+        );
+        // A clock that only runs on sends nothing but the game time every 20 ticks.
+        for _ in 0..30 {
+            assert_eq!(
+                clocks_after(&mut game, &rx, "seed"),
+                Vec::<Vec<(i64, f32)>>::new()
+            );
+        }
+        let told = clocks_after(&mut game, &rx, "gamerule advance_time false");
+        assert!(told[0].iter().any(|&(_, rate)| rate == 0.0), "{told:?}");
     }
 }

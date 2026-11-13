@@ -682,6 +682,23 @@ drops absent regions. Completed chunks keep their saved biomes and blocks. New g
 differ in surface material, carving, features and structures. The
 [design note](design/mod-api/mod-biome-regions.md) lists record limits and fixture coverage.
 
+### Worlds saved with mods that are gone: `[missing_mods]`
+
+A world records the mods it was saved with: code mods and content mods, and the namespaces of the mods' blocks.
+If one of them is no longer loaded, opening the world turns that mod's blocks into air and removes what they hold,
+and the next save makes it permanent. So the server refuses to start that world: it logs one line per missing mod
+and a last line naming the switch, and changes nothing in the world. To open it anyway, back the world up, then add
+to `server.toml` and restart:
+
+```toml
+[missing_mods]
+allow = true   # false, the default: don't start
+```
+
+Started as `horizon-client --dedicated` directly, `--allowMissingMods` does the same for one start. With either one,
+the server logs the same list as a warning and opens the world. A mod whose `mod_mismatch` listener marks a missing
+mod resolved (a migration) takes it off the list.
+
 ## 8. Start it with the computer
 
 ```sh
