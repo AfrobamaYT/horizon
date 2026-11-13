@@ -1791,7 +1791,18 @@ mod tests {
         };
         let open = |dim: Dim| {
             let shape = shapes.get(dim.id());
-            mod_terrain(&world, &root, &[], &[], resources, &biomes, dim, shape, 0, true)
+            mod_terrain(
+                &world,
+                &root,
+                &[],
+                &[],
+                resources,
+                &biomes,
+                dim,
+                shape,
+                0,
+                true,
+            )
         };
         let pocket = Dim::Extra(mod_api::__private::dimension_key("test:pocket"));
         let Some(Ok(ModLevel::Terrain(terrain))) = open(pocket) else {
