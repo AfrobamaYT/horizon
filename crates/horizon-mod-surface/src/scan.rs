@@ -2,9 +2,10 @@
 //!
 //! A token scan, not a parser: it skips comments (nested block comments included) and
 //! whitespace, reads string, byte, C and raw string literals, char and byte literals and number
-//! literals with their suffixes as one [`Token::Literal`] each, lifetimes and labels as
-//! [`Token::Lifetime`], `r#` raw identifiers by their name, and every other ASCII character as
-//! [`Token::Punct`]. Macro bodies are tokens like any other, so a name used only inside
+//! literals with their suffixes (a float's fraction included) as one [`Token::Literal`] each,
+//! lifetimes and labels as [`Token::Lifetime`], `r#` raw identifiers by their name, a tuple
+//! field's position after a single `.` (`pair.0`) as the identifier it names, and every other
+//! ASCII character as [`Token::Punct`]. Macro bodies are tokens like any other, so a name used only inside
 //! `vec![…]` or `format!(…)` is seen. Any text scans: an unterminated literal or comment ends the
 //! scan, never a panic.
 
@@ -14,7 +15,8 @@ pub enum Token<'a> {
     Ident(&'a str),
     /// One ASCII punctuation character: `::` is two.
     Punct(u8),
-    Literal,
+    /// A literal, as written (quotes and suffix included).
+    Literal(&'a str),
     Lifetime,
 }
 
@@ -140,20 +142,20 @@ impl<'a> Tokens<'a> {
         }
     }
 
-    /// At `'`: a char or byte literal (`'a'`, `'\n'`, `'é'`) to its closing quote, or a lifetime
-    /// or label (`'a`), skipped with its name.
-    fn quote(&mut self) -> Token<'a> {
+    /// At `'`: a char or byte literal (`'a'`, `'\n'`, `'é'`) to its closing quote (true), or a
+    /// lifetime or label (`'a`), skipped with its name (false).
+    fn quote(&mut self) -> bool {
         self.at += 1;
         if self.peek(0) == Some(b'\\') {
             // An escape: only a char literal starts so.
-            self.at += 2;
+            self.at = (self.at + 2).min(self.bytes.len());
             while self.peek(0).is_some_and(|b| b != b'\'' && b != b'\n') {
                 self.at += 1;
             }
             if self.peek(0) == Some(b'\'') {
                 self.at += 1;
             }
-            return Token::Literal;
+            return true;
         }
         // One character, then a quote: a char literal. Otherwise a lifetime or label.
         let width = self.text[self.at..]
@@ -165,10 +167,10 @@ impl<'a> Tokens<'a> {
                 self.line += 1;
             }
             self.at += width + 1;
-            Token::Literal
+            true
         } else {
             self.word();
-            Token::Lifetime
+            false
         }
     }
 }
@@ -179,6 +181,16 @@ impl<'a> Iterator for Tokens<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(byte) = self.peek(0) {
             let line = self.line;
+            let start = self.at;
+            // What was read since `start`: always whole characters, so the slice holds.
+            let literal = |this: &Self| Token::Literal(this.text.get(start..this.at).unwrap_or(""));
+            let quoted = |this: &Self, is_literal: bool| {
+                if is_literal {
+                    literal(this)
+                } else {
+                    Token::Lifetime
+                }
+            };
             match byte {
                 b'/' if self.peek(1) == Some(b'/') => self.line_comment(),
                 b'/' if self.peek(1) == Some(b'*') => {
@@ -187,14 +199,32 @@ impl<'a> Iterator for Tokens<'a> {
                 }
                 b'"' => {
                     self.string();
-                    return Some((Token::Literal, line));
+                    return Some((literal(self), line));
                 }
-                b'\'' => return Some((self.quote(), line)),
+                b'\'' => {
+                    let is_literal = self.quote();
+                    return Some((quoted(self, is_literal), line));
+                }
                 b'0'..=b'9' => {
-                    // A number with its suffix (`1u32`, `0x_ff`); a `.` ends it, so a tuple
-                    // index's field access stays out too.
+                    // After a single `.` (`pair.0`, `nested.0.1`): a tuple field's position.
+                    let field = start >= 1
+                        && self.bytes[start - 1] == b'.'
+                        && (start < 2 || self.bytes[start - 2] != b'.');
+                    if field {
+                        while self.peek(0).is_some_and(|b| b.is_ascii_digit()) {
+                            self.at += 1;
+                        }
+                        return Some((Token::Ident(&self.text[start..self.at]), line));
+                    }
+                    // A number with its suffix (`1u32`, `0x_ff`), and a float's fraction.
                     self.word();
-                    return Some((Token::Literal, line));
+                    if self.peek(0) == Some(b'.')
+                        && self.peek(1).is_some_and(|b| b.is_ascii_digit())
+                    {
+                        self.at += 1;
+                        self.word();
+                    }
+                    return Some((literal(self), line));
                 }
                 _ if is_ident(byte) => {
                     let word = self.word();
@@ -204,7 +234,7 @@ impl<'a> Iterator for Tokens<'a> {
                             if next == Some(b'"') || self.raw_string_ahead() =>
                         {
                             self.raw_string();
-                            return Some((Token::Literal, line));
+                            return Some((literal(self), line));
                         }
                         ("r", Some(b'#')) => {
                             // A raw identifier: `r#type` is `type`.
@@ -216,9 +246,12 @@ impl<'a> Iterator for Tokens<'a> {
                         }
                         ("b" | "c", Some(b'"')) => {
                             self.string();
-                            return Some((Token::Literal, line));
+                            return Some((literal(self), line));
                         }
-                        ("b", Some(b'\'')) => return Some((self.quote(), line)),
+                        ("b", Some(b'\'')) => {
+                            let is_literal = self.quote();
+                            return Some((quoted(self, is_literal), line));
+                        }
                         _ => return Some((Token::Ident(word), line)),
                     }
                 }

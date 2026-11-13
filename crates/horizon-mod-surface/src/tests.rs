@@ -488,3 +488,38 @@ fn types_doc(item: Type) -> Surface {
         vec![],
     )
 }
+
+#[test]
+fn a_trait_whose_role_is_not_known_hashes_like_one_mods_implement() {
+    let with = |role: Role, required: &[&str]| {
+        Trait::new(
+            "trait:ChunkGenerator",
+            "",
+            TraitContract {
+                role,
+                side: Side::Both,
+                generics: String::new(),
+                bounds: vec![],
+                required: required
+                    .iter()
+                    .map(|name| Required {
+                        name: name.to_string(),
+                        signature: format!("fn {name}(&self) -> i32"),
+                    })
+                    .collect(),
+                refs: vec![],
+            },
+            vec![],
+            vec![],
+        )
+        .hash
+    };
+    assert_ne!(
+        with(Role::None, &["fill"]),
+        with(Role::None, &["fill", "height"])
+    );
+    // A bound on it counts too.
+    let bounded = api_trait("trait:ChunkGenerator", Role::None, &["trait:Debug"], &[]);
+    let plain = api_trait("trait:ChunkGenerator", Role::None, &[], &[]);
+    assert_ne!(bounded.hash, plain.hash);
+}

@@ -34,15 +34,18 @@
 //!
 //! A record's `hash` is [`contract_hash`] of its contract: every field except `id`, `hash`,
 //! `doc`, `wasm_reason`, `paths`, a hook's `engine` and `counterparts`, a type's `shape` and
-//! `impls`, and its member records. Each
+//! `impls`, its `wire` and `wire_form` (how it crosses to wasm, which `shape` and the build's
+//! wasm layout cover), a struct's `constructible` and `non_exhaustive` (which matter only to a
+//! mod that builds it, judged by the fit test), and its member records. Each
 //! member (a method, field or variant) has its own hash, so adding a method to `Host`, adding a
 //! hook or adding a field to a type mods cannot build changes no existing record's hash. A
-//! container's hash covers its members only where a new member breaks users: the fields of a
-//! `constructible` struct, the variants of an exhaustive enum, the required methods of a trait
-//! mods implement. A trait's supertrait bounds and their references are in its hash only when
-//! mods implement it (role `implement`): a trait mods only call is its method set, so gaining or
-//! losing a supertrait (a sub-host trait of `Host`) changes no existing record's hash, and a
-//! method that goes shows as that method removed. A hook's hash covers what every listener
+//! container's hash covers its members only where a new member breaks users: the variants of an
+//! exhaustive enum, the required methods of a trait mods may implement (any role but `call`; a
+//! role the boundary lists cannot tell is `none`, which counts as implementable). Such a
+//! trait's supertrait bounds are in its hash too; a trait mods only call is its method set, so
+//! gaining or losing a supertrait (a sub-host trait of `Host`) changes no existing record's hash,
+//! and a method that goes shows as that method removed. [`Surface::closure`] does not follow a
+//! called trait's supertraits; [`Surface::reach`] does. A hook's hash covers what every listener
 //! relies on (side, kind, scope, cancellable, context, host, owner, whether it has an output),
 //! not its arguments, which are member records, nor its `version`. A struct's field set is never
 //! in its hash; its `fields_hash` says whether a full literal still builds. A type's `impls` are a set, derived and
@@ -263,11 +266,21 @@ fn mentions(ty: &str, name: &str) -> bool {
 
 /// The hash of a struct's field set: each public field's `name: type` in declaration order.
 pub fn fields_hash(fields: &[Field]) -> String {
+    fields_hash_of(
+        fields
+            .iter()
+            .map(|field| (leaf(&field.id), field.contract.ty.as_str())),
+    )
+}
+
+/// [`fields_hash`] of `(name, type)` pairs: the exporter's, over every public field a literal
+/// must name, `#[doc(hidden)]` ones included.
+pub fn fields_hash_of<'a>(fields: impl IntoIterator<Item = (&'a str, &'a str)>) -> String {
     let mut text = String::new();
-    for field in fields {
-        text.push_str(leaf(&field.id));
+    for (name, ty) in fields {
+        text.push_str(name);
         text.push_str(": ");
-        text.push_str(&field.contract.ty);
+        text.push_str(ty);
         text.push('\n');
     }
     shape::digest(&text)
@@ -282,8 +295,9 @@ impl Trait {
         associated: Vec<Associated>,
     ) -> Self {
         // A trait mods only call is its method set: a supertrait it gains or loses shows through
-        // the methods themselves, so its bounds and their references stay out of its hash.
-        let hash = if contract.role == Role::Implement {
+        // the methods themselves, so its bounds and their references stay out of its hash. Any
+        // other role (`none` included, where the boundary lists cannot tell) may be implemented.
+        let hash = if contract.role != Role::Call {
             contract_hash(&contract)
         } else {
             contract_hash(&TraitContract {
@@ -313,18 +327,29 @@ impl Type {
         fields: Vec<Field>,
         variants: Vec<Variant>,
     ) -> Self {
+        // How a type crosses to wasm is its `shape`'s and the build's wasm layout's: a native mod
+        // cannot observe it, so `wire` and `wire_form` stay out of the hash. Whether a struct can
+        // be built with a literal matters only to a mod that builds it, which the fit test judges
+        // from `constructible` itself.
+        let struct_like = matches!(
+            contract.kind,
+            TypeKind::Struct | TypeKind::TupleStruct | TypeKind::UnitStruct | TypeKind::Union
+        );
+        let hash = contract_hash(&TypeContract {
+            wire: false,
+            wire_form: None,
+            constructible: false,
+            non_exhaustive: contract.non_exhaustive && !struct_like,
+            ..contract.clone()
+        });
         Self {
             id: id.into(),
-            hash: contract_hash(&contract),
+            hash,
             doc: doc.into(),
             shape,
             paths: Vec::new(),
             impls: Vec::new(),
-            fields_hash: matches!(
-                contract.kind,
-                TypeKind::Struct | TypeKind::TupleStruct | TypeKind::UnitStruct | TypeKind::Union
-            )
-            .then(|| fields_hash(&fields)),
+            fields_hash: struct_like.then(|| fields_hash(&fields)),
             contract,
             fields,
             variants,
@@ -464,7 +489,21 @@ impl Surface {
     /// references are those of its fields, variants and alias target; a trait's, those of its
     /// supertraits when mods implement it, and none otherwise. Unknown ids are kept and lead nowhere.
     pub fn closure<'a>(&self, ids: impl IntoIterator<Item = &'a str>) -> BTreeSet<String> {
-        let refs = self.refs();
+        self.walk(ids, false)
+    }
+
+    /// [`Surface::closure`], also through the supertraits of traits mods only call: what a mod
+    /// can reach, as when it calls a sub-host trait's method on `&mut dyn ServerHost`.
+    pub fn reach<'a>(&self, ids: impl IntoIterator<Item = &'a str>) -> BTreeSet<String> {
+        self.walk(ids, true)
+    }
+
+    fn walk<'a>(
+        &self,
+        ids: impl IntoIterator<Item = &'a str>,
+        supertraits: bool,
+    ) -> BTreeSet<String> {
+        let refs = self.refs(supertraits);
         let mut out = BTreeSet::new();
         let mut pending: Vec<String> = ids.into_iter().map(str::to_owned).collect();
         while let Some(id) = pending.pop() {
@@ -481,7 +520,7 @@ impl Surface {
     }
 
     /// Each record's direct references, the edges [`Surface::closure`] follows.
-    pub(crate) fn refs(&self) -> BTreeMap<&str, Vec<&str>> {
+    pub(crate) fn refs(&self, supertraits: bool) -> BTreeMap<&str, Vec<&str>> {
         let mut refs: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for hook in &self.hooks {
             refs.insert(
@@ -496,9 +535,9 @@ impl Surface {
             }
         }
         for item in &self.traits {
-            // Only a trait mods implement leads to its supertraits: implementing it means
-            // implementing them.
-            let own = if item.contract.role == Role::Implement {
+            // A trait mods may implement leads to its supertraits: implementing it means
+            // implementing them. A called trait's lead there only with `supertraits`.
+            let own = if supertraits || item.contract.role != Role::Call {
                 item.contract.refs.iter().map(String::as_str).collect()
             } else {
                 Vec::new()
