@@ -630,6 +630,8 @@ impl Surface {
 }
 
 #[cfg(test)]
+mod counterexamples_tests;
+#[cfg(test)]
 mod scan_tests;
 #[cfg(test)]
 mod tests;
