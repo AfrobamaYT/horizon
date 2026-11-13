@@ -16,7 +16,8 @@ in INTEGRATION_TESTS also run their `tests/` integration tests. The job fails wh
 no file in tools/ci/ignored-tests/ lists, when a listed test passes (take it off its file: the lists only
 shrink), and when a listed test no longer exists. A test marked `flaky` there
 may pass or fail; one marked `harness` is a parity harness's step, run by its harness with the
-environment it sets, and is skipped here; one marked `needs` reads an input only its parity harness provides
+environment it sets, and is skipped here, as is one marked `manual` (run by hand, by its parent test, or by the
+workflow its row names); one marked `needs` reads an input only its parity harness provides
 (REFERENCE names the environment variable): without that variable it is refused by name at the start of the
 shard, and with it, it runs and must pass; one marked `gpu` needs a graphics adapter and runs only where
 the runner has a Vulkan driver (an ICD file), and must pass there.
@@ -97,6 +98,10 @@ LISTED = re.compile(r"^(\S+): test$")
 DAILY_TARGET = re.compile(r"^(?:lib|(?:bin|test):[\w-]+)$")
 # Why a test is a daily test (CONTRIBUTING.md "CI tiers"): slower than 2 s, or what it needs.
 DAILY_REASONS = ("slow", "game-boot", "resources", "child-process", "network", "wasm-fixture")
+# Who runs a `manual` row's test, never the daily shards: a person, its parent test (a child process it starts), or
+# a workflow of .github/workflows/ by file name.
+MANUAL_RUNNERS = re.compile(r"^(?:by-hand|subprocess|[\w.-]+\.ya?ml)$")
+WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 ICD_DIRS = ("/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d")
 # The largest tracked Rust file read to check a panic location's line: above every source in the tree (the largest
 # are near 0.7 MB), so a location in any tracked source of any package is reported, while a blob stays bounded.
@@ -211,16 +216,23 @@ def listed_entries():
     rows = []
     for path in sorted(POLICY.glob("*.txt")):
         file = f"{POLICY_PATH}/{path.name}"
-        for number, line in enumerate(path.read_text().splitlines(), 1):
-            line = line.split(" # ", 1)[0].split()
+        for number, text in enumerate(path.read_text().splitlines(), 1):
+            line = text.split(" # ", 1)[0].split()
             if not line or line[0].startswith("#"):
                 continue
-            if line[3:4] == ["daily"]:
+            if line[3:4] == ["manual"]:
+                if (len(line) != 4 or not MANUAL_RUNNERS.match(line[2]) or " # " not in text
+                        or not text.split(" # ", 1)[1].strip()):
+                    sys.exit(f"{file}:{number}: expected `PACKAGE TEST WHO manual # WHY`, WHO `by-hand`, `subprocess` "
+                             "or a workflow file name, and WHY saying why it never runs in the daily shards")
+                if MANUAL_RUNNERS.match(line[2]) and line[2].endswith((".yml", ".yaml")) and not (WORKFLOWS / line[2]).is_file():
+                    sys.exit(f"{file}:{number}: no workflow .github/workflows/{line[2]}")
+            elif line[3:4] == ["daily"]:
                 if len(line) != 5 or not DAILY_TARGET.match(line[2]) or line[4] not in DAILY_REASONS:
                     sys.exit(f"{file}:{number}: expected `PACKAGE TEST TARGET daily REASON`, TARGET `lib`, "
                              f"`bin:NAME` or `test:NAME`, REASON one of {', '.join(DAILY_REASONS)}")
             elif len(line) < 3 or line[3:] not in ([], ["flaky"], ["harness"], ["gpu"], ["needs"], ["needs-plain"]):
-                sys.exit(f"{file}:{number}: expected `PACKAGE TEST REFERENCE [flaky|harness|gpu|needs|needs-plain|daily]`")
+                sys.exit(f"{file}:{number}: expected `PACKAGE TEST REFERENCE [flaky|harness|gpu|needs|needs-plain|daily|manual]`")
             if (line[0], line[1]) in seen:
                 sys.exit(f"{file}:{number}: {line[0]} {line[1]} is already listed in {seen[line[0], line[1]]}; "
                          "a test belongs to one file")
@@ -233,7 +245,7 @@ def listed_entries():
 
 
 def known_failures():
-    """(package, test) -> its mark (None, "flaky", "harness" or "gpu"), from the policy files."""
+    """(package, test) -> its mark (None, "flaky", "harness", "gpu" or "manual"), from the policy files."""
     return {(row.package, row.test): row.mark for row in listed_entries()
             if row.mark not in {"needs", "needs-plain", "daily"}}
 
@@ -885,7 +897,7 @@ def main(shards, report=None):
     known = known_failures()
     inputs = harness_inputs()
     files = {(row.package, row.test): row.file for row in listed_entries()}
-    skipped = {"harness"} if has_vulkan() else {"harness", "gpu"}
+    skipped = {"harness", "manual"} if has_vulkan() else {"harness", "manual", "gpu"}
     if "gpu" in skipped:
         print("no Vulkan driver on this runner: the tests marked `gpu` are skipped")
     problems = []

@@ -139,5 +139,33 @@ class LauncherDailyRows(unittest.TestCase):
 
 
 
+class RowlessIgnores(unittest.TestCase):
+    """An #[ignore]d test no daily shard runs needs a row of some mark; in a shard's own targets it runs anyway."""
+
+    def ignored(self, path, packages, kind, name="slow"):
+        return (path, 7, name, packages, kind, False)
+
+    def test_only_tests_no_shard_runs_need_a_row(self):
+        functions = [self.ignored("crates/horizon-world/src/a.rs", {"horizon-world"}, "lib"),
+                     self.ignored("crates/horizon-client/src/game/b.rs", {"horizon-client", "horizon-client-lib"}, "bin"),
+                     self.ignored("crates/horizon-world/tests/c.rs", {"horizon-world"}, "test"),
+                     self.ignored("crates/horizon-core/src/d.rs", {"horizon-core"}, "lib"),
+                     self.ignored("launcher/src/e.rs", {"horizon-launcher"}, "lib")]
+        problems = check.rowless_problems([], functions)
+        self.assertEqual([problem.split(":", 1)[0] for problem in problems],
+                         ["crates/horizon-world/tests/c.rs", "crates/horizon-core/src/d.rs", "launcher/src/e.rs"])
+        self.assertIn("runs nowhere", problems[0])
+        self.assertIn("manual-PACKAGE.txt", problems[0])
+        rows = [ignored_tests.Row("horizon-world", "it::slow", "by-hand", "manual", "manual-horizon-world.txt"),
+                ignored_tests.Row("horizon-core", "d::slow", "#12", None, "issue-12.txt"),
+                row("horizon-launcher", "e::tests::slow")]
+        self.assertEqual(check.rowless_problems(rows, functions), [])
+
+    def test_where_a_source_file_builds(self):
+        self.assertEqual([check.target_kind("crates/x", path) for path in (
+            "crates/x/src/lib.rs", "crates/x/src/main.rs", "crates/x/src/bin/tool.rs", "crates/x/tests/it.rs",
+            "crates/x/examples/probe.rs", "crates/x/src/a/tests.rs")], ["lib", "bin", "bin", "test", "example", "lib"])
+
+
 if __name__ == "__main__":
     unittest.main()

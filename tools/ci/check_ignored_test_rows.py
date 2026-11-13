@@ -7,6 +7,10 @@ and `needs-plain` fixture rows; neither is a known failure. Every `daily` row mu
 one of its test targets, and some leg of the daily run's matrix must run it: its package's shard, or the `daily-rows`
 leg (tools/ci/ignored_shards.py), so no moved test runs nowhere. Builds nothing.
 
+Every `#[ignore]`d test that no daily shard runs (rowless_problems) has a row of some mark: `daily`, a known
+failure, `needs`, `manual`, ...; otherwise it would run nowhere unseen. In a shard's own targets a rowless
+`#[ignore]` is fine: the shard runs it with `--include-ignored`, and it must pass.
+
 The rows and the source agree both ways (read with tools/ci/rust_tests.py): every function marked
 `#[ignore = "daily"]` in a workspace package's sources has a daily row of that package whose test path ends in its
 name, and every daily row names a function of that name marked so in its package's sources. A source file compiled
@@ -55,8 +59,19 @@ def source_packages():
             for name, (member, _) in ignored_shards.workspace_members().items()}
 
 
-def daily_functions(root=ROOT):
-    """(path, line, function name, packages) of every function marked `#[ignore = "daily"]` in tracked sources."""
+def target_kind(member, path):
+    """The kind of target a member's source file builds into, as a daily row's TARGET begins: `test` (tests/),
+    `bin` (src/main.rs, src/bin/), `example` or `bench`, else `lib`."""
+    inside = path[len(member) + 1:]
+    for prefix, kind in (("tests/", "test"), ("src/bin/", "bin"), ("examples/", "example"), ("benches/", "bench")):
+        if inside.startswith(prefix):
+            return kind
+    return "bin" if inside == "src/main.rs" else "lib"
+
+
+def ignored_functions(root=ROOT):
+    """(path, line, function name, packages, target kind, daily) of every unconditionally `#[ignore]`d test
+    function in the tracked sources of every workspace."""
     owners = source_packages()
     listing = subprocess.run(["git", "ls-files", "-z", "--", "*.rs"], cwd=root, capture_output=True, text=True,
                              check=True)
@@ -66,12 +81,37 @@ def daily_functions(root=ROOT):
         if folder is None:
             continue
         source = (root / path).read_text(errors="replace")
-        if '"daily"' not in source:
+        if "ignore" not in source:
             continue
         for function in rust_tests.functions(source, rust_tests.DAILY_KEEP):
-            if function.is_daily:
-                found.append((path, function.line, function.name, owners[folder]))
+            if function.is_test and function.is_ignored:
+                found.append((path, function.line, function.name, owners[folder], target_kind(folder, path),
+                              function.is_daily))
     return found
+
+
+def daily_functions(root=ROOT):
+    """(path, line, function name, packages) of every function marked `#[ignore = "daily"]` in tracked sources."""
+    return [(path, line, name, packages) for path, line, name, packages, _, daily in ignored_functions(root) if daily]
+
+
+def rowless_problems(rows, functions):
+    """Ignored tests no daily shard runs and no row of any mark names: they run nowhere, and nothing says so.
+
+    A package's shard runs every test of the targets it builds with `--include-ignored`, so there a rowless
+    `#[ignore]` still runs daily and must pass; anywhere else (another package, or a shard package's target its shard
+    does not build) it needs a row. Matched by package and function name."""
+    named = {(row.package, row.test.rsplit("::", 1)[-1]) for row in rows}
+    problems = []
+    for path, line, name, packages, kind, _ in functions:
+        if any(ignored_tests.shard_runs(package, "lib" if kind == "lib" else f"{kind}:") for package in packages):
+            continue
+        if not any((package, name) in named for package in packages):
+            problems.append(f"{path}:{line}: `{name}` is #[ignore]d in {' or '.join(sorted(packages))}, which no daily "
+                            "shard runs, and no row names it, so it runs nowhere: mark it #[ignore = \"daily\"] with its "
+                            f"row to run it daily ({ADD_ROW}), or write a `manual` row in "
+                            "tools/ci/ignored-tests/manual-PACKAGE.txt saying who runs it and why")
+    return problems
 
 
 def source_problems(rows, functions):
@@ -97,9 +137,12 @@ if __name__ == "__main__":
     daily = [row for row in rows if row.mark == "daily"]
     problems = daily_problems(daily, ignored_shards.workspace_targets(),
                               [*ignored_shards.expand(ignored_shards.SHARDS), *ignored_shards.DAILY_ROWS_LEGS.values()])
-    functions = daily_functions()
+    ignored = ignored_functions()
+    functions = [(path, line, name, packages) for path, line, name, packages, _, daily in ignored if daily]
     problems += source_problems(daily, functions)
+    problems += rowless_problems(rows, ignored)
     for problem in problems:
         print(f"::error::{problem}")
-    print(f"{len(daily)} daily rows, {len(functions)} #[ignore = \"daily\"] functions; {len(problems)} problems")
+    print(f"{len(daily)} daily rows, {len(functions)} #[ignore = \"daily\"] functions, {len(ignored)} ignored tests; "
+          f"{len(problems)} problems")
     sys.exit(1 if problems else 0)
