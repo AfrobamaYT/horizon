@@ -742,6 +742,8 @@
   "horizon.agent.connected.one_ago": "Connected: 1 agent connection, last command %s s ago",
   "horizon.agent.connected.many_ago": "Connected: %s agent connections, last command %s s ago",
   "horizon.agent.waiting": "Waiting for an agent.",
+  "horizon.attribute.modifier.disabled": "%s: Disabled",
+  "horizon.attribute.modifier.enabled": "%s: Enabled",
   "horizon.agent.off": "Off: agents can't reach this game.",
   "horizon.agent.session_opened": "Opened for this session by the program that started the game.",
   "horizon.agent.socket": "Socket: %s (copy the details for its full path)",

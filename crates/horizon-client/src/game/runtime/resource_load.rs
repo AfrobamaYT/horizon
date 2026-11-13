@@ -428,10 +428,30 @@ pub(super) fn with_mod_attributes(
                 )
                 .map_err(|error| format!("mod attribute {}: {error}", declared.id))?,
                 syncable: declared.syncable,
-                sentiment: match declared.sentiment {
-                    mod_api::Sentiment::Positive => horizon_world::attributes::Sentiment::Positive,
-                    mod_api::Sentiment::Negative => horizon_world::attributes::Sentiment::Negative,
-                    mod_api::Sentiment::Neutral => horizon_world::attributes::Sentiment::Neutral,
+                tooltip: horizon_world::attributes::Tooltip {
+                    sentiment: match declared.sentiment {
+                        mod_api::Sentiment::Positive => {
+                            horizon_world::attributes::Sentiment::Positive
+                        }
+                        mod_api::Sentiment::Negative => {
+                            horizon_world::attributes::Sentiment::Negative
+                        }
+                        mod_api::Sentiment::Neutral => {
+                            horizon_world::attributes::Sentiment::Neutral
+                        }
+                    },
+                    display: match declared.tooltip.display {
+                        mod_api::AttributeDisplay::Ranged => {
+                            horizon_world::attributes::Display::Ranged
+                        }
+                        mod_api::AttributeDisplay::Percentage => {
+                            horizon_world::attributes::Display::Percentage
+                        }
+                        mod_api::AttributeDisplay::Boolean => {
+                            horizon_world::attributes::Display::Boolean
+                        }
+                    },
+                    base_modifier: declared.tooltip.base_modifier.clone(),
                 },
             })
         })
