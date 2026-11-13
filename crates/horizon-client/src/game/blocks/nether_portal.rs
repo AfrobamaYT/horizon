@@ -19,6 +19,7 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
+use horizon_world::level::flags as level_flags;
 use std::collections::HashMap;
 use {
     horizon_core::nbt::Tag,
