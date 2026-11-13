@@ -2,6 +2,8 @@
 # where it must pass (README.md). Rows: PACKAGE TEST TARGET daily REASON, sorted; tools/ci/move_to_daily.py writes them.
 horizon-mod-api-gen a_malformed_note_or_surface_is_refused_by_name test:surface_diff daily child-process
 horizon-mod-api-gen a_new_note_naming_an_unchanged_id_fails_and_an_old_or_edited_one_is_ignored test:surface_diff daily child-process
+horizon-mod-api-gen a_parse_that_overflows_ends_the_child_and_names_the_file test:scan_child daily child-process
+horizon-mod-api-gen a_program_that_is_not_a_scans_child_is_stopped test:scan_child daily child-process
 horizon-mod-api-gen build::listed_render_slots_have_eligible_points lib daily slow
 horizon-mod-api-gen crossing::tests::a_stale_crossing_foreign_path_fails_with_its_name lib daily slow
 horizon-mod-api-gen crossing::tests::checked_in_foreign_layouts_match_the_locked_source lib daily slow
@@ -19,6 +21,7 @@ horizon-mod-api-gen dispatch::tests::settings_boundary_owns_and_caches_values li
 horizon-mod-api-gen dispatch::writeback_tests::untouched_writeback_runtime_and_mutants lib daily slow
 horizon-mod-api-gen game_modules::tests::existing_game_exports_keep_their_visibility lib daily slow
 horizon-mod-api-gen hook_targets::tests::every_catalog_target_resolves_and_missing_function_is_rejected lib daily slow
+horizon-mod-api-gen horizon_stage_scans_through_its_child test:scan_child daily child-process
 horizon-mod-api-gen host::state_write_tests::boolean_state_writes_refuse_before_mutation_without_changing_the_bool_contract lib daily child-process
 horizon-mod-api-gen internals::tests::discovery_keeps_the_catalog_and_normal_output_and_reports_compiler_uses lib daily child-process
 horizon-mod-api-gen internals::tests::listed_function_module_helpers_compile_from_outside lib daily child-process
@@ -41,6 +44,7 @@ horizon-mod-api-gen surface::tests::the_real_tree_exports lib daily slow
 horizon-mod-api-gen tests::fragment_hooks_generate lib daily slow
 horizon-mod-api-gen tests::new_hook_placeholder_is_reported_then_filled lib daily slow
 horizon-mod-api-gen tests::only_a_game_hooks_placeholder_body_is_filled lib daily child-process
+horizon-mod-api-gen the_child_refuses_input_that_is_not_a_scans test:scan_child daily child-process
 horizon-mod-api-gen the_gate_fails_an_undeclared_break_and_passes_a_declared_one test:surface_diff daily child-process
 horizon-mod-api-gen the_json_report_is_written test:surface_diff daily child-process
 horizon-mod-api-gen wire::append::tests::append_shape_requires_public_untransformed_typed_pushes lib daily slow
