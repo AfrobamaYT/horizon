@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -38,15 +39,35 @@ def failure(test, panic="crates/horizon-world/src/lib.rs:7:3", kind="failed", pa
 class Api:
     """GitHub's REST API as the summary sees it: listings by page, and every write recorded."""
 
-    def __init__(self, jobs, issues=(), tag=False, fail_on=None):
+    def __init__(self, jobs, issues=(), tag=False, fail_on=None, comments=None, runs=None):
         self.jobs, self.issues, self.tag, self.fail_on, self.writes = jobs, list(issues), tag, fail_on, []
+        self.comments = comments if comments is not None else {}
+        self.runs = runs or {}
 
     def __call__(self, method, path, body=None):
         if self.fail_on and self.fail_on in path:
             raise SystemExit("::error::GitHub refused GET: HTTP 403 (rate limit exhausted)")
         if method != "GET":
             self.writes.append((method, path, body))
+            if path.endswith("/comments"):
+                self.comments.setdefault(int(path.split("/")[1]), []).append(body["body"])
+            elif path == "issues":
+                self.issues.append({"number": 1000 + len(self.issues), "title": body["title"], "body": body["body"]})
             return {}
+        if "matching-refs" in path:
+            return [{"ref": "refs/tags/daily-green"}] if self.tag else []
+        if re.fullmatch(r"issues/\d+", path):
+            number = int(path.split("/")[1])
+            return {"body": None, **next(issue for issue in self.issues if issue["number"] == number)}
+        if "workflows/daily.yml/runs" in path:
+            return {"workflow_runs": list(self.runs.values())} if path.endswith("page=1") else {"workflow_runs": []}
+        if re.search(r"actions/runs/(\d+)/jobs", path) and "/runs/77/" not in path:
+            ident = int(re.search(r"actions/runs/(\d+)/jobs", path)[1])
+            return {"jobs": self.runs[ident]["jobs"]} if path.endswith("page=1") else {"jobs": []}
+        page = int(path.rsplit("page=", 1)[1])
+        if re.fullmatch(r"issues/\d+/comments\?per_page=100&page=\d+", path):
+            found = self.comments.get(int(path.split("/")[1]), [])
+            return [{"body": text} for text in found[(page - 1) * 100:page * 100]]
         if "matching-refs" in path:
             return [{"ref": "refs/tags/daily-green"}] if self.tag else []
         page = int(path.rsplit("page=", 1)[1])
@@ -138,7 +159,7 @@ class DailySummaryTests(unittest.TestCase):
     def test_an_open_issue_gets_a_comment_not_a_duplicate(self):
         jobs = [job("shards / ignored-tests-shards (horizon-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
         issues = [{"number": n, "title": f"filler {n}"} for n in range(150)]
-        issues.append({"number": 900, "title": "Daily: horizon-world game::x::tests::broken"})
+        issues.append({"number": 900, "title": "Daily: horizon-world game::x::tests::broken", "body": "> filed"})
         api = Api(jobs, issues=issues)
         self.run_summary(api, [shard_report([failure("game::x::tests::broken")])],
                          results=dict(LEGS, shards={"result": "failure"}))
@@ -176,6 +197,57 @@ class DailySummaryTests(unittest.TestCase):
         titles = [body["title"] for _, path, body in api.writes if path == "issues"]
         self.assertEqual(titles, ["Daily: horizon-client game::wasm::wasm_interaction_shared_matrix"])
 
+    def test_a_second_invocation_for_one_run_posts_nothing_twice(self):
+        jobs = [job("shards / ignored-tests-shards (horizon-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
+        red = dict(LEGS, shards={"result": "failure"})
+        issues = [{"number": 900, "title": "Daily: horizon-world old::red", "body": "> filed earlier"},
+                  {"number": 901, "title": "Daily: horizon-world was::red", "body": "> filed earlier"}]
+        report = shard_report([failure("old::red"), failure("new::red")],
+                              passed=[{"package": "horizon-world", "test": "was::red"}])
+        api = Api(jobs, issues=issues)
+        self.run_summary(api, [report], results=red)
+        first = list(api.writes)
+        self.assertEqual(sorted((m, p) for m, p, _ in first),
+                         [("PATCH", "issues/901"), ("POST", "issues"), ("POST", "issues/900/comments"),
+                          ("POST", "issues/901/comments")])
+        api.writes.clear()
+        # The rerun sees the issue it filed (its body names this run) and the comments it posted.
+        self.run_summary(api, [report], results=red)
+        self.assertEqual([(m, p) for m, p, _ in api.writes], [("PATCH", "issues/901")],
+                         "only the idempotent close is repeated")
+
+    def test_a_partial_first_application_completes_on_the_second(self):
+        jobs = [job("shards / ignored-tests-shards (horizon-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
+        run_url = "https://github.com/arismoko/horizon/actions/runs/77"
+        # The first attempt filed the new issue, then stopped before commenting on the old one.
+        issues = [{"number": 900, "title": "Daily: horizon-world old::red", "body": "> filed earlier"},
+                  {"number": 950, "title": "Daily: horizon-world new::red", "body": f"> filed\nFirst: {run_url}"}]
+        api = Api(jobs, issues=issues)
+        self.run_summary(api, [shard_report([failure("old::red"), failure("new::red")])],
+                         results=dict(LEGS, shards={"result": "failure"}))
+        self.assertEqual([(m, p) for m, p, _ in api.writes], [("POST", "issues/900/comments")])
+
+    def test_an_unknown_job_or_a_leg_with_no_job_is_red(self):
+        for jobs, title in (
+                (GREEN_JOBS + [job("surprise / something")], "Daily: surprise / something did not complete"),
+                ([j for j in GREEN_JOBS if not j["name"].startswith("linkage")], "Daily: linkage did not complete")):
+            with self.subTest(title=title):
+                api = Api(jobs)
+                _, out = self.run_summary(api, [shard_report()])
+                self.assertIn("green=false", out, "never silently green")
+                self.assertEqual([body["title"] for _, path, body in api.writes if path == "issues"], [title])
+                self.assertIn("did not report", api.writes[0][2]["body"])
+
+    def test_seen_finds_a_completed_real_run_by_its_summary_job(self):
+        sha = "e" * 40
+        runs = {5: {"id": 5, "conclusion": "failure", "html_url": "u5", "jobs": [job(f"summary {sha}", "failure")]},
+                6: {"id": 6, "conclusion": "success", "html_url": "u6", "jobs": [job(f"summary {sha} (dry run)")]},
+                7: {"id": 7, "conclusion": "cancelled", "html_url": "u7", "jobs": [job(f"summary {sha}")]}}
+        with mock.patch.dict(os.environ, {"GITHUB_RUN_ID": "77", "GITHUB_REPOSITORY": "arismoko/horizon"}):
+            self.assertEqual(summary.seen(sha, Api([], runs=runs)), "u5", "a failed real run counts")
+            del runs[5]
+            self.assertEqual(summary.seen(sha, Api([], runs=runs)), "", "dry and cancelled runs do not")
+
     def test_nothing_is_written_off_main_or_in_a_dry_run(self):
         jobs = [job("shards / ignored-tests-shards (horizon-world)", "failure", ["Run"])] + GREEN_JOBS[2:]
         for ref, dry_run in (("refs/heads/hotspots-daily", "false"), ("refs/heads/main", "true")):
@@ -205,7 +277,11 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertEqual(self.workflow["on"]["schedule"], [{"cron": "0 9 * * *"}])
         self.assertIn("github.event_name == 'schedule'", jobs["schedule-dispatch"]["if"])
         self.assertEqual(jobs["schedule-dispatch"]["runs-on"], "ubuntu-latest")
-        self.assertIn("--ref main -f dry_run=false", jobs["schedule-dispatch"]["steps"][0]["run"])
+        self.assertIn("--ref main -f dry_run=false -f scheduled=true", jobs["schedule-dispatch"]["steps"][0]["run"])
+        resolve = jobs["resolve"]["steps"][-1]
+        self.assertIn('if [ "$SCHEDULED" = true ] && [ "$DRY_RUN" != true ]', resolve["run"],
+                      "only the schedule stops on a commit already tested; a hand dispatch retries")
+        self.assertEqual(self.workflow["on"]["workflow_dispatch"]["inputs"]["scheduled"]["default"], "false")
         self.assertEqual(jobs["resolve"]["if"], "github.event_name == 'workflow_dispatch'")
         self.assertEqual(self.workflow["on"]["workflow_dispatch"]["inputs"]["dry_run"]["default"], "true")
 
@@ -218,6 +294,8 @@ class DailyWorkflowTests(unittest.TestCase):
                          "needs.summary.outputs.green == 'true' && needs.resolve.outputs.dry_run == 'false'")
         self.assertEqual(self.workflow["concurrency"]["cancel-in-progress"], "false")
         self.assertEqual(jobs["sdk"]["with"]["publish"], "${{ needs.resolve.outputs.dry_run == 'false' }}")
+        self.assertEqual(jobs["nightly"]["with"]["daily"], "true")
+        self.assertTrue(jobs["summary"]["name"].startswith("summary ${{ needs.resolve.outputs.commit }}"))
 
     def test_every_leg_is_a_called_workflow_with_the_commit(self):
         jobs = self.workflow["jobs"]

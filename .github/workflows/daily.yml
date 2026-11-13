@@ -22,11 +22,16 @@ on:
         description: Print the tag move, issues and nightly the run would make; write nothing
         type: boolean
         default: true
+      scheduled:
+        description: Set by the schedule only; stop when this commit already has a completed real daily run
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
-  # One daily run at a time; a dispatch while one runs waits and never cancels it. The scheduled event only
-  # dispatches (below), so it never queues in this group.
+  # One daily run runs and at most one waits; a newer waiting dispatch replaces an older waiting one (GitHub keeps one
+  # pending run per group), and a running one is never cancelled. The scheduled event only dispatches (below), so it
+  # never waits in this group.
   group: daily${{ github.event_name == 'schedule' && format('-schedule-{0}', github.run_id) || '' }}
   cancel-in-progress: false
 env:
@@ -43,9 +48,10 @@ jobs:
     steps:
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run daily.yml --repo "$GITHUB_REPOSITORY" --ref main -f dry_run=false
+        run: gh workflow run daily.yml --repo "$GITHUB_REPOSITORY" --ref main -f dry_run=false -f scheduled=true
 
-  # The commit, and whether it already has a finished real daily run (then this one stops).
+  # The commit, resolved to its full SHA, and for a scheduled run whether that commit already has a completed real
+  # daily run (then this one stops). A hand dispatch never stops here: it is how a failed run is retried.
   resolve:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -68,16 +74,17 @@ jobs:
           COMMIT: ${{ inputs.commit || github.sha }}
           # Only main writes: a run on any other ref is a dry run whatever its input says.
           DRY_RUN: ${{ inputs.dry_run || github.ref != 'refs/heads/main' }}
+          SCHEDULED: ${{ inputs.scheduled }}
         run: |
+          # A branch, tag or short SHA becomes the full SHA here; every later job and the run's summary job name use it.
           sha=$(git rev-parse --verify --quiet "$COMMIT^{commit}") || { echo "::error::$COMMIT is not a commit of this repository"; exit 1; }
           skip=false
-          if [ "$DRY_RUN" != true ]; then
-            # A finished (not cancelled) real daily run of this commit: its title is `daily <sha>`.
-            done=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows/daily.yml/runs?status=completed&per_page=100" \
-              --jq ".workflow_runs[] | select(.id != $GITHUB_RUN_ID and .display_title == \"daily $sha\" and (.conclusion == \"success\" or .conclusion == \"failure\")) | .html_url" | head -1)
+          if [ "$SCHEDULED" = true ] && [ "$DRY_RUN" != true ]; then
+            # A completed real daily run of this commit: its summary job is named `summary <full sha>`.
+            done=$(python3 tools/ci/daily_summary.py --seen "$sha")
             if [ -n "$done" ]; then
               skip=true
-              echo "### $sha already has a finished daily run: $done" >> "$GITHUB_STEP_SUMMARY"
+              echo "### $sha already has a completed daily run: $done" >> "$GITHUB_STEP_SUMMARY"
             fi
           fi
           { echo "commit=$sha"; echo "skip=$skip"; echo "dry_run=$DRY_RUN"; } >> "$GITHUB_OUTPUT"
@@ -120,6 +127,8 @@ jobs:
 
   # Reads every leg's result and verdict file (never a log) and moves `daily-green` or files the issues.
   summary:
+    # The resolved commit names the job: what a scheduled run's lookup (daily_summary.py --seen) matches.
+    name: summary ${{ needs.resolve.outputs.commit }}${{ needs.resolve.outputs.dry_run == 'true' && ' (dry run)' || '' }}
     needs: [resolve, shards, wasm-mods, fn-replace-check, linkage, sdk]
     if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip == 'false'
     runs-on: ubuntu-latest
@@ -164,3 +173,4 @@ jobs:
       kind: nightly
       commit: ${{ needs.resolve.outputs.commit }}
       dry_run: false
+      daily: true

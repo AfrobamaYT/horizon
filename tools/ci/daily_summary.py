@@ -9,6 +9,9 @@ files (tools/ci/ignored_tests.py --report: test identity, kind, panic location, 
 - a leg that failed without a test name (build error, timeout, killed, cancelled, skipped, or a leg with no
   sanitised verdict): one issue per leg, `Daily: <leg> did not complete`, naming the failed steps;
 - a test (or leg) green again: closes its open issue with a comment.
+A job it does not know, or an expected leg with no job, is a red leg ("did not report"), never green. Each comment
+names this run's URL, and none is posted twice for one run (a rerun of failed jobs, or a retry after a partial
+write, completes what is missing). `daily_summary.py --seen SHA` prints a completed real daily run of SHA, if any.
 Only a run on refs/heads/main with DRY_RUN=false writes; otherwise it prints what it would do to the job summary.
 Lookups come first and fail the job on any API error (a rate limit included), so a failed lookup never files
 duplicates.
@@ -17,6 +20,7 @@ Environment: GITHUB_REPOSITORY, GITHUB_RUN_ID, GITHUB_REF, GITHUB_SERVER_URL, GH
 RESULTS (toJSON(needs)), REPORTS (the downloaded daily-report-* artifacts), GITHUB_STEP_SUMMARY, GITHUB_OUTPUT.
 """
 
+import datetime as dt
 import json
 import os
 import re
@@ -100,6 +104,12 @@ def report_for(job, reports):
     return None
 
 
+def known(name):
+    """daily.yml's own jobs and its legs' jobs; any other job is one the summary cannot judge."""
+    return (name in ("resolve", "schedule-dispatch") or name.startswith(("summary ", "nightly / "))
+            or name.split(" / ", 1)[0] in LEGS and " / " in name)
+
+
 def named(problem):
     return not problem["test"].startswith("identity withheld")
 
@@ -132,10 +142,14 @@ def verdicts(jobs, reports, results):
             tests += by_name
         else:
             unfinished.append((job["name"], job["conclusion"], steps, "failed at the steps named"))
+    for job in jobs:
+        if not known(job["name"]):
+            unfinished.append((job["name"], job["conclusion"], [], "did not report: a job the summary does not know"))
     seen = {job["name"].split(" / ", 1)[0] for job in leg_jobs(jobs)}
     for leg in LEGS:
-        if results.get(leg, {}).get("result") != "success" and leg not in seen:
-            unfinished.append((leg, results.get(leg, {}).get("result", "missing"), [], "no job of this leg ran"))
+        if leg not in seen:
+            unfinished.append((leg, results.get(leg, {}).get("result", "missing"), [],
+                               "did not report: no job of this leg ran, or its jobs are named differently"))
     green = (all(results.get(leg, {}).get("result") == "success" for leg in LEGS)
              and all(job_green(job) for job in leg_jobs(jobs)) and not tests and not unfinished)
     failing = {(item["package"], item["test"]) for item in tests}
@@ -237,7 +251,13 @@ def render(actions, writes):
     return "\n".join(lines) + "\n"
 
 
-def apply(actions, call):
+def already_said(number, run_url, call):
+    """Whether issue `number` already names this run (its body, or one of its comments)."""
+    return run_url in (call("GET", f"issues/{number}")["body"] or "") or any(
+        run_url in (comment["body"] or "") for comment in pages(call, f"issues/{number}/comments"))
+
+
+def apply(actions, call, run_url):
     for action in actions:
         if action[0] == "tag":
             # Force-update the one tag; create it the first time.
@@ -248,9 +268,11 @@ def apply(actions, call):
         elif action[0] == "create":
             call("POST", "issues", {"title": action[1], "body": action[2], "labels": [LABEL]})
         elif action[0] == "comment":
-            call("POST", f"issues/{action[1]}/comments", {"body": action[3]})
+            if not already_said(action[1], run_url, call):
+                call("POST", f"issues/{action[1]}/comments", {"body": action[3]})
         else:
-            call("POST", f"issues/{action[1]}/comments", {"body": action[3]})
+            if not already_said(action[1], run_url, call):
+                call("POST", f"issues/{action[1]}/comments", {"body": action[3]})
             call("PATCH", f"issues/{action[1]}", {"state": "closed", "state_reason": "completed"})
 
 
@@ -283,9 +305,26 @@ def main(call=api, run_git=git):
         with open(env["GITHUB_OUTPUT"], "a") as out:
             out.write(f"green={str(green).lower()}\n")
     if writes:
-        apply(actions, call)
+        apply(actions, call, run_url)
     return 0
 
 
+def seen(sha, call=api):
+    """The URL of a completed real daily run of sha (its summary job, named `summary <sha>`, finished), or ""."""
+    current = int(os.environ["GITHUB_RUN_ID"])
+    # The schedule asks about main's head, so a run of it is recent: look back two weeks, not at all history.
+    since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=14)).date().isoformat()
+    for run in pages(call, f"actions/workflows/daily.yml/runs?status=completed&created=%3E%3D{since}", "workflow_runs"):
+        if run["id"] == current or run["conclusion"] not in ("success", "failure"):
+            continue
+        if any(job["name"] == f"summary {sha}" and job["conclusion"] in ("success", "failure")
+               for job in pages(call, f"actions/runs/{run['id']}/jobs?filter=latest", "jobs")):
+            return run["html_url"]
+    return ""
+
+
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--seen"]:
+        print(seen(sys.argv[2]))
+        sys.exit(0)
     sys.exit(main())
