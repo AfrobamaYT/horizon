@@ -381,7 +381,32 @@ struct FileFacts<'t> {
 /// An `impl` or `trait` body: its token range, its target's last name and the whole path.
 type Body<'t> = (usize, usize, &'t str, Vec<&'t str>);
 
-fn file_facts(text: &str) -> FileFacts<'_> {
+/// The deepest nesting of `use` groups the scan reads: `use a::{b::{c}}` nests 2.
+pub const MAX_USE_NESTING: usize = 64;
+
+/// Why a mod's source cannot be judged.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScanError {
+    /// A `use` statement nests its groups deeper than [`MAX_USE_NESTING`], at this line of
+    /// this file.
+    UseTooDeep { file: String, line: usize },
+}
+
+impl std::fmt::Display for ScanError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UseTooDeep { file, line } => write!(
+                f,
+                "{file}:{line}: a `use` statement nests its groups deeper than {MAX_USE_NESTING}; the mod's source cannot be judged"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ScanError {}
+
+/// A file's facts, or the line of a `use` statement nested deeper than [`MAX_USE_NESTING`].
+fn file_facts(text: &str) -> Result<FileFacts<'_>, usize> {
     let tokens: Vec<(Token<'_>, usize)> = scan::tokens(text).collect();
     let mut in_use = vec![false; tokens.len()];
     let mut imports = Vec::new();
@@ -396,6 +421,18 @@ fn file_facts(text: &str) -> FileFacts<'_> {
                     .find(|i| punct(&tokens, *i, b';'))
                     .unwrap_or(tokens.len());
                 in_use[at..end].iter_mut().for_each(|t| *t = true);
+                // [`use_tree`] recurses once per group: bound it before it reads one.
+                let mut nesting = 0usize;
+                for (token, _) in &tokens[at..end] {
+                    match token {
+                        Token::Punct(b'{') => nesting += 1,
+                        Token::Punct(b'}') => nesting = nesting.saturating_sub(1),
+                        _ => {}
+                    }
+                    if nesting > MAX_USE_NESTING {
+                        return Err(tokens[at].1);
+                    }
+                }
                 let mut start = at + 1;
                 while start < end {
                     if punct(&tokens, start, b':') {
@@ -517,7 +554,7 @@ fn file_facts(text: &str) -> FileFacts<'_> {
             _ => {}
         }
     }
-    FileFacts {
+    Ok(FileFacts {
         tokens,
         in_use,
         imports,
@@ -526,7 +563,7 @@ fn file_facts(text: &str) -> FileFacts<'_> {
         bodies,
         defines,
         inline_modules,
-    }
+    })
 }
 
 /// What the whole mod says that each name resolves through.
@@ -725,12 +762,12 @@ fn constructor_value(tokens: &Tokens<'_>, at: usize) -> bool {
 }
 
 /// The records `sources` (each a path and its Rust text) and `manifest` bring in, with
-/// everything their signatures reference.
+/// everything their signatures reference; [`ScanError`] when the source cannot be judged.
 pub fn uses<P: AsRef<str>, T: AsRef<str>>(
     sources: impl IntoIterator<Item = (P, T)>,
     manifest: &ManifestFacts,
     surface: &Surface,
-) -> Uses {
+) -> Result<Uses, ScanError> {
     let hashes: BTreeMap<&str, &str> = surface.entries().collect();
     let types: BTreeMap<&str, &Type> = surface.types.iter().map(|t| (t.id.as_str(), t)).collect();
     let roles: BTreeMap<&str, Role> = surface
@@ -771,7 +808,15 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
         .into_iter()
         .map(|(p, t)| (p.as_ref().to_owned(), t.as_ref().to_owned()))
         .collect();
-    let files: Vec<FileFacts<'_>> = sources.iter().map(|(_, text)| file_facts(text)).collect();
+    let files: Vec<FileFacts<'_>> = sources
+        .iter()
+        .map(|(file, text)| {
+            file_facts(text).map_err(|line| ScanError::UseTooDeep {
+                file: file.clone(),
+                line,
+            })
+        })
+        .collect::<Result<_, _>>()?;
     let module = mod_facts(&files);
     // Whether a `type` alias target may be an API item: an API name, or an alias of the mod's
     // that may lead to one. Unsure is the API's.
@@ -1176,7 +1221,7 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
 
     let at = |(file, line): &Place| format!("{file}:{line}");
     let hook_versions = &manifest.hook_versions;
-    Uses {
+    Ok(Uses {
         items: origins
             .into_iter()
             .map(|(id, origin)| {
@@ -1243,7 +1288,7 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                 }
             })
             .collect(),
-    }
+    })
 }
 
 /// How a used item differs in the target build.

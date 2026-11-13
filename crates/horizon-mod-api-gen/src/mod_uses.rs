@@ -369,6 +369,15 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_deep_folder_tree_is_read_without_recursion() {
+        let dir = tempfile::tempdir().unwrap();
+        let deep = "m/".repeat(200);
+        write(dir.path(), &format!("src/{deep}x.rs"), "x");
+        let input = read(dir.path()).unwrap();
+        assert_eq!(input.sources, [(format!("src/{deep}x.rs"), "x".to_owned())]);
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_symbolic_link_cannot_be_judged() {

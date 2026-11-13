@@ -368,6 +368,7 @@ fn scan_on(pieces: Pieces, source: &str) -> Uses {
         &manifest(&["registries"]),
         &pieces.build(),
     )
+    .unwrap()
 }
 
 fn scan(source: &str) -> Uses {
@@ -470,7 +471,7 @@ fn the_list_is_what_the_source_and_manifest_name_and_what_their_signatures_reach
 #[test]
 fn the_first_place_is_the_first_file_then_line_whatever_the_order_given() {
     let sources = [("src/b.rs", "\n\nInventory"), ("src/a.rs", "\nInventory")];
-    let uses = uses(sources, &ManifestFacts::default(), &base().build());
+    let uses = uses(sources, &ManifestFacts::default(), &base().build()).unwrap();
     assert_eq!(
         uses.items[0].origin,
         Origin::Source {
@@ -586,11 +587,11 @@ fn a_hook_version_counts_only_when_the_manifest_names_one() {
     target.hooks[0].contract.version = 2;
     let version_two = target.build();
     let source = [("src/lib.rs", MOD)];
-    let plain = uses(source, &manifest(&["registries"]), &base().build());
+    let plain = uses(source, &manifest(&["registries"]), &base().build()).unwrap();
     assert_eq!(fits(plain.entries(), &version_two), Fit::Fits);
     let mut facts = manifest(&["registries"]);
     facts.hook_versions.insert("player_logged_in".into(), 1);
-    let pinned = uses(source, &facts, &base().build());
+    let pinned = uses(source, &facts, &base().build()).unwrap();
     assert_eq!(entry(&pinned, "hook:player_logged_in").version, Some(1));
     assert_eq!(
         words(fits(pinned.entries(), &version_two)),
@@ -871,8 +872,8 @@ fn the_list_does_not_depend_on_the_order_of_sources() {
     let a = ("src/a.rs", "use mod_api::ServerHost;");
     let b = ("src/b.rs", "fn f(e: PlayerLoggedInEvent) {}");
     let surface = base().build();
-    let one = uses([a, b], &manifest(&["registries"]), &surface);
-    let two = uses([b, a], &manifest(&["registries"]), &surface);
+    let one = uses([a, b], &manifest(&["registries"]), &surface).unwrap();
+    let two = uses([b, a], &manifest(&["registries"]), &surface).unwrap();
     assert_eq!(one, two);
     assert_eq!(one.table("abc").to_json(), two.table("abc").to_json());
 }
@@ -1114,7 +1115,14 @@ fn full_builds_by_another_name_are_full() {
         ),
         full
     );
-    // The mod's own struct is placed.
+    // The mod's own struct, or its own enum's variant, is placed.
+    assert_eq!(
+        built(
+            "enum Kind { Custom { a: u8 } }\nuse Kind::Custom;\nfn f(s: Settings) { let k = Custom { a: 1 }; }",
+            "type:Settings"
+        ),
+        Some(Built::None)
+    );
     assert_eq!(
         built(
             "struct Wrapper { a: u8 }\nfn f(s: Settings) { let w = Wrapper { a: 1 }; }",
@@ -1274,7 +1282,7 @@ fn a_sub_host_trait_leaving_the_host_the_mod_calls_through_is_named() {
 }
 
 fn scan_files(pieces: Pieces, files: &[(&str, &str)]) -> Uses {
-    uses(files.iter().copied(), &manifest(&[]), &pieces.build())
+    uses(files.iter().copied(), &manifest(&[]), &pieces.build()).unwrap()
 }
 
 fn built_in(files: &[(&str, &str)], id: &str) -> Option<Built> {
@@ -1613,6 +1621,7 @@ fn a_type_alias_of_an_api_struct_is_not_the_mods_own() {
         "use crate::types::DimensionSettings;\nfn f() -> DimensionSettings {{ {DIMS_LITERAL} }}"
     );
     refused_for_the_new_field(fits_a_new_dims_field(&[
+        ("src/lib.rs", "mod types;\nmod world;"),
         (
             "src/types.rs",
             "pub type DimensionSettings = mod_api::DimensionSettings;",
@@ -1698,7 +1707,11 @@ fn a_path_inside_the_mod_to_an_imported_api_struct_is_the_apis() {
         "struct Mine { a: u8 }\nimpl It for X { type DimensionSettings = Mine; }",
     );
     let through = format!("use crate::a::DimensionSettings;\nfn f() {{ let d = {DIMS_LITERAL}; }}");
-    refused_for_the_new_field(fits_a_new_dims_field(&[associated, ("src/b.rs", &through)]));
+    refused_for_the_new_field(fits_a_new_dims_field(&[
+        ("src/lib.rs", "mod a;\nmod b;"),
+        associated,
+        ("src/b.rs", &through),
+    ]));
     // An import from a path that does not start inside the mod may be the API's.
     let relative = format!("use world::DimensionSettings;\nfn f() {{ let d = {DIMS_LITERAL}; }}");
     refused_for_the_new_field(fits_a_new_dims_field(&[own, ("src/b.rs", &relative)]));
@@ -1854,4 +1867,55 @@ fn self_in_an_impl_for_a_qualified_api_struct_is_the_apis() {
     // `Self` in an impl for the file's own struct stays its own.
     let own = "struct DimensionSettings { mine: u8 }\nimpl DimensionSettings { fn new() -> Self { Self { mine: 1 } } }";
     assert_eq!(fits_a_new_dims_field(&[("src/lib.rs", own)]), Fit::Fits);
+}
+
+#[test]
+fn a_use_statement_nested_too_deep_cannot_be_judged() {
+    let nested = |depth: usize| {
+        format!(
+            "use mod_api::{}Settings{};\nfn f(s: Settings) {{}}",
+            "a::{".repeat(depth),
+            "}".repeat(depth)
+        )
+    };
+    let surface = wider().build();
+    let at_limit = uses(
+        [("src/lib.rs", nested(MAX_USE_NESTING))],
+        &manifest(&[]),
+        &surface,
+    );
+    assert!(at_limit.is_ok());
+    let deep = uses([("src/lib.rs", nested(100_000))], &manifest(&[]), &surface);
+    assert_eq!(
+        deep.unwrap_err().to_string(),
+        "src/lib.rs:1: a `use` statement nests its groups deeper than 64; the mod's source cannot be judged"
+    );
+}
+
+#[test]
+fn deeply_nested_brackets_and_comments_scan_without_recursion() {
+    // A literal whose field value nests 100 000 brackets, a macro body as deep, and as many nested
+    // block comments: every walk over them is a loop, so each scans to its end.
+    let depth = 100_000;
+    let literal = format!(
+        "fn f() {{ let s = Settings {{ height: {}1{} }}; }}",
+        "(".repeat(depth),
+        ")".repeat(depth)
+    );
+    assert_eq!(
+        entry(&scan_on(wider(), &literal), "type:Settings").built,
+        Some(Built::Full)
+    );
+    let macro_body = format!(
+        "macro_rules! m {{ () => {{ {}Settings{} }} }}",
+        "{[".repeat(depth),
+        "]}".repeat(depth)
+    );
+    assert!(ids(&scan_on(wider(), &macro_body)).contains(&"type:Settings"));
+    let comments = format!(
+        "{}{}\nfn f(s: Settings) {{}}",
+        "/*".repeat(depth),
+        "*/".repeat(depth)
+    );
+    assert!(ids(&scan_on(wider(), &comments)).contains(&"type:Settings"));
 }

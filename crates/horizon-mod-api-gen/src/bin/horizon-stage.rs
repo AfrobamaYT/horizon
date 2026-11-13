@@ -101,7 +101,8 @@ fn uses_command(args: &[PathBuf]) {
         input.sources.iter().map(|(p, t)| (p, t)),
         &manifest,
         &surface,
-    );
+    )
+    .unwrap_or_else(|e| fail(e));
     let mut kinds = std::collections::BTreeMap::<&str, usize>::new();
     for used in &uses.items {
         let place = match &used.origin {
