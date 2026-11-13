@@ -20,7 +20,7 @@ mod api_route;
 mod inject;
 mod planning;
 mod slots;
-pub use planning::routes;
+pub use planning::{routes, update_check, UpdateCheck};
 mod crates;
 mod diagnostics;
 mod internals;
@@ -1594,6 +1594,8 @@ pub struct AtStake {
     pub backups: PathBuf,
     /// The build the instance plays now, as people read it: "Stay on" it is the default.
     pub stay: String,
+    /// The release or Nightly the stopped build was on: the other choice builds on it again.
+    pub base: String,
 }
 
 /// Each project's fit to `sdk`'s build, by mod id, in `projects`' order; the surface and build
@@ -1673,6 +1675,7 @@ fn guard_worlds(
                 .collect(),
             backups: home.join("backups"),
             stay: String::new(),
+            base: String::new(),
         }));
     }
     for (world, _) in &at_stake {
@@ -2229,6 +2232,7 @@ pub fn build(
             // "Stay" keeps the build the instance plays now.
             Failed::Worlds(stake) => Failed::Worlds(AtStake {
                 stay: playing(instance),
+                base: base.to_owned(),
                 ..stake
             }),
             other => other,

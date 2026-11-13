@@ -199,7 +199,8 @@ fn every_message_names_the_mod_the_builds_and_the_worlds() {
         "Greeter doesn't fit this game.\nIt was made for aaaaaaa and this instance runs \
          nightly-2026-11-13 (afe471c). Since then the game changed 2 things Greeter uses: the hook \
          `player_logged_in` (changed); the method `ServerHost::give_item` (removed).\nWhat you can \
-         do: check for a newer Greeter · use a game build it fits · play without Greeter."
+         do: play without Greeter. It stays installed and is left out of the build; Turn off \
+         Greeter in its menu on the Mods page to keep it out."
     );
     let fits = Verdict::Fits {
         made_for: made_for.clone(),
@@ -220,4 +221,35 @@ fn every_message_names_the_mod_the_builds_and_the_worlds() {
          for good."
     );
     assert!(worlds_at_stake("Greeter", build, &["Home".into()]).contains("One of your worlds"));
+}
+
+#[test]
+fn an_update_says_how_many_mods_fit_and_which_will_be_switched_off() {
+    let build = "nightly-2026-11-20 (9a8b7c6)";
+    assert_eq!(
+        update_summary(build, 1, &[]),
+        "Update to nightly-2026-11-20 (9a8b7c6)? Your native mod fits it."
+    );
+    assert_eq!(
+        update_summary(build, 4, &[]),
+        "Update to nightly-2026-11-20 (9a8b7c6)? All 4 of your native mods fit it."
+    );
+    let misfit = Verdict::DoesNotFit {
+        made_for: OTHER_BUILD.into(),
+        misfits: vec![Misfit {
+            id: "hook:player_logged_in".into(),
+            change: Change::Changed,
+        }],
+    };
+    let off = [("Greeter".to_owned(), short(&misfit))];
+    assert_eq!(
+        update_summary(build, 4, &off),
+        "Update to nightly-2026-11-20 (9a8b7c6)? 3 of your 4 native mods fit it.\nGreeter does \
+         not: the hook `player_logged_in` (changed). It will be switched off until it is updated."
+    );
+    let exact = Verdict::Exact {
+        made_for: OTHER_BUILD.into(),
+        why: "[[native.mixin]]",
+    };
+    assert_eq!(short(&exact), "it changes game code ([[native.mixin]])");
 }

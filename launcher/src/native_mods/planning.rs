@@ -113,3 +113,87 @@ pub(super) fn classify(
     }
     Ok(result)
 }
+
+/// What updating an instance's native mods to a newer release or Nightly would do, told before
+/// anything is downloaded but the build's small SDK files (design-fit §10.1).
+#[derive(Clone, Debug, PartialEq)]
+pub struct UpdateCheck {
+    /// The newer installed release or Nightly the update builds on.
+    pub to: String,
+    /// What the player reads: how many mods fit, and each one switched off and why.
+    pub summary: String,
+    /// The worlds saved with a mod the update would switch off: then backing them up is the
+    /// other choice to staying.
+    pub worlds: Vec<String>,
+}
+
+/// [`UpdateCheck`] for the native mods turned on in game folder `home`, on the installed release
+/// or Nightly `to`. Worker-only: it reads releases.
+pub fn update_check(home: &Path, to: &str) -> Result<UpdateCheck, Failed> {
+    require_consent()?;
+    let _lease = crate::native_cache::Cache::acquire(&backend::build_dir()).map_err(cache_error)?;
+    let found = match stage_installed(home, root().join("installed.routes"))? {
+        Some(folder) => scan_bundles(&folder)?,
+        None => Vec::new(),
+    };
+    let found: Vec<Bundle> = found
+        .into_iter()
+        .filter(|bundle| bundle.manifest.native.is_some())
+        .collect();
+    let projects: Vec<_> = found
+        .iter()
+        .filter_map(|bundle| api::Project::read(bundle).ok())
+        .collect();
+    let revision = build_revision(to, None)?;
+    let sdk_base = sdk_cache::Base::from_env();
+    let keys = horizon_release_sign::trusted_keys_for(backend::REPO);
+    let sdk = sdk_cache::index(&sdk_base, &revision, &keys).map_err(|r| r.to_string())?;
+    let verdicts = judge_all(&projects, &sdk, &sdk_base).map_err(|r| r.to_string())?;
+    let shown = sdk.shown();
+    let unfit: Vec<LeftOut> = verdicts
+        .iter()
+        .filter(|(_, verdict)| !verdict.usable())
+        .filter_map(|(id, verdict)| {
+            let bundle = found.iter().find(|b| &b.manifest.id == id)?;
+            Some(LeftOut::new(
+                bundle,
+                isolate::Why::Unfit(fit::short(verdict)),
+            ))
+        })
+        .collect();
+    let declared: Vec<Vec<dependencies::Dependency>> = found
+        .iter()
+        .map(|bundle| dependencies::from_manifest(&bundle.manifest.dependencies))
+        .collect();
+    let pairs: Vec<(&Bundle, &[dependencies::Dependency])> = found
+        .iter()
+        .zip(&declared)
+        .map(|(b, d)| (b, d.as_slice()))
+        .collect();
+    let left = isolate::with_dependents(&unfit, &pairs);
+    let off: Vec<(String, String)> = left
+        .iter()
+        .map(|l| {
+            let why = match &l.why {
+                isolate::Why::Unfit(why) => why.clone(),
+                isolate::Why::Needs(library) => trf(
+                    "it needs {library}, which doesn't fit",
+                    &[("library", library)],
+                ),
+                _ => String::new(),
+            };
+            (l.id.clone(), why)
+        })
+        .collect();
+    let ids: Vec<String> = left.iter().map(|l| l.id.clone()).collect();
+    let all = crate::worlds::list(home);
+    let worlds = crate::worlds::saved_with(&all, &ids)
+        .into_iter()
+        .map(|(world, _)| world.name.clone())
+        .collect();
+    Ok(UpdateCheck {
+        to: to.to_owned(),
+        summary: fit::update_summary(&shown, found.len(), &off),
+        worlds,
+    })
+}

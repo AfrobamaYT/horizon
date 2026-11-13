@@ -13,6 +13,12 @@ pub(super) struct RouteMemo {
     result: Option<Result<native_mods::Routes, String>>,
 }
 
+/// The update check for one instance and newer game, while it runs (`None`) and once it ended.
+pub(super) struct UpdateMemo {
+    key: String,
+    result: Option<Result<native_mods::UpdateCheck, String>>,
+}
+
 /// What a mod in the list is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ModKind {
@@ -112,7 +118,130 @@ impl Launcher {
             Some(step) => card.child(self.panel().child(self.building_card(step, pal, cx))),
             None => card.child(self.mode_status(error, mine, pal, cx)),
         };
+        if building.is_none() && error.is_none() && state != State::NoMods {
+            if let Some(update) = self.update_card(instance, pal, cx) {
+                card = card.child(update);
+            }
+        }
         Some(card)
+    }
+
+    /// Before an update of an instance with native mods (design-fit §10.1): when a newer release
+    /// or Nightly is installed, every mod is checked against it first, and the card says how
+    /// many fit and which will be switched off. Update builds on it; staying changes nothing.
+    /// When worlds were saved with a mod it switches off, staying is the default and the other
+    /// choice backs those worlds up first.
+    fn update_card(
+        &self,
+        instance: &instances::Instance,
+        pal: Pal,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
+        if self.native_step.is_some() || self.settings.native_mods_allowed_at.is_none() {
+            return None;
+        }
+        let plays = self.version_of(instance)?.clone();
+        let to = native_mods::update_for(&plays, &self.installed)?;
+        let home = self.mods.home();
+        let key = format!(
+            "{}{to}",
+            native_status::fingerprint(&home, Some(to.as_str()))
+        );
+        if self.mods.update_stayed.borrow().as_deref() == Some(key.as_str()) {
+            return None;
+        }
+        let mut memo = self.mods.native_update.borrow_mut();
+        if let Some(previous) = memo.as_ref().filter(|previous| previous.key == key) {
+            // While it runs, nothing; a check that failed leaves it to the build to say why.
+            let check = previous.result.as_ref()?.as_ref().ok()?.clone();
+            drop(memo);
+            return Some(self.update_panel(check, &plays, key, pal, cx));
+        }
+        *memo = Some(UpdateMemo {
+            key: key.clone(),
+            result: None,
+        });
+        drop(memo);
+        let work = cx
+            .background_executor()
+            .spawn(async move { native_mods::update_check(&home, &to).map_err(String::from) });
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| {
+                *this.mods.native_update.borrow_mut() = Some(UpdateMemo {
+                    key,
+                    result: Some(result),
+                });
+                cx.notify();
+            });
+        })
+        .detach();
+        None
+    }
+
+    /// The update's summary and its two choices.
+    fn update_panel(
+        &self,
+        check: native_mods::UpdateCheck,
+        plays: &str,
+        key: String,
+        pal: Pal,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let t = self.theme;
+        let current = native_mods::about(plays).map_or_else(|| plays.to_owned(), |a| a.base);
+        let stay = button(
+            "native-update-stay",
+            native_mods::fit::stay(&current),
+            if check.worlds.is_empty() {
+                Kind::Secondary
+            } else {
+                Kind::Primary
+            },
+            &t,
+        )
+        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+            *this.mods.update_stayed.borrow_mut() = Some(key.clone());
+            cx.notify();
+        }));
+        let to = check.to.clone();
+        let back_up = !check.worlds.is_empty();
+        let take = button(
+            "native-update-take",
+            if back_up {
+                native_mods::fit::back_up_and_update()
+            } else {
+                native_mods::fit::update()
+            },
+            if back_up {
+                Kind::Secondary
+            } else {
+                Kind::Primary
+            },
+            &t,
+        )
+        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+            this.build_native_on(Some(to.clone()), back_up);
+            cx.notify();
+        }));
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(text_in(13., pal.ink).child(check.summary.clone()));
+        if back_up {
+            body = body.child(
+                text_in(13., pal.warn).child(native_mods::fit::update_worlds(&check.worlds)),
+            );
+        }
+        // The default choice first.
+        let choices = div().flex().flex_wrap().gap(px(8.));
+        let choices = if back_up {
+            choices.child(stay).child(take)
+        } else {
+            choices.child(take).child(stay)
+        };
+        self.panel().child(body.child(choices))
     }
 
     /// Where the instance's native mods stand, read again only when what it depends on changes.
@@ -267,6 +396,8 @@ impl Launcher {
     /// those worlds up, where it says, then builds without the mods.
     fn worlds_choice(&self, stake: &native_mods::AtStake, pal: Pal, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
+        // The same build again: on the base it stopped on, the worlds backed up first.
+        let base = stake.base.clone();
         let stay = if stake.stay.is_empty() {
             tr("Stay on this game build").to_string()
         } else {
@@ -302,8 +433,8 @@ impl Launcher {
                             &t,
                         )
                         .on_click(cx.listener(
-                            |this, _: &ClickEvent, _, cx| {
-                                this.build_native_with(true);
+                            move |this, _: &ClickEvent, _, cx| {
+                                this.build_native_on(Some(base.clone()), true);
                                 cx.notify();
                             },
                         )),

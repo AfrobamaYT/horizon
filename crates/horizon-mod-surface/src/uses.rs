@@ -2512,7 +2512,7 @@ pub fn fits<'a>(entries: impl IntoIterator<Item = &'a Entry>, target: &Surface) 
 pub const USES_SCHEMA: u32 = 1;
 
 /// The file a mod carries its [`UsesTable`] in, beside its `horizon-mod.toml`.
-pub const USES_FILE: &str = "horizon-uses.json";
+pub const USES_FILE: &str = "uses.json";
 
 /// The largest table [`UsesTable::read`] reads, in bytes.
 pub const MAX_USES_BYTES: usize = 4 << 20;

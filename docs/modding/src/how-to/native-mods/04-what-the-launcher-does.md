@@ -57,7 +57,7 @@ transformations are refusals, not reasons to build the game locally.
 
 A native mod is made for one game build (its `[native] horizon` pin). On another build the
 launcher compiles it when it fits: the mod uses only the mod API (no `[native.*]` table, no
-internals), its package lists what it uses (`horizon-uses.json`, written by
+internals), its package lists what it uses (`uses.json`, written by
 `cargo horizon-mod build`), and every item on that list is unchanged in the build's
 `surface.json`. The compile stays the final check: a mod that fits and still doesn't compile is
 left out of that build and the others build.
@@ -65,6 +65,10 @@ left out of that build and the others build.
 A mod that doesn't fit stays installed and is left out of the build, with the changed items named
 (at most five; the build log lists them all). A mod with a `[native.*]` table or internals, or a
 package without the list, works on the build it was made for only.
+
+When a newer release or Nightly is installed, the Mods page checks every native mod against it
+before anything large is downloaded and says what an update would do: how many mods fit, and
+which will be switched off and why. **Update** builds on the newer game; staying changes nothing.
 
 When worlds of the instance were saved with a mod the build would leave out, the build stops and
 names those worlds: opening them without the mod removes its blocks and what they hold, for good.
