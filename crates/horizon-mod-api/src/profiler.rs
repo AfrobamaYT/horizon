@@ -596,7 +596,11 @@ mod tests {
         if std::env::var_os("HORIZON_PROFILER_TEST_CHILD").is_none() {
             assert!(
                 std::process::Command::new(std::env::current_exe().unwrap())
-                    .args(["--include-ignored", "--exact", &format!("__private::profiler::tests::{name}")])
+                    .args([
+                        "--include-ignored",
+                        "--exact",
+                        &format!("__private::profiler::tests::{name}")
+                    ])
                     .env("HORIZON_PROFILER_TEST_CHILD", "1")
                     .status()
                     .unwrap()

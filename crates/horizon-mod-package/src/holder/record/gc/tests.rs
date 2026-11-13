@@ -121,7 +121,11 @@ fn collection_with_closed_stdio() {
     }
     let (root, path) = fixture();
     let status = Command::new(std::env::current_exe().unwrap())
-        .args(["--include-ignored", "--exact", "holder::record::gc::tests::closed_stdio_actor"])
+        .args([
+            "--include-ignored",
+            "--exact",
+            "holder::record::gc::tests::closed_stdio_actor",
+        ])
         .env("RECORD_GC_CLOSED_ROOT", root.path())
         .status()
         .unwrap();

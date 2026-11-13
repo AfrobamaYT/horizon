@@ -19,7 +19,11 @@ fn compiler_worker() {
 fn command(input: &Path, key: &str) -> Command {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command
-        .args(["--include-ignored", "--exact", "compile_budget_tests::compiler_worker"])
+        .args([
+            "--include-ignored",
+            "--exact",
+            "compile_budget_tests::compiler_worker",
+        ])
         .env("HORIZON_TEST_COMPILE_INPUT", input)
         .env("HORIZON_TEST_COMPILE_KEY", key);
     command
