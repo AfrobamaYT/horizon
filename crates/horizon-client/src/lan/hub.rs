@@ -1199,15 +1199,15 @@ impl Hub {
             },
         }));
     }
-    /// Disconnect a guest with a reason (ServerGamePacketListenerImpl.disconnect).
+    /// Disconnect a guest with a reason (ServerGamePacketListenerImpl.disconnect), once
+    /// ([`Guest::begin_disconnect`]): a guest already on the way out keeps its first reason.
     pub fn kick(&mut self, conn: u32, reason: Tag) {
-        // The log's "lost connection" line gives the reason, as vanilla's.
         let text = self.english(&reason);
-        if let Some((player, name)) = self.update_guest(conn, |g| {
-            g.left_reason = text.clone();
-            g.sender.disconnect(reason);
-            (g.uuid, g.name.clone())
-        }) {
+        let started = self.update_guest(conn, |g| {
+            g.begin_disconnect(text.clone(), reason)
+                .then(|| (g.uuid, g.name.clone()))
+        });
+        if let Some((player, name)) = started.flatten() {
             self.pending_kicks.push(HostEvent::Kicked {
                 conn,
                 player,

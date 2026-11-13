@@ -2410,20 +2410,26 @@ impl Game<'_> {
         }
     }
 
-    /// `Hub::kick`, with the server's `kick` event recorded.
-    pub(super) fn kick_conn(&mut self, conn: u32, reason: Tag) {
+    /// `Hub::kick`, with the server's `kick` event recorded. Whether it started the guest's
+    /// disconnect: false for a missing guest and one whose disconnect is already pending.
+    pub(super) fn kick_conn(&mut self, conn: u32, reason: Tag) -> bool {
         let Some(h) = self.lan.as_mut() else {
-            return;
+            return false;
         };
-        h.hub.kick(conn, reason);
-        if let Some(g) = h.hub.guest(conn) {
-            events::record(
-                "kick",
-                &g.name,
-                g.uuid,
-                serde_json::json!({ "reason": g.left_reason }),
-            );
+        if h.hub.guest(conn).is_none_or(|g| g.disconnect_pending) {
+            return false;
         }
+        h.hub.kick(conn, reason);
+        let Some(g) = h.hub.guest(conn) else {
+            return false;
+        };
+        events::record(
+            "kick",
+            &g.name,
+            g.uuid,
+            serde_json::json!({ "reason": g.left_reason }),
+        );
+        true
     }
 
     /// MinecraftServer.stopServer: players saved and sent away, worlds saved.

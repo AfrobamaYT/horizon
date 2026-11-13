@@ -438,8 +438,9 @@ pub trait PlayersBackendMut {
     /// connection" line names it, `player_kicked` hears it and a dedicated server records a
     /// `kick` event. The connection closes when the server next polls it, so the calling hook
     /// finishes first; works for the acting player inside their own hook, and without the
-    /// world published. False for a stale or unavailable player, a fake player and the
-    /// single-player owner (`/kick` refuses the owner).
+    /// world published. False for a stale or unavailable player, a fake player, the
+    /// single-player owner (`/kick` refuses the owner) and a player whose disconnect is already
+    /// pending (a second call, also from `player_kicked`: the first reason stands).
     #[access(WorldOnly)]
     /// Refuses text deeper than 512 component nodes before applying any changes.
     fn player_disconnect(&mut self, player: PlayerRef, reason: Text)

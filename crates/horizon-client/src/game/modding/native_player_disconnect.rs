@@ -8,13 +8,14 @@ impl Game<'_> {
     /// Disconnects that player with `reason` through the hub's kick (the client shows it, the
     /// log names it, `player_kicked` hears it) and records the server's `kick` event. Works
     /// for the acting player inside their own hook; the connection closes at the next poll.
-    /// False for a stale or unavailable player, a fake player and the single-player owner.
+    /// False for a stale or unavailable player, a fake player, the single-player owner and a
+    /// player whose disconnect is already pending (`Guest::disconnect_pending`: the first
+    /// reason stands, and nothing more is sent or heard).
     pub(super) fn player_disconnect(&mut self, player: PlayerRef, reason: Text) -> bool {
         let Some(conn) = self.disconnect_target(player) else {
             return false;
         };
-        self.kick_conn(conn, component_nbt(&reason.component()));
-        true
+        self.kick_conn(conn, component_nbt(&reason.component()))
     }
 
     /// The connection of a connected player other than the single-player owner: the acting

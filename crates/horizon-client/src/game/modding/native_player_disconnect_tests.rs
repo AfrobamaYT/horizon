@@ -68,27 +68,62 @@ fn disconnect_sends_the_reason_to_that_guest_only() {
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-fn disconnect_reaches_the_acting_player_inside_their_turn() {
+fn disconnect_reaches_acting_and_displaced_players() {
     with_guests(|game| {
         let players = game.players().server_players();
         let (a, b) = (players[0], players[1]);
+        let (to_a, to_b) = (listen(game, 12), listen(game, 13));
+        // In guest12's turn, guest13 is displaced: their record is reached, not their body.
         let kicked = game
             .as_guest(12, |game| {
                 assert_eq!(game.players().acting_player(), Some(a));
+                b.disconnect(game, Text::literal("Displaced by guest12"))
+                    .unwrap()
+            })
+            .unwrap();
+        assert!(kicked);
+        assert_eq!(left_reason(game, 13), "Displaced by guest12");
+        assert_eq!(disconnects(&to_b).len(), 1);
+        assert_eq!(left_reason(game, 12), "");
+        // The acting player, inside their own turn.
+        let kicked = game
+            .as_guest(12, |game| {
                 a.disconnect(game, Text::literal("Bye from your own hook"))
                     .unwrap()
             })
             .unwrap();
         assert!(kicked);
         assert_eq!(left_reason(game, 12), "Bye from your own hook");
-        // A displaced player is reached from another guest's turn too.
-        let kicked = game
-            .as_guest(13, |game| {
-                b.disconnect(game, Text::literal("Moved on")).unwrap()
+        assert_eq!(disconnects(&to_a).len(), 1);
+    });
+}
+
+/// A disconnect is pending until the connection is removed: a second call answers false,
+/// sends nothing and keeps the first reason.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_second_disconnect_while_pending_is_refused() {
+    with_guests(|game| {
+        let a = game.players().server_players()[0];
+        let to_a = listen(game, 12);
+        assert!(a.disconnect(game, Text::literal("First reason")).unwrap());
+        assert!(!a.disconnect(game, Text::literal("Second reason")).unwrap());
+        let refused = game
+            .as_guest(12, |game| {
+                a.disconnect(game, Text::literal("Third reason")).unwrap()
             })
             .unwrap();
-        assert!(kicked);
-        assert_eq!(left_reason(game, 13), "Moved on");
+        assert!(!refused);
+        assert_eq!(left_reason(game, 12), "First reason");
+        let hub = &game.lan.as_ref().unwrap().hub;
+        assert!(hub.guest(12).unwrap().disconnect_pending);
+        assert!(!hub.guest(13).unwrap().disconnect_pending);
+        let sent = disconnects(&to_a);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(
+            horizon_protocol::text::plain(&sent[0], &Default::default()),
+            "First reason"
+        );
     });
 }
 
