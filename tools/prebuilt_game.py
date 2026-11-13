@@ -50,14 +50,8 @@ EXECUTABLE = "horizon-client.exe" if sys.platform == "win32" else "horizon-clien
 NO_RESOURCES = "Horizon's prepared game files are missing"
 # The launcher's generated `main.rs` comes from the game it links against.
 TEMPLATE = "native_main.rs.template"
-# The API route's mods library (`horizon_native_mods`): the SDK builds it from this template with no rows as the stub
-# the API route's executable links against; the launcher builds it with the instance's rows and replaces the stub.
-NATIVE_MODS_TEMPLATE = "native_mods.rs.template"
-NATIVE_MODS = "horizon_native_mods"
-# Fixed, so the stub and the launcher's library mangle their three functions alike. Recorded in the identity.
-NATIVE_MODS_METADATA = "horizon-native-mods"
-# The API route's executable: built here once against the stub, never relinked on the player's machine.
-API_MAIN = ROOT / "crates/horizon-client/src/native_api_main.rs"
+NATIVE_MODS_TEMPLATE = "native_mod_entry.rs.template"
+API_MAIN = ROOT / "crates/horizon-client/src/native_main.rs.template"
 # The folder holding that executable and the stub, in the `runtime` slice.
 RUNTIME = "bin"
 # The required inputs (`horizon_mod_package::sdk::Inputs`): `members` lists what each slice must hold.
@@ -166,9 +160,6 @@ def stage(target_dir: Path, stage_tool: Path | None = None) -> Path:
     print(f"{label}: {time.monotonic() - started:.3f}s (source copy/setup excluded)", flush=True)
     # Only the prebuilt game splits the wasm runtime out: normal source builds stay static. With
     # prefer-dynamic, rustc picks this dylib for the game rather than folding its runtime stack into it.
-    for crate in ("horizon-mod-wasm",):
-        with (staged / f"crates/{crate}/Cargo.toml").open("a") as manifest:
-            manifest.write('\n[lib]\ncrate-type = ["rlib", "dylib"]\n')
     return staged
 
 
@@ -243,10 +234,13 @@ def slices(metadata: dict, copied: dict[str, list[str]], api_route: list[str]) -
     inside = sorted(names[package_id] for package_id in closure if names.get(package_id) in libraries)
     if inside:
         sys.exit(f"the API closure holds game libraries {inside}, which the api slice cannot carry")
+    dynamic = lambda file: file.endswith((".so", ".dylib", ".dll", ".dll.a"))
     runtime = [IDENTITY, *api_route] + [file for package_id, files in copied.items()
-                                        if names.get(package_id) in libraries for file in files]
-    api = [file for package_id in closure for file in copied.get(package_id, [])] + [*API_BUILD_DATA,
-                                                                                    NATIVE_MODS_TEMPLATE]
+                if package_id in closure or names.get(package_id) in libraries
+                for file in files if dynamic(file) and not file.startswith("host/")]
+    api = [file for package_id in closure for file in copied.get(package_id, [])
+           if not dynamic(file) or file.startswith("host/")] + [*API_BUILD_DATA, NATIVE_MODS_TEMPLATE]
+
     return {"runtime": sorted(set(runtime)), "api": sorted(set(api))}
 
 
@@ -259,25 +253,12 @@ def api_route(out: Path, link_args: list[str]) -> list[str]:
     folder.mkdir()
     common = ["--edition", "2024", "-C", "prefer-dynamic", "-C", "opt-level=3", "-L", f"dependency={deps}",
               "-L", f"dependency={out / 'host'}", "-L", f"native={out / NATIVE}"]
-    library = f"{dylib_prefix()}{NATIVE_MODS}{dylib_suffix()}"
-    # macOS records a dylib's own path as its install name: the executable must find it through its rpath instead.
-    install_name = ["-C", f"link-arg=-Wl,-install_name,@rpath/{library}"] if sys.platform == "darwin" else []
-    with tempfile.TemporaryDirectory(dir=out.parent) as scratch:
-        stub = Path(scratch) / f"{NATIVE_MODS}.rs"
-        template = (out / NATIVE_MODS_TEMPLATE).read_text()
-        for marker in ("/* MOD_ENTRIES */", "/* MOD_SLOTS */", "/* BUILT_MODS */"):
-            template = template.replace(marker, "")
-        # The stub takes the API from the game's library, as the launcher's library does at its C link.
-        stub.write_text(f"{template}\nextern crate {GAME_LIBRARIES[0]} as _;\n")
-        run(["rustc", *common, *install_name, "--crate-type", "dylib", "--crate-name", NATIVE_MODS,
-             "-C", f"metadata={NATIVE_MODS_METADATA}", *extern_args(deps, "mod_api"),
-             "--extern", f"{GAME_LIBRARIES[0]}={dylib(deps, GAME_LIBRARIES[0])}", "--out-dir", str(folder), str(stub)])
     origin = {"linux": ["-Wl,-rpath,$ORIGIN"], "darwin": ["-Wl,-rpath,@executable_path"]}.get(sys.platform, [])
     run(["rustc", *common, "--crate-type", "bin", "--crate-name", "horizon_native_game",
          *(flag for arg in origin + link_args for flag in ("-C", f"link-arg={arg}")),
          *extern_args(deps, "horizon_client"), *extern_args(deps, "mod_api"), *extern_args(deps, "horizon_mod_package"),
          "--extern", f"{GAME_LIBRARIES[0]}={dylib(deps, GAME_LIBRARIES[0])}",
-         "--extern", f"{NATIVE_MODS}={folder / library}", "-o", str(folder / EXECUTABLE), str(API_MAIN)])
+ "-o", str(folder / EXECUTABLE), str(API_MAIN)])
     built = sorted(path.relative_to(out).as_posix() for path in folder.iterdir())
     if not {path.name for path in folder.iterdir()} <= api_route_files():
         sys.exit(f"the API route's build left {built}, not only {sorted(api_route_files())}")
@@ -286,8 +267,7 @@ def api_route(out: Path, link_args: list[str]) -> list[str]:
 
 def api_route_files() -> set[str]:
     """What OUT/bin may hold: the executable and the stub, with its import library on Windows."""
-    library = f"{dylib_prefix()}{NATIVE_MODS}{dylib_suffix()}"
-    return {EXECUTABLE, library, *([f"{library}.a"] if sys.platform == "win32" else [])}
+    return {EXECUTABLE}
 
 
 def holder_mark() -> bytes:
@@ -387,6 +367,23 @@ def build(out: Path, server: bool) -> None:
     target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "prebuilt"
     staged = stage(target_dir)
     host = rustc_host()
+    metadata = json.loads(run(["cargo", "metadata", "--format-version", "1"], cwd=staged))
+    closure = api_closure(metadata)
+    for package in metadata["packages"]:
+        if package["id"] not in closure and package["name"] != "horizon-mod-wasm":
+            continue
+        if not any(target["kind"] == ["lib"] for target in package["targets"]):
+            continue
+        manifest = Path(package["manifest_path"])
+        if not manifest.is_relative_to(staged):
+            continue  # Registry dependencies are owned by Cargo, not rewritten.
+        text = manifest.read_text()
+        if "[lib]" in text:
+            text = text.replace("[lib]", '[lib]\ncrate-type = ["rlib", "dylib"]', 1)
+        else:
+            text += '\n[lib]\ncrate-type = ["rlib", "dylib"]\n'
+        manifest.write_text(text)
+
     # One std for the game, every mod and the executable: the game links std dynamically, as mods will.
     rustflags = "-C prefer-dynamic"
     # On macOS this also gives both dylibs an @rpath install name instead of an absolute build path.
@@ -473,7 +470,6 @@ def build(out: Path, server: bool) -> None:
         "native_links": native_links(metadata, GAME),
         # The API route: the mods library's crate name and metadata, and which files the `runtime` and `api` archives
         # hold (every other file is the `engine` archive's).
-        "native_mods": {"crate": NATIVE_MODS, "metadata": NATIVE_MODS_METADATA},
         "slices": sliced,
         "files": files,
     }
@@ -646,7 +642,7 @@ def install_package(folder: Path, source: str) -> None:
 def runtime_libraries(deps: Path) -> list[Path]:
     """What the launcher installs beside the executable (launcher/src/native_mods/prebuilt.rs `runtime_libraries`):
     the game's two libraries, std, and on Windows the MinGW runtime the GNU DLLs import."""
-    libraries = [dylib(deps, crate) for crate in ("horizon_mod_host", "horizon_mod_wasm")]
+    libraries = [path for path in deps.iterdir() if path.suffix in (".so", ".dll", ".dylib")]
     libdir = Path(run(["rustc", "--print", "target-libdir"]).strip())
     libraries += [path for path in libdir.iterdir()
                   if path.name.startswith(("libstd-", "std-")) and path.suffix in (".so", ".dll", ".dylib")]

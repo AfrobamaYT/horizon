@@ -11,6 +11,18 @@ mod registry_installation;
 /// (`horizon_mod_package::runtime`). It lives in the API's closure so that the launcher's
 /// `horizon_native_mods` library, built from the API slice alone, can name it.
 pub mod native {
+    /// One dynamically loaded native library, registered before the engine seal.
+    pub struct NativeMod {
+        /// Hook factories owned by this library.
+        pub entries: fn() -> Vec<crate::ModEntry>,
+        /// Compiled API point listeners owned by this library.
+        pub slots: fn() -> Vec<super::points::SlotListener>,
+        /// Manifest identities (empty for the patch library).
+        pub built: &'static [BuiltMod],
+        /// Install patch copies and return their verification rows.
+        pub installs: fn() -> Vec<(&'static str, &'static [&'static str], bool)>,
+    }
+
     /// One native mod compiled into the executable, with its manifest's `side`.
     #[derive(Clone, Copy, Debug, Default, PartialEq)]
     pub struct BuiltMod {

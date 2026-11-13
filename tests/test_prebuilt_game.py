@@ -24,7 +24,7 @@ def write_build_data(root: Path, identity: dict | None = None, commit: str = COM
         (root / name).write_text(json.dumps({"schema": 1, "build": {"commit": commit}}))
     so, exe = prebuilt_game.dylib_suffix(), ".exe" if sys.platform == "win32" else ""
     lib = prebuilt_game.dylib_prefix()
-    members = {"runtime": [f"bin/horizon-client{exe}", f"bin/{lib}horizon_native_mods{so}",
+    members = {"runtime": [f"bin/horizon-client{exe}",
                            f"deps/{lib}horizon_mod_host{so}", f"deps/{lib}horizon_mod_wasm{so}"],
                "api": [prebuilt_game.NATIVE_MODS_TEMPLATE, "deps/libmod_api-1.rmeta", "deps/libmod_points-1.rmeta"]}
     for name in members["runtime"] + members["api"]:
@@ -176,8 +176,7 @@ class DeterministicArchiveTests(unittest.TestCase):
 
 
 class SdkAssetTests(unittest.TestCase):
-    RUNTIME = ["deps/libhorizon_mod_host.so", "deps/libhorizon_mod_wasm.so", "bin/horizon-client",
-               "bin/libhorizon_native_mods.so"]
+    RUNTIME = ["deps/libhorizon_mod_host.so", "deps/libhorizon_mod_wasm.so", "bin/horizon-client"]
     API = ["deps/libmod_api-1.rmeta", "deps/libmod_points-1.rmeta", "host/libserde_derive.so"]
     ENGINE = ["deps/libhorizon_client-1.rmeta", "native/libwindows.a"]
 
@@ -243,7 +242,7 @@ class SdkAssetTests(unittest.TestCase):
                             ({"api": [*api, "deps/libhorizon_mod_host.so"]}, "overlap"),
                             # Each slice holds the members the required inputs name (so neither is empty).
                             ({"api": []}, "lack required members"),
-                            ({"runtime": [prebuilt_game.IDENTITY, *self.RUNTIME[:3]]}, "lack required members"),
+                            ({"runtime": [prebuilt_game.IDENTITY, *self.RUNTIME[:2]]}, "lack required members"),
                             ({"api": api[1:]}, "lack required members"),
                             ({"api": api[:-1]}, "lack required members")):
             with tempfile.TemporaryDirectory() as directory, self.subTest(change), \
@@ -365,6 +364,8 @@ class AllocatorSelectionTests(unittest.TestCase):
             pass
 
         def capture(command, **kwargs):
+            if command[:2] == ["cargo", "metadata"]:
+                return json.dumps({"packages": [], "resolve": {"nodes": []}})
             self.assertEqual(command[command.index("--target") + 1], "fixture-host")
             self.assertIn("-C prefer-dynamic", kwargs["env"]["RUSTFLAGS"])
             self.assertNotIn("CARGO_ENCODED_RUSTFLAGS", kwargs["env"])
