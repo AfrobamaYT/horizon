@@ -34,30 +34,23 @@ fn eligible(base: &str, directory: &std::path::Path, native_revision: Option<&st
 }
 
 pub const REBUILD: &str = "This game cannot enforce offline developer single-player. Rebuild and reinstall the developer game and its native mods.";
+const START_FAILED: &str = "The game failed to start while checking support for offline developer play. Reinstall the developer game and its native mods, then try Play again. If it still fails, report this message.\n{reason}";
 pub fn require_capability(tag: &str) -> Result<(), String> {
     let output = Command::new(crate::backend::client_program(tag))
         .arg("--launch-api")
         .output()
-        .map_err(|e| {
-            trf(
-                "The game could not start for its capability check: {reason}",
-                &[("reason", &e.to_string())],
-            )
-        })?;
+        .map_err(|e| trf(START_FAILED, &[("reason", &e.to_string())]))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let reason = stderr
             .lines()
-            .next()
-            .filter(|s| !s.is_empty())
+            .map(str::trim)
+            .find(|s| !s.is_empty())
             .map(str::to_owned)
             .unwrap_or_else(|| output.status.to_string());
-        return Err(trf(
-            "The game could not start for its capability check: {reason}",
-            &[("reason", &reason)],
-        ));
+        return Err(trf(START_FAILED, &[("reason", &reason)]));
     }
-    if output.status.success() && supports_restriction(&output.stdout) {
+    if supports_restriction(&output.stdout) {
         Ok(())
     } else {
         Err(tr(REBUILD).into())
