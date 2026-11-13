@@ -360,6 +360,30 @@ pub trait LevelsBackend {
     /// `native_level_height`. Does not load chunks.
     #[access(WorldOnly)]
     fn level_in_spawnable_bounds(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool>;
+    /// Side: server.
+    /// `Some(true)` when this resident, in-bounds position has entity-ticking tickets.
+    /// `Some(false)` for unloaded or out-of-bounds positions or tickets that forbid ticking.
+    /// With no ticket system, resident in-bounds chunks tick; an active but empty ticket
+    /// system permits none. This reads the current ticket decision, not a tick guarantee.
+    /// `None` for stale handles, a client or a level not currently in place. Parked
+    /// levels cannot answer because the live ticket state belongs to the level in place.
+    /// Does not load chunks. Each call shares the ticket map through a reference count;
+    /// it does not allocate a memo table or refresh a resident-chunk cache.
+    #[access(WorldOnly)]
+    fn level_entity_ticking(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool>;
+    /// Side: server.
+    /// `Some(true)` when scheduled blocks, block events and block entities can tick here:
+    /// a resident, in-bounds position with block-ticking tickets and no pending entities.
+    /// `Some(false)` for unloaded or out-of-bounds positions, tickets that forbid ticking,
+    /// or a chunk waiting for its entities. With no ticket system, resident in-bounds
+    /// chunks with no pending entities tick; an active but empty ticket system permits none.
+    /// `None` for stale handles, a client or a level not currently in place. Parked
+    /// levels cannot answer because the live ticket state belongs to the level in place.
+    /// Does not load chunks. Each call shares the ticket map through a reference count
+    /// and borrows the pending-entity set without copying it or allocating a memo table.
+    #[access(WorldOnly)]
+    fn level_should_tick_blocks_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool>;
+
     /// Side: both.
     /// The level's game time (`Level.getGameTime`). On clients this is the
     /// synchronized time advanced by the local level tick. API 381.
@@ -1021,6 +1045,9 @@ pub trait LevelsBackendMut {
     /// Side: server.
     /// Send `ServerLevel.destroyBlockProgress` in this level: stages 0..9 show a crack,
     /// any other stage removes it. A machine uses a stable negative breaker id.
+    /// Inside a transaction, notices wait for the root commit in call order; abort publishes
+    /// no notice. Outside a transaction this executes immediately. True means accepted or
+    /// queued, not already delivered.
     #[access(WorldOnly)]
     fn level_set_break_progress(
         &mut self,
@@ -1036,6 +1063,9 @@ pub trait LevelsBackendMut {
     /// nothing queued, for a stale or parked handle, a client, and an unloaded or out-of-height
     /// position. True with no player to notify (no one is in the level) when the position is
     /// valid: the chunk is marked changed and nothing is sent.
+    /// Inside a transaction this waits for the root commit; abort publishes no notice.
+    /// Outside a transaction this executes immediately. True means accepted or queued,
+    /// not already delivered.
     #[access(WorldOnly)]
     fn level_send_block_updated(&mut self, level: LevelRef, pos: [i32; 3]) -> bool;
     /// Side: server.
@@ -1282,6 +1312,9 @@ pub trait LevelsBackendMut {
     /// Set the biome of the 4x4x4 cell holding `pos` to `biome` (`minecraft:plains`), as
     /// `/fillbiome` does for one cell. False for a refused write, a stale or parked handle, a
     /// client, an unknown biome and an unchanged cell.
+    /// Tentative reads see the new cells inside a transaction. Abort restores the cells
+    /// without publishing. Saving, remeshing and resending wait for the outermost commit,
+    /// once per column. Outside a transaction they run immediately.
     #[access(WorldOnly)]
     fn level_set_biome(&mut self, level: LevelRef, pos: [i32; 3], biome: &str) -> bool;
 }

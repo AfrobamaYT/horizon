@@ -40,7 +40,7 @@ jobs:
           # through a target symlink. Each member still has its own workspace and
           # link invocation. Dispatches on other branches reuse dependency artifacts; main also exercises
           # independent dependency compilation in the original per-member targets.
-          for member in fixture library-fixture/{library,observer,dependent} groups/{counter_lib,alpha,beta,gamma,hog}; do
+          for member in fixture mixed-output-fixture library-fixture/{library,observer,dependent} groups/{counter_lib,alpha,beta,gamma,hog}; do
             root="$GITHUB_WORKSPACE/crates/horizon-mod-wasm/tests/$member/target/horizon-mod"
             mkdir -p "$root"
             artifacts="$cache/shared"
@@ -94,6 +94,14 @@ jobs:
           cargo test -p horizon-mod-points --features listener-fixture --test registry --test replace --test order
           cargo test -p horizon-mod-wasm --features listener-fixture --test real_member --test unstaged --test self_refusal --test native_listener --test no_wire_registration -- --include-ignored --nocapture
           cargo test -p horizon-mod-wasm --features listener-fixture --lib guest_input_pool_stays_flat_for_100k_no_import_calls -- --ignored --nocapture
+      - name: Build and test the isolated mixed-output boundary
+        env:
+          HORIZON_WASM_MIXED_OUTPUT_FIXTURE: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/mixed-output-fixture/target/horizon-mod/mixed_output_fixture.hmod
+          HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
+        run: |
+          (cd crates/horizon-mod-wasm/tests/mixed-output-fixture && \
+            "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod build --wasm --catalog ../library-fixture/points.json)
+          cargo test -p horizon-mod-wasm --features mixed-output-fixture --test listener_outputs -- --ignored --exact generated_mixed_outputs_cross_real_guest_boundary --nocapture
       # The client tests that load this run's compiled fixture into a real game. The slow shards refuse them by
       # name (`needs` rows in tools/ci/ignored-tests-known-failures.txt): only this job has the artifacts.
       - uses: actions/setup-java@v4
@@ -141,7 +149,10 @@ jobs:
             game::native_server::wasm_selector_tests::wasm_server_tick_messages_reach_dedicated_game \
             game::native_hooks::math::tests::compiled_wasm_math_profile_import_matches_actual_game_host \
             game::payload_transport::wasm_tests::compiled_guest_runs_in_actual_game_roots \
-            game::remote::interaction_event_tests::interaction_event_wasm_tests::wasm_interaction_shared_matrix; do
+            game::payload_transport::wasm_config_tests::compiled_guest_runs_on_configuration_connection_thread \
+            game::remote::interaction_event_tests::interaction_event_wasm_tests::wasm_interaction_shared_matrix \
+            game::remote::movement_input_tests::wasm_movement_input_keys_axes_and_sprint \
+            game::native_hooks::runtime_environment::tests::native_and_wasm_process_environment_in_registration_and_game_hosts; do
             run_exact 1 -p horizon-client --lib -- --ignored --exact "$test"
           done
       - name: Build independent library members

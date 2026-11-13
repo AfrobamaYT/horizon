@@ -264,25 +264,9 @@ impl TryIntoApi for horizon_client::boss_overlay::ModBar {
     }
 }
 
-/// Registry access for generated stack write-back in full and narrowed hook hosts.
-pub(in crate::game) trait ItemBoundary {
-    fn boundary_items(&self) -> Option<&Items>;
-}
-impl ItemBoundary for super::Game<'_> {
-    fn boundary_items(&self) -> Option<&Items> {
-        Some(self.items())
-    }
-}
-impl ItemBoundary for super::GameLevel<'_> {
-    fn boundary_items(&self) -> Option<&Items> {
-        Some(self.items)
-    }
-}
-impl ItemBoundary for super::native_hooks::HitLevel<'_> {
-    fn boundary_items(&self) -> Option<&Items> {
-        self.0.tags()
-    }
-}
+#[path = "api_values/item_snapshot.rs"]
+mod item_snapshot;
+pub(in crate::game) use item_snapshot::ItemBoundary;
 
 impl TryIntoApi for horizon_world::chunk::BlockState {
     type Api = mod_api::BlockState;

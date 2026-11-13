@@ -200,6 +200,27 @@ impl CauldronContents {
 static CONTENTS: LazyLock<RwLock<Arc<CauldronContents>>> =
     LazyLock::new(|| RwLock::new(Arc::new(CauldronContents::vanilla())));
 
+static BUILT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The published table, absent until resource registration has built it.
+pub(in crate::game) fn current_if_built() -> Option<Arc<CauldronContents>> {
+    BUILT
+        .load(std::sync::atomic::Ordering::Acquire)
+        .then(current)
+}
+
+#[cfg(test)]
+pub(in crate::game) fn without_built_table(test: impl FnOnce()) {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            BUILT.store(self.0, std::sync::atomic::Ordering::Release);
+        }
+    }
+    let _restore = Restore(BUILT.swap(false, std::sync::atomic::Ordering::AcqRel));
+    test();
+}
+
 /// The table in place.
 pub(in crate::game) fn current() -> Arc<CauldronContents> {
     CONTENTS
@@ -213,6 +234,7 @@ pub(in crate::game) fn install(contents: CauldronContents) {
     *CONTENTS
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Arc::new(contents);
+    BUILT.store(true, std::sync::atomic::Ordering::Release);
 }
 
 #[cfg(test)]

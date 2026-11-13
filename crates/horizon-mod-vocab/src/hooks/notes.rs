@@ -2,11 +2,11 @@
 pub trait Notes {
     #[notes = r##"## Named hook catalog (draft)
 
-The declarations under `crates/horizon-mod-api/src/hooks/` map stable hook names and contract versions to the current
-source targets. A contract includes the signature, call timing and behavior.
-Keep an existing contract or add a new version when it changes incompatibly.
-The catalog does not cover helper methods or arbitrary private game code.
-Injections name them with `hook` and `hook_version` ("Named hook points" above).
+The declarations map stable hook names and contract versions to source targets. A contract includes its signature,
+timing and behavior: retain it or version incompatible changes. Injections name these with `hook` and `hook_version`.
+Each listener's edited stack-list outputs are validated before leaving its scope. A refused output keeps the immediately
+preceding accepted value; scalar outputs and cancellation still apply, and later listeners remain independent.
+One warning per refused output names its owning mod, hook, output and conversion error. Native and wasm share this rule.
 
 ### Reading server blocks (draft)
 
@@ -3041,7 +3041,7 @@ registration path.
 
 - Hearing players and mobs on the server for every player: `player_died`, `mob_spawned`,
   `mob_killed` (a player's melee blow, a sweep or a spear thrust too),
-  `item_toss` (`ItemTossEvent`: a throw; not the items scattered when a player dies; `canceled` makes no item entity and the items are lost) and `item_picked_up` (`can_pickup`: `False` leaves the stack on the ground, `True` takes it despite its pickup delay or another player's target), then `item_picked_up_post` (`ItemEntityPickupEvent.Post`: a copy of the stack before the pickup and the live remainder on the item entity, which a listener may set; heard only when the whole stack went in, never on a partial pickup). They name a player by UUID.
+  `item_toss` (`ItemTossEvent`: a throw, with the item entity made but not yet in the level, which the `item_entity_*` methods read and change; not the items scattered when a player dies; `canceled` keeps the entity out of the level and the items are lost) and `item_picked_up` (the ground item entity; `can_pickup`: `False` leaves the stack on the ground, `True` takes it despite its pickup delay or another player's target), then `item_picked_up_post` (`ItemEntityPickupEvent.Post`: the same item entity, a copy of the stack before the pickup and the live remainder on it, which a listener may set; heard only when the whole stack went in, never on a partial pickup). They name a player by UUID.
 
 - [Server data reload listeners](#server-data-reload-listeners) read a mod's pack resources with datapack overrides, once per reload.
 - [Client asset reload listeners](#client-asset-reload-listeners) read a mod's pack resources with resource-pack overrides, once per reload.
