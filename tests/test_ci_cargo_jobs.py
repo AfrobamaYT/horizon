@@ -97,14 +97,12 @@ class CargoJobsTests(unittest.TestCase):
 
     def test_every_dyna_job_that_builds_caps_its_parallelism_first(self):
         # A runner's nproc reports the whole host: an uncapped build there starts one compiler per
-        # host core inside the runner's CPU quota. native-dylib-probe builds in its own scratch
-        # target and is owned by the SDK work; it is listed in the parallelism audit instead.
-        exempt = {("native-dylib-probe.yml", "linkage")}
+        # host core inside the runner's CPU quota.
         builds = re.compile(r"\bcargo (build|test|check|clippy|rustc|run|doc)\b|vanilla-data\.sh|"
                             r"prebuilt_game\.py|ignored_tests\.py|run_test_binaries\.py|test_\w+_parity\.py")
         for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
             for name, job in (yaml.safe_load(path.read_text()).get("jobs") or {}).items():
-                if "dyna" not in str(job.get("runs-on", "")) or (path.name, name) in exempt:
+                if "dyna" not in str(job.get("runs-on", "")):
                     continue
                 runs = [step.get("run") or "" for step in job.get("steps", [])]
                 first = next((i for i, run in enumerate(runs) if builds.search(run)), None)
