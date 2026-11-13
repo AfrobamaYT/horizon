@@ -3,6 +3,8 @@
 mod horizon_look;
 use crate::{crash, game, logging};
 use horizon_mod_package::selection::{Argument, LaunchArguments};
+pub(crate) mod dedicated_arguments;
+pub(crate) mod runtime_environment;
 
 /// Validated startup state. No native hooks or workers may run before prepare returns.
 pub struct Startup {
@@ -102,6 +104,7 @@ pub fn start<G>(
         options,
         _capture,
     } = startup;
+    runtime_environment::capture(&launch);
     horizon_threads::configure_allocator();
     horizon_chat_filter::install();
     horizon_look::give();
@@ -122,7 +125,6 @@ pub fn start<G>(
     // The text crates ship (`horizon_hooks::lang`), loaded with the game's own languages.
     horizon_client::lang::install_crate_files(horizon_hooks::lang::engine::all());
     horizon_client::spans::startup::init(std::time::Instant::now());
-    horizon_client::spans::trace::start_from_env();
     logging::set_game_home(launch.context.home.clone());
     // The dedicated server logs in its own folder, as vanilla's does; the game in its home.
     let (home, side, thread) = if launch
@@ -186,6 +188,8 @@ pub fn start<G>(
     if horizon_world::native_worldgen_hooks::install(
         horizon_world::native_worldgen_hooks::NativeWorldgenHooks {
             alter_ground: crate::game::api_values::alter_ground,
+            on_tree_grow: crate::game::native_tree_grow::on_tree_grow,
+            feature: crate::game::native_worldgen_parts::feature,
         },
     )
     .is_err()
@@ -230,7 +234,6 @@ pub fn start<G>(
 pub(crate) fn install_client_hooks() {
     game::api_values::install_stack_hooks();
     if !crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
-        menu_slot_rules: game::api_values::menu_slot_rules,
         menu_still_valid: game::api_values::menu_still_valid,
         menu_still_valid_listens: |menu| {
             mod_api::__private::menu_listens(mod_api::HookId::MenuStillValid, menu)
@@ -350,6 +353,9 @@ pub(crate) fn install_client_hooks() {
         },
         is_ladder: |context, entity, pos, state, ladder| {
             crate::game::is_ladder(context, entity, pos, state, ladder);
+        },
+        friction: |context, entity, kind, pos, state, friction| {
+            crate::game::native_surface::friction(context, entity, kind, pos, state, friction);
         },
         player_stays_on_ground_surface: |context, entity, staying| {
             if !mod_api::__private::listened(mod_api::HookId::PlayerStaysOnGroundSurface) {

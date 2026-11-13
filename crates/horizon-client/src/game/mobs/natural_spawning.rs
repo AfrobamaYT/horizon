@@ -1297,6 +1297,7 @@ impl<'a> Game<'a> {
                         }
                         spawned
                     };
+                    horizon_threads::work::set_chunk(chunk.0, chunk.1);
                     spawn_selection::spawn_for_chunk(
                         &level,
                         &mut random,
@@ -1312,6 +1313,7 @@ impl<'a> Game<'a> {
             let rides = std::mem::take(&mut *level.rides.borrow_mut());
             (created, rides)
         };
+        horizon_threads::work::clear_work();
         spawn_selection::attempt_counters(true);
         laps.lap("sn_attempts");
         self.world.random = random;
@@ -1336,8 +1338,9 @@ impl<'a> Game<'a> {
         let Some(terrain) = self.end.locator() else {
             return;
         };
-        // `FlatLevelSource.spawnOriginalMobs` is empty: a superflat world places no packs.
-        if terrain.is_flat() {
+        // `FlatLevelSource.spawnOriginalMobs` is empty: a superflat world places no packs, and
+        // neither does a mod's chunk generator, whose own `spawnOriginalMobs` the API has none of.
+        if !terrain.noise_ground() {
             return;
         }
         // `NoiseGeneratorSettings.disableMobGeneration`: the shipped End preset

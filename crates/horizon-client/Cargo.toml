@@ -35,11 +35,14 @@ horizon-core = { path = "../horizon-core" }
 horizon-optifine = { path = "../horizon-optifine" }
 # The server thread ahead of the workers (MinecraftServer.spin's Thread.setPriority).
 horizon-threads = { path = "../horizon-threads" }
+horizon-perf-format = { path = "../horizon-perf-format" }
 horizon-hdr = { path = "../horizon-hdr" }
 horizon-world = { path = "../horizon-world" }
 horizon-protocol = { path = "../horizon-protocol" }
 # server.properties, eula.txt and the user lists, shared with horizon-server.
 horizon-server-files = { path = "../horizon-server-files" }
+# The JDK's clock, for the LAN host's random seed and the probes.
+horizon-java-properties = { path = "../horizon-java-properties" }
 # The dedicated server's anticheat, off unless server.toml's [anticheat] turns it on (docs/anticheat.md).
 horizon-anticheat = { path = "../horizon-anticheat" }
 # The dedicated server's chat filter: [chat_filter], the slur list, mutes (docs/chat-filter.md);
@@ -101,10 +104,6 @@ fs4 = { version = "1.1.0", default-features = false, features = ["sync"] }
 rustix = { version = "1", default-features = false, features = ["std", "time", "process", "fs"] }
 
 [target.'cfg(windows)'.dependencies]
-# Resolve virtualized folders to shell-compatible physical paths.
-dunce = "1.0.5"
-# Use the registered URI handler without routing links through Explorer/cmd.
-open = { version = "5.4.5", features = ["shellexecute-on-windows"] }
 # DirectX 12, where Vulkan has no adapter or device, or by choice (`graphicsApi`, graphics.rs).
 # Shaders compile with FXC (d3dcompiler_47.dll, part of Windows), or on integrated GPUs with DXC
 # (dxcompiler.dll beside the game, gfx/dx12_compiler.rs).
@@ -149,7 +148,9 @@ rng-trace = ["horizon-core/rng-trace", "horizon-client-lib/rng-trace"]
 # Rust's allocations go to the system heap instead of mimalloc, where heap profilers that replace
 # malloc (heaptrack, valgrind's massif) see them. Also the Windows prebuilt archive's allocator
 # (tools/prebuilt_game.py, #2394): there std's DLL keeps its own allocator. Otherwise mimalloc is faster.
-system-allocator = []
+system-allocator = ["horizon-threads/system-allocator"]
+# mimalloc that counts each thread's allocations and frees (`stats` replies with `alloc`).
+alloc-count = ["horizon-threads/alloc-count"]
 # mimalloc with a tag on each block: `horizon-ctl memory` lists the live heap by startup step and
 # thread (`heap_by_tag_mb`). For measuring only: each block costs 16 bytes more.
 alloc-census = ["horizon-threads/alloc-census"]
@@ -170,11 +171,16 @@ path = "tests/mod_biome_sync.rs"
 name = "mod_api_hooks"
 path = "tests/mod_api_hooks.rs"
 
+[[test]]
+name = "skull_models"
+path = "tests/skull_models.rs"
+
 [lints]
 workspace = true
 
 [dev-dependencies]
-horizon-client-lib = { path = "../horizon-client-lib", default-features = false, features = ["test-payload-probe"] }
+horizon-client-core = { path = "../horizon-client-core", features = ["test-language-publication"] }
+horizon-client-lib = { path = "../horizon-client-lib", default-features = false, features = ["test-payload-probe", "test-publication-scope", "test-residency-observer"] }
 horizon-mod-wasm = { path = "../horizon-mod-wasm", features = ["runtime-fixture", "listener-fixture", "test-copy-probe"] }
 wat = "1.261"
 tempfile = "3"
@@ -183,5 +189,6 @@ horizon-threads = { path = "../horizon-threads", features = ["test-allocation-co
 mod_platform = { package = "horizon-mod-api", path = "../horizon-mod-api", features = ["testing"] }
 horizon-client-render = { path = "../horizon-client-render", features = ["test-support"] }
 horizon-items = { path = "../horizon-items", features = ["test-support"] }
+horizon-perf = { path = "../horizon-perf" }
 # Every WGSL shader translated as wgpu's DirectX 12 backend does (gfx.rs tests).
 naga = { version = "30.0.1", features = ["wgsl-in", "hlsl-out", "msl-out", "spv-out"] }

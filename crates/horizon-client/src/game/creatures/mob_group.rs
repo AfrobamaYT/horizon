@@ -13,6 +13,8 @@ use horizon_core::random::LegacyRandom;
 /// What every mob of the loop reads and none writes.
 pub(super) struct Shared<'a> {
     pub uuid: Option<[i32; 4]>,
+    /// The item registry the mobs live with: what a villager's snapshot counts its food by.
+    pub items: &'a horizon_client::items::Items,
     pub level_id: &'static str,
     /// The blocks whose collision changed since the last tick: mobs re-path around them.
     pub path_changes: &'a [[i32; 3]],
@@ -333,9 +335,7 @@ impl<M: MobSlot> Group<M> {
         };
         w.controlling_player_movement = controlling_player_movement;
         self.ticked.insert(self.mobs[i].mob().id);
-        // `horizon-report`'s cost by mob type (tick_profile.rs).
-        let sampled =
-            super::super::tick_profile::start().map(|t| (t, self.mobs[i].mob().kind.clone()));
+        let sampled = super::super::tick_profile::start_mob(&self.mobs[i].mob().kind);
         let kept = horizon_client::mobs::riders::tick(
             &mut self.mobs,
             i,
@@ -343,9 +343,7 @@ impl<M: MobSlot> Group<M> {
             &mut self.random,
             &mut self.events,
         );
-        if let Some((started, kind)) = sampled {
-            super::super::tick_profile::add(shared.level_id, &kind, started);
-        }
+        super::super::tick_profile::end_mob(shared.level_id, sampled);
         let m = self.mobs[i].mob_mut();
         if seen_guest.is_none() {
             self.player = w.player;
@@ -451,7 +449,7 @@ impl<M: MobSlot> Group<M> {
         self.keep.push(kept);
         // ServerLevel ticks entities one after another: the ones
         // after this mob see it as it is now.
-        self.snapshot[i] = seen(m, shared.uuid);
+        self.snapshot[i] = seen(m, shared.uuid, shared.items);
         self.snapshot[i].alive &= kept;
         self.grid.update(i, self.snapshot[i].bounds);
         horizon_client::mobs::apply_brain_events(&mut self.mobs, &mut self.events, from);

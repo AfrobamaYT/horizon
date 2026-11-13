@@ -34,6 +34,18 @@ pub(super) fn chat_tree(
         None => horizon_client::command::vanilla::game_dispatcher(),
     }
 }
+/// The arguments of a typed `/profiler` the client answers itself: only when the chat tree's `profiler` is Horizon's, else the server or mod that owns the name runs it.
+fn horizon_profiler_args<'a>(
+    message: &'a str,
+    server_tree: Option<&horizon_client::command::Dispatcher>,
+) -> Option<&'a str> {
+    let args = message
+        .strip_prefix('/')
+        .and_then(super::profile_capture::profiler_args)?;
+    server_tree
+        .is_none_or(|tree| tree.has_horizon_profiler())
+        .then_some(args)
+}
 use winit::{
     event::KeyEvent,
     keyboard::{KeyCode, PhysicalKey},
@@ -181,7 +193,7 @@ impl Game<'_> {
             horizon_client::command::MOD_COMMAND,
             &arguments,
         );
-        with_studio_commands(&with_native_commands(&tree_with_mods, &["studio"]))
+        with_studio_commands(&with_native_commands(&tree_with_mods, &["studio"])).with_profiler()
     }
 }
 
@@ -499,19 +511,7 @@ fn resource_ids(root: &Path) -> Arc<ResourceIds> {
         return ids.clone();
     }
     let data = root.join("data/minecraft");
-    let mut entity_types: Vec<String> = serde_json::from_slice::<serde_json::Value>(
-        &std::fs::read(root.join("entity-types.json")).unwrap_or_default(),
-    )
-    .ok()
-    .and_then(|v| {
-        v.as_object().map(|o| {
-            o.keys()
-                .map(|k| horizon_client::command::args::normalize(k))
-                .collect()
-        })
-    })
-    .unwrap_or_default();
-    entity_types.sort();
+    let entity_types = super::entity_type_rows::entity_type_rows(root).ids.clone();
     let (timelines, markers) = overworld_timelines(root);
     let ids = Arc::new(ResourceIds {
         // `/recipe <id>` must suggest a content mod's recipes too.
@@ -934,7 +934,7 @@ impl Game<'_> {
             .collect();
         self.sync_enchantment_registries();
         // After the export, which keys the registry with vanilla's tags.
-        self.ui.registries.sync_damage_type_ids();
+        self.sync_stat_registries();
     }
     /// The block the player is looking at, for coordinate suggestions, and
     /// the entity, for entity arguments (ClientSuggestionProvider).
@@ -1362,6 +1362,12 @@ impl Game<'_> {
             return;
         }
         self.ui.chat.add_recent(&message);
+        if let Some(args) =
+            horizon_profiler_args(&message, self.remote.as_ref().map(|r| &r.chat_tree))
+        {
+            self.profiler_chat(args);
+            return;
+        }
         // On a server (single player's own included) the server runs it,
         // unless a client mod owns the command.
         if self.remote.is_some() {
@@ -1498,6 +1504,14 @@ impl Game<'_> {
                 }
             }
             Some(ClickEvent::RunCommand(command)) => self.click_command(&command),
+            Some(ClickEvent::Profiler(command)) => {
+                if let Some(args) = command
+                    .strip_prefix('/')
+                    .and_then(super::profile_capture::profiler_args)
+                {
+                    self.profiler_chat(args);
+                }
+            }
             // Screen.defaultHandleGameClickEvent: the dialog opens over the
             // screen, and closes back to it.
             Some(ClickEvent::ShowDialog(dialog)) => self.show_dialog_ref(&dialog),
@@ -2041,11 +2055,6 @@ impl Game<'_> {
     /// The carrier store's open-time state settles here too, before the
     /// first tick and any player: a refusal fails the open.
     pub(super) fn load_world_state(&mut self) -> crate::Result<()> {
-        self.ui.rules = GameRules::load_with_registry(
-            &self.world_root,
-            &self.level.enabled_features,
-            self.level.rule_registry.clone(),
-        );
         self.ui.dispatcher = SessionDispatcher(Arc::new(
             horizon_client::command::vanilla::session_dispatcher(
                 &self.level.rule_registry,
@@ -2348,6 +2357,31 @@ const LINK_COPY: usize = 1;
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_typed_profiler_is_the_clients_unless_the_server_owns_the_name() {
+        let vanilla = horizon_client::command::vanilla::game_dispatcher();
+        let ours = vanilla.with_profiler();
+        assert_eq!(
+            super::horizon_profiler_args("/profiler share", Some(&ours)),
+            Some(" share")
+        );
+        assert_eq!(super::horizon_profiler_args("/profiler", None), Some(""));
+        assert_eq!(
+            super::horizon_profiler_args("/profilers", Some(&ours)),
+            None
+        );
+        let mut server = vanilla.clone();
+        let node = server.literal(0, "profiler");
+        server.executes(node, "server:profiler");
+        let theirs = server.with_profiler();
+        assert_eq!(
+            super::horizon_profiler_args("/profiler share", Some(&theirs)),
+            None
+        );
+    }
+
+    /// A mod's text reaches the chat box as typing would leave it: emoji and
+    /// accents stay, control characters, DEL and the section sign go.
     #[test]
     fn canceled_screenshot_keeps_a_custom_line_or_the_default_reason() {
         let custom = Text::literal("kept");
@@ -2962,7 +2996,8 @@ mod enchantment_snapshot_tests {
                 .unwrap(),
         );
         game.world_tables.as_mut().unwrap().stations.enchantments = synced.clone();
-        game.world_tables.as_mut().unwrap().items.enchantments = synced;
+        std::sync::Arc::make_mut(&mut game.world_tables.as_mut().unwrap().items).enchantments =
+            synced;
         assert!(
             game.active_enchantment_definitions()
                 .get("h024:audit")
@@ -3006,7 +3041,8 @@ mod enchantment_snapshot_tests {
             assert_eq!(reg.effects, effects);
         }
         game.world_tables.as_mut().unwrap().stations.enchantments = base.clone();
-        game.world_tables.as_mut().unwrap().items.enchantments = base;
+        std::sync::Arc::make_mut(&mut game.world_tables.as_mut().unwrap().items).enchantments =
+            base;
         assert!(
             game.active_enchantment_definitions()
                 .get("h024:audit")
