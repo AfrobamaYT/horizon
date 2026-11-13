@@ -363,15 +363,11 @@ pub(crate) fn index_of(
             continue;
         }
         let krate = folder.replace('-', "_");
-        if !index.crates.contains_key(&krate) {
-            let library = crate::replace::library_name(&package)?;
-            index.crates.insert(
-                krate,
-                CrateModules {
-                    library,
-                    modules: BTreeMap::new(),
-                },
-            );
+        if let std::collections::btree_map::Entry::Vacant(slot) = index.crates.entry(krate) {
+            slot.insert(CrateModules {
+                library: crate::replace::library_name(&package)?,
+                modules: BTreeMap::new(),
+            });
         }
     }
     // Every function a target can name, by key, with its file and span.
