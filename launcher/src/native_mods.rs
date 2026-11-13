@@ -1151,6 +1151,8 @@ fn run_checked(
             tail.push_back(text);
         }
         let status = child.wait();
+        // Before the watcher's join, which can wait out its 100 ms poll.
+        let took = started.elapsed();
         finished.store(true, Ordering::Relaxed);
         let _ = watcher.join();
         if CANCEL.load(Ordering::Relaxed) {
@@ -1160,16 +1162,21 @@ fn run_checked(
         let status = status.map_err(|e| ran(e.to_string()))?;
         if status.success() {
             // Every command of a native build says how long it took, so the log accounts for
-            // the whole build and not only the steps that time themselves.
+            // the whole build and not only the steps that time themselves. The command's stdout
+            // went into this log and may not have ended its last line.
+            let mut last = *b"\n";
+            if let Ok(mut read) = fs::File::open(log_path()) {
+                if read.seek(SeekFrom::End(-1)).is_ok() {
+                    let _ = read.read_exact(&mut last);
+                }
+            }
             let _ = writeln!(
                 log,
-                "{}",
+                "{}{}",
+                if last[0] == b'\n' { "" } else { "\n" },
                 trf(
                     "{step}: {ms} ms",
-                    &[
-                        ("step", what),
-                        ("ms", &started.elapsed().as_millis().to_string()),
-                    ],
+                    &[("step", what), ("ms", &took.as_millis().to_string())],
                 )
             );
             return Ok(());
@@ -3763,8 +3770,9 @@ mod tests {
     fn each_command_logs_its_time() {
         let _guard = TEST_STATE.lock().unwrap();
         clear_log().unwrap();
+        // Its stdout, which goes to the log, does not end its line.
         let mut cmd = Command::new("sh");
-        cmd.args(["-c", "sleep 0.05"]);
+        cmd.args(["-c", "printf output; sleep 0.05"]);
         run(cmd, "Linking the game", |_| {}).unwrap();
         let mut cmd = Command::new("sh");
         cmd.args(["-c", "exit 1"]);
@@ -3777,6 +3785,7 @@ mod tests {
             .parse()
             .unwrap();
         assert!(ms >= 50, "{log}");
+        assert!(log.lines().any(|line| line == "output"), "{log}");
         assert!(!log.contains("Compiling fnr_alpha: "), "{log}");
     }
 }
