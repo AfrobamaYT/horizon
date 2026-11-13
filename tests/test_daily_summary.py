@@ -357,18 +357,10 @@ class DailyWorkflowTests(unittest.TestCase):
         publish = jobs["sdk-publish"]
         self.assertEqual(publish["needs"], ["resolve", "summary", "sdk"])
         self.assertEqual(publish["if"], "needs.summary.outputs.green == 'true' && needs.resolve.outputs.dry_run == 'false'")
-        self.assertEqual(publish["env"]["TAG"], "${{ needs.sdk.outputs.tag }}")
-        self.assertEqual([step.get("name") for step in publish["steps"]][-1], "Release prebuilt-<sha>")
+        self.assertEqual(publish["uses"], "./.github/workflows/sdk-publish.yml")
+        self.assertEqual(publish["with"], {"commit": "${{ needs.resolve.outputs.commit }}",
+                                           "tag": "${{ needs.sdk.outputs.tag }}"})
         self.assertIn("sdk-publish", jobs["nightly"]["needs"])
-        steps = {step.get("name") or step.get("uses"): step for step in publish["steps"]}
-        self.assertEqual(steps["Is prebuilt-<sha> published"]["id"], "published")
-        download = steps["actions/download-artifact@v4"]
-        self.assertNotIn("continue-on-error", download, "a failed download stops the publish")
-        release = steps["Release prebuilt-<sha>"]
-        for step in (download, release):
-            self.assertEqual(step["if"], "steps.published.outputs.published == 'false'")
-        self.assertLess(release["run"].index("python3 tools/ci/nightly.py sdk-archives"),
-                        release["run"].index("gh release create"), "refuses unless exactly the four archives are there")
 
         self.assertEqual(jobs["nightly"]["with"]["daily"], "true")
         self.assertTrue(jobs["summary"]["name"].startswith("summary ${{ needs.resolve.outputs.commit }}"))

@@ -118,7 +118,7 @@ def report_for(job, reports):
 
 def known(name):
     """daily.yml's own jobs and its legs' jobs; any other job is one the summary cannot judge."""
-    return (name in ("resolve", "schedule-dispatch", "sdk-publish") or name.startswith(("summary ", "nightly / "))
+    return (name in ("resolve", "schedule-dispatch") or name.startswith(("summary ", "sdk-publish / ", "nightly / "))
             or name.split(" / ", 1)[0] in LEGS and " / " in name)
 
 

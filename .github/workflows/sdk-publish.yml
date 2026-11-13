@@ -1,0 +1,68 @@
+name: sdk publish
+# The one place a prebuilt SDK is published (#589): the archives prebuilt-game-build.yml uploaded earlier in the SAME
+# workflow run (artifacts belong to the run, so a called workflow downloads what another called workflow of the run
+# uploaded) become the prerelease `tag` (prebuilt-<commit>), never marked latest. Called by the daily run after a green
+# summary (daily.yml), by a snapshot (release.yml, kind snapshot) and by the hand dispatch (prebuilt-game.yml).
+# A release that already exists is left alone: an SDK is never replaced and never pruned, since nightlies, snapshots
+# and installed games reference it by commit.
+on:
+  workflow_call:
+    inputs:
+      commit:
+        description: The full commit the archives were built from
+        type: string
+        required: true
+      tag:
+        description: The release tag, prebuilt-<commit> (prebuilt-game-build.yml's output `tag`)
+        type: string
+        required: true
+permissions:
+  contents: write  # the prebuilt-<sha> release
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      COMMIT: ${{ inputs.commit }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      # The build skips when the release already exists: then there is nothing to download or publish.
+      - name: Is prebuilt-<sha> published
+        id: published
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "### $TAG is already published" >> "$GITHUB_STEP_SUMMARY"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.published.outputs.published == 'false'
+        with:
+          persist-credentials: false
+      # A failed download fails the job here, before anything is published.
+      - uses: actions/download-artifact@v4
+        if: steps.published.outputs.published == 'false'
+        with:
+          pattern: horizon-prebuilt-*
+          path: archives
+          merge-multiple: true
+      - name: Release prebuilt-<sha>
+        if: steps.published.outputs.published == 'false'
+        run: |
+          set -euo pipefail
+          # Exactly the archives a nightly requires (tools/ci/nightly.py SDK_ARCHIVES), or nothing is released: an
+          # incomplete prebuilt-<sha> could never be repaired by a later run.
+          expected=$(python3 tools/ci/nightly.py sdk-archives | sort)
+          actual=$(ls archives | sort)
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::not releasing $TAG: the archives are not exactly $(echo $expected) (found: $(echo $actual))"
+            exit 1
+          fi
+          cd archives
+          sha256sum horizon-prebuilt-*.tar.gz > SHA256SUMS
+          gh release create "$TAG" horizon-prebuilt-*.tar.gz SHA256SUMS --target "$COMMIT" --prerelease \
+            --latest=false --title "Prebuilt game ${COMMIT::10}" \
+            --notes "The game as a Rust dylib plus crate metadata, for the launcher's native mod builds (#589). Compiler outputs plus game-owned registry patch sources."

@@ -7,8 +7,8 @@ name: prebuilt game
 # release stops early), and published as a prerelease tagged prebuilt-<sha>, never marked latest. Exact-SHA SDKs are retained: Nightlies and installed
 # games can continue referencing older builds. Only compiler outputs go in:
 # tools/prebuilt_game.py refuses anything else, and nothing here reads vanilla data. The build lives in
-# prebuilt-game-build.yml, which the daily run calls read-only and publishes itself (daily.yml, sdk-publish) once
-# every leg is green; this workflow is the hand dispatch, which publishes from main. A run on another branch builds
+# prebuilt-game-build.yml and the publish in sdk-publish.yml, which the daily run (once every leg is green), a
+# snapshot (release.yml) and this hand dispatch (from main) all call. A run on another branch builds
 # and smokes every OS and publishes nothing.
 on:
   workflow_dispatch:
@@ -25,24 +25,9 @@ jobs:
     needs: build
     # A run on any other branch builds and smokes every OS but releases nothing.
     if: github.ref == 'refs/heads/main' && needs.build.outputs.needed == 'true'
-    runs-on: ubuntu-latest
     permissions:
-      contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-      COMMIT: ${{ github.sha }}
-      TAG: ${{ needs.build.outputs.tag }}
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: archives
-          merge-multiple: true
-      - name: Release prebuilt-<sha>
-        run: |
-          set -euo pipefail
-          cd archives
-          sha256sum horizon-prebuilt-*.tar.gz > SHA256SUMS
-          gh release create "$TAG" horizon-prebuilt-*.tar.gz SHA256SUMS --target "$COMMIT" --prerelease \
-            --latest=false --title "Prebuilt game ${COMMIT::10}" \
-            --notes "The game as a Rust dylib plus crate metadata, for the launcher's native mod builds (#589). Compiler outputs plus game-owned registry patch sources."
+      contents: write  # the prebuilt-<sha> release
+    uses: ./.github/workflows/sdk-publish.yml
+    with:
+      commit: ${{ github.sha }}
+      tag: ${{ needs.build.outputs.tag }}
