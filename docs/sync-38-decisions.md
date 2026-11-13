@@ -24,7 +24,7 @@ modding/native_scene.rs only changes a documentation ordinal; no runtime breakag
 # Game conflict resolutions
 
 
-- administration/commands/mod.rs: take upstream teleport cause and hold_for_chunks instead of direct trip removal. hold_for_chunks itself clears the previous trip.
+- administration/commands/mod.rs: take upstream hold_for_chunks instead of direct trip removal; it clears the previous trip. Drop the incoming hub::teleport_cause call because the fork has no such function; that upstream cause-reporting feature is not taken. The fork's typed teleport decision remains intact.
 - creatures/mob_group.rs: preserve upstream collision count across snapshot refresh and retain fork's shared.items argument to seen.
 - creatures/mob_islands.rs: retain upstream own-random villager grouped parity test, then fork teleport-consumable test and its correct comment. Discard upstream raider comment that would incorrectly describe the fork test. Wire upstream helper-thread profiling around fork worker run and merge successful join sums, retaining lane cleanup guards and first-panic propagation.
 - entities/boat_passengers.rs: remove obsolete mobs_near_carts optimization; upstream now selects candidates via CartCells in the new push path.
