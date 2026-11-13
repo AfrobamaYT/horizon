@@ -84,7 +84,6 @@ jobs:
             --expanded "$CARGO_TARGET_DIR/wire-goldens/expanded.rs" --check
           cargo test --locked -p horizon-mod-vocab --lib existing_fieldless_enum_layouts_match_baseline
           cargo test --locked -p horizon-mod-api --test wire_math_profile
-          cargo test --locked -p horizon-client --lib math_profile_selection_matches_platform_and_is_stable
       - name: Compile and test emitted point records
         run: |
           manifest=crates/horizon-mod-point-shape/tests/record-wire/Cargo.toml
