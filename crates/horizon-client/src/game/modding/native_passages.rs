@@ -37,9 +37,9 @@ pub(crate) struct Passages {
     index: FxHashMap<PassageId, (DimensionKey, [i32; 2])>,
     /// The last number given; numbers start at 1 and are never reused.
     last: u64,
-    /// The passages whose change the clients have not been told, one entry each: a live
-    /// passage not told yet, or a removed one they were told of. So it holds at most the
-    /// live passages and those told before their removal.
+    /// The passages whose change the clients have not all been told, one entry each: a
+    /// live passage not told to every client yet, or a removed one some were told of. So it
+    /// holds at most the live passages and those told before their removal.
     dirty: FxHashMap<PassageId, Dirty>,
     /// A client's copy: what its server told it of, kept with the chunk.
     held: FxHashMap<PassageId, Passage>,
@@ -53,8 +53,9 @@ struct LevelPassages {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Dirty {
-    /// Registered and not told yet.
-    Added,
+    /// Registered and not told to every client tracking its chunk; `told` once a chunk's
+    /// sync gave it to one, so a removal must be told too.
+    Added { told: bool },
     /// Removed from this level and chunk after the clients were told of it.
     Removed(DimensionKey, [i32; 2]),
 }
@@ -79,7 +80,7 @@ impl Passages {
         self.index.retain(|_, (level, _)| *level != key);
         let index = &self.index;
         self.dirty.retain(|id, dirty| match dirty {
-            Dirty::Added => index.contains_key(id),
+            Dirty::Added { .. } => index.contains_key(id),
             Dirty::Removed(level, _) => *level != key,
         });
     }
@@ -117,12 +118,15 @@ impl Game<'_> {
                 limit: MAX_PER_CHUNK,
             });
         }
-        passages.last += 1;
-        let id = PassageId::from_raw(passages.last);
+        let Some(next) = passages.last.checked_add(1) else {
+            return Err(Refused::NoIdsLeft);
+        };
+        passages.last = next;
+        let id = PassageId::from_raw(next);
         held.chunks.entry(chunk).or_default().push((id, passage));
         held.count += 1;
         passages.index.insert(id, (level.dimension(), chunk));
-        passages.dirty.insert(id, Dirty::Added);
+        passages.dirty.insert(id, Dirty::Added { told: false });
         Ok(id)
     }
 
@@ -148,32 +152,34 @@ impl Game<'_> {
             }
             held.count -= 1;
         }
-        if passages.dirty.remove(&id) != Some(Dirty::Added) {
+        if passages.dirty.remove(&id) != Some(Dirty::Added { told: false }) {
             passages.dirty.insert(id, Dirty::Removed(at, chunk));
         }
         true
     }
 
     /// The changes since the last call, by number, told to the Horizon clients that track
-    /// the passage's chunk (`ChunkMap.isChunkTracked`). From the first one on, the hub
-    /// records the chunks it sends (`ChunkWatchLog::record_for_passages`), so a client that
-    /// gets the chunk later hears of it with the chunk. Kept for the next call while the hub
-    /// is lent out.
+    /// the passage's chunk (`ChunkMap.isChunkTracked`). While a passage lives, the hub
+    /// records the chunks it sends (`ChunkWatchLog::record_for_passages`), a new hub after
+    /// the LAN reopens too, so a client that gets the chunk later hears of it with the
+    /// chunk. Kept for the next call while the hub is lent out.
     pub(in crate::game) fn flush_passages(&mut self) {
-        if self.passages.dirty.is_empty() {
-            return;
-        }
         let Some(host) = self.lan.as_mut() else {
             return;
         };
         let hub = &mut host.hub;
-        hub.chunk_watches.record_for_passages();
+        if !self.passages.index.is_empty() {
+            hub.chunk_watches.record_for_passages();
+        }
+        if self.passages.dirty.is_empty() {
+            return;
+        }
         let passages = &mut self.passages;
         let mut changes: Vec<_> = passages.dirty.drain().collect();
         changes.sort_unstable_by_key(|(id, _)| *id);
         for (id, dirty) in changes {
             let (key, chunk, message) = match dirty {
-                Dirty::Added => {
+                Dirty::Added { .. } => {
                     let Some(&(key, chunk)) = passages.index.get(&id) else {
                         continue;
                     };
@@ -215,9 +221,15 @@ impl Game<'_> {
         let Some(g) = host.hub.guests.iter().find(|g| g.uuid == uuid) else {
             return;
         };
-        if g.tracks_chunk(level.dimension_id(), (chunk[0], chunk[1])) {
-            let forms = list.iter().map(|(id, p)| form(*id, p)).collect();
-            g.send_passage_sync(&Message::Add(forms));
+        if !g.tracks_chunk(level.dimension_id(), (chunk[0], chunk[1])) {
+            return;
+        }
+        let forms = list.iter().map(|(id, p)| form(*id, p)).collect();
+        g.send_passage_sync(&Message::Add(forms));
+        for (id, _) in list {
+            if let Some(Dirty::Added { told }) = self.passages.dirty.get_mut(id) {
+                *told = true;
+            }
         }
     }
 
@@ -543,6 +555,18 @@ mod tests {
                 Err(Refused::Stale)
             );
             assert!(!game.level_remove_passage(stale, PassageId::from_raw(1)));
+            // The last id is given once; then registration is refused, nothing given twice.
+            game.passages.last = u64::MAX - 1;
+            assert!(game.level_remove_passage(level, PassageId::from_raw(4)));
+            assert_eq!(
+                game.level_register_passage(level, in_chunk(0, 9)),
+                Ok(PassageId::from_raw(u64::MAX))
+            );
+            assert!(game.level_remove_passage(level, PassageId::from_raw(5)));
+            assert_eq!(
+                game.level_register_passage(level, in_chunk(0, 10)),
+                Err(Refused::NoIdsLeft)
+            );
         });
         with_client_game(|game| {
             let epoch = game.native_lifecycle.epoch().unwrap();
@@ -692,6 +716,165 @@ mod tests {
                     ]
                 );
             }
+        });
+    }
+
+    /// The LAN closes and opens again with a passage live: the new hub records the chunks
+    /// it sends at the next tick's end, though nothing changed, so a late joiner still gets
+    /// the passage with its chunk.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_reopened_lan_records_chunks_for_the_live_passages() {
+        use crate::game::lan::LanSettings;
+        use horizon_client::lan::{NetConfig, hub::HubConfig};
+        with_guests(|game| {
+            game.native_lifecycle.world_open_ready().unwrap();
+            let level = game.level(game.dim.id()).unwrap();
+            game.level_register_passage(level, doorway()).unwrap();
+            game.flush_passages();
+            assert!(game.lan.as_ref().unwrap().hub.chunk_watches.recording());
+            game.lan_disconnect(false);
+            let settings = LanSettings {
+                port: 0,
+                guest_commands: false,
+                force_game_mode: false,
+            };
+            let net = NetConfig {
+                listen: false,
+                announce: false,
+                lod_distance: 0,
+                ..NetConfig::lan(0, String::new(), 2)
+            };
+            let config = HubConfig {
+                default_game_mode: 0,
+                guest_commands: false,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 2,
+                simulation_distance: 2,
+                dimension: game.dim.id().to_owned(),
+                allow_flight: true,
+                seed: 0,
+                max_players: 2,
+                integrated: true,
+                levels: game.level_shapes,
+            };
+            game.lan_host(settings, net, config).unwrap();
+            assert!(!game.lan.as_ref().unwrap().hub.chunk_watches.recording());
+            game.flush_passages();
+            assert!(game.lan.as_ref().unwrap().hub.chunk_watches.recording());
+        });
+    }
+
+    /// A Horizon arrival held for a hand-over is sent its chunks, so it is told their
+    /// passages too; a held vanilla client is not.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_held_arrival_is_told_its_chunks_passages() {
+        with_guests(|game| {
+            game.native_lifecycle.world_open_ready().unwrap();
+            let receivers = listen(game, ["horizon", "vanilla"]);
+            let hub = &mut game.lan.as_mut().unwrap().hub;
+            hub.guests.update_all(|g| {
+                g.placed = false;
+                g.held = true;
+                g.center = Some((0, 0));
+                g.sent_chunks.insert((0, 0));
+            });
+            let level = game.level(game.dim.id()).unwrap();
+            game.level_register_passage(level, doorway()).unwrap();
+            game.flush_passages();
+            assert_eq!(
+                passage_messages(&packets(&receivers[0])),
+                [Message::Add(vec![doorway_form(1)])]
+            );
+            assert!(passage_messages(&packets(&receivers[1])).is_empty());
+        });
+    }
+
+    /// Removes the passage in the second `chunk_sent` it hears.
+    struct RemoveOnSecondSent {
+        heard: std::sync::Mutex<u32>,
+        id: PassageId,
+    }
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for RemoveOnSecondSent {
+        fn chunk_sent(&self, host: &mut dyn mod_api::ServerHost, e: &mut mod_api::ChunkSentEvent) {
+            let mut heard = self.heard.lock().unwrap();
+            *heard += 1;
+            if *heard == 2 {
+                assert!(e.chunk.level().remove_passage(host, self.id));
+            }
+        }
+    }
+
+    /// Two chunk sends in one tick: the first gives a new passage to guest 12 with its
+    /// chunk, and the mod removes it at the second, before the tick's end told it to the
+    /// rest. The removal still reaches 12, which ends with no passage, and 13 is told
+    /// only the removal.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    fn a_passage_sent_with_its_chunk_and_removed_in_the_same_tick_leaves_no_ghost() {
+        use horizon_client::lan::chunk_watch::{
+            ChunkWatch, ChunkWatchKind, ChunkWatchLog, LevelWatches,
+        };
+        let mods = vec![mod_api::ModEntry::new(
+            "remover",
+            Box::new(RemoveOnSecondSent {
+                heard: Default::default(),
+                id: PassageId::from_raw(1),
+            }),
+        )];
+        mod_platform::testing::with_mods(mods.into(), || {
+            with_guests(|game| {
+                game.native_lifecycle.world_open_ready().unwrap();
+                let receivers = listen(game, ["horizon", "horizon"]);
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let dimension = game.dim.id().to_owned();
+                let hub = &mut game.lan.as_mut().unwrap().hub;
+                hub.guests.update_all(|g| {
+                    g.center = Some((0, 0));
+                    g.sent_chunks.insert((0, 0));
+                });
+                let sent = |uuid: u128| ChunkWatch {
+                    kind: ChunkWatchKind::Sent,
+                    uuid,
+                    entity_id: uuid as i32,
+                    chunk: [0, 0],
+                };
+                hub.chunk_watches = ChunkWatchLog::new(vec![LevelWatches {
+                    dimension,
+                    watches: vec![sent(12), sent(13)],
+                }]);
+                let level = game.level(game.dim.id()).unwrap();
+                let id = game.level_register_passage(level, doorway()).unwrap();
+                assert_eq!(id, PassageId::from_raw(1));
+                game.run_chunk_watches();
+                game.flush_passages();
+                let twelve = packets(&receivers[0]);
+                assert_eq!(
+                    passage_messages(&twelve),
+                    [
+                        Message::Add(vec![doorway_form(1)]),
+                        Message::Remove(vec![1])
+                    ]
+                );
+                assert_eq!(
+                    passage_messages(&packets(&receivers[1])),
+                    [Message::Remove(vec![1])]
+                );
+                // Guest 12's client, given what it was sent, holds nothing.
+                for p in &twelve {
+                    if let Clientbound::CustomPayload(p) = p
+                        && p.channel == "horizon:passage_sync"
+                    {
+                        assert!(game.remote_passage_sync(&p.data).is_empty());
+                    }
+                }
+                assert!(game.passages.held.is_empty());
+            });
         });
     }
 

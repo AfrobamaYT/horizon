@@ -121,6 +121,8 @@ pub enum PassageRegistrationError {
         /// Passages per chunk at most.
         limit: u32,
     },
+    /// Every number was given: an id is never given twice.
+    NoIdsLeft,
 }
 
 impl From<crate::LevelReadError> for PassageRegistrationError {

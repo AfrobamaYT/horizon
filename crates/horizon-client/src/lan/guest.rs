@@ -838,10 +838,11 @@ impl Guest {
             Err(e) => log::debug!("Horizon: attachment sync not sent: {e}"),
         }
     }
-    /// Passages to hold or forget (#3775), if the guest is placed and on a Horizon
-    /// client, the only one that reads them; a message that cannot be written is not sent.
+    /// Passages to hold or forget (#3775), if the guest is on a Horizon client, the only
+    /// one that reads them, and placed or held (a hand-over's arrival is sent its chunks,
+    /// so their passages too); a message that cannot be written is not sent.
     pub fn send_passage_sync(&self, message: &passage_sync::Message) {
-        if !self.reads_attachment_sync() {
+        if !(self.placed || self.held) || self.brand != "horizon" {
             return;
         }
         match passage_sync::encode(message) {

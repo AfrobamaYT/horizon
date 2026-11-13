@@ -768,7 +768,8 @@ pub trait LevelsBackendMut {
     /// A passage removed before the tick's end is never told. Refused with nothing
     /// registered for a stale handle, a client, a passage that isn't a finite rectangle
     /// with unit axes at a right angle and sides above 0 and at most 32 blocks, one with a
-    /// corner past vanilla's position limits, and a full level or chunk.
+    /// corner past vanilla's position limits, a full level or chunk, and once every id was
+    /// given.
     #[access(WorldOnly)]
     fn level_register_passage(
         &mut self,

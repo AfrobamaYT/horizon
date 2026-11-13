@@ -64,13 +64,13 @@ impl ChunkWatchLog {
     }
 
     /// Whether the hub records the chunks players watch: while a mod listens
-    /// ([`listened`]), and from the first passage on until the world closes.
+    /// ([`listened`]), and from the first live passage on while this hub lasts.
     pub fn recording(&self) -> bool {
         self.passages || listened()
     }
 
-    /// A passage was registered: record from now on, for the passages the game
-    /// sends with each chunk sent.
+    /// The server has a live passage: record from now on, for the passages the
+    /// game sends with each chunk sent.
     pub fn record_for_passages(&mut self) {
         self.passages = true;
     }
