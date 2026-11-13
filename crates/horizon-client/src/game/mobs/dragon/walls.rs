@@ -3,9 +3,10 @@ use super::*;
 impl Game<'_> {
     /// `EnderDragon.checkWalls` over the head, neck and body. A block that is
     /// neither air nor `#dragon_transparent` breaks when griefing is allowed
-    /// (`canEntityGrief` for the dragon), the dragon may destroy it (not
-    /// `#dragon_immune`, or what its parts answer) and no mod keeps it; any
-    /// other puts the dragon in a wall.
+    /// (`canEntityGrief` for the dragon), its parts let the dragon destroy it
+    /// (unanswered: not `#dragon_immune`), no mod keeps it
+    /// (`LivingDestroyBlockEvent`) and it is not `#dragon_immune`, which a yes
+    /// does not bypass; any other puts the dragon in a wall.
     pub(super) fn dragon_check_walls(&mut self) {
         let mut in_wall = false;
         let Some(d) = self.dragon.as_ref() else {
@@ -34,15 +35,10 @@ impl Game<'_> {
                         if self.res.facts().is_air(state) || transparent.contains(&**name) {
                             continue;
                         }
-                        // Not #dragon_immune, or what the block's parts answer.
-                        if griefing
-                            && self.entity_may_destroy(
-                                dragon_id,
-                                [x, y, z],
-                                !immune.contains(&**name),
-                            )
-                        {
-                            removed.push([x, y, z]);
+                        // Griefing, then what the block's parts answer.
+                        let is_immune = immune.contains(&**name);
+                        if griefing && self.entity_may_destroy(dragon_id, [x, y, z], !is_immune) {
+                            removed.push(([x, y, z], is_immune));
                         } else {
                             in_wall = true;
                         }
@@ -52,15 +48,20 @@ impl Game<'_> {
         }
         // LivingDestroyBlockEvent: a block a mod keeps is still in the wall.
         if !mod_api::__private::mods().is_empty() {
-            removed.retain(|p| {
-                let kept = !self.may_destroy(dragon_id, "minecraft:ender_dragon", *p);
+            removed.retain(|&(p, _)| {
+                let kept = !self.may_destroy(dragon_id, "minecraft:ender_dragon", p);
                 in_wall |= kept;
                 !kept
             });
         }
+        // #dragon_immune still holds after both: such a block stays, in the wall.
+        removed.retain(|&(_, is_immune)| {
+            in_wall |= is_immune;
+            !is_immune
+        });
         let air = self.world.air;
         let broke = !removed.is_empty();
-        for p in removed {
+        for (p, _) in removed {
             let _ = self.level_set(p, air);
         }
         if broke && let Some(d) = self.dragon.as_ref() {

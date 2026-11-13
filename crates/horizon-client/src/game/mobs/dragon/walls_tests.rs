@@ -27,6 +27,7 @@ impl Hooks for Walls {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
         for (name, may) in [
             ("minecraft:obsidian", true),
+            ("minecraft:glass", true),
             ("minecraft:bedrock", true),
             ("minecraft:stone", false),
         ] {
@@ -76,11 +77,12 @@ fn block_parts_answer_what_the_dragon_and_the_wither_may_destroy() {
                 .unwrap();
             game.place_dragon_parts();
             let registry = game.pack.assets.registry;
-            let [obsidian, stone, bedrock, dirt] = [
+            let [obsidian, stone, bedrock, dirt, glass] = [
                 "minecraft:obsidian",
                 "minecraft:stone",
                 "minecraft:bedrock",
                 "minecraft:dirt",
+                "minecraft:glass",
             ]
             .map(|name| registry.default_state(name).unwrap());
             // The chunk around the dragon, all of `state`; how many cells still are, after
@@ -108,18 +110,20 @@ fn block_parts_answer_what_the_dragon_and_the_wither_may_destroy() {
                 );
             };
             griefing(game, true);
-            // Obsidian is #dragon_immune; answering yes, the dragon breaks it.
-            let (broken, in_wall) = walls(game, obsidian);
+            // Glass answering yes (not #dragon_immune) breaks, and leaves no wall.
+            let (broken, in_wall) = walls(game, glass);
             assert!(broken > 0 && !in_wall, "{broken} {in_wall}");
+            // Obsidian is #dragon_immune: answering yes does not bypass it.
+            assert_eq!(walls(game, obsidian), (0, true));
             // Stone answering no stays, and the dragon is in a wall.
             assert_eq!(walls(game, stone), (0, true));
             // A living_destroy_block cancel keeps a block the part allowed.
             keep.store(true, Ordering::Relaxed);
-            assert_eq!(walls(game, obsidian), (0, true));
+            assert_eq!(walls(game, glass), (0, true));
             keep.store(false, Ordering::Relaxed);
             // With mob_griefing off nothing breaks, whatever the part says.
             griefing(game, false);
-            assert_eq!(walls(game, obsidian), (0, true));
+            assert_eq!(walls(game, glass), (0, true));
             griefing(game, true);
             // The wither asks through its mob world: stone answering no is kept, and bedrock
             // (#wither_immune) answering yes breaks; an unanswered block keeps vanilla's rule.

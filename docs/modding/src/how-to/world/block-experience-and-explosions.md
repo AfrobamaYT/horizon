@@ -59,14 +59,17 @@ way, and vanilla's answer is used.
 `can_entity_destroy(host, event)` answers whether `event.entity` may destroy the
 block, where vanilla asks its per-block rule: the wither's block break (any
 block but air and `#wither_immune`), a dangerous wither skull's blast (the
-entity is the skull; only a block it may destroy has its resistance capped at
-0.8) and the dragon's wall check (any block but air, `#dragon_transparent` and
-`#dragon_immune`; a transparent block is skipped before the part is asked).
-`Some(true)` makes a block vanilla spares destroyable for that entity, such as
-obsidian for the dragon; `Some(false)` spares one it would break, and the
-dragon is then in a wall. The griefing gate runs first, so with `mob_griefing`
-off nothing breaks whatever the part says, and `living_destroy_block` can still
-keep a block the part allowed. The host is read-only. The dragon asks every
+entity is the skull, still readable; only a block it may destroy has its
+resistance capped at 0.8), the dragon's wall check, a zombie breaking a door
+and a zombie choosing a turtle egg to trample. `Some(true)` makes a block
+vanilla spares destroyable for that entity, such as bedrock for the wither;
+`Some(false)` spares one it would break, and the dragon is then in a wall. The
+griefing gate runs first, so with `mob_griefing` off nothing breaks whatever
+the part says, and `living_destroy_block` can still keep a block the part
+allowed (the turtle-egg choice fires none). For the dragon,
+`#dragon_transparent` blocks are skipped before the part is asked, and a
+`#dragon_immune` block stays even when the part says yes. A ravager asks only
+the griefing event. The host is read-only. The dragon asks every
 tick for each block in its head, neck and body, so answer fast. A panic is
 contained and vanilla's rule is used.
 

@@ -528,17 +528,26 @@ fn block_parts_answer_drops_from_explosions() {
     });
 }
 
-/// Stone a dangerous wither skull may not destroy, while `.0` is set.
+/// Stone a dangerous wither skull may not destroy, while `proof` is set. It reads the
+/// supplied entity's kind and position first, and records them.
 #[derive(Clone)]
-struct SkullProof(Arc<AtomicBool>);
+struct SkullProof {
+    proof: Arc<AtomicBool>,
+    seen: Arc<Mutex<Vec<(Option<String>, Option<[f64; 3]>)>>>,
+}
 #[mod_api::horizon_part]
 impl BlockPart for SkullProof {
     fn can_entity_destroy(
         &self,
-        _: &dyn mod_api::Host,
-        _: &mut CanEntityDestroyEvent,
+        host: &dyn mod_api::Host,
+        event: &mut CanEntityDestroyEvent,
     ) -> Option<bool> {
-        self.0.load(Ordering::Relaxed).then_some(false)
+        let kind = event.entity.kind(host);
+        let position = event.entity.position(host);
+        let skull = kind.as_deref() == Some("minecraft:wither_skull")
+            && position.is_some_and(|p| (1.0..=2.5).contains(&p[0]));
+        self.seen.lock().unwrap().push((kind, position));
+        (skull && self.proof.load(Ordering::Relaxed)).then_some(false)
     }
 }
 struct SkullMod(SkullProof);
@@ -553,10 +562,13 @@ impl Hooks for SkullMod {
 #[test]
 #[ignore = "needs prepared resources and isolated native mod state"]
 fn a_block_part_keeps_its_block_from_a_dangerous_skull_cap() {
-    let proof = Arc::new(AtomicBool::new(false));
+    let part = SkullProof {
+        proof: Arc::new(AtomicBool::new(false)),
+        seen: Arc::default(),
+    };
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
         "skull_proof",
-        Box::new(SkullMod(SkullProof(proof.clone()))),
+        Box::new(SkullMod(part.clone())),
     )]
     .into();
     mod_platform::testing::with_mods(mods.clone(), || {
@@ -572,24 +584,38 @@ fn a_block_part_keeps_its_block_from_a_dangerous_skull_cap() {
                 .registry
                 .default_state("minecraft:stone")
                 .unwrap();
-            // A dangerous skull's radius-1 blast just west of a stone block: a ray east
-            // reaches the stone on its second step with at least 0.7 - 0.225 = 0.475 power.
+            // A dangerous skull flying east into a stone block at (2, 64, 0): its impact
+            // blasts at radius 1 and keeps it readable while the stone's part is asked.
             let survives = |game: &mut Game<'_>| {
-                game.world.set(2, 65, 3, stone).unwrap();
-                game.combat.blast_resistance_cap = Some(0.8);
-                game.combat.explosion_direct = Some(4242);
-                game.server_explode([1.9, 65.5, 3.5], 1.0, BlockInteraction::Destroy, false)
-                    .unwrap();
-                game.combat.explosion_direct = None;
-                game.combat.blast_resistance_cap = None;
-                game.world.block(2, 65, 3) == stone
+                game.world.set(2, 64, 0, stone).unwrap();
+                let mut skull = horizon_client::projectiles::Projectile::new(
+                    horizon_client::projectiles::ProjectileKind::WitherSkull { dangerous: true },
+                    Vec3::new(1.5, 64.25, 0.5),
+                    None,
+                );
+                skull.velocity = Vec3::new(0.6, 0.0, 0.0);
+                game.spawn_mob_projectile(skull);
+                for _ in 0..5 {
+                    game.tick_projectiles_now().unwrap();
+                }
+                assert!(game.creatures.projectiles.is_empty(), "the skull hit");
+                game.world.block(2, 64, 0) == stone
             };
             // Capped at 0.8, a step through the stone costs (0.8 + 0.3) × 0.3 = 0.33.
             assert!(!survives(game));
             // Answering no for the skull, the stone keeps its 6: (6 + 0.3) × 0.3 = 1.89 a
             // step, more than a ray's 1.3 at most.
-            proof.store(true, Ordering::Relaxed);
+            part.proof.store(true, Ordering::Relaxed);
             assert!(survives(game));
+            let seen = part.seen.lock().unwrap();
+            assert!(!seen.is_empty());
+            for (kind, position) in seen.iter() {
+                assert_eq!(kind.as_deref(), Some("minecraft:wither_skull"));
+                assert!(
+                    position.is_some_and(|p| (1.0..=2.5).contains(&p[0])),
+                    "{position:?}"
+                );
+            }
         });
     });
 }
