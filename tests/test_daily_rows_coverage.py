@@ -181,6 +181,11 @@ class WindowsDailyTests(unittest.TestCase):
         self.assertNotIn("holder::game_entry::tests::write_missing_registration_actor", printed.split())
         workflow = (ROOT / ".github/workflows/launcher-windows-check.yml").read_text()
         self.assertIn("ignored_tests.py --daily-tests horizon-mod-package lib", workflow)
+        self.assertNotIn("< <(", workflow)  # a process substitution would hide the reader's failure
+        # No rows: no output at all, not one empty name.
+        empty = subprocess.run([sys.executable, str(ROOT / "tools/ci/ignored_tests.py"), "--daily-tests",
+                                "no-such-package", "lib"], capture_output=True, text=True, check=True).stdout
+        self.assertEqual(empty, "")
         self.assertIn('-- --ignored --exact "${tests[@]}"', workflow)
 
 
