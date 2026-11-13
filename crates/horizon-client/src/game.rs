@@ -7847,9 +7847,8 @@ impl Game<'_> {
         self.occupy_bed(head);
         true
     }
-    /// `Player.stopSleepInBed(false, update_level)`: `update_level` is false
-    /// only for the morning's `ServerLevel.wakeUpAllPlayers`.
-    fn wake_up(&mut self, update_level: bool) {
+    /// `Player.stopSleepInBed`: preserve the flags of the owning wake caller.
+    fn wake_up(&mut self, wake_immediately: bool, update_level: bool) {
         if self.remote.is_some() {
             // InBedChatScreen.sendWakeUp: the server wakes the player.
             self.remote_stop_sleeping();
@@ -7857,7 +7856,7 @@ impl Game<'_> {
         }
         // PlayerWakeUpEvent: heard at the start of stopSleepInBed, still in bed;
         // a listener may have woken the player, so the sleep is read after it.
-        self.native_acting_bed_leave(update_level);
+        self.native_acting_bed_leave(wake_immediately, update_level);
         let Some(head) = self.sleeping.take() else {
             return;
         };
@@ -7904,14 +7903,13 @@ impl Game<'_> {
             let bed_gone = !self.res.facts().get(bed).name.ends_with("_bed");
             // Vanilla has no Shift wake-up: the chat screen's capitals must
             // not get the sleeper up.
-            if (self.screen != Screen::Chat && self.keys.held(Mapping::Sneak))
-                || bed_gone
+            let wake_immediately = bed_gone
                 || self
                     .player
                     .as_ref()
-                    .is_none_or(|p| p.health.dead_or_dying())
-            {
-                self.wake_up(true);
+                    .is_none_or(|p| p.health.dead_or_dying());
+            if wake_immediately || (self.screen != Screen::Chat && self.keys.held(Mapping::Sneak)) {
+                self.wake_up(wake_immediately, true);
                 return;
             }
             // setPosToBed: the bed's top (`getSleepHeight`) and 0.125 above
@@ -7967,7 +7965,7 @@ impl Game<'_> {
                 self.world.weather.thunder_time = 0;
             }
             if self.sleeping.is_some() {
-                self.wake_up(false);
+                self.wake_up(false, false);
             }
             self.wake_guests();
             // SleepStatus.removeAllSleepers: waking everyone is not announced.

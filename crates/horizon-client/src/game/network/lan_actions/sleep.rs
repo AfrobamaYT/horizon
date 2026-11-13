@@ -53,10 +53,14 @@ impl Game<'_> {
         }
     }
 
-    /// `ServerPlayer.stopSleepInBed(false, update_level)` for guest `gi`:
-    /// `update_level` is false only for the morning's `wakeUpAllPlayers`.
+    /// `ServerPlayer.stopSleepInBed` for guest `gi`, with the caller's flags.
     /// The mods hear it first, while the guest still lies in the bed.
-    pub(in crate::game) fn wake_guest(&mut self, gi: usize, update_level: bool) {
+    pub(in crate::game) fn wake_guest(
+        &mut self,
+        gi: usize,
+        wake_immediately: bool,
+        update_level: bool,
+    ) {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
@@ -66,7 +70,7 @@ impl Game<'_> {
             && mod_api::__private::listened(mod_api::HookId::PlayerBedLeave)
         {
             let name = g.name.clone();
-            self.native_player_bed_leave(player, &name, head, false, update_level);
+            self.native_player_bed_leave(player, &name, head, wake_immediately, update_level);
         }
         // A listener may have woken the guest already, or changed the list:
         // find the guest again; `wake` does nothing to one already awake.
@@ -109,42 +113,41 @@ impl Game<'_> {
                 None
             };
             let mut keep_sleeping = !gone;
-            if !modded {
-                keep_sleeping &= self.sleep_problem(bed_exists, true).is_none();
-            } else if keep_sleeping && let Some(name) = name.as_deref() {
-                // Player.tick's bed rule check, which comes before and doesn't
-                // look at the bed.
+            let mut wake_immediately = gone;
+            // Player.tick's bed-rule check precedes living-entity continuation.
+            if keep_sleeping {
                 let problem = self.sleep_problem(true, true);
                 let mut may_continue = None;
-                self.native_can_continue_sleeping(
-                    uuid,
-                    name,
-                    "minecraft:player",
-                    head,
-                    problem,
-                    &mut may_continue,
-                );
+                if let Some(name) = name.as_deref() {
+                    self.native_can_continue_sleeping(
+                        uuid,
+                        name,
+                        "minecraft:player",
+                        head,
+                        problem,
+                        &mut may_continue,
+                    );
+                }
                 keep_sleeping = may_continue.unwrap_or(problem.is_none());
             }
-            // Then LivingEntity.tick's checkBedExists, for a sleeper still in bed.
-            if modded
-                && keep_sleeping
-                && let Some(name) = name.as_deref()
-            {
+            if keep_sleeping {
                 let problem = self.sleep_problem(bed_exists, false);
                 let mut may_continue = None;
-                self.native_can_continue_sleeping(
-                    uuid,
-                    name,
-                    "minecraft:player",
-                    head,
-                    problem,
-                    &mut may_continue,
-                );
+                if let Some(name) = name.as_deref() {
+                    self.native_can_continue_sleeping(
+                        uuid,
+                        name,
+                        "minecraft:player",
+                        head,
+                        problem,
+                        &mut may_continue,
+                    );
+                }
                 keep_sleeping = may_continue.unwrap_or(problem.is_none());
+                wake_immediately = !keep_sleeping;
             }
             if !keep_sleeping {
-                self.wake_guest(gi, true);
+                self.wake_guest(gi, wake_immediately, true);
             } else if let Some(host) = self.lan.as_mut() {
                 // LivingEntity.tick: a sleeper's xRot is 0.
                 host.hub.guests.update(gi, |g| {
@@ -279,7 +282,7 @@ impl Game<'_> {
         };
         let count = host.hub.guests.len();
         for i in 0..count {
-            self.wake_guest(i, false);
+            self.wake_guest(i, false, false);
         }
     }
 

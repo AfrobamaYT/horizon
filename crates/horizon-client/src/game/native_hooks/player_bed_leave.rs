@@ -12,23 +12,25 @@ thread_local! {
 impl Game<'_> {
     /// [`Self::native_player_bed_leave`] for the player acting now, who sleeps
     /// in `self.sleeping`; its name is copied only when a mod listens.
-    pub(in crate::game) fn native_acting_bed_leave(&mut self, update_level: bool) {
+    pub(in crate::game) fn native_acting_bed_leave(
+        &mut self,
+        wake_immediately: bool,
+        update_level: bool,
+    ) {
         if let (Some(head), Some(player)) = (self.sleeping, self.lan_acting_uuid)
             && mod_api::__private::listened(mod_api::HookId::PlayerBedLeave)
         {
             let name = self.lan_acting_name.clone().unwrap_or_default();
-            self.native_player_bed_leave(player, &name, head, false, update_level);
+            self.native_player_bed_leave(player, &name, head, wake_immediately, update_level);
         }
     }
 
     /// `PlayerWakeUpEvent`: a server player is getting out of the bed at
     /// `pos` (`Player.stopSleepInBed`), heard first, while they still read
     /// as sleeping there. `wake_immediately` is vanilla's flag for skipping
-    /// the wake-up fade; every Horizon caller passes false, as vanilla's
-    /// morning wake and leave-bed button do. `update_level` is false when
-    /// the level woke everyone at morning (`ServerLevel.wakeUpAllPlayers`)
-    /// and true when the player got up: the Leave Bed button, their bed
-    /// gone, a rule that no longer lets them sleep.
+    /// the wake-up fade. Morning uses (false, false), explicit leave/sneak
+    /// and bed-rule refusal use (false, true), and generic stop-sleeping,
+    /// death and living-entity continuation failure use (true, true).
     pub(in crate::game) fn native_player_bed_leave(
         &mut self,
         player: u128,
