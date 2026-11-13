@@ -2,20 +2,24 @@
 //! `Renderer`, offscreen: a white wall the player's camera faces and a green one behind it that
 //! a view from the other side faces, an entity quad between them, drawn without views and with
 //! two. The frame's own picture stays as it was; each view comes back at its size with what its
-//! own camera sees. Run with throwaway HORIZON_HOME, HORIZON_LAUNCHER_HOME, XDG_DATA_HOME and
-//! XDG_CONFIG_HOME, through production source staging: `python3 tools/run_world_views.py <output-dir>`;
+//! own camera sees. Behind the player's camera, a blue wall facing it: mirrored views draw its
+//! front and cull its back as an unmirrored view does, mirrored left to right; a clip plane
+//! leaves the green wall out of a view behind it, and a clipped view's entities keep their
+//! depth order against terrain. Run with throwaway HORIZON_HOME, HORIZON_LAUNCHER_HOME,
+//! XDG_DATA_HOME and XDG_CONFIG_HOME, through production source staging:
+//! `python3 tools/run_world_views.py <output-dir>`;
 //! `--bench` (an optimized build): instead, the time of a frame of rolling land 49 by 49
 //! chunks around the camera at 1920 by 1080 without a view, with a 1 by 1 one (the culling it
 //! turns off), a 640 by 360 one and a 1920 by 1080 one.
 use client::{
-    gfx::{Frame, Renderer, ScreenshotRequest, native_render},
+    gfx::{Frame, Renderer, ScreenshotRequest},
     graphics::GraphicsApi,
     hud::HudBatch,
     mesher::{SectionMesh, TerrainVertex, Vertex},
+    render_slots::{self, Slots, WorldView, WorldViewDrawn},
 };
 use glam::DVec3;
 use horizon_client_render as client;
-use native_render::{WorldView, wgpu};
 use std::{
     path::Path,
     sync::{Arc, Mutex},
@@ -42,7 +46,7 @@ static DEVICE: Mutex<Option<wgpu::Device>> = Mutex::new(None);
 fn ask_views(views: &mut Vec<WorldView>) {
     views.extend(VIEWS.lock().unwrap().iter().copied());
 }
-fn view_drawn(view: &mut native_render::WorldViewDrawn<'_>) {
+fn view_drawn(view: &mut WorldViewDrawn<'_>) {
     {
         let [width, height] = view.size;
         assert_eq!([view.color.width(), view.color.height()], view.size);
@@ -74,8 +78,15 @@ fn view_drawn(view: &mut native_render::WorldViewDrawn<'_>) {
 }
 
 fn install_mod() {
-    assert!(native_render::__fnr_world_views(ask_views));
-    assert!(native_render::__fnr_world_view_drawn(view_drawn));
+    render_slots::install(Slots {
+        world_views: ask_views,
+        world_views_hooked: || true,
+        world_view_drawn: view_drawn,
+        world_drawn: |_| {},
+        hand_drawn: |_| {},
+        render_needs: |_| {},
+        world_drawn_hooked: || false,
+    });
 }
 
 /// The views drawn in the last frame, by id: their size and RGBA pixels.
@@ -142,8 +153,9 @@ fn count(pixels: &[[u8; 4]], want: [u8; 3]) -> usize {
         .count()
 }
 
-/// A wall across x 0..16, y 0..16 at z = 12 of a section, both windings, in `color`.
-fn wall(color: u32) -> SectionMesh {
+/// A wall across x 0..16, y 0..16 at z = 12 of a section, in `color`, with each of `windings`:
+/// `[0, 1, 2, 3]` faces north (-z), `[3, 2, 1, 0]` south.
+fn wall(color: u32, windings: &[[usize; 4]]) -> SectionMesh {
     let mut mesh = SectionMesh::default();
     let corners = [
         [0., 0., 12.],
@@ -151,6 +163,19 @@ fn wall(color: u32) -> SectionMesh {
         [16., 16., 12.],
         [16., 0., 12.],
     ];
+    let uvs = [[0., 1.], [0., 0.], [1., 0.], [1., 1.]];
+    for order in windings {
+        for &i in order {
+            mesh.solid
+                .push(TerrainVertex::new(corners[i], uvs[i], 0, color, 0xf0f0));
+        }
+    }
+    mesh.sort_solid();
+    mesh
+}
+
+/// `mesh` with a quad through `corners` (section-relative), both windings, in `color`.
+fn with_quad(mut mesh: SectionMesh, corners: [[f32; 3]; 4], color: u32) -> SectionMesh {
     let uvs = [[0., 1.], [0., 0.], [1., 0.], [1., 1.]];
     for order in [[0, 1, 2, 3], [3, 2, 1, 0]] {
         for i in order {
@@ -199,27 +224,63 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     renderer.fullbright = true;
     // (keys count sections from the bottom of the world, y -64: 10 is y 96 to 112)
     // white at z 12, which the player's camera at z 0.5 faces; green at z 28 behind it
-    renderer.upload((0, 10, 0), &wall(u32::MAX));
-    renderer.upload((0, 10, 1), &wall(0xff00_ff00));
-    // an entity quad between the player's camera and the white wall, at z 6
-    let entity: Vec<Vertex> = [
-        [7.5, 103.5, 6.0],
-        [7.5, 104.5, 6.0],
-        [8.5, 104.5, 6.0],
-        [8.5, 103.5, 6.0],
-    ]
-    .into_iter()
-    .zip([[0., 1.], [0., 0.], [1., 0.], [1., 1.]])
-    .map(|(p, uv)| Vertex {
-        pos: [p[0] - 8.0, p[1] - 104.0, p[2] - 0.5],
-        uv,
-        layer: 0,
-        color: 0xff40_40ff,
-        light: 0xf0,
-        normal: [0, 0, 0, 0],
-        glint_uv: [0.0; 2],
-    })
-    .collect();
+    let both = [[0, 1, 2, 3], [3, 2, 1, 0]];
+    renderer.upload((0, 10, 0), &wall(u32::MAX, &both));
+    // In front of the green wall, magenta terrain at x 9..11 a clipped view's plane at z 30 cuts:
+    // a floor quad across it (z 28..32) and a wall quad just in front of it (z 29.995). Their
+    // entity twins stand mirrored about x 8.
+    let magenta = 0xffff_40ff;
+    let green = wall(0xff00_ff00, &both);
+    let green = with_quad(
+        green,
+        [[9., 6., 12.], [9., 6., 16.], [10., 6., 16.], [10., 6., 12.]],
+        magenta,
+    );
+    let green = with_quad(
+        green,
+        [
+            [9., 3., 13.995],
+            [9., 5., 13.995],
+            [11., 5., 13.995],
+            [11., 3., 13.995],
+        ],
+        magenta,
+    );
+    renderer.upload((0, 10, 1), &green);
+    // blue at z -4 behind the player's camera, facing south (toward it) only
+    renderer.upload((0, 10, -1), &wall(0xffff_0000, &[[3, 2, 1, 0]]));
+    // entity quads: red between the player's camera and the white wall, at z 6; yellow 0.1
+    // behind the green wall (z 27.9) and cyan on its plane (z 28), seen from past it
+    let quad = |corners: [[f32; 3]; 4], color: u32| {
+        corners
+            .into_iter()
+            .zip([[0., 1.], [0., 0.], [1., 0.], [1., 1.]])
+            .map(move |([x, y, z], uv)| Vertex {
+                pos: [x - 8.0, y - 104.0, z - 0.5],
+                uv,
+                layer: 0,
+                color,
+                light: 0xf0,
+                normal: [0, 0, 0, 0],
+                glint_uv: [0.0; 2],
+            })
+    };
+    let upright =
+        |[x0, y0, x1, y1]: [f32; 4], z: f32| [[x0, y0, z], [x0, y1, z], [x1, y1, z], [x1, y0, z]];
+    let entity: Vec<Vertex> = quad(upright([7.5, 103.5, 8.5, 104.5], 6.0), 0xff40_40ff)
+        .chain(quad(upright([4.0, 100.0, 8.0, 104.0], 27.9), 0xff40_ffff))
+        .chain(quad(upright([9.0, 105.0, 13.0, 109.0], 28.0), 0xffff_ff40))
+        .chain(quad(
+            [
+                [6., 102., 28.],
+                [6., 102., 32.],
+                [7., 102., 32.],
+                [7., 102., 28.],
+            ],
+            magenta,
+        ))
+        .chain(quad(upright([5.0, 99.0, 7.0, 101.0], 29.995), magenta))
+        .collect();
     let hud = HudBatch::new([320, 180], GUI);
     let shot = |renderer: &mut Renderer, name: &str, views: Vec<WorldView>| {
         *VIEWS.lock().unwrap() = views;
@@ -318,6 +379,143 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     *VIEWS.lock().unwrap() = Vec::new();
     assert!(!behind_camera(&renderer), "and culled without views");
 
+    // Mirrored views (64 by 64, x 12): looking north at the blue wall's front 4.5 blocks off, it
+    // fills the picture; looking south from z -10 at its back, it is culled, mirrored or not, and
+    // the mirrored picture is the unmirrored one left to right (the white wall and the entity
+    // are to the right of the middle). And with a clip plane at z 20, the view past the green
+    // wall sees the white one instead.
+    let at = |id, z, yaw| WorldView::new(id, DVec3::new(12.0, 104.0, z), yaw, 0.0, 70.0, [64, 64]);
+    let clipped = behind.with_clip_plane([0.0, 0.0, -1.0, 20.0]);
+    let mirrors = vec![
+        at(11, 0.5, 180.0).with_mirror(),
+        at(12, -10.0, 0.0).with_mirror(),
+        at(13, -10.0, 0.0),
+        clipped,
+    ];
+    let (_, drawn) = shot(&mut renderer, "mirrors", mirrors);
+    let ids: Vec<u64> = drawn.iter().map(|(id, ..)| *id).collect();
+    assert_eq!(ids, [11, 12, 13, 7]);
+    for (id, size, pixels) in &drawn {
+        write_png(&out.join(format!("mirror_view_{id}.png")), *size, pixels)?;
+    }
+    let blue = [0, 0, 255];
+    let front_blue = count(&drawn[0].2, blue);
+    assert_eq!(
+        front_blue,
+        64 * 64,
+        "a mirrored view draws the faces toward it"
+    );
+    let back_blue = [count(&drawn[1].2, blue), count(&drawn[2].2, blue)];
+    assert_eq!(back_blue, [0, 0], "and culls the faces away, as unmirrored");
+    let (mirrored, plain_back) = (&drawn[1].2, &drawn[2].2);
+    let unlike = (0..64 * 64)
+        .filter(|i| {
+            let (a, b) = (mirrored[*i], plain_back[i / 64 * 64 + 63 - i % 64]);
+            (0..3).any(|c| a[c].abs_diff(b[c]) >= 40)
+        })
+        .count();
+    let asymmetric = (0..64 * 64)
+        .filter(|i| {
+            let (a, b) = (plain_back[*i], plain_back[i / 64 * 64 + 63 - i % 64]);
+            (0..3).any(|c| a[c].abs_diff(b[c]) >= 40)
+        })
+        .count();
+    assert!(
+        asymmetric > 200,
+        "the unmirrored picture isn't symmetric: {asymmetric}"
+    );
+    assert!(
+        unlike < 64,
+        "the mirrored picture is it left to right: {unlike} unlike"
+    );
+    let clip = &drawn[3].2;
+    let clip_white = count(clip, [255, 255, 255]);
+    assert_eq!(
+        count(clip, [0, 255, 0]),
+        0,
+        "the clip plane leaves the green wall out"
+    );
+    assert!(
+        clip_white > 2000,
+        "and the view sees the white wall: {clip_white}"
+    );
+
+    // Clipped views' entities: seen from z 76 through a plane 0.05 in front of the
+    // camera, where depth changes little with distance, the yellow quad 0.1 behind the green wall
+    // stays hidden; the cyan one on the wall's plane shows as an unclipped view shows it, clip and
+    // mirror together too.
+    let (yellow, cyan) = ([255, 255, 64], [64, 255, 255]);
+    let north = |id, z, size| WorldView::new(id, DVec3::new(8.0, 104.0, z), 180.0, 0.0, 70.0, size);
+    let entity_views = vec![
+        north(21, 76.0, [256, 256]).with_clip_plane([0.0, 0.0, -1.0, 75.95]),
+        north(22, 40.0, [64, 64]).with_clip_plane([0.0, 0.0, -1.0, 36.0]),
+        north(23, 40.0, [64, 64]),
+        north(24, 40.0, [64, 64])
+            .with_clip_plane([0.0, 0.0, -1.0, 36.0])
+            .with_mirror(),
+    ];
+    let (_, drawn) = shot(&mut renderer, "clipped_entities", entity_views);
+    for (id, size, pixels) in &drawn {
+        write_png(&out.join(format!("entity_view_{id}.png")), *size, pixels)?;
+    }
+    let behind_wall = count(&drawn[0].2, yellow);
+    assert!(
+        count(&drawn[0].2, [0, 255, 0]) > 2000,
+        "the far view sees the green wall"
+    );
+    assert_eq!(
+        behind_wall, 0,
+        "an entity behind a wall stays hidden in a clipped view"
+    );
+    let coplanar = drawn[1..]
+        .iter()
+        .map(|v| count(&v.2, cyan))
+        .collect::<Vec<_>>();
+    assert!(
+        coplanar[1] > 150,
+        "the unclipped view sees the cyan quad: {coplanar:?}"
+    );
+    assert!(
+        coplanar.iter().all(|&c| c.abs_diff(coplanar[1]) < 8),
+        "and the clipped ones, mirrored too, as much of it: {coplanar:?}"
+    );
+    let (clipped, both) = (&drawn[1].2, &drawn[3].2);
+    let clip_mirror_unlike = (0..64 * 64)
+        .filter(|i| {
+            let (a, b) = (both[*i], clipped[i / 64 * 64 + 63 - i % 64]);
+            (0..3).any(|c| a[c].abs_diff(b[c]) >= 40)
+        })
+        .count();
+    assert!(
+        clip_mirror_unlike < 64,
+        "clipped and mirrored is the clipped picture left to right: {clip_mirror_unlike}"
+    );
+
+    // A clipped view 10 behind its plane (z 30) cuts the magenta entities where it cuts their
+    // terrain twins: the floor across the plane, and the wall 0.005 in front of it kept whole.
+    // The unclipped view sees more of the floor.
+    let edge = vec![
+        north(26, 40.0, [128, 128]).with_clip_plane([0.0, 0.0, -1.0, 30.0]),
+        north(27, 40.0, [128, 128]),
+    ];
+    let (_, drawn) = shot(&mut renderer, "plane_edge", edge);
+    for (id, size, pixels) in &drawn {
+        write_png(&out.join(format!("edge_view_{id}.png")), *size, pixels)?;
+    }
+    let halves = |pixels: &[[u8; 4]]| {
+        let left = (0..128 * 128)
+            .filter(|i| i % 128 < 64 && count(&pixels[*i..*i + 1], [255, 64, 255]) == 1)
+            .count();
+        (left, count(pixels, [255, 64, 255]) - left)
+    };
+    let (edge_entity, edge_terrain) = halves(&drawn[0].2);
+    let (whole_entity, _) = halves(&drawn[1].2);
+    assert!(
+        edge_terrain > 200 && edge_entity.abs_diff(edge_terrain) <= 4 + edge_terrain / 50,
+        "the plane cuts entities as it cuts terrain: {edge_entity} vs {edge_terrain}"
+    );
+    assert!(whole_entity > edge_entity, "{whole_entity} unclipped");
+
     // a view asked for again at another size and roll comes back at that size
     let turned = behind.with_roll(30.0);
     let mut resized = turned;
@@ -336,6 +534,11 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         serde_json::to_vec_pretty(&serde_json::json!({
             "wall_pixels": wall_px, "entity_pixels": entity_px, "view_green_pixels": green,
             "view_entity_pixels": red, "frame_unchanged_with_views": true,
+            "mirrored_front_pixels": front_blue, "mirrored_back_pixels": back_blue[0],
+            "mirrored_unlike_pixels": unlike, "clipped_white_pixels": clip_white,
+            "clipped_behind_wall_pixels": behind_wall, "coplanar_pixels": coplanar,
+            "clipped_mirrored_unlike_pixels": clip_mirror_unlike,
+            "plane_edge_pixels": [edge_entity, edge_terrain, whole_entity],
             "graphics_adapter": client::crash::system_details("fixture").into_iter()
                 .find(|(name, _)| name == "Graphics Adapter").map(|(_, detail)| detail),
         }))?,

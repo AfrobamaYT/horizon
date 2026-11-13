@@ -106,6 +106,8 @@ pub struct Flat {
     pub solid_mirror: wgpu::RenderPipeline,
     pub translucent: wgpu::RenderPipeline,
     pub translucent_mark: wgpu::RenderPipeline,
+    /// `solid` and `translucent` as a mirrored world view draws them, culling the front.
+    pub flipped: super::world_views::Flipped,
     flatten: wgpu::ComputePipeline,
     compute_layout: wgpu::BindGroupLayout,
     flatten_seen: wgpu::ComputePipeline,
@@ -434,7 +436,7 @@ impl Flat {
             Option<wgpu::Face>,
             bool,
         ) -> wgpu::RenderPipeline,
-        solid: impl Fn(&wgpu::PipelineLayout, &str, &str, &str) -> SolidPipeline,
+        solid: impl Fn(&wgpu::PipelineLayout, &str, &str, &str, wgpu::Face) -> SolidPipeline,
     ) -> Self {
         let vertex = wgpu::ShaderStages::VERTEX;
         let compute = wgpu::ShaderStages::COMPUTE;
@@ -500,18 +502,21 @@ impl Flat {
                 "Terrain solid (flat)",
                 "vs_section_flat",
                 "fs_solid",
+                wgpu::Face::Back,
             ),
             solid_opaque: solid(
                 &layout,
                 "Terrain solid opaque (flat)",
                 "vs_section_flat_opaque",
                 "fs_opaque",
+                wgpu::Face::Back,
             ),
             solid_cutout: solid(
                 &layout,
                 "Terrain solid cutout (flat)",
                 "vs_section_flat_cutout",
                 "fs_solid",
+                wgpu::Face::Back,
             ),
             // The mirror flips the winding: its solid terrain culls the front.
             solid_mirror: pipeline(
@@ -541,6 +546,24 @@ impl Flat {
                 back,
                 false,
             ),
+            flipped: super::world_views::Flipped {
+                solid: solid(
+                    &layout,
+                    "Terrain solid flipped (flat)",
+                    "vs_section_flat",
+                    "fs_solid",
+                    wgpu::Face::Front,
+                ),
+                translucent: pipeline(
+                    &layout,
+                    "Terrain translucent flipped (flat)",
+                    "vs_terrain_flat",
+                    "fs_translucent",
+                    Some(wgpu::BlendState::ALPHA_BLENDING),
+                    Some(wgpu::Face::Front),
+                    false,
+                ),
+            },
             flatten,
             compute_layout,
             flatten_seen,
