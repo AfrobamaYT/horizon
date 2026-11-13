@@ -23,6 +23,9 @@ pub(crate) fn rotate(
     let Some(index) = native_worldgen_parts::index() else {
         return table;
     };
+    if !index.worldgen_listens(HookId::Rotate, state) {
+        return table;
+    }
     let (Ok(asked), Ok(mut rotated)) = (index.to_api(state), index.to_api(table)) else {
         return table;
     };
