@@ -173,6 +173,8 @@ def verdicts(jobs, reports, results):
             unfinished.append((leg, result, [], "did not report: no job of this leg ran, or its jobs are named differently"))
         elif result != "success" and not accounted:
             unfinished.append((leg, result, [], "did not complete, and no job or test of it says why"))
+        elif result == "success" and not accounted:
+            green_legs.add(leg)  # a whole leg that reported and passed closes its leg-level issue
     green = (all(results.get(leg, {}).get("result") == "success" for leg in LEGS)
              and all(job_green(job, fresh_ok) for job in leg_jobs(jobs)) and not tests and not unfinished)
     failing = {(item["package"], item["test"]) for item in tests}

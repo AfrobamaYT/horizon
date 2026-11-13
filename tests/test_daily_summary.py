@@ -266,6 +266,26 @@ class DailySummaryTests(unittest.TestCase):
         comment = next(body for _, path, body in api.writes if path == "issues/900/comments")
         self.assertIn("Green again in the daily run", comment["body"])
 
+    def test_a_leg_level_issue_closes_once_the_leg_passes_whole(self):
+        failed = [j for j in GREEN_JOBS if not j["name"].startswith("sdk / ")] + [
+            job("sdk / fresh", "failure", ["Set up job"]), job("sdk / build linux", "skipped")]
+        api = Api(failed)
+        self.run_summary(api, [shard_report()], results=dict(LEGS, sdk={"result": "failure"}))
+        created = [body["title"] for _, path, body in api.writes if path == "issues"]
+        self.assertEqual(created, ["Daily: sdk did not complete"])
+        number = api.issues[-1]["number"]
+        api.writes.clear()
+        api.jobs = [j for j in GREEN_JOBS if not j["name"].startswith("sdk / ")]
+        self.run_summary(api, [shard_report()], results=dict(LEGS, sdk={"result": "success"}))
+        self.assertNotIn(("PATCH", f"issues/{number}"), [(m, p) for m, p, _ in api.writes],
+                         "a run where the leg did not report leaves it open")
+        api.writes.clear()
+        api.jobs = GREEN_JOBS
+        self.run_summary(api, [shard_report()])
+        self.assertIn(("PATCH", f"issues/{number}"), [(m, p) for m, p, _ in api.writes])
+        comment = next(body for _, path, body in api.writes if path == f"issues/{number}/comments")
+        self.assertIn("Green again in the daily run", comment["body"])
+
     def test_an_unknown_job_or_a_leg_with_no_job_is_red(self):
         for jobs, title in (
                 (GREEN_JOBS + [job("surprise / something")], "Daily: surprise / something did not complete"),
