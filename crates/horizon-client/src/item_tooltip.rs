@@ -35,7 +35,7 @@ fn format_amount(value: f64) -> String {
 }
 
 /// `ItemAttributeModifiers.Display.Default.apply`: a modifier's line, none
-/// for a zero amount except a Boolean attribute's, which reads disabled.
+/// for a zero amount on ordinary numeric attributes.
 /// `operation` is the modifier's operation id (0: added value, 1 and 2:
 /// multiplied); `display` is how the attribute reads its amounts (NeoForge's
 /// `IAttributeExtension.toValueComponent`).
@@ -49,9 +49,18 @@ fn modifier_line(
 ) -> Option<String> {
     let text = |key: &str| translate(key).unwrap_or_else(|| key.to_owned());
     let name = || crate::text::Text::literal(text(&format!("attribute.name.{attribute}")));
-    // `BooleanAttribute`: an added value above zero turns it on, any other turns it off.
-    if display == Display::Boolean && operation == 0 && !total {
-        let state = if amount > 0.0 { "enabled" } else { "disabled" };
+    if display == Display::Boolean {
+        let state = if amount.is_nan() {
+            "invalid"
+        } else if total {
+            if amount > 0.0 { "enabled" } else { "disabled" }
+        } else if operation == 0 && amount > 0.0 {
+            "enabled"
+        } else if operation == 2 && amount.trunc() == -1.0 {
+            "disabled"
+        } else {
+            "invalid"
+        };
         let key = format!("horizon.attribute.modifier.{state}");
         return Some(crate::text::format_translation(&text(&key), &[name()]).plain());
     }
@@ -265,7 +274,7 @@ pub fn attribute_lines_filtered(
             slot,
         } in modifiers
         {
-            if slot != group || filter.skips(modifier, slot) {
+            if slot != group || filter.skips(modifier, slot) || *amount == 0.0 {
                 continue;
             }
             if std::mem::take(&mut first) {
@@ -2202,7 +2211,7 @@ mod tests {
                 .skip(2)
                 .collect()
         };
-        let (blue, red, green, debug) = (
+        let (blue, _red, green, debug) = (
             rgba(85, 85, 255, 255),
             rgba(255, 85, 85, 255),
             rgba(0, 170, 0, 255),
@@ -2214,27 +2223,27 @@ mod tests {
                 ("+5% Swim Speed".to_owned(), blue),
                 ("Gliding: Enabled".to_owned(), blue),
                 (" 15 Mana".to_owned(), green),
-                // A Boolean attribute's zero is a line too, not nothing.
-                ("Gliding: Disabled".to_owned(), red),
             ]
         );
         // Recipe search has no player: the base modifier is a plain line.
         assert_eq!(lines(None, false)[2], ("+5 Mana".to_owned(), blue));
         let advanced = lines(None, true);
-        assert_eq!(advanced.len(), 8);
+        assert_eq!(advanced.len(), 6);
         assert_eq!(advanced[1], ("  mymod:boots".to_owned(), debug));
     }
 
     /// A Percentage attribute's added value reads through the percent translation, whatever
-    /// its word order, and a Boolean attribute reads disabled at zero and below.
+    /// its word order, and Boolean modifiers use enabled, disabled or invalid instead of numbers.
     #[test]
-    fn a_percentage_reads_through_the_percent_translation_and_a_boolean_zero_is_disabled() {
+    fn a_percentage_reads_through_the_percent_translation_and_booleans_name_their_state() {
         let lang = |key: &str| {
             Some(
                 match key {
                     "attribute.modifier.plus.1" => "%2$s: +%1$s%%",
                     "attribute.modifier.take.1" => "%2$s: -%1$s%%",
                     "horizon.attribute.modifier.disabled" => "%s: Disabled",
+                    "horizon.attribute.modifier.enabled" => "%s: Enabled",
+                    "horizon.attribute.modifier.invalid" => "%s: not valid",
                     "attribute.name.mymod:swim" => "Swim Speed",
                     "attribute.name.mymod:glide" => "Gliding",
                     _ => return None,
@@ -2253,11 +2262,28 @@ mod tests {
             Some("Swim Speed: -50%")
         );
         assert_eq!(line("mymod:swim", 0.0, Display::Percentage), None);
-        for amount in [0.0, -1.0] {
+        for (amount, operation, expected) in [
+            (1.0, 0, "Gliding: Enabled"),
+            (0.0, 0, "Gliding: not valid"),
+            (-1.0, 0, "Gliding: not valid"),
+            (-1.0, 2, "Gliding: Disabled"),
+            (-1.5, 2, "Gliding: Disabled"),
+            (-1.99, 2, "Gliding: Disabled"),
+            (0.5, 2, "Gliding: not valid"),
+            (0.5, 1, "Gliding: not valid"),
+            (f64::NAN, 0, "Gliding: not valid"),
+        ] {
             assert_eq!(
-                line("mymod:glide", amount, Display::Boolean).as_deref(),
-                Some("Gliding: Disabled"),
-                "{amount}"
+                modifier_line(
+                    &lang,
+                    "mymod:glide",
+                    amount,
+                    operation,
+                    false,
+                    Display::Boolean
+                )
+                .as_deref(),
+                Some(expected)
             );
         }
     }
