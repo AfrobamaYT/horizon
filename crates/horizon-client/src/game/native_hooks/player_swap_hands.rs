@@ -1,12 +1,9 @@
 use super::*;
 
 impl Game<'_> {
-    /// `player` (`name`) pressed the swap-hands key: heard before the main and
-    /// off hand items swap (the `SWAP_ITEM_WITH_OFFHAND` player action that
-    /// `ServerGamePacketListenerImpl.handlePlayerAction` answers; NeoForge's
-    /// `LivingSwapItemsEvent.Hands`), not for a spectator. `to_main_hand` starts
-    /// as the off hand's stack and `to_off_hand` as the main hand's; the hands
-    /// get what the listeners leave, and a client whose stacks changed gets
+    /// Heard before a non-spectator player's swap-hands action.
+    /// The two mutable stacks start as the off-hand and main-hand stacks;
+    /// the hands receive the listener's outputs unless it cancels.
     /// both slots. Set `cancel` to keep the items where they are: the player's
     /// client is sent both slots again. The player's
     /// state is swapped in, so `native_acting_player`, `native_tell` and the
