@@ -169,8 +169,9 @@ fn the_call_time_answer_stands_when_the_block_changes_before_the_commit() {
     });
 }
 
-/// Listens to `block_drops` and keeps the block it reads where the drops are made.
-struct SeenBlocks(Arc<std::sync::Mutex<Vec<Option<String>>>>);
+/// Listens to `block_drops`, keeps the block it reads where the drops are made and cancels
+/// the drops when asked to.
+struct SeenBlocks(Arc<std::sync::Mutex<Vec<Option<String>>>>, bool);
 #[mod_api::__subscriptions]
 impl mod_api::Hooks for SeenBlocks {
     fn block_drops(
@@ -182,19 +183,23 @@ impl mod_api::Hooks for SeenBlocks {
             .block_state(AT)
             .and_then(|state| host.state_block(state).map(str::to_owned));
         self.0.lock().unwrap().push(block);
-        mod_api::Flow::Continue
+        if self.1 {
+            mod_api::Flow::Cancel
+        } else {
+            mod_api::Flow::Continue
+        }
     }
 }
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-fn a_drop_listener_sees_the_new_block_and_an_abort_undoes_the_loot_it_unpacked() {
+fn a_drop_listener_sees_the_old_block_and_an_abort_undoes_the_loot_it_unpacked() {
     use horizon_client::chunk::PendingContainerLoot;
     use horizon_core::nbt::Tag;
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
         "seen_blocks",
-        Box::new(SeenBlocks(seen.clone())),
+        Box::new(SeenBlocks(seen.clone(), false)),
     )]
     .into();
     mod_platform::testing::with_mods(mods, || {
@@ -223,8 +228,11 @@ fn a_drop_listener_sees_the_new_block_and_an_abort_undoes_the_loot_it_unpacked()
             let water = key("minecraft:water");
             assert!(game.level_place_fluid(level, AT, water, None, false, root.transaction()));
             game.transaction_close(&root, false);
-            // The listener ran after the new block was stored.
-            assert_eq!(*seen.lock().unwrap(), [Some("minecraft:water".to_owned())]);
+            // The listener ran while the broken block was still there.
+            assert_eq!(
+                *seen.lock().unwrap(),
+                [Some("minecraft:skeleton_skull".to_owned())]
+            );
             assert_eq!(block(game), skull);
             let Some(BlockEntity::Chest(slots)) = game.world.block_entities.get(&pos) else {
                 panic!("the container's block entity is back");
@@ -234,6 +242,33 @@ fn a_drop_listener_sees_the_new_block_and_an_abort_undoes_the_loot_it_unpacked()
                 "its loot is unrolled again"
             );
             assert!(game.world.block_entity_extras(pos).pending_loot.is_some());
+        });
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_cancelled_drop_keeps_the_replacement() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "cancelled_drops",
+        Box::new(SeenBlocks(seen.clone(), true)),
+    )]
+    .into();
+    mod_platform::testing::with_mods(mods, || {
+        with_level(|game, level| {
+            game.options.dedicated = Some(Vec::new());
+            let poppy = state(game, "minecraft:poppy");
+            game.world.set(AT[0], AT[1], AT[2], poppy).unwrap();
+            let items = game.dropped.len();
+            let root = game.transaction_open();
+            let water = key("minecraft:water");
+            assert!(game.level_place_fluid(level, AT, water, None, false, root.transaction()));
+            game.transaction_close(&root, true);
+            // The listener saw the poppy and cancelled: no drop, but the water is there.
+            assert_eq!(*seen.lock().unwrap(), [Some("minecraft:poppy".to_owned())]);
+            assert_eq!(game.dropped.len(), items);
+            assert_eq!(block(game), state(game, "minecraft:water"));
         });
     });
 }

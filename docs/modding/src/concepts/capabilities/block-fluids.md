@@ -98,8 +98,10 @@ open. Under them, `level.pickup_fluid(host, pos, player, tx)` and
 `level.place_fluid(host, pos, fluid, player, validate, tx)` decide everything at the
 call against the world as the transaction has it and write the block at once, so a
 second pickup of the same source in the transaction gets nothing. A block the fluid
-replaces has its drops made at the call, after the new block is written and its block
-entity kept by the journal: `block_drops` listeners, which only read, see the new block.
+replaces has its drops made at the call, with the block as it is and its block entity kept
+by the journal first: `block_drops` listeners, which only read, see the old block, and a
+cancelled drop keeps the replacement (it suppresses the drops and the experience, not the
+removal). The new block is written after the drops are made.
 The block's updates, the fluid tick, those drops, the broken block's particles and
 `block_destroy`, then the bucket's sound and `fluid_pickup` or `fluid_place` follow at the
 outermost commit. Where water evaporates (the Nether), placing it only hisses. The tank

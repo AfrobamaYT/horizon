@@ -106,11 +106,12 @@ impl Game<'_> {
         player.is_some_and(|player| self.player_is_creative(player) == Some(true))
     }
     /// What `write` does at the call. The block entity a new block of another kind removes is
-    /// kept whole by the journal and the new block stored, without its updates, before any mod
-    /// code runs; then the broken block's drops are made from the block as it was and the block
-    /// entity still there (the `block_drops` listeners, which only read, see the new block, and
-    /// whatever unpacking its loot changes in the entity an abort puts back); then that block
-    /// entity goes. The rest waits for the commit.
+    /// kept whole by the journal before any mod code runs; then the broken block's drops are
+    /// made from the block as it is, with its block entity still there (the `block_drops`
+    /// listeners, which only read, see the old block, and whatever unpacking its loot changes
+    /// in the entity an abort puts back; a cancelled drop keeps the replacement); then the new
+    /// block is stored, without its updates, and that block entity goes. The rest waits for
+    /// the commit.
     fn journal_fluid_write(
         &mut self,
         level: LevelRef,
@@ -128,9 +129,6 @@ impl Game<'_> {
         if removes {
             self.journal_block_entity(key);
         }
-        if to != write.from {
-            self.journal_set_block(pos, to);
-        }
         let drops = match write.broken() {
             Some(broken) => self.with_level(|b, level, ticks| {
                 b.drop_resources(level, ticks, write.pos, broken);
@@ -138,6 +136,9 @@ impl Game<'_> {
             }),
             None => Spill::default(),
         };
+        if to != write.from {
+            self.journal_set_block(pos, to);
+        }
         if removes {
             self.journal_remove_block_entity(key);
         }
