@@ -1352,10 +1352,10 @@ impl Loading {
         let screen = self.menu.key_screen();
         if super::pad_menu::another_screen_is_front(&mut self.menu.focus_screen, screen) {
             self.menu.options.clear_click_focus();
-            if let Some(title) = self.menu.title.as_mut() {
-                if !matches!(title.mode, horizon_client::title::Mode::MissingMods { .. }) {
-                    title.focused_button = None;
-                }
+            if let Some(title) = self.menu.title.as_mut()
+                && !matches!(title.mode, horizon_client::title::Mode::MissingMods { .. })
+            {
+                title.focused_button = None;
             }
         }
         if self.menu.pending.is_some() {

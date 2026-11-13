@@ -1332,10 +1332,10 @@ impl Game<'_> {
     /// the one in front (a screen that just opened leaves the old focus
     /// behind it), so every menu's click focus goes.
     pub(super) fn clear_screen_click_focus(&mut self) {
-        if let Some(title) = self.title.as_mut() {
-            if !matches!(title.mode, horizon_client::title::Mode::MissingMods { .. }) {
-                title.focused_button = None;
-            }
+        if let Some(title) = self.title.as_mut()
+            && !matches!(title.mode, horizon_client::title::Mode::MissingMods { .. })
+        {
+            title.focused_button = None;
         }
         self.pause_focus = None;
         self.death_focus = None;
