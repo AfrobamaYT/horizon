@@ -554,4 +554,187 @@ mod tests {
             })
         });
     }
+    #[test]
+    #[ignore = "daily"]
+    fn removing_the_next_target_from_a_callback_still_visits_later_originals() {
+        struct RemoveNext(Arc<Mutex<Vec<u32>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for RemoveNext {
+            fn explosion_knockback(
+                &self,
+                host: &mut dyn ServerHost,
+                event: &mut mod_api::ExplosionKnockbackEvent<'_>,
+            ) {
+                if let Some(id) = event.entity {
+                    self.0.lock().unwrap().push(id);
+                    if id == 970 {
+                        assert!(host.entity(971).unwrap().discard(host));
+                    }
+                }
+            }
+        }
+        for listened in [false, true] {
+            let heard = Arc::new(Mutex::new(Vec::new()));
+            let mut mods = vec![mod_api::ModEntry::new(
+                "remove",
+                Box::new(RemoveNext(heard.clone())),
+            )];
+            if listened {
+                mods.push(mod_api::ModEntry::new("noop", Box::new(Noop)));
+            }
+            mod_platform::testing::with_mods(mods.into(), || {
+                with_game(|game| {
+                    for (id, x) in [(970, -1.0), (971, 0.0), (972, 1.0)] {
+                        game.boats.push(crate::game::boats::Boat::new(
+                            id,
+                            "oak".into(),
+                            Vec3::new(x, 1.0, 0.0),
+                            0.0,
+                        ));
+                    }
+                    explode(game);
+                    assert!(
+                        game.boats
+                            .iter()
+                            .all(|boat| ![970, 971, 972].contains(&boat.id))
+                    );
+                })
+            });
+            assert_eq!(
+                *heard.lock().unwrap(),
+                [970, 972],
+                "subscription: {listened}"
+            );
+        }
+    }
+
+    fn specials(game: &mut crate::game::Game<'_>) {
+        use horizon_client::entities::{ArmorStand, Cushion, ItemFrame, Painting};
+        use horizon_core::random::LegacyRandom;
+        game.armor_stands
+            .push(ArmorStand::new(950, Vec3::new(2.0, 1.0, 0.0), 0.0));
+        game.item_frames.push(ItemFrame {
+            attachment_lifetime: Default::default(),
+            join: Default::default(),
+            id: 951,
+            pos: [2, 1, 0],
+            facing: 3,
+            glow: false,
+            item: None,
+            rotation: 0,
+            drop_chance: 1.0,
+            fixed: false,
+            invisible: false,
+            check_interval: 0,
+            custom_name: None,
+            random: LegacyRandom::new(1),
+        });
+        game.paintings.push(Painting {
+            attachment_lifetime: Default::default(),
+            join: Default::default(),
+            id: 952,
+            pos: [2, 1, 0],
+            facing: 0,
+            variant: "minecraft:kebab".into(),
+            width: 1,
+            height: 1,
+            check_interval: 0,
+        });
+        game.cushions.push(Cushion {
+            attachment_lifetime: Default::default(),
+            join: Default::default(),
+            id: 953,
+            position: Vec3::new(2.0, 1.0, 0.0),
+            pos: [2, 1, 0],
+            yaw: 0.0,
+            color: 0,
+            check_interval: 0,
+            custom_name: None,
+        });
+        game.crystals.push(crate::game::dragon::Crystal {
+            attachment_lifetime: Default::default(),
+            join: Default::default(),
+            id: 954,
+            position: Vec3::new(2.0, 1.0, 0.0),
+            show_bottom: false,
+            time: 0,
+            beam: None,
+            invulnerable: false,
+            fall: (false, 0.0),
+        });
+        zombie(game, 955, -2.0);
+        game.boats.push(crate::game::boats::Boat::new(
+            960,
+            "oak".into(),
+            Vec3::new(1.0, 1.0, 0.0),
+            0.0,
+        ));
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn empty_and_mixed_kind_lists_control_direct_membership_with_ordinary_order_only() {
+        struct Filter(bool, Arc<Mutex<Vec<u32>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Filter {
+            fn explosion_detonate(
+                &self,
+                _: &mut dyn ServerHost,
+                event: &mut ExplosionDetonateEvent<'_>,
+            ) {
+                let ids = event.entities.iter().map(|e| e.id()).collect::<Vec<_>>();
+                for id in [950, 951, 952, 953, 954, 955, 960] {
+                    assert!(ids.contains(&id), "{ids:?}");
+                }
+                event.blocks.clear();
+                event
+                    .entities
+                    .retain(|e| !self.0 && [951, 960, 955].contains(&e.id()));
+                event
+                    .entities
+                    .sort_by_key(|e| [951, 960, 955].iter().position(|id| *id == e.id()));
+            }
+            fn explosion_knockback(
+                &self,
+                _: &mut dyn ServerHost,
+                event: &mut mod_api::ExplosionKnockbackEvent<'_>,
+            ) {
+                if let Some(id) = event.entity {
+                    self.1.lock().unwrap().push(id);
+                }
+            }
+        }
+        for empty in [true, false] {
+            let heard = Arc::new(Mutex::new(Vec::new()));
+            let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+                "filter",
+                Box::new(Filter(empty, heard.clone())),
+            )]
+            .into();
+            mod_platform::testing::with_mods(mods, || {
+                with_game(|game| {
+                    specials(game);
+                    explode(game);
+                    assert!(game.armor_stands.iter().any(|entity| entity.id == 950));
+                    assert!(game.paintings.iter().any(|entity| entity.id == 952));
+                    assert!(game.cushions.iter().any(|entity| entity.id == 953));
+                    assert!(game.crystals.iter().any(|entity| entity.id == 954));
+                    assert_eq!(
+                        game.item_frames.iter().any(|entity| entity.id == 951),
+                        empty
+                    );
+                    assert_eq!(game.boats.iter().any(|entity| entity.id == 960), empty);
+                    if empty {
+                        assert_eq!(health_of(game, 955), 20.0);
+                    } else {
+                        assert!(health_of(game, 955) < 20.0);
+                    }
+                })
+            });
+            assert_eq!(
+                *heard.lock().unwrap(),
+                if empty { vec![] } else { vec![960, 955] }
+            );
+        }
+    }
 }

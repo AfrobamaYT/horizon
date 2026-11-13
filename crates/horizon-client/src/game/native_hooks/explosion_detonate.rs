@@ -12,7 +12,9 @@ impl Game<'_> {
     /// item frames, paintings, cushions and end crystals it misses. Take one
     /// out and it is neither hurt nor pushed, and `explosion_knockback` is
     /// not asked for it; one a mod adds is walked as any other, and the list
-    /// the listeners leave is the order the blast visits in. Server-side.
+    /// the listeners leave controls membership subject to normal eligibility.
+    /// Its order controls ordinary storage targets only: crystals/dragon and
+    /// players run earlier, and decorations run last in storage order. Server-side.
     pub(in crate::game) fn native_explosion_detonate(
         &mut self,
         dimension: &str,
