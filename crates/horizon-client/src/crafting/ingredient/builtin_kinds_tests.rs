@@ -142,6 +142,28 @@ fn components_dyed_color_decodes_rgb_forms_and_matches_borrowed_values() {
         let error = components::validate(&rule, &items).unwrap_err();
         assert!(error.contains("minecraft:dyed_color"), "{error}");
     }
+    let absence = parse(
+        r#"{"type":"neoforge:components","items":["minecraft:leather_helmet","minecraft:stick"],"components":{"!minecraft:dyed_color":{}}}"#,
+        &items,
+    );
+    assert!(!absence.test_in(&context, &default));
+    let mut populated_typed = default.clone();
+    populated_typed.data_mut().dyed_color = Some(-65536);
+    assert!(!absence.test_in(&context, &populated_typed));
+    let mut populated_raw = default.clone();
+    populated_raw.data_mut().set_other(
+        "minecraft:dyed_color",
+        Some(Tag::List(vec![Tag::Int(1), Tag::Int(0), Tag::Int(0)])),
+    );
+    assert!(!absence.test_in(&context, &populated_raw));
+    let mut removed = default.clone();
+    removed
+        .data_mut()
+        .set_loot_component("minecraft:dyed_color", &None);
+    assert!(absence.test_in(&context, &removed));
+    assert!(!integer.test_in(&context, &removed));
+    assert!(!vector.test_in(&context, &removed));
+    assert!(absence.test_in(&context, &ItemStack::new("minecraft:stick", 1)));
 }
 #[test]
 #[ignore = "requires prepared resources"]
