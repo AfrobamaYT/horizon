@@ -202,6 +202,16 @@ impl Hub {
         any.then_some(false)
     }
 
+    /// Whether a player's client still holds chunks of `dimension` as a viewed level: after its
+    /// last area there is withdrawn, until the forgets and `close` went out. It holds no ticket.
+    pub fn viewed_open(&self, dimension: &str) -> bool {
+        self.viewed.active()
+            && self
+                .guests
+                .iter()
+                .any(|g| g.viewed.views.contains_key(dimension))
+    }
+
     /// Whether a player's client views the level in place.
     pub(super) fn viewed_here(&self) -> bool {
         self.viewed.active()

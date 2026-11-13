@@ -6,6 +6,10 @@ use std::collections::BTreeMap;
 
 /// The largest radius: vanilla's largest view distance.
 pub const MAX_RADIUS: u32 = 32;
+/// The farthest an area's centre may be from (0, 0) on each axis, in chunks: the largest world
+/// border's edge (`WorldBorder.MAX_SIZE`: 29,999,984 blocks out, inside chunk 1,875,000). Every
+/// square, ring and ticket of an area then stays far inside `i32`.
+pub const MAX_CENTER: i32 = 1_875_000;
 /// The most areas a player may have, every mod together.
 pub const MAX_AREAS: usize = 32;
 /// The most `Loaded` chunks one player may hold in one level: fixed for this revision of
@@ -95,6 +99,9 @@ pub enum ChunkAreaRefusal {
     NotOnline,
     /// A radius over the engine's 32.
     RadiusTooLarge { radius: u32, max: u32 },
+    /// A centre more than `max` chunks (1,875,000, the world border's limit) from (0, 0) on an
+    /// axis.
+    CenterOutOfRange { center: (i32, i32), max: i32 },
     /// More than the engine's 32 areas for this player, all mods together.
     TooManyAreas { asked: u32, max: u32 },
     /// Areas in more levels than the client can view (`cap` is its capability answer; 0 for a
@@ -215,6 +222,13 @@ pub fn check(
         return Err(ChunkAreaRefusal::RadiusTooLarge {
             radius: a.radius,
             max: MAX_RADIUS,
+        });
+    }
+    let far = |c: i32| !(-MAX_CENTER..=MAX_CENTER).contains(&c);
+    if let Some(a) = new.iter().find(|a| far(a.center.0) || far(a.center.1)) {
+        return Err(ChunkAreaRefusal::CenterOutOfRange {
+            center: a.center,
+            max: MAX_CENTER,
         });
     }
     let all: Vec<&ChunkArea> = areas

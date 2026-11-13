@@ -1414,12 +1414,8 @@ impl Game<'_> {
     /// (other than the Overworld) nobody has been in for a while.
     pub(super) fn close_idle_levels(&mut self) -> Result<()> {
         let mut occupied = self.levels_to_tick();
-        // A level a viewed area names, ticked or not.
-        occupied.extend(
-            Dim::all()
-                .into_iter()
-                .filter(|d| self.viewed_level(*d).is_some()),
-        );
+        // A level a viewed area names, ticked or not, or one a client still holds chunks of.
+        occupied.extend(Dim::all().into_iter().filter(|d| self.needs_view_pass(*d)));
         // A vehicle waiting there for its rider's arrival in another level.
         let waiting: Vec<Dim> = self
             .levels

@@ -460,3 +460,52 @@ fn a_view_holding_2048_columns_is_sent_no_more() {
     );
     assert_eq!(hub.guests[0].viewed.view(NETHER).unwrap().queue.len(), 16);
 }
+
+/// A centre past the world border's 1,875,000 chunks on either axis is refused with that limit,
+/// whatever the radius, and changes nothing; centres on the limit hold their squares and
+/// tickets there.
+#[test]
+fn a_centre_past_the_world_border_is_refused() {
+    use ChunkAreaMode::{Loaded, Ticking};
+    let (mut hub, _rx) = hub_with(&[1], 2);
+    hub.set_viewed_areas(1, "test:portal", nether(1)).unwrap();
+    for center in [
+        (i32::MAX, 0),
+        (0, i32::MIN),
+        (i32::MIN, i32::MAX),
+        (1_875_001, 0),
+        (0, -1_875_001),
+    ] {
+        assert_eq!(
+            hub.set_viewed_areas(1, "test:portal", vec![area(NETHER, center, 0, Loaded)]),
+            Err(ChunkAreaRefusal::CenterOutOfRange {
+                center,
+                max: 1_875_000
+            }),
+            "{center:?}"
+        );
+    }
+    assert_eq!(hub.viewed_areas(1, "test:portal"), nether(1));
+    let edge = vec![
+        area(NETHER, (1_875_000, -1_875_000), 19, Loaded),
+        area(NETHER, (-1_875_000, 1_875_000), 10, Ticking),
+    ];
+    hub.set_viewed_areas(1, "test:portal", edge.clone())
+        .unwrap();
+    assert_eq!(
+        hub.viewed_extra(NETHER),
+        vec![((1_875_000, -1_875_000), 19), ((-1_875_000, 1_875_000), 11)]
+    );
+    let mut tickets = crate::ticket_levels::ChunkTickets::default();
+    tickets.update(Some(crate::ticket_levels::Sources {
+        viewed: hub.viewed_tickets(NETHER),
+        ..Default::default()
+    }));
+    let levels = tickets.levels();
+    assert!(levels.entity_ticking(-1_874_990, 1_875_010));
+    assert!(!levels.entity_ticking(-1_874_989, 1_875_000));
+    assert!(
+        !levels.block_ticking(1_875_000, -1_875_000),
+        "Loaded ticks nothing"
+    );
+}
