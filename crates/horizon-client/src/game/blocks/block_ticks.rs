@@ -33,7 +33,7 @@ impl Game<'_> {
         // and the arrows (the mobs and other entities are added in `with_level`
         // below).
         scratch.inside.clear();
-        let guests = self.lan_block_trigger_boxes().into_iter().map(|(_, b)| b);
+        let guests = self.lan_block_trigger_boxes();
         let boxes = self
             .player
             .iter()
@@ -145,7 +145,7 @@ impl Game<'_> {
                     }
                 }
             };
-            for_each_entity!(level.entities, entity => {
+            for_each_entity!(level.entities(), entity => {
                 if entity.triggers_blocks() && entity.sweeps_blocks_inside() {
                     let at = entity.position();
                     if entity_ticking(at.x.floor() as i32, at.z.floor() as i32) {
@@ -288,6 +288,7 @@ impl Game<'_> {
         Ok(sent)
     }
 
+    /// The ticks shown by this frame; still mode follows world time.
     /// `ChunkMap.forEachBlockTickingChunk`: the chunks that random tick this
     /// tick, empty ones included (`tickChunk` still draws for precipitation in
     /// those).
