@@ -10,45 +10,29 @@ use crate::save::level_mods::{self, MissingMod};
 #[path = "missing_mods_tests.rs"]
 mod tests;
 
+/// The same player-facing entry for visible text and narration.
+fn entry(m: &MissingMod) -> String {
+    let label = if m.saved_version.is_empty() {
+        lang::tr("horizon.missing_mods.entry_unknown", &[&m.id])
+    } else {
+        lang::tr("horizon.missing_mods.entry", &[&m.id, &m.saved_version])
+    };
+    let kinds = level_mods::affected_kinds(m);
+    if kinds.is_empty() {
+        label
+    } else {
+        lang::tr("horizon.missing_mods.entry_kinds", &[&label, &kinds])
+    }
+}
+
 /// The prompt's text: what opening does, then each missing mod.
 fn message(missing: &[MissingMod]) -> String {
     let mut message = lang::get("horizon.missing_mods.description");
     for m in missing {
         message.push('\n');
-        message.push_str(&level_mods::describe(m));
+        message.push_str(&entry(m));
     }
     message
-}
-
-/// The most lines of text that leave the heading and both rows of buttons on a screen `h` high.
-/// `confirm_top` centres a column of 61 plus the text, and the second row of buttons ends 85
-/// plus the text below its top, so the text may take `h - 109`, less 8 to spare.
-fn max_lines(h: f32) -> usize {
-    ((h - 109.0 - 8.0) / 9.0).floor().max(1.0) as usize
-}
-
-/// The description, then each mod's lines while they fit in `max` lines; when some don't, the
-/// last line says how many mods are left out. The narration reads them all (`screen_info`).
-fn fit(description: Vec<String>, mods: Vec<Vec<String>>, max: usize) -> Vec<String> {
-    let total = description.len() + mods.iter().map(Vec::len).sum::<usize>();
-    let mut lines = description;
-    if total <= max {
-        lines.extend(mods.into_iter().flatten());
-        return lines;
-    }
-    let mut shown = 0;
-    for m in &mods {
-        if lines.len() + m.len() + 1 > max {
-            break;
-        }
-        lines.extend(m.iter().cloned());
-        shown += 1;
-    }
-    lines.push(lang::tr(
-        "horizon.missing_mods.more",
-        &[&(mods.len() - shown)],
-    ));
-    lines
 }
 
 /// What the narrator reads for the prompt.
@@ -56,13 +40,113 @@ pub(super) fn screen_info(missing: &[MissingMod]) -> crate::widgets::ScreenInfo 
     crate::widgets::ScreenInfo::new(
         "missing_mods",
         crate::widgets::join_for_narration(&[
-            &lang::get("horizon.missing_mods.title"),
+            &lang::tr("horizon.missing_mods.count", &[&missing.len()]),
             &message(missing),
         ]),
     )
 }
 
+/// Shared viewport geometry for rendering, scrolling and action layout.
+pub(super) fn layout(w: f32, h: f32) -> (f32, f32, bool) {
+    let narrow = w < 324.0;
+    let top = 36.0;
+    let bottom = top + ((h - if narrow { 88.0 } else { 64.0 } - top) / 9.0).floor() * 9.0;
+    (top, bottom, narrow)
+}
+
 impl Title {
+    /// The right stick's scroll: the open list moves wherever the hidden pointer
+    /// is, and Create World's buttons don't take the step.
+    pub fn stick_scroll(&mut self, delta: f32, cursor: (f32, f32), size: (f32, f32)) {
+        self.step_scroll(delta, crate::widgets::over_scroll_area(cursor), size);
+    }
+    /// A focus step past a list's edge: what the pointer is over scrolls, and
+    /// Create World's buttons don't take the step.
+    pub fn step_scroll(&mut self, delta: f32, cursor: (f32, f32), size: (f32, f32)) {
+        let open_rules = self.rules.get_mut().is_some();
+        if matches!(self.mode, Mode::Create { .. }) && !open_rules {
+            return;
+        }
+        self.scroll_worlds(delta, cursor, size);
+    }
+    pub(super) fn drag_missing_mods(&mut self, cursor: (f32, f32), size: (f32, f32)) -> bool {
+        if !matches!(self.mode, Mode::MissingMods { .. }) {
+            return false;
+        }
+        let (top, bottom, _) = layout(size.0, size.1);
+        let mut scroll = self.scroll.get();
+        scroll.drag(cursor.1, top, bottom, self.message_lines.get() as f32 * 9.0);
+        self.scroll.set(scroll);
+        true
+    }
+    pub(super) fn wheel_missing_mods(&mut self, delta: f32, size: (f32, f32)) -> bool {
+        if !matches!(self.mode, Mode::MissingMods { .. }) {
+            return false;
+        }
+        let (top, bottom, _) = layout(size.0, size.1);
+        let mut scroll = self.scroll.get();
+        scroll.wheel(
+            delta,
+            18.0,
+            top,
+            bottom,
+            self.message_lines.get() as f32 * 9.0,
+        );
+        self.scroll.set(scroll);
+        true
+    }
+    pub(super) fn press_missing_mods(&mut self, cursor: (f32, f32), size: (f32, f32)) -> Action {
+        let (top, bottom, _) = layout(size.0, size.1);
+        self.scroll.get_mut().press(
+            cursor,
+            size.0 - 10.0,
+            top,
+            bottom,
+            self.message_lines.get() as f32 * 9.0,
+        );
+        Action::None
+    }
+    pub(super) fn confirm_missing_mods(&mut self) -> Option<(Action, bool)> {
+        let Mode::MissingMods { world, .. } = &self.mode else {
+            return None;
+        };
+        Some((
+            self.answer_missing_mods(world.clone(), self.focused_button.unwrap_or(101)),
+            true,
+        ))
+    }
+
+    /// The controller draws its own focus mark, so remove the keyboard's mark
+    /// when control passes to the existing pad focus path (including its first stop).
+    pub fn missing_mods_pad_focus(&mut self) {
+        if matches!(self.mode, Mode::MissingMods { .. }) {
+            self.focused_button = None;
+        }
+    }
+
+    /// Page keys scroll the complete warning regardless of which action has focus.
+    /// Arrow keys remain available for ordinary action navigation.
+    pub fn page_missing_mods(&mut self, key: winit::keyboard::KeyCode, (w, h): (f32, f32)) -> bool {
+        use winit::keyboard::KeyCode;
+        if !matches!(self.mode, Mode::MissingMods { .. }) {
+            return false;
+        }
+        let (top, bottom, _) = layout(w, h);
+        let content = self.message_lines.get() as f32 * 9.0;
+        let mut scroll = self.scroll.get();
+        let page = (bottom - top).max(9.0);
+        scroll.amount = match key {
+            KeyCode::PageUp => scroll.amount - page,
+            KeyCode::PageDown => scroll.amount + page,
+            KeyCode::Home => 0.0,
+            KeyCode::End => content,
+            _ => return false,
+        };
+        scroll.clamp(top, bottom, content);
+        self.scroll.set(scroll);
+        true
+    }
+
     /// Shows the question for the world in `folder`, whose `missing` mods no listener resolved.
     pub fn ask_missing_mods(&mut self, folder: &str, missing: Vec<MissingMod>) {
         let world = list_worlds(&self.saves)
@@ -72,6 +156,8 @@ impl Title {
                 WorldEntry::corrupted(folder.to_owned(), std::time::SystemTime::now())
             });
         self.set_mode(Mode::MissingMods { world, missing });
+        self.focused_button = Some(101);
+        self.scroll.set(Default::default());
     }
 
     pub(super) fn draw_missing_mods(
@@ -82,25 +168,58 @@ impl Title {
         missing: &[MissingMod],
     ) {
         crate::ui::menu_background(batch, atlas, 0.0, 0.0, w, h, false);
-        let width = w - 50.0;
-        let description = wrapped(atlas, &lang::get("horizon.missing_mods.description"), width);
-        let mods = missing
-            .iter()
-            .map(|m| wrapped(atlas, &level_mods::describe(m), width))
-            .collect();
-        let lines = fit(description, mods, max_lines(h));
+        let width = w - 32.0;
+        let mut lines = wrapped(atlas, &lang::get("horizon.missing_mods.description"), width);
+        let description_lines = lines.len();
+        lines.push(String::new());
+        let mut rows = Vec::with_capacity(missing.len());
+        for m in missing {
+            let label = entry(m);
+            let start = lines.len();
+            lines.extend(wrapped(atlas, &label, width));
+            rows.push((label, start, lines.len() - start));
+            lines.push(String::new());
+        }
         self.message_lines.set(lines.len());
-        let top = confirm_top(h, lines.len());
+        let (top, bottom, _) = layout(w, h);
+        let mut scroll = self.scroll.get();
+        scroll.clamp(top, bottom, lines.len() as f32 * 9.0);
+        self.scroll.set(scroll);
         centered(
             atlas,
             batch,
-            &lang::get("horizon.missing_mods.title"),
-            top,
+            &lang::tr("horizon.missing_mods.count", &[&missing.len()]),
+            12.0,
             rgba(255, 85, 85, 255),
         );
-        for (i, line) in lines.iter().enumerate() {
-            centered(atlas, batch, line, top + 17.0 + i as f32 * 9.0, u32::MAX);
+        for (label, start, count) in rows {
+            let y = top + start as f32 * 9.0 - (scroll.amount / 9.0).floor() * 9.0;
+            super::flat::row_target(&label, [16.0, y, width, count as f32 * 9.0], top, bottom);
         }
+        let first = batch.vertices.len();
+        for (i, line) in lines.iter().enumerate() {
+            centered(
+                atlas,
+                batch,
+                line,
+                top + i as f32 * 9.0 - (scroll.amount / 9.0).floor() * 9.0,
+                if i < description_lines {
+                    u32::MAX
+                } else {
+                    rgba(170, 170, 170, 255)
+                },
+            );
+        }
+        batch.clip_since(first, 0.0, top, w, bottom);
+        crate::ui::scrollbar(
+            batch,
+            atlas,
+            w - 10.0,
+            top,
+            bottom,
+            lines.len() as f32 * 9.0,
+            scroll.amount,
+        );
     }
 
     /// The question's buttons: Don't Open (101), Back Up and Open (102), Open Without a Backup

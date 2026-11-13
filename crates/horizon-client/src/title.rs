@@ -1254,6 +1254,9 @@ impl Title {
             buffet::drag(buffet, cursor, size);
             return;
         }
+        if self.drag_missing_mods(cursor, size) {
+            return;
+        }
         if let Mode::Select { worlds, .. } = &self.mode {
             let (top, bottom, _, content) = self.world_list(worlds, size);
             let mut scroll = self.scroll.get();
@@ -1302,6 +1305,9 @@ impl Title {
             buffet::wheel(buffet, delta, cursor, size);
             return false;
         }
+        if self.wheel_missing_mods(delta, size) {
+            return false;
+        }
         // CycleButton.mouseScrolled reads only the vertical wheel.
         if let Mode::Create {
             creative, options, ..
@@ -1334,20 +1340,6 @@ impl Title {
         scroll.wheel(delta, ROW_HEIGHT / 2.0, top, bottom, content);
         self.scroll.set(scroll);
         false
-    }
-    /// The right stick's scroll: the open list moves wherever the hidden pointer
-    /// is, and Create World's buttons don't take the step.
-    pub fn stick_scroll(&mut self, delta: f32, cursor: (f32, f32), size: (f32, f32)) {
-        self.step_scroll(delta, crate::widgets::over_scroll_area(cursor), size);
-    }
-    /// A focus step past a list's edge: what the pointer is over scrolls, and
-    /// Create World's buttons don't take the step.
-    pub fn step_scroll(&mut self, delta: f32, cursor: (f32, f32), size: (f32, f32)) {
-        let open_rules = self.rules.get_mut().is_some();
-        if matches!(self.mode, Mode::Create { .. }) && !open_rules {
-            return;
-        }
-        self.scroll_worlds(delta, cursor, size);
     }
     pub fn failed(&mut self, error: impl std::fmt::Display) {
         let return_to = Box::new(self.mode.clone());
@@ -2647,6 +2639,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 self.set_mode(Mode::Main);
                 Action::None
             }
+            (Mode::MissingMods { .. }, None) => self.press_missing_mods((x, y), (w, h)),
             (Mode::Select { .. }, None) => {
                 self.search_focused =
                     (21.0..41.0).contains(&y) && (x - (w / 2.0).floor()).abs() < 100.0;
@@ -3004,6 +2997,9 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
     /// Returns the triggered action and whether a UI button click sound should play.
     pub fn confirm_key_size(&mut self, size: (f32, f32)) -> (Action, bool) {
         self.remember_direct_address();
+        if let Some(answer) = self.confirm_missing_mods() {
+            return answer;
+        }
         if self.rules.get_mut().is_some() {
             return (Action::None, false);
         }

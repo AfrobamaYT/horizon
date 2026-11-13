@@ -15,6 +15,31 @@ fn gone() -> MissingMod {
     }
 }
 
+#[test]
+fn entries_preserve_affected_kinds_and_known_or_unknown_versions() {
+    crate::lang::scoped(crate::lang::Language::load(&[], "en_us"), || {
+        assert_eq!(entry(&gone()), "gone, version 1.0.0 (code mod, its blocks)");
+        assert_eq!(
+            entry(&MissingMod {
+                code: false,
+                blocks: false,
+                ..gone()
+            }),
+            "gone, version 1.0.0"
+        );
+        assert_eq!(
+            entry(&MissingMod {
+                saved_version: String::new(),
+                code: false,
+                content: true,
+                blocks: false,
+                ..gone()
+            }),
+            "gone, version unknown (content mod)"
+        );
+    });
+}
+
 /// Every file under `dir`, by its path relative to `dir`, with its bytes.
 fn files(dir: &Path) -> BTreeMap<String, Vec<u8>> {
     fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
@@ -165,30 +190,145 @@ fn a_failed_backup_cancels_the_open() {
         if message.starts_with(&lang::tr("horizon.missing_mods.backup_failed", &[&""]))));
 }
 
-/// However many mods are missing, the text fits between the heading and the buttons: the mods
-/// that don't fit become one line counting them, and a short list is shown whole.
+/// Button hit targets stay entirely inside a narrow viewport, regardless of text length.
 #[test]
-fn a_long_list_keeps_the_heading_and_buttons_on_screen() {
-    let line = |text: &str| vec![text.to_owned()];
-    let description = vec!["a".to_owned(), "b".to_owned()];
-    let mods: Vec<Vec<String>> = (0..30).map(|i| line(&format!("mod {i}"))).collect();
-    // A 240 high window: the column must end on it.
-    let max = max_lines(240.0);
-    let top = confirm_top(240.0, max);
-    assert!(top >= 0.0 && top + 85.0 + max as f32 * 9.0 <= 240.0);
-    let shown = fit(description.clone(), mods.clone(), max);
-    assert_eq!(shown.len(), max);
-    assert_eq!(shown[..2], description[..]);
-    let kept = max - 3;
-    assert_eq!(
-        shown[2..2 + kept],
-        (0..kept).map(|i| format!("mod {i}")).collect::<Vec<_>>()[..]
+fn long_text_keeps_all_three_actions_inside_narrow_viewport() {
+    let mut f = Fixture::new();
+    f.title.ask_missing_mods("Gone", vec![gone(); 30]);
+    for lines in [3, 14, 100] {
+        f.title.message_lines.set(lines);
+        let buttons = f.title.buttons(240.0, 240.0);
+        assert_eq!(buttons.len(), 3);
+        for (button, y) in buttons.iter().zip([212.0, 164.0, 188.0]) {
+            assert_eq!(button.x, 10.0);
+            assert_eq!(button.w, 220.0);
+            assert_eq!(button.y, y);
+            assert!(button.y + 20.0 <= 240.0);
+        }
+    }
+}
+
+#[test]
+fn page_keys_scroll_independently_of_action_focus() {
+    let mut f = Fixture::new();
+    f.title.ask_missing_mods("Gone", vec![gone()]);
+    f.title.message_lines.set(100);
+    f.title.focused_button = Some(101);
+    assert!(
+        f.title
+            .page_missing_mods(winit::keyboard::KeyCode::PageDown, (240.0, 240.0))
     );
-    assert_eq!(
-        shown.last().unwrap(),
-        &lang::tr("horizon.missing_mods.more", &[&(30 - kept)])
+    assert_eq!(f.title.scroll.get().amount, 108.0);
+    assert_eq!(f.title.focused_button, Some(101));
+    f.title.focused_button = None;
+    f.title.scroll.set(Default::default());
+    f.title.message_lines.set(3);
+    f.title
+        .arrow_key(winit::keyboard::KeyCode::ArrowDown, (240.0, 240.0), false);
+    assert!(f.title.focused_button.is_some());
+}
+
+#[test]
+fn opening_prompt_replaces_stale_destructive_focus_with_cancel() {
+    let _answer = level_mods::TEST_ANSWER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let mut f = Fixture::new();
+    f.world("Gone", "Gone");
+    f.title.focused_button = Some(103);
+    f.title.scroll.get_mut().amount = 400.0;
+    f.title.ask_missing_mods("Gone", vec![gone()]);
+    assert_eq!(f.title.focused_button, Some(101));
+    assert_eq!(f.title.scroll.get().amount, 0.0);
+    for size in [(240.0, 240.0), (640.0, 360.0)] {
+        f.title
+            .arrow_key(winit::keyboard::KeyCode::ArrowDown, size, false);
+        assert_eq!(f.title.focused_button, Some(101));
+    }
+    // Untouched Enter must choose Cancel too, not a world-opening action.
+    f.title.ask_missing_mods("Gone", vec![gone()]);
+    assert_eq!(f.title.confirm_key_size((240.0, 240.0)).0, Action::None);
+    assert!(matches!(f.title.mode, Mode::Select { .. }));
+}
+
+#[test]
+fn controller_down_past_visible_rows_scrolls_then_reaches_cancel_at_end() {
+    use crate::gamepad::{Button, ScrollArea, list_step};
+    let mut f = Fixture::new();
+    f.title.ask_missing_mods("Gone", vec![gone(); 30]);
+    f.title.message_lines.set(100);
+    let size = (240.0, 240.0);
+    let (top, bottom, _) = layout(size.0, size.1);
+    let row = [16.0, bottom - 9.0, 208.0, 9.0];
+    let buttons = f.title.buttons(size.0, size.1);
+    let targets: Vec<_> = buttons.iter().map(|b| [b.x, b.y, b.w, 20.0]).collect();
+    let mut area = ScrollArea {
+        rect: [0.0, top, 236.0, bottom - top],
+        amount: 0.0,
+        up: false,
+        down: true,
+    };
+    assert_eq!(list_step(row, Button::DPadDown, &targets, &[area]), None);
+    // The existing pad focus path emits this step-wheel when list_step returns None.
+    f.title.step_scroll(-1.0, (120.0, bottom - 4.0), size);
+    assert_eq!(f.title.scroll.get().amount, 18.0);
+    area.down = false;
+    let mut from = row;
+    for expected_id in [102, 103, 101] {
+        let next = list_step(from, Button::DPadDown, &targets, &[area]).unwrap();
+        assert_eq!(buttons[next].id, expected_id);
+        from = targets[next];
+    }
+}
+
+#[test]
+fn missing_mod_scrollbar_uses_existing_press_drag_release() {
+    let mut f = Fixture::new();
+    f.title.ask_missing_mods("Gone", vec![gone(); 30]);
+    f.title.message_lines.set(100);
+    assert_eq!(f.title.click(233.0, 40.0, (240.0, 240.0)).0, Action::None);
+    f.title.drag((233.0, 130.0), (240.0, 240.0));
+    assert!(f.title.scroll.get().amount > 0.0);
+    f.title.release();
+    let released = f.title.scroll.get().amount;
+    f.title.drag((233.0, 50.0), (240.0, 240.0));
+    assert_eq!(f.title.scroll.get().amount, released);
+}
+
+#[test]
+fn controller_rows_group_wrapped_mods_and_exclude_the_description() {
+    let mut f = Fixture::new();
+    let mut wrapped_mod = gone();
+    wrapped_mod.id = "first_line\nsecond_line".into();
+    f.title.ask_missing_mods("Gone", vec![wrapped_mod, gone()]);
+    let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+        "/nonexistent/horizon-test-assets".into(),
+    ))
+    .unwrap();
+    let mut batch = HudBatch::new(
+        [240, 480],
+        crate::hud::GuiScale {
+            requested: 1,
+            unicode: false,
+        },
     );
-    // A list that fits is shown whole, with no count.
-    let short = fit(description.clone(), mods[..2].to_vec(), max);
-    assert_eq!(short, ["a", "b", "mod 0", "mod 1"]);
+    crate::widgets::end_frame(100);
+    let Mode::MissingMods { missing, .. } = &f.title.mode else {
+        unreachable!()
+    };
+    let english = crate::lang::Language::load(&[], "en_us");
+    crate::lang::scoped(english, || {
+        f.title
+            .draw_missing_mods(&atlas, &mut batch, (240.0, 480.0), missing);
+    });
+    crate::widgets::end_frame(101);
+    let rows: Vec<_> = crate::widgets::last_targets()
+        .into_iter()
+        .filter(|t| t.kind == crate::widgets::Kind::Row)
+        .collect();
+    assert_eq!(rows.len(), 2);
+    assert!(rows[0].rect[3] > 9.0);
+    assert_eq!(f.title.focused_button, Some(101));
+    f.title.missing_mods_pad_focus();
+    assert_eq!(f.title.focused_button, None);
 }
