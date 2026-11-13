@@ -2,7 +2,6 @@
 //! server threads and the play-state hub, feeds it the world's entities each
 //! tick and turns what the guests do into gameplay. A world that is not open
 //! costs one `Option` check per tick.
-mod event_kind;
 mod event_timings;
 #[cfg(test)]
 mod level_event_targets;
@@ -18,12 +17,7 @@ use super::{
     shield::OFFHAND_SLOT,
 };
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
-<<<<<<< HEAD
-use event_kind::{EventKind, event_kind};
-use event_timings::EventTimings;
-=======
 use event_timings::{EventTimings, UseDetail, describe_burst, event_kind, note_event};
->>>>>>> arismoko/main
 use horizon_client::crafting::ResolvedSources;
 use horizon_client::{
     Result,
