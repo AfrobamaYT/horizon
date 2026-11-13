@@ -6595,7 +6595,7 @@ impl Game<'_> {
         if self.remote.is_none() {
             self.read_raids();
         }
-        self.native_tags_updated(mod_api::TagsUpdateCause::ServerDataLoad { reload: false });
+        self.announce_data_bound(mod_api::TagsUpdateCause::ServerDataLoad { reload: false });
         self.announce_data_maps_updated(mod_api::DataMapsUpdateCause::ServerReload);
         self.sync_recipe_content();
         reset_world_progress(&mut self.adv, &mut self.stats);
@@ -7007,7 +7007,11 @@ impl Game<'_> {
                 t.transform_type.clone(),
             )
         };
+        let mapped = self.axe_mapped(&id, block);
         if mod_api::__private::mods().is_empty() {
+            if let Some((new, ability)) = mapped {
+                return Some(Self::tool_ability_result(new, ability));
+            }
             let (new, t) = vanilla?;
             return Some(result(new, t));
         }
@@ -7019,10 +7023,13 @@ impl Game<'_> {
             _ => return vanilla.map(|(new, t)| result(new, t)),
         };
         for &ability in actions {
-            let mut state = vanilla
-                .as_ref()
-                .and_then(|(state, t)| vanilla_tool_state(&id, &t.particle, ability, *state));
-            let matches_vanilla = state.is_some();
+            let mut state = match mapped {
+                Some((new, from)) => (from == ability).then_some(new),
+                None => vanilla
+                    .as_ref()
+                    .and_then(|(state, t)| vanilla_tool_state(&id, &t.particle, ability, *state)),
+            };
+            let matches_vanilla = state.is_some() && mapped.is_none();
             let mut cancel = false;
             let tool = mod_api::ToolUse::from(mod_api::__private::built::ToolUse {
                 player,
@@ -7042,23 +7049,7 @@ impl Game<'_> {
                     let (_, t) = vanilla?;
                     return Some(result(new, t));
                 }
-                let (sound, particle) = match ability {
-                    AxeStrip => ("minecraft:item.axe.strip", "none"),
-                    AxeScrape => ("minecraft:item.axe.scrape", "scrape"),
-                    AxeWaxOff => ("minecraft:item.axe.wax_off", "wax_off"),
-                    ShovelFlatten => ("minecraft:item.shovel.flatten", "none"),
-                    HoeTill => ("minecraft:item.hoe.till", "none"),
-                    ShovelDouse => unreachable!(),
-                    _ => unreachable!("ToolAbility: unhandled variant"),
-                };
-                return Some((
-                    new,
-                    sound.to_owned(),
-                    None,
-                    1,
-                    particle.to_owned(),
-                    String::new(),
-                ));
+                return Some(Self::tool_ability_result(new, ability));
             }
         }
         None
@@ -7274,6 +7265,9 @@ impl Game<'_> {
             {
                 return Ok(UseResult::Fail);
             }
+            if let Some(result) = self.player_empty_contents(stack, target, &hit) {
+                return Ok(result);
+            }
             let pos = BlockPos::new(target[0], target[1], target[2]);
             let [x, y, z] = hit.beside();
             let beside = Some(BlockPos::new(x, y, z));
@@ -7297,26 +7291,7 @@ impl Game<'_> {
             // `BucketItem.emptyContents` uses `playSound(player, …)`: the
             // actor's client already played the empty / evaporate sound from
             // its DryLevel prediction (#4684).
-            if self.lan_acting.is_some()
-                && let Some(capture) = self.audio.capture.as_mut()
-            {
-                let want = sound.trim_start_matches("minecraft:");
-                let mut keep = Vec::with_capacity(capture.len());
-                for entry in capture.drain(..) {
-                    let name = entry.event.trim_start_matches("minecraft:");
-                    if name == want || name == "block.fire.extinguish" {
-                        self.guest_player_sounds.push((
-                            entry.event,
-                            entry.position,
-                            entry.volume,
-                            entry.pitch,
-                        ));
-                    } else {
-                        keep.push(entry);
-                    }
-                }
-                *capture = keep;
-            }
+            self.keep_guest_bucket_sounds(sound);
             if let Some(kind) = mob {
                 if let Some(id) = self.spawn_mob_at(kind, (target[0], target[1], target[2]), true) {
                     self.mob_placed(id, stack)?;
@@ -7340,9 +7315,7 @@ impl Game<'_> {
         if item == "honeycomb" {
             let registry = self.pack.assets.registry;
             let old = registry.state(clicked);
-            if let Some(waxed) = old.and_then(|old| self.res.transformers().waxed(registry, old))
-                && let Ok(state) = registry.resolve(&waxed)
-            {
+            if let Some(state) = self.honeycomb_waxed(clicked) {
                 let other = old.and_then(|old| storage::chest_connected_pos(old, hit.pos));
                 // HoneycombItem.useOn: ITEM_USED_ON_BLOCK before the swap.
                 self.trigger_block("minecraft:item_used_on_block", hit.pos, stack);

@@ -140,7 +140,7 @@ class RegistryPatchTests(unittest.TestCase):
 class DeterministicArchiveTests(unittest.TestCase):
     def test_workflow_archive_is_independent_of_creation_order_and_mtimes(self):
         # Execute the workflow command itself, so a regression in its flags breaks this proof.
-        workflow = yaml.safe_load((prebuilt_game.ROOT / ".github/workflows/prebuilt-game.yml").read_text())
+        workflow = yaml.safe_load((prebuilt_game.ROOT / ".github/workflows/prebuilt-game-build.yml").read_text())
         command = next(step["run"] for step in workflow["jobs"]["build"]["steps"] if step.get("name") == "Archive")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -674,6 +674,7 @@ impl Game<'_> {
                         &crate::game::native_hooks::HookedAttributeTooltips::new(self, None),
                         self.item_enchantments(),
                         &|k| self.pack.names.display_get(k),
+                        &|attribute| self.attribute_style(attribute, false),
                     )
                 })
             {

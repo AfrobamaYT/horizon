@@ -2117,7 +2117,10 @@ mod tests {
             id: id.into(),
             definition: Definition::ranged(default, 0.0, 100.0).unwrap(),
             syncable,
-            sentiment,
+            tooltip: horizon_world::attributes::Tooltip {
+                sentiment,
+                ..Default::default()
+            },
         };
         let grown = catalog
             .with_attributes(&[

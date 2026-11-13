@@ -4,7 +4,7 @@ run-name: nightly build${{ inputs.request && format(' (request {0})', inputs.req
 # train decides (release.yml, with the commit as `base`; the daily run calls it when every leg is green), and when a
 # trusted reviewer asks (`/nightly 2640 2642`, nightly-command.yml), it builds main plus the pull requests the
 # reviewers picked, merged in order (tools/ci/nightly_set.py), or main alone with none picked. Main is its newest
-# commit where checks passed (or the `base` input), on the fork also `daily-green` or an ancestor of it, and no
+# commit where checks passed (or the `base` input), on the fork the commit `daily-green` points to, and no
 # Nightly is published while a release-blocker is open. It publishes the result as the `nightly` pre-release, which every launcher and
 # `horizon-server update` install. The previous nightly stays a week as nightly-<date>.
 #
@@ -59,7 +59,7 @@ on:
         type: string
         default: ''
       base:
-        description: The commit of main to build on (default main's newest with green checks that is daily-green or before it)
+        description: The commit of main to build on (default main's newest with green checks; on the fork the daily-green commit, and only it)
         type: string
         default: ''
       urgent:

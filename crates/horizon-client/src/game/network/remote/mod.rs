@@ -502,7 +502,7 @@ pub(super) struct Remote {
     pub far_terrain: Option<horizon_client::lod_net::Offer>,
     pub(super) builtin: Arc<Builtin>,
     lang: Arc<Language>,
-    pub(super) registries: Arc<Dynamic>,
+    pub(in crate::game) registries: Arc<Dynamic>,
     /// The block, item and fluid tags of `registries` by name, as native mods read them
     /// (`install_remote_tags`).
     pub(super) tags: Option<horizon_client::items::Items>,
@@ -614,7 +614,7 @@ pub(super) struct Remote {
     use_target: Option<[i32; 3]>,
     /// A mod menu's extra data, kept for the `OpenScreen` of its window that
     /// follows (`horizon:menu_extra`).
-    menu_extra: Option<horizon_protocol::menu_extra::Message>,
+    pub(in crate::game) menu_extra: Option<horizon_protocol::menu_extra::Message>,
     pub(super) entities: HashMap<i32, Tracked>,
     /// Per-tick remote entity scratch retained between frames.
     tick_fluids: Vec<Option<horizon_client::mobs::living::Fluids>>,
@@ -3585,14 +3585,7 @@ impl Game<'_> {
             // A mod menu type's block and its mod's bytes, just before the
             // menu's `OpenScreen`.
             C::CustomPayload(p) if p.channel == horizon_protocol::menu_extra::CHANNEL => {
-                match horizon_protocol::menu_extra::decode(&p.data) {
-                    Ok(extra) => {
-                        if let Some(r) = self.remote.as_mut() {
-                            r.menu_extra = Some(extra);
-                        }
-                    }
-                    Err(e) => log::debug!("Horizon: a bad menu extra payload: {e}"),
-                }
+                self.receive_menu_extra(&p.data);
             }
             C::CustomPayload(p) if horizon_client::lan::recipes::viewer_channel(&p.channel) => {
                 self.remote_recipe_viewer(&p.channel, &p.data);
@@ -3702,10 +3695,9 @@ impl Game<'_> {
                 // A new player, without effects (the server sends them
                 // again) and with no item in use.
                 self.potions.effects.clear();
-                // The server sends the level, chunks and entities again, and opens again
-                // the levels it views: none is kept through a Respawn.
+                // Every synced attachment but the player's is sent again; the viewed
+                // levels go or stay with the level entered (`enter_respawn_level`).
                 if let Some(r) = self.remote.as_mut() {
-                    r.viewed.clear();
                     r.attachments
                         .retain(|holder, _| matches!(holder, Holder::Player(_)));
                 }
@@ -3751,7 +3743,7 @@ impl Game<'_> {
                     r.sequence = 0;
                 }
                 self.portals.respawn_attributes.respawn(p.keep & 1 != 0);
-                self.enter_remote_dimension(&p.spawn, true, reason);
+                self.enter_respawn_level(&p, reason);
                 // handleRespawn adds the new LocalPlayer after what the kept
                 // level holds; a new level holds nothing yet.
                 let before: std::collections::HashSet<u32> =
@@ -9174,7 +9166,7 @@ impl Game<'_> {
                 )
             });
         }
-        let Some((content, sound, _)) = horizon_client::items::bucket_contents(&stack.item) else {
+        let Some((content, sound, _)) = self.predicted_bucket_contents(stack) else {
             return (false, None, Vec::new());
         };
         let Some(hit) = self.pick() else {
@@ -10383,8 +10375,7 @@ impl Game<'_> {
             .filter(|e| e.window == p.container);
         let target = extra
             .as_ref()
-            .map(|e| (e.pos[0], e.pos[1], e.pos[2]))
-            .or(target);
+            .map_or(target, |e| e.pos.map(|p| (p[0], p[1], p[2])));
         if menu == "minecraft:lectern" {
             // LecternScreen: the book and page come in the menu's content and data.
             if let Some(r) = self.remote.as_mut() {
