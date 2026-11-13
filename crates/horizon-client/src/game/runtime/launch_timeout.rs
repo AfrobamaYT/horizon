@@ -1,10 +1,8 @@
-//! The explicit run deadline and the default deadline for frame-limited runs.
-use super::Options;
-use std::time::Duration;
-
+//! The explicit run deadline (`Options::time_limit`, game/runtime/launch_options.rs) ends a
+//! live run.
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::time::Duration;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
