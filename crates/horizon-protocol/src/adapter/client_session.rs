@@ -1334,7 +1334,7 @@ mod tests {
     #[test]
     fn equipment_with_components_reaches_every_older_client() {
         use crate::item::{Component, Stack, component};
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let mut hat = Stack::new(1012, 1);
         hat.added.push((
             component::CUSTOM_NAME,

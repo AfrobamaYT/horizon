@@ -29,7 +29,7 @@ The integration is prepared in separate commits. The restoration script and the 
 
 `measure/game_rs.py` reports **104 name matches**, not zero. This approximate, name-based count includes true extraction remnants and unrelated methods with the same name; it is not a qualified Rust-method count. The full destination series is explicitly deferred to stacked sync 37 under the parallel-sync order, while the three missing post-move behavior fixes are already restored separately.
 
-The seven names whose upstream matches are entirely outside `game/` are `stage`, `native`, `exists`, `all`, `hurt_helmet`, `render_with` and `in_own_process`. `Dim::key`, `Dim::level` and `Dim::sea_level` also collide with unrelated upstream methods. `Options::parse` is handled by the planned whole-Options extraction; its name also occurs in unrelated helpers. None of those facts is used to silently turn the raw count into zero.
+After qualifying the matches, the raw count consists of 94 extraction names, three unrelated `Dim` method names with `game/` matches, and seven names matched only outside `game/`. The seven names whose upstream matches are entirely outside `game/` are `stage`, `native`, `exists`, `all`, `hurt_helmet`, `render_with` and `in_own_process`. `Dim::key`, `Dim::level` and `Dim::sea_level` also collide with unrelated upstream methods. `Options::parse` is handled by the planned whole-Options extraction; its name also occurs in unrelated helpers. None of those facts is used to silently turn the raw count into zero.
 
 All names remaining in the raw metric:
 
