@@ -371,6 +371,10 @@ struct FileFacts<'t> {
     type_aliases: Vec<(&'t str, &'t str, bool)>,
     /// Each `impl` or `trait` body's token range and the type or trait it is for.
     bodies: Vec<(usize, usize, &'t str)>,
+    /// The structs, enums, unions and type aliases the file defines at its top level.
+    defines: BTreeSet<&'t str>,
+    /// The file holds an inline `mod name { … }`, so it is more than one scope.
+    inline_modules: bool,
 }
 
 fn file_facts(text: &str) -> FileFacts<'_> {
@@ -458,7 +462,9 @@ fn file_facts(text: &str) -> FileFacts<'_> {
                 if !in_use[at]
                     && punct(&tokens, at + 1, b':')
                     && punct(&tokens, at + 2, b':')
-                    && !(at >= 1 && punct(&tokens, at - 1, b':')) =>
+                    && !(at >= 2
+                        && punct(&tokens, at - 1, b':')
+                        && punct(&tokens, at - 2, b':')) =>
             {
                 // A path written out: `a::b::C`.
                 let mut path = vec![first];
@@ -476,6 +482,26 @@ fn file_facts(text: &str) -> FileFacts<'_> {
         }
         at += 1;
     }
+    let mut defines = BTreeSet::new();
+    let mut inline_modules = false;
+    let mut depth = 0usize;
+    for at in 0..tokens.len() {
+        match tokens[at].0 {
+            Token::Punct(b'{') => depth += 1,
+            Token::Punct(b'}') => depth = depth.saturating_sub(1),
+            Token::Ident("mod")
+                if ident(&tokens, at + 1).is_some() && punct(&tokens, at + 2, b'{') =>
+            {
+                inline_modules = true;
+            }
+            Token::Ident("struct" | "enum" | "union" | "type") if depth == 0 => {
+                if let Some(name) = ident(&tokens, at + 1) {
+                    defines.insert(name);
+                }
+            }
+            _ => {}
+        }
+    }
     FileFacts {
         tokens,
         in_use,
@@ -483,6 +509,8 @@ fn file_facts(text: &str) -> FileFacts<'_> {
         chains,
         type_aliases,
         bodies,
+        defines,
+        inline_modules,
     }
 }
 
@@ -584,7 +612,7 @@ fn mod_facts<'t>(files: &[FileFacts<'t>]) -> ModFacts<'t> {
                         if depth == 0
                             && matches!(tokens[i - 1].0, Token::Punct(b'{' | b',' | b']')) =>
                     {
-                        facts.others.insert(variant);
+                        facts.types.insert(variant);
                     }
                     _ => {}
                 }
@@ -711,22 +739,19 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
     let module = mod_facts(&files);
     // Whether the mod's own type of an API name is certainly the one a bare name means: the mod
     // defines it, and no file can see the API's of that name unqualified.
-    // A glob may bring the API's in unless its public paths show that module does not export it.
-    let certainly_own = |name: &str| {
-        module.types.contains(name)
-            && !module.imported.contains(name)
-            && !module.globs.iter().any(|glob| {
-                let path = if glob.is_empty() {
-                    name.to_owned()
-                } else {
-                    format!("{glob}::{name}")
-                };
-                by_name.get(name).into_iter().flatten().any(|id| {
-                    public_paths
-                        .get(id)
-                        .is_none_or(|paths| paths.is_empty() || paths.contains(&path))
-                })
-            })
+    // Whether an unqualified `name` in `file` certainly means the mod's own type, following Rust's
+    // scoping file by file: the file defines it, or imports it by name from a path inside the mod
+    // and the mod defines it. Anything else (an import of the API's, any glob, nothing at all)
+    // leaves the API's, and so does a file with an inline module, which is more than one scope.
+    // A glob in another file never reaches this one.
+    let own_in = |file: &FileFacts<'_>, name: &str| {
+        !file.inline_modules
+            && (file.defines.contains(name)
+                || file.imports.iter().any(|(path, local)| {
+                    *local == name
+                        && matches!(path.first(), Some(&("crate" | "super" | "self")))
+                        && module.types.contains(name)
+                }))
     };
 
     // The records named directly, each with the first place that names it; how each named
@@ -752,8 +777,6 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
             {
                 start -= 3;
             }
-            let qualified_api = start < at
-                && ident(tokens, start).is_some_and(|first| module.roots.contains(first));
             // The API name this token stands for, and whether it is a local name for one.
             let (name, local) = match *written_name {
                 "Self" => match file
@@ -820,12 +843,18 @@ pub fn uses<P: AsRef<str>, T: AsRef<str>>(
                 if !struct_like(id) {
                     continue;
                 }
-                // The mod's own type of the API name, when certain; written out through the
-                // API's path, never.
-                if !qualified_api && !local && certainly_own(name) {
-                    continue;
-                }
-                if local && *written_name == "Self" && certainly_own(name) {
+                // The mod's own type of the API name: written out through a path inside the mod
+                // that leads to its own definition, or unqualified where the file's scope
+                // certainly means its own.
+                let own = if local && *written_name != "Self" {
+                    false
+                } else if start < at {
+                    matches!(ident(tokens, start), Some("crate" | "super" | "self"))
+                        && module.types.contains(name)
+                } else {
+                    own_in(file, name)
+                };
+                if own {
                     continue;
                 }
                 named_structs.insert(id);

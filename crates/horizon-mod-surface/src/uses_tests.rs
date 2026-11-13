@@ -1434,3 +1434,78 @@ fn a_tuple_constructor_as_a_value_is_a_full_build() {
     assert_eq!(pos("struct Maker { ctor: Pos }"), Some(Built::None));
     assert_eq!(pos("fn f(a: [Pos; 2]) {}"), Some(Built::None));
 }
+
+#[test]
+fn whether_a_name_is_the_mods_own_follows_each_files_scope() {
+    let none = Some(Built::None);
+    let full = Some(Built::Full);
+    // The examples case: the mod's own `Settings`, built with `Self { … }` in its file; a glob of
+    // the API in another file does not reach it.
+    let own = (
+        "src/widget.rs",
+        "pub struct Settings { pub mine: u8 }\nimpl Settings { fn new() -> Self { Self { mine: 1 } } }",
+    );
+    let glob_elsewhere = ("src/reload.rs", "use mod_api::*;\nfn f(s: &Settings) {}");
+    assert_eq!(built_in(&[own, glob_elsewhere], "type:Settings"), none);
+    // A third file with `use super::*` that builds `Settings { … }`: unsure, so the API's.
+    let super_glob = (
+        "src/third.rs",
+        "use super::*;\nfn g() { let s = Settings { height: 1 }; }",
+    );
+    assert_eq!(built_in(&[own, super_glob], "type:Settings"), full);
+    // An explicit import of the mod's own: its own.
+    let imported = (
+        "src/third.rs",
+        "use crate::widget::Settings;\nfn g() { let s = Settings { mine: 1 }; }",
+    );
+    assert_eq!(built_in(&[own, imported], "type:Settings"), none);
+    // An explicit import of the API's, while the mod defines its own elsewhere: the API's.
+    let api_import = (
+        "src/third.rs",
+        "use mod_api::Settings;\nfn g() { let s = Settings { height: 1 }; }",
+    );
+    assert_eq!(built_in(&[own, api_import], "type:Settings"), full);
+    // A path inside the mod written out: its own.
+    let qualified = (
+        "src/third.rs",
+        "fn g() { let s = crate::widget::Settings { mine: 1 }; }",
+    );
+    assert_eq!(built_in(&[own, qualified], "type:Settings"), none);
+    // A path inside the mod that leads to an associated type, which may stand for the API's: the
+    // API's. One that leads to a variant: the mod's own.
+    let associated = (
+        "src/third.rs",
+        "impl It for X { type Settings = mod_api::Settings; }\nfn g() { let s = crate::X::Settings { height: 1 }; }",
+    );
+    assert_eq!(built_in(&[associated], "type:Settings"), full);
+    let variant = (
+        "src/third.rs",
+        "enum Kind { Settings { mine: u8 } }\nuse crate::Kind::Settings;\nfn g() { let s = Settings { mine: 1 }; }",
+    );
+    assert_eq!(built_in(&[variant], "type:Settings"), none);
+    // A file with an API glob and no definition of its own: the API's.
+    let api_glob = (
+        "src/third.rs",
+        "use mod_api::*;\nfn g() { let s = Settings { height: 1 }; }",
+    );
+    assert_eq!(built_in(&[own, api_glob], "type:Settings"), full);
+    // A file with an inline module is more than one scope: unsure, so the API's.
+    let inline = (
+        "src/widget.rs",
+        "mod inner { pub use mod_api::*; }\npub struct Settings { pub mine: u8 }\nfn g() { let s = Settings { mine: 1 }; }",
+    );
+    assert_eq!(built_in(&[inline], "type:Settings"), full);
+}
+
+#[test]
+fn a_path_through_a_renamed_crate_is_recorded() {
+    let mut made_for = wider();
+    let mut record = api_type("type:world::Biome", "", false, vec![]);
+    record.paths = vec!["Biome".into(), "world::Biome".into()];
+    made_for.types.push(record.clone());
+    let uses = scan_files(
+        made_for,
+        &[("src/lib.rs", "use mod_api as api;\nfn f(b: api::Biome) {}")],
+    );
+    assert_eq!(entry(&uses, "type:world::Biome").paths, ["Biome"]);
+}
