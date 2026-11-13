@@ -201,3 +201,57 @@ fn a_bad_table_is_a_typed_error() {
         Err(ShapeError::Undefined("Absent".into()))
     );
 }
+
+#[test]
+fn a_recursive_argument_counts_the_types_around_its_use() {
+    // Wrap<T> { v: Option<T> }, A { f: Vec<Wrap<A>> } against W2 { v: Option<W2> }, C { f: Vec<W2> }:
+    // after `Some`, an A continues with a list and a C with an option.
+    let one = table(vec![
+        (
+            "Wrap",
+            Definition {
+                params: 1,
+                body: Body::Record(vec![(
+                    "v".into(),
+                    Shape::Option(Box::new(Shape::Param(0))),
+                )]),
+            },
+        ),
+        (
+            "A",
+            record(&[(
+                "f",
+                Shape::List(Box::new(Shape::Named("Wrap".into(), vec![named("A")]))),
+            )]),
+        ),
+    ]);
+    let two = table(vec![
+        ("W2", record(&[("v", Shape::Option(Box::new(named("W2"))))])),
+        ("C", record(&[("f", Shape::List(Box::new(named("W2"))))])),
+    ]);
+    let a = Shapes::new(&one).shape("A").unwrap();
+    let c = Shapes::new(&two).shape("C").unwrap();
+    assert_ne!(a, c);
+    // A's text: the argument A, used two levels below A, is rec(2).
+    let wrap_of_a = sha("record{1:v:option(rec(2))}");
+    assert_eq!(a, sha(&format!("record{{1:f:list(type({wrap_of_a}))}}")));
+}
+
+#[test]
+fn nesting_past_the_limit_is_a_typed_error() {
+    let mut entries = Vec::new();
+    let names: Vec<String> = (0..=MAX_DEPTH).map(|i| format!("T{i}")).collect();
+    for (i, name) in names.iter().enumerate() {
+        let body = match names.get(i + 1) {
+            Some(next) => record(&[("x", named(next))]),
+            None => record(&[("x", Shape::Scalar(Scalar::U8))]),
+        };
+        entries.push((name.as_str(), body));
+    }
+    let defs = table(entries);
+    assert!(matches!(
+        Shapes::new(&defs).shape("T0"),
+        Err(ShapeError::Depth(_))
+    ));
+    assert!(Shapes::new(&defs).shape("T1").is_ok());
+}

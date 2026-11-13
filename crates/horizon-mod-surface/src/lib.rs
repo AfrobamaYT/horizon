@@ -7,15 +7,19 @@
 //!
 //! # Ids
 //!
-//! Every record and every member record has one id, unique in the document. Paths are the path
-//! a mod writes after `mod_api::` (the shortest public one; the first in byte order of equals).
+//! Every record and every member record has one id, unique in the document. An item's path is
+//! a path a mod writes after `mod_api::`: the path of the module that defines it when that path
+//! is public (so a re-export added later never changes the id), otherwise its shortest public
+//! path (the first in byte order among equals). `paths` lists every public path; signatures and
+//! `refs` write ids.
 //!
 //! | Record | Id |
 //! |---|---|
 //! | hook | `hook:<name>` |
 //! | trait | `trait:<path>` |
 //! | trait method | `method:<trait path>::<name>` |
-//! | inherent method of an API type | `handle:<type path>::<name>` |
+//! | associated type or const of a trait | `assoc:<trait path>::<name>` |
+//! | inherent method or const of an API type, or of a trait object (`impl dyn Trait`) | `handle:<type or trait path>::<name>` |
 //! | free function | `fn:<path>` |
 //! | macro | `macro:<path>` |
 //! | type | `type:<path>` |
@@ -33,6 +37,15 @@
 //! `constructible` struct, the variants of an exhaustive enum, the required methods of a trait
 //! mods implement. A type's `shape` is its full wire layout ([`shape`]) and is not hashed into
 //! its contract. The document's `hash` is [`Surface::document_hash`] over every (id, hash).
+//!
+//! A trait's `role` says whether mods implement it, call it, or neither: the generator takes it
+//! from the WebAssembly boundary's lists of the traits a mod implements (its exports, with the
+//! handler traits capability keys name) and calls (its imports), resolved to the trait itself,
+//! not its name. A trait on neither list has role `none`. Whether a method is on wasm is hashed
+//! as a boolean; the reason is documentation (`wasm_reason`).
+//!
+//! Every member record lists its owner (the trait or type) in `refs`, so
+//! [`Surface::closure`] from a member reaches its owner.
 //!
 //! # Reading
 //!
@@ -125,23 +138,30 @@ pub fn leaf(id: &str) -> &str {
 }
 
 macro_rules! sealed {
-    ($($record:ident($contract:ty)),* $(,)?) => {$(
+    ($($record:ident($contract:ty) { $($extra:ident),* }),* $(,)?) => {$(
         impl $record {
-            /// The record, with the hash of `contract`.
+            /// The record, with the hash of `contract`; the fields outside the hash are empty.
             pub fn new(id: impl Into<String>, doc: impl Into<String>, contract: $contract) -> Self {
-                Self { id: id.into(), hash: contract_hash(&contract), doc: doc.into(), contract }
+                Self {
+                    id: id.into(),
+                    hash: contract_hash(&contract),
+                    doc: doc.into(),
+                    contract,
+                    $($extra: Default::default(),)*
+                }
             }
         }
     )*};
 }
 
 sealed!(
-    Method(MethodContract),
-    Function(FunctionContract),
-    Macro(MacroContract),
-    Field(FieldContract),
-    Variant(VariantContract),
-    Capability(CapabilityContract),
+    Method(MethodContract) { wasm_reason },
+    Function(FunctionContract) { wasm_reason, paths },
+    Macro(MacroContract) { paths },
+    Field(FieldContract) {},
+    Variant(VariantContract) {},
+    Capability(CapabilityContract) {},
+    Associated(AssociatedContract) {},
 );
 
 impl Hook {
@@ -169,13 +189,16 @@ impl Trait {
         doc: impl Into<String>,
         contract: TraitContract,
         methods: Vec<Method>,
+        associated: Vec<Associated>,
     ) -> Self {
         Self {
             id: id.into(),
             hash: contract_hash(&contract),
             doc: doc.into(),
+            paths: Vec::new(),
             contract,
             methods,
+            associated,
         }
     }
 }
@@ -184,7 +207,7 @@ impl Type {
     pub fn new(
         id: impl Into<String>,
         doc: impl Into<String>,
-        shape: String,
+        shape: Option<String>,
         contract: TypeContract,
         fields: Vec<Field>,
         variants: Vec<Variant>,
@@ -194,6 +217,7 @@ impl Type {
             hash: contract_hash(&contract),
             doc: doc.into(),
             shape,
+            paths: Vec::new(),
             contract,
             fields,
             variants,
@@ -219,7 +243,8 @@ impl Part {
 }
 
 impl Surface {
-    /// The document: each list sorted by id, members in declaration order, and its hash.
+    /// The document: each list sorted by id, a trait's members by id, a type's fields and
+    /// variants in declaration order, and its hash.
     pub fn new(
         mut hooks: Vec<Hook>,
         mut traits: Vec<Trait>,
@@ -234,6 +259,7 @@ impl Surface {
         traits.sort_by(|a, b| a.id.cmp(&b.id));
         for item in &mut traits {
             item.methods.sort_by(|a, b| a.id.cmp(&b.id));
+            item.associated.sort_by(|a, b| a.id.cmp(&b.id));
         }
         handles.sort_by(|a, b| a.id.cmp(&b.id));
         functions.sort_by(|a, b| a.id.cmp(&b.id));
@@ -263,6 +289,7 @@ impl Surface {
         let traits = self.traits.iter().flat_map(|r| {
             std::iter::once((r.id.as_str(), r.hash.as_str()))
                 .chain(r.methods.iter().map(|m| (m.id.as_str(), m.hash.as_str())))
+                .chain(r.associated.iter().map(|a| (a.id.as_str(), a.hash.as_str())))
         });
         let functions = self
             .handles
@@ -335,6 +362,12 @@ impl Surface {
                 &item.id,
                 item.contract.refs.iter().map(String::as_str).collect(),
             );
+            for associated in &item.associated {
+                refs.insert(
+                    &associated.id,
+                    associated.contract.refs.iter().map(String::as_str).collect(),
+                );
+            }
             for method in &item.methods {
                 refs.insert(
                     &method.id,

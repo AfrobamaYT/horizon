@@ -6,7 +6,8 @@ fn function(id: &str, refs: &[&str]) -> Function {
         "",
         FunctionContract {
             signature: format!("fn {}()", leaf(id)),
-            wasm: Wasm::Yes,
+            impl_generics: String::new(),
+            wasm: true,
             refs: refs.iter().map(|r| r.to_string()).collect(),
         },
     )
@@ -27,12 +28,14 @@ fn record_type(id: &str, fields: Vec<Field>) -> Type {
     Type::new(
         id,
         "",
-        String::new(),
+        None,
         TypeContract {
             kind: TypeKind::Struct,
             generics: String::new(),
             derives: vec![],
+            impls: vec![],
             wire: false,
+            wire_form: None,
             constructible: false,
             non_exhaustive: false,
             target: None,
@@ -154,7 +157,7 @@ fn the_reader_refuses_with_a_typed_error() {
         Err(ReadError::Json(_))
     ));
     assert!(matches!(Surface::read(b"{}"), Err(ReadError::Json(_))));
-    let wrong_type = text.replacen("\"wasm\": true", "\"wasm\": false", 1);
+    let wrong_type = text.replacen("\"wasm\": true", "\"wasm\": \"yes\"", 1);
     assert!(matches!(
         Surface::read(wrong_type.as_bytes()),
         Err(ReadError::Json(_))
@@ -184,7 +187,8 @@ fn unknown_fields_are_ignored() {
 fn the_contract_hash_leaves_out_doc_and_info_fields() {
     let contract = FunctionContract {
         signature: "fn f(x: u8)".into(),
-        wasm: Wasm::No("reads a file".into()),
+        impl_generics: String::new(),
+        wasm: false,
         refs: vec![],
     };
     let documented = Function::new("fn:f", "Does f.", contract.clone());
@@ -192,10 +196,28 @@ fn the_contract_hash_leaves_out_doc_and_info_fields() {
     assert_eq!(documented.hash, bare.hash);
     // Independent of the code: SHA-256 of the compact JSON, first 16 bytes.
     use sha2::{Digest, Sha256};
-    let expected: String = Sha256::digest(br#"{"signature":"fn f(x: u8)","wasm":"reads a file"}"#)
+    let expected: String = Sha256::digest(br#"{"signature":"fn f(x: u8)","wasm":false}"#)
         [..16]
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect();
     assert_eq!(bare.hash, expected);
+}
+
+#[test]
+fn deeply_nested_json_neither_overflows_nor_passes_as_records() {
+    let deep = |field: &str| {
+        let mut text = format!("{{\"schema\": 1, \"hash\": \"\", \"{field}\": ");
+        text.push_str(&"[".repeat(100_000));
+        text.push_str(&"]".repeat(100_000));
+        text.push('}');
+        text
+    };
+    // In a record list: refused, without exhausting the stack.
+    assert!(matches!(
+        Surface::read(deep("hooks").as_bytes()),
+        Err(ReadError::Json(_))
+    ));
+    // In a field this reader does not know: skipped.
+    assert!(Surface::read(deep("future").as_bytes()).is_ok());
 }

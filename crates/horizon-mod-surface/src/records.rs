@@ -1,7 +1,7 @@
 //! The record kinds of `surface.json`. Each record is `id`, `hash`, the fields its hash leaves
 //! out (`doc`, and `engine`, `counterparts` or `shape` where the kind has one) and its contract,
 //! written flat beside them. [`crate::contract_hash`] of the contract is the record's `hash`.
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 fn is_false(value: &bool) -> bool {
     !value
@@ -48,9 +48,6 @@ pub struct Scope {
 pub struct HookEngine {
     /// The game function that fires it.
     pub target: String,
-    /// The load-phase context it takes instead of a host, if any.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context: Option<String>,
 }
 
 /// The names a hook has in other mod APIs: information only, outside the hash.
@@ -80,6 +77,10 @@ pub struct HookContract {
     pub scope: Option<Scope>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancellable: Option<bool>,
+    /// The load-phase context a listener takes instead of a host (`registration`,
+    /// `data_load`, `loop`, `worldgen`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
     /// The host a listener gets when its receiver does not say which (`read`, `level`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
@@ -112,40 +113,6 @@ pub struct Hook {
     pub contract: HookContract,
 }
 
-/// Whether a callable is available to WebAssembly mods: `true`, or the reason it is not.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Wasm {
-    Yes,
-    No(String),
-}
-
-impl Serialize for Wasm {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            Self::Yes => serializer.serialize_bool(true),
-            Self::No(why) => serializer.serialize_str(why),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for Wasm {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Form {
-            Flag(bool),
-            Reason(String),
-        }
-        match Form::deserialize(deserializer)? {
-            Form::Flag(true) => Ok(Self::Yes),
-            Form::Flag(false) => Err(serde::de::Error::custom(
-                "wasm is true or the reason it is not",
-            )),
-            Form::Reason(why) => Ok(Self::No(why)),
-        }
-    }
-}
-
 /// What a mod does with a trait.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -158,7 +125,8 @@ pub enum Role {
     None,
 }
 
-/// A trait method a mod must write.
+/// A trait member a mod must write: a method, associated type or associated const with no
+/// default.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Required {
     pub name: String,
@@ -176,7 +144,7 @@ pub struct TraitContract {
     /// Supertraits, normalised.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bounds: Vec<String>,
-    /// With role `implement`: the methods with no default, by name.
+    /// With role `implement`: the members with no default, in declaration order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required: Vec<Required>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -190,10 +158,46 @@ pub struct Trait {
     pub hash: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub doc: String,
+    /// Every public path a mod can name it by; outside the hash.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
     #[serde(flatten)]
     pub contract: TraitContract,
     #[serde(default)]
     pub methods: Vec<Method>,
+    /// Its associated types and consts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub associated: Vec<Associated>,
+}
+
+/// What an associated item is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssociatedKind {
+    Type,
+    Const,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AssociatedContract {
+    pub kind: AssociatedKind,
+    /// `type Name: Bounds` or `const NAME: Type`, normalised, without a default.
+    pub signature: String,
+    /// It has no default.
+    pub required: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refs: Vec<String>,
+}
+
+/// `assoc:<trait id path>::<name>`: an associated type or const of a trait.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Associated {
+    pub id: String,
+    pub hash: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub doc: String,
+    #[serde(flatten)]
+    pub contract: AssociatedContract,
 }
 
 /// A trait method's contract.
@@ -203,7 +207,8 @@ pub struct MethodContract {
     pub signature: String,
     /// It has no default body.
     pub required: bool,
-    pub wasm: Wasm,
+    /// A WebAssembly mod can call or implement it.
+    pub wasm: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub refs: Vec<String>,
 }
@@ -215,26 +220,40 @@ pub struct Method {
     pub hash: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub doc: String,
+    /// Why it is not on wasm, when it is not; documentation, outside the hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wasm_reason: Option<String>,
     #[serde(flatten)]
     pub contract: MethodContract,
 }
 
-/// A free function's or inherent method's contract.
+/// A free function's, inherent method's or inherent const's contract.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FunctionContract {
+    /// `fn name<…>(…) -> …` or `const NAME: Type`, normalised.
     pub signature: String,
-    pub wasm: Wasm,
+    /// An inherent item's `impl` generics and where clause (`<T: Clone> where T: Send`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub impl_generics: String,
+    /// A WebAssembly mod can call it.
+    pub wasm: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub refs: Vec<String>,
 }
 
-/// `fn:<path>` (a free function) or `handle:<Type path>::<name>` (an inherent method).
+/// `fn:<path>` (a free function) or `handle:<owner path>::<name>` (an inherent method or
+/// const of an API type, or of a trait object: `impl dyn Trait`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Function {
     pub id: String,
     pub hash: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub doc: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wasm_reason: Option<String>,
+    /// A free function's public paths; outside the hash.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
     #[serde(flatten)]
     pub contract: FunctionContract,
 }
@@ -268,6 +287,8 @@ pub struct Macro {
     pub hash: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub doc: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
     #[serde(flatten)]
     pub contract: MacroContract,
 }
@@ -296,8 +317,17 @@ pub struct TypeContract {
     /// The traits of its `#[derive(…)]` lists, by last path segment, sorted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub derives: Vec<String>,
-    /// It derives `Wire`.
+    /// The trait impls written for it in the API's crates (`From<String>`, `Default`), by
+    /// normalised trait path, sorted; derives are in `derives`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub impls: Vec<String>,
+    /// It crosses the WebAssembly boundary: it derives `Wire` or has a `Wire` impl.
     pub wire: bool,
+    /// How it crosses: `derive` (its Rust fields), `fields` (a hand-written impl's declared
+    /// `layout_fields!`), `via:<type>` (as another type), or `manual` (a hand-written impl that
+    /// declares no layout).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire_form: Option<String>,
     /// A mod can build it with a literal: every field is public and it is not
     /// `#[non_exhaustive]`. For an enum: it is not `#[non_exhaustive]`.
     pub constructible: bool,
@@ -322,9 +352,12 @@ pub struct Type {
     pub hash: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub doc: String,
-    /// Its wire layout hash ([`crate::shape`]), outside the contract hash.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub shape: String,
+    /// Its wire layout hash ([`crate::shape`]), outside the contract hash; `null` for a type
+    /// that does not cross or whose layout cannot be described (the export's notes say which).
+    #[serde(default)]
+    pub shape: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
     #[serde(flatten)]
     pub contract: TypeContract,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

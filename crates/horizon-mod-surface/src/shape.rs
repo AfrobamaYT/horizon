@@ -21,14 +21,16 @@
 //! | `Map(k, v)`, `Result(a, b)` | `map(k,v)`, `result(a,b)` |
 //! | `Tuple(a, b, …)` | `tuple(a,b,…)` |
 //! | `Array(t, n)` | `array(t;n)` |
-//! | `Param(i)` | the text of argument `i` of the type being described |
+//! | `Param(i)` | argument `i` of the type being described, written where it is used (so a `rec` inside it counts the types around that use); `param(<i>)` for a parameter of the outermost type |
 //! | `Opaque(s)` | `opaque(<n>:<s>)`: a type the description does not look into |
-//! | `Named(key, args)` | `rec(<d>)` when the same key with the same argument texts is being described `d` levels up (1 = the type directly around it); otherwise `type(<shape of key with args>)` |
+//! | `Named(key, args)` | `rec(<d>)` when the same key with the same arguments (parameters replaced) is being described `d` levels up (1 = the type directly around it); otherwise `type(<shape of key with args>)` |
 //! | `Body::Record(fields)` | `record{<n>:<name>:<t>,…}` |
 //! | `Body::Tuple(fields)` | `tuple{<t>,…}` |
 //! | `Body::Unit` | `unit{}` |
 //! | `Body::Enum(variants)` | `enum{<n>:<name><body>,…}`, each variant's body as above |
 //! | `Body::Via(t)` | `via(t)`: a type that crosses as another |
+//!
+//! Types nest at most [`MAX_DEPTH`] deep; deeper is [`ShapeError::Depth`].
 //!
 //! A shape is computed once per key and argument list, except for a type in a cycle, which is
 //! described afresh each time it is reached: the result never depends on the order shapes are
@@ -143,6 +145,8 @@ pub enum ShapeError {
     },
     /// A `Param` index outside the type's parameters.
     Param { key: String, index: usize },
+    /// Types nested deeper than [`MAX_DEPTH`], at the type named.
+    Depth(String),
 }
 
 impl std::fmt::Display for ShapeError {
@@ -155,23 +159,27 @@ impl std::fmt::Display for ShapeError {
                 found,
             } => write!(f, "{key} takes {expected} type arguments, given {found}"),
             Self::Param { key, index } => write!(f, "{key} has no type parameter {index}"),
+            Self::Depth(key) => write!(f, "types nest deeper than {MAX_DEPTH} at {key}"),
         }
     }
 }
 
 impl std::error::Error for ShapeError {}
 
+/// How deep types may nest inside each other before a description is refused.
+pub const MAX_DEPTH: usize = 256;
+
 /// Computes shapes over one table of definitions, remembering each finished one.
 pub struct Shapes<'a> {
     table: &'a BTreeMap<String, Definition>,
-    done: BTreeMap<(String, Vec<String>), String>,
+    done: BTreeMap<(String, String), String>,
 }
 
-/// One type being described: its key, its argument texts, and the lowest stack level a `rec`
-/// inside it referred to.
+/// One type being described: its key, its arguments (already free of the parameters of the
+/// types around it), and the lowest stack level a `rec` inside it referred to.
 struct Frame {
     key: String,
-    args: Vec<String>,
+    args: Vec<Shape>,
     reaches: usize,
 }
 
@@ -189,18 +197,18 @@ impl<'a> Shapes<'a> {
             .table
             .get(key)
             .ok_or_else(|| ShapeError::Undefined(key.to_owned()))?;
-        let args = (0..definition.params)
-            .map(|i| format!("param({i})"))
-            .collect();
+        let args = (0..definition.params).map(Shape::Param).collect();
         let text = self.named(key, args, &mut Vec::new())?;
         // With nothing around it, the type is never a `rec`.
         Ok(text["type(".len()..text.len() - 1].to_owned())
     }
 
+    /// The type at `key` with `args`, which are resolved: a `Param` left in them is a parameter
+    /// of the outermost type.
     fn named(
         &mut self,
         key: &str,
-        args: Vec<String>,
+        args: Vec<Shape>,
         stack: &mut Vec<Frame>,
     ) -> Result<String, ShapeError> {
         if let Some(level) = stack
@@ -216,7 +224,11 @@ impl<'a> Shapes<'a> {
             }
             return Ok(format!("rec({depth})"));
         }
-        let memo = (key.to_owned(), args);
+        if stack.len() >= MAX_DEPTH {
+            return Err(ShapeError::Depth(key.to_owned()));
+        }
+        // The memo's key, never hashed.
+        let memo = (key.to_owned(), format!("{args:?}"));
         if let Some(done) = self.done.get(&memo) {
             return Ok(format!("type({done})"));
         }
@@ -224,17 +236,17 @@ impl<'a> Shapes<'a> {
             .table
             .get(key)
             .ok_or_else(|| ShapeError::Undefined(key.to_owned()))?;
-        if definition.params != memo.1.len() {
+        if definition.params != args.len() {
             return Err(ShapeError::Arguments {
                 key: key.to_owned(),
                 expected: definition.params,
-                found: memo.1.len(),
+                found: args.len(),
             });
         }
         let level = stack.len();
         stack.push(Frame {
-            key: memo.0.clone(),
-            args: memo.1.clone(),
+            key: key.to_owned(),
+            args,
             reaches: usize::MAX,
         });
         let mut text = String::new();
@@ -268,7 +280,7 @@ impl<'a> Shapes<'a> {
                         out.push(',');
                     }
                     let _ = write!(out, "{}:{name}:", name.len());
-                    self.field(shape, out, stack)?;
+                    self.field(shape, false, out, stack)?;
                 }
                 out.push('}');
             }
@@ -278,7 +290,7 @@ impl<'a> Shapes<'a> {
                     if i > 0 {
                         out.push(',');
                     }
-                    self.field(shape, out, stack)?;
+                    self.field(shape, false, out, stack)?;
                 }
                 out.push('}');
             }
@@ -296,71 +308,105 @@ impl<'a> Shapes<'a> {
             }
             Body::Via(shape) => {
                 out.push_str("via(");
-                self.field(shape, out, stack)?;
+                self.field(shape, false, out, stack)?;
                 out.push(')');
             }
         }
         Ok(())
     }
 
+    /// `shape` with the current type's parameters replaced by its arguments.
+    fn resolve(&self, shape: &Shape, stack: &[Frame]) -> Result<Shape, ShapeError> {
+        let frame = stack.last().expect("a field is inside a type");
+        let each = |shape: &Shape| self.resolve(shape, stack).map(Box::new);
+        Ok(match shape {
+            Shape::Param(index) => frame
+                .args
+                .get(*index)
+                .cloned()
+                .ok_or_else(|| ShapeError::Param {
+                    key: frame.key.clone(),
+                    index: *index,
+                })?,
+            Shape::List(t) => Shape::List(each(t)?),
+            Shape::Set(t) => Shape::Set(each(t)?),
+            Shape::Option(t) => Shape::Option(each(t)?),
+            Shape::Map(k, v) => Shape::Map(each(k)?, each(v)?),
+            Shape::Result(a, b) => Shape::Result(each(a)?, each(b)?),
+            Shape::Array(t, n) => Shape::Array(each(t)?, *n),
+            Shape::Tuple(parts) => Shape::Tuple(
+                parts
+                    .iter()
+                    .map(|part| self.resolve(part, stack))
+                    .collect::<Result<_, _>>()?,
+            ),
+            Shape::Named(key, args) => Shape::Named(
+                key.clone(),
+                args.iter()
+                    .map(|arg| self.resolve(arg, stack))
+                    .collect::<Result<_, _>>()?,
+            ),
+            Shape::Scalar(_) | Shape::Opaque(_) => shape.clone(),
+        })
+    }
+
+    /// Writes `shape`. An argument is written where it is used, so a `rec` inside it counts the
+    /// types around that use. `resolved` says the current type's parameters are already
+    /// replaced, so a `Param` left is the outermost type's.
     fn field(
         &mut self,
         shape: &Shape,
+        resolved: bool,
         out: &mut String,
         stack: &mut Vec<Frame>,
     ) -> Result<(), ShapeError> {
-        let wrap = |this: &mut Self,
-                    name: &str,
-                    parts: &[&Shape],
-                    out: &mut String,
-                    stack: &mut Vec<Frame>|
-         -> Result<(), ShapeError> {
+        let mut wrap = |this: &mut Self, name: &str, parts: &[&Shape]| {
             out.push_str(name);
             out.push('(');
             for (i, part) in parts.iter().enumerate() {
                 if i > 0 {
                     out.push(',');
                 }
-                this.field(part, out, stack)?;
+                this.field(part, resolved, out, stack)?;
             }
             out.push(')');
-            Ok(())
+            Ok::<(), ShapeError>(())
         };
         match shape {
             Shape::Scalar(scalar) => out.push_str(scalar.name()),
-            Shape::List(t) => wrap(self, "list", &[t], out, stack)?,
-            Shape::Set(t) => wrap(self, "set", &[t], out, stack)?,
-            Shape::Option(t) => wrap(self, "option", &[t], out, stack)?,
-            Shape::Map(k, v) => wrap(self, "map", &[k, v], out, stack)?,
-            Shape::Result(a, b) => wrap(self, "result", &[a, b], out, stack)?,
+            Shape::List(t) => wrap(self, "list", &[t])?,
+            Shape::Set(t) => wrap(self, "set", &[t])?,
+            Shape::Option(t) => wrap(self, "option", &[t])?,
+            Shape::Map(k, v) => wrap(self, "map", &[k, v])?,
+            Shape::Result(a, b) => wrap(self, "result", &[a, b])?,
             Shape::Tuple(parts) => {
                 let parts: Vec<&Shape> = parts.iter().collect();
-                wrap(self, "tuple", &parts, out, stack)?;
+                wrap(self, "tuple", &parts)?;
             }
             Shape::Array(t, n) => {
                 out.push_str("array(");
-                self.field(t, out, stack)?;
+                self.field(t, resolved, out, stack)?;
                 let _ = write!(out, ";{n})");
             }
-            Shape::Param(index) => {
-                let frame = stack.last().expect("a field is inside a type");
-                let arg = frame.args.get(*index).ok_or_else(|| ShapeError::Param {
-                    key: frame.key.clone(),
-                    index: *index,
-                })?;
-                out.push_str(arg);
+            Shape::Param(index) if resolved => {
+                let _ = write!(out, "param({index})");
+            }
+            Shape::Param(_) => {
+                let arg = self.resolve(shape, stack)?;
+                self.field(&arg, true, out, stack)?;
             }
             Shape::Opaque(written) => {
                 let _ = write!(out, "opaque({}:{written})", written.len());
             }
             Shape::Named(key, args) => {
-                let mut texts = Vec::with_capacity(args.len());
-                for arg in args {
-                    let mut text = String::new();
-                    self.field(arg, &mut text, stack)?;
-                    texts.push(text);
-                }
-                let text = self.named(key, texts, stack)?;
+                let args = if resolved {
+                    args.clone()
+                } else {
+                    args.iter()
+                        .map(|arg| self.resolve(arg, stack))
+                        .collect::<Result<_, _>>()?
+                };
+                let text = self.named(key, args, stack)?;
                 out.push_str(&text);
             }
         }
