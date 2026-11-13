@@ -178,20 +178,18 @@ impl Hub {
         self.broadcast_near(at, f64::from(volume.max(1.0)) * 16.0, &packet, except);
     }
 
-    /// ClientboundLevelEventPacket (block break particles and sounds ...).
+    /// ClientboundLevelEventPacket (block break particles and sounds ...); wrapped, to the
+    /// clients that view the level and hold its chunk.
     pub fn level_event(&self, kind: i32, pos: [i32; 3], data: i32, except: Option<u32>) {
         let at = [f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2])];
-        self.broadcast_near(
-            at,
-            64.0,
-            &C::LevelEvent(play::LevelEvent {
-                kind,
-                pos,
-                data,
-                global: false,
-            }),
-            except,
-        );
+        let packet = C::LevelEvent(play::LevelEvent {
+            kind,
+            pos,
+            data,
+            global: false,
+        });
+        self.broadcast_near(at, 64.0, &packet, except);
+        self.send_viewers_of((pos[0] >> 4, pos[2] >> 4), &packet);
     }
 
     /// `ServerLevel.globalLevelEvent` for an event in level `level`: the packet
@@ -210,7 +208,8 @@ impl Hub {
         }
     }
 
-    /// ClientboundBlockEventPacket (`PlayerList.broadcast` within 64 blocks).
+    /// ClientboundBlockEventPacket (`PlayerList.broadcast` within 64 blocks); wrapped, to the
+    /// clients that view the level and hold its chunk.
     pub fn block_event(&self, pos: [i32; 3], b0: i32, b1: i32, state: u32) {
         let block = self
             .encoder
@@ -219,17 +218,14 @@ impl Hub {
             .copied()
             .unwrap_or(0);
         let at = [f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2])];
-        self.broadcast_near(
-            at,
-            64.0,
-            &C::BlockEvent(play::BlockEvent {
-                pos,
-                b0: b0 as u8,
-                b1: b1 as u8,
-                block,
-            }),
-            None,
-        );
+        let packet = C::BlockEvent(play::BlockEvent {
+            pos,
+            b0: b0 as u8,
+            b1: b1 as u8,
+            block,
+        });
+        self.broadcast_near(at, 64.0, &packet, None);
+        self.send_viewers_of((pos[0] >> 4, pos[2] >> 4), &packet);
     }
 
     /// `ServerLevel.broadcastEntityEvent`: send to the players tracking the

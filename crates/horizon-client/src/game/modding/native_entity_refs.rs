@@ -322,10 +322,10 @@ impl Game<'_> {
         ids
     }
     /// `ClientLevel.getEntities` for `level_entities_in`: the entities the server
-    /// tracks to this client in entity-list order, the dragon and then the
-    /// window's own player unless it spectates, then the dragon's parts. Other
-    /// players are left out, as their handles do not resolve on a client. None
-    /// before login or for a level the client does not show.
+    /// tracks to this client in entity-list order, other players among them (a
+    /// tracked player has a client copy, so its handle resolves), the dragon and
+    /// then the window's own player unless it spectates, then the dragon's parts.
+    /// None before login or for a level the client does not show.
     fn client_entities_in(&self, level: LevelRef, bounds: Aabb) -> Option<Vec<EntityRef>> {
         let remote = self.remote.as_ref().filter(|r| r.logged_in)?;
         if level.dimension() != self.native_level_key() {

@@ -4501,7 +4501,7 @@ impl ParticleEngine {
         partial: f32,
         pixel_focal_length: f32,
         culling_enabled: bool,
-        frustum: Option<&crate::gfx::Frustum>,
+        frustum: Option<&crate::gfx::JoinedFrusta>,
         mut occluded: impl FnMut([f64; 3], [f64; 3]) -> bool,
         light_at: &dyn Fn([i32; 3]) -> u8,
         out: &mut Vec<Vertex>,
@@ -4538,7 +4538,7 @@ impl ParticleEngine {
         base: Quat,
         partial: f32,
         pixel_focal_length: f32,
-        frustum: Option<&crate::gfx::Frustum>,
+        frustum: Option<&crate::gfx::JoinedFrusta>,
         occluded: &mut dyn FnMut([f64; 3], [f64; 3]) -> bool,
         light_at: &dyn Fn([i32; 3]) -> u8,
         out: &mut Vec<Vertex>,
@@ -5267,7 +5267,7 @@ mod tests {
         engine
     }
 
-    fn quad_vertices(engine: &ParticleEngine, view: Option<&crate::gfx::Frustum>) -> usize {
+    fn quad_vertices(engine: &ParticleEngine, view: Option<&crate::gfx::JoinedFrusta>) -> usize {
         let mut out = Vec::new();
         engine.render_in_view(DVec3::ZERO, Quat::IDENTITY, 0.5, view, &|_| 0xf0, &mut out);
         out.len()
@@ -5275,8 +5275,12 @@ mod tests {
 
     #[test]
     fn particles_outside_the_pulled_back_frustum_make_no_quads() {
-        use crate::gfx::{Frustum, world_projection};
-        let view = Frustum::from_view_projection(world_projection(70.0, 16.0 / 9.0, 512.0));
+        use crate::gfx::{Frustum, JoinedFrusta, world_projection};
+        let view = JoinedFrusta::from(Frustum::from_view_projection(world_projection(
+            70.0,
+            16.0 / 9.0,
+            512.0,
+        )));
         let kept = [
             [0.0, 0.0, -5.0],   // straight ahead
             [0.0, 0.0, 2.5],    // behind the camera, inside the 3 blocks of offset
@@ -5307,8 +5311,12 @@ mod tests {
 
     #[test]
     fn the_culled_path_applies_the_same_frustum_test() {
-        use crate::gfx::{Frustum, world_projection};
-        let view = Frustum::from_view_projection(world_projection(70.0, 16.0 / 9.0, 512.0));
+        use crate::gfx::{Frustum, JoinedFrusta, world_projection};
+        let view = JoinedFrusta::from(Frustum::from_view_projection(world_projection(
+            70.0,
+            16.0 / 9.0,
+            512.0,
+        )));
         let engine = smoke_at(&[[0.0, 0.0, -5.0], [0.0, 0.0, 10.0]]);
         let mut out = Vec::new();
         // The disabled setting still keeps vanilla's always-on test.
@@ -5331,8 +5339,12 @@ mod tests {
 
     #[test]
     fn a_particle_is_tested_at_its_position_this_tick_not_an_interpolated_one() {
-        use crate::gfx::{Frustum, world_projection};
-        let view = Frustum::from_view_projection(world_projection(70.0, 16.0 / 9.0, 512.0));
+        use crate::gfx::{Frustum, JoinedFrusta, world_projection};
+        let view = JoinedFrusta::from(Frustum::from_view_projection(world_projection(
+            70.0,
+            16.0 / 9.0,
+            512.0,
+        )));
         // The frame is drawn half way (0.5) between `previous` and `position`.
         // Ahead now, far behind a tick ago (half way: 12.5 behind, outside): kept.
         let mut coming = smoke_at(&[[0.0, 0.0, -5.0]]);

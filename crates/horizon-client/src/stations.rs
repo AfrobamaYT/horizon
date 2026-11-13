@@ -37,7 +37,12 @@ impl StationData {
         context: &horizon_world::native_load_context::LoadContext,
     ) -> Self {
         let sources = crate::crafting::ResolvedSources::load_or_empty(root, overlay, context);
-        Self::from_sources(root, items, overlay, defaults, &sources)
+        let recipes = crate::crafting::Recipes::from_resolved(root, items, overlay, &sources)
+            .unwrap_or_else(|error| {
+                log::error!("recipes: could not load station recipe index: {error}");
+                crate::crafting::Recipes::empty()
+            });
+        Self::from_sources(root, items, overlay, defaults, (&sources, &recipes))
     }
     /// The tables of one load whose recipes are `sources`.
     pub fn from_sources(
@@ -45,7 +50,7 @@ impl StationData {
         items: &Items,
         overlay: &PackOverlay,
         defaults: &horizon_world::item_defaults::ItemDefaults,
-        sources: &crate::crafting::ResolvedSources,
+        (sources, recipes): (&crate::crafting::ResolvedSources, &crate::crafting::Recipes),
     ) -> Self {
         Self {
             enchantments: std::sync::Arc::clone(&items.enchantments),
@@ -60,7 +65,7 @@ impl StationData {
             trades: crate::merchant::Trades::load(root, overlay),
             professions: Arc::new(crate::mobs::villager::ResolvedProfessions::vanilla()),
             banners: crate::banner::Banners::load(root, defaults),
-            recipe_index: crate::recipe_book::RecipeIndex::load(root, overlay),
+            recipe_index: crate::recipe_book::RecipeIndex::from_recipes(recipes),
         }
     }
 }
@@ -662,9 +667,9 @@ impl ParsedStationRecipe {
             }
             "minecraft:smithing_trim" => Some(Self::Smithing(Smithing::Trim {
                 id,
-                template: ingredient(&v["template"], items),
-                base: ingredient(&v["base"], items),
-                addition: ingredient(&v["addition"], items),
+                template: Ingredient::parse(&v["template"], items)?,
+                base: Ingredient::parse(&v["base"], items)?,
+                addition: Ingredient::parse(&v["addition"], items)?,
                 // Use the same holder codec as item components, collapsing
                 // unstyled literal text once at the recipe boundary before
                 // publishing the typed snapshot.
@@ -685,7 +690,7 @@ impl ParsedStationRecipe {
             })),
             "minecraft:stonecutting" => Some(Self::Stonecutting(Stonecutting {
                 id,
-                input: ingredient(&v["ingredient"], items),
+                input: Ingredient::parse(&v["ingredient"], items)?,
                 result: crate::crafting::Template::parse(&v["result"])?.create(),
             })),
             _ => None,
@@ -737,9 +742,6 @@ pub struct StationRecipes {
     smithing_additions: [HashSet<String>; 3],
     item_limits: std::collections::HashMap<Arc<str>, (u32, u32)>,
 }
-fn ingredient(v: &Value, items: &Items) -> Ingredient {
-    Ingredient::parse(v, items).unwrap_or_else(|| Ingredient::of(Vec::new()))
-}
 impl StationRecipes {
     pub fn load(
         root: &Path,
@@ -761,7 +763,10 @@ impl StationRecipes {
         for recipe in sources.station_recipes(items).iter().flatten() {
             match recipe {
                 ParsedStationRecipe::Smithing(recipe) => smithing.push(recipe.clone()),
-                ParsedStationRecipe::Stonecutting(recipe) => stonecutting.push(recipe.clone()),
+                ParsedStationRecipe::Stonecutting(recipe) if !recipe.input.items.is_empty() => {
+                    stonecutting.push(recipe.clone())
+                }
+                ParsedStationRecipe::Stonecutting(_) => {}
             }
         }
         let mut trim_materials = Vec::new();
@@ -821,21 +826,43 @@ impl StationRecipes {
     }
     fn slot_ok(&self, context: &LoopContext, slot: usize, stack: &ItemStack) -> bool {
         self.smithing_additions[slot].contains(&*stack.item)
-            || self.smithing.iter().any(|r| match r {
-                Smithing::Transform {
-                    template,
-                    base,
-                    addition,
-                    ..
-                } => [template.as_ref(), Some(base), addition.as_ref()][slot]
-                    .is_some_and(|i| i.test_in(context, stack)),
-                Smithing::Trim {
-                    template,
-                    base,
-                    addition,
-                    ..
-                } => [template, base, addition][slot].test_in(context, stack),
-            })
+            || self
+                .smithing
+                .iter()
+                .filter(|r| match r {
+                    Smithing::Transform {
+                        template,
+                        base,
+                        addition,
+                        ..
+                    } => [template.as_ref(), Some(base), addition.as_ref()]
+                        .into_iter()
+                        .flatten()
+                        .all(|i| !i.items.is_empty()),
+                    Smithing::Trim {
+                        template,
+                        base,
+                        addition,
+                        ..
+                    } => [template, base, addition]
+                        .into_iter()
+                        .all(|i| !i.items.is_empty()),
+                })
+                .any(|r| match r {
+                    Smithing::Transform {
+                        template,
+                        base,
+                        addition,
+                        ..
+                    } => [template.as_ref(), Some(base), addition.as_ref()][slot]
+                        .is_some_and(|i| i.test_in(context, stack)),
+                    Smithing::Trim {
+                        template,
+                        base,
+                        addition,
+                        ..
+                    } => [template, base, addition][slot].test_in(context, stack),
+                })
     }
     /// `RecipePropertySet` SMITHING_TEMPLATE / BASE / ADDITION.
     pub fn smithing_accepts(&self, context: &LoopContext, slot: usize, stack: &ItemStack) -> bool {
@@ -2298,20 +2325,6 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
-    #[test]
-    fn smithing_ingredient_parses_holders() {
-        let items = sample_items();
-        let a = ingredient(&serde_json::json!("minecraft:diamond_sword"), &items);
-        assert_eq!(a.order, vec!["minecraft:diamond_sword"]);
-        let b = ingredient(
-            &serde_json::json!(["minecraft:diamond_sword", "minecraft:diamond_axe"]),
-            &items,
-        );
-        assert_eq!(
-            b.order,
-            vec!["minecraft:diamond_sword", "minecraft:diamond_axe"]
-        );
-    }
     #[test]
     fn stonecutter_result_keeps_its_components() {
         let root = std::env::temp_dir().join(format!(

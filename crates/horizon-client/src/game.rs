@@ -151,7 +151,7 @@ use horizon_client::{
     mesher::{MeshTables, Vertex},
     mobs::{Mob, MobType, MobTypes},
     models,
-    motion::{MotionEvent, MotionResources, PlayerMotion},
+    motion::{MotionResources, PlayerMotion},
     mouse::{LookOptions, MouseLook},
     particles::Particle,
     save::{Level, Persistent, SaveDir},
@@ -959,8 +959,7 @@ struct FallingBlock {
     pub rotation: [f32; 2],
     /// When it joined its list (`horizon_client::join_seq`); set by the list.
     pub(super) join: horizon_client::join_seq::JoinSeq,
-    /// Its entity id: from the entity counter on the server, the server's on
-    /// a client.
+    /// Its entity id: from the entity counter on the server, the server's on a client.
     id: u32,
     state: BlockStateId,
     /// `DATA_START_POS`: spawn position used to select weighted block models.
@@ -1080,8 +1079,7 @@ struct WorldTables {
     recipes: Recipes,
     stations: horizon_client::stations::StationData,
     reload_sources: Option<Arc<horizon_client::crafting::ResolvedSources>>,
-    /// The values of the data map types native mods registered
-    /// (`native_data_map_types`).
+    /// The values of the data map types native mods registered (`native_data_map_types`).
     data_maps: native_data_maps::DataMaps,
     /// The entity type, biome, structure and damage type tags with the packs'
     /// over the game's own, by registry (`TagLoader.loadTagsForExistingRegistries`):
@@ -2055,7 +2053,7 @@ struct Game<'a> {
     /// Meshed sections waiting for an upload budget (Horizon settings).
     pending_uploads: Vec<((i32, i32, i32), horizon_client::mesher::SectionMesh)>,
     /// This frame's view frustum, for culling entities and block entities.
-    view_frustum: Option<horizon_client::gfx::Frustum>,
+    view_frustum: Option<horizon_client::gfx::JoinedFrusta>,
     /// Whether the renderer's section-occlusion graph is active for this view.
     entity_section_visibility_valid: bool,
     /// The camera section in the current world layout.
@@ -2170,6 +2168,8 @@ struct Game<'a> {
     /// The natural spawning policy mods set on each level (`LevelRef::set_spawn_limits`,
     /// `set_spawn_flags`); a level with none spawns as vanilla. Kept while the world is open.
     spawn_policies: HashMap<mod_api::DimensionKey, natural_spawning::SpawnPolicy>,
+    /// The passages mods registered in each level, and a client's copy (`native_passages.rs`).
+    passages: native_passages::Passages,
     /// PauseScreen.showPauseMenu (false after F3+Escape).
     pause_menu: bool,
     pause_focus: Option<u8>,
@@ -2230,8 +2230,7 @@ struct Game<'a> {
     /// the song's network id is only known once the hub is in hand.
     lan_songs: Vec<([i32; 3], Option<String>)>,
     lan_cushion_breaks: Vec<(horizon_world::registry::BlockStateId, [f64; 3])>,
-    /// Block events (position, b0, b1, state) and entity events (id, event)
-    /// for the guests.
+    /// Block events (position, b0, b1, state) and entity events (id, event) for the guests.
     lan_block_events: Vec<([i32; 3], i32, i32, u32)>,
     lan_entity_events: Vec<(i32, i8)>,
     /// Successful crits (attacking guest, hit entity), queued while the hub is taken.
@@ -4357,13 +4356,13 @@ impl Game<'_> {
                 forced: self.streaming.forced.iter().copied().collect(),
                 // Filled from the `PORTAL` tickets by `update`.
                 portal: Vec::new(),
-                // EnderDragonFight.tick: while a player watches the fight, the
-                // arena holds a `DRAGON` ticket of radius 9 at (0, 0), so its
-                // island ticks out to 7 chunks whatever the watcher's
-                // simulation distance. The fight lives where the type has one.
+                // EnderDragonFight.tick: while a player watches the fight, the arena holds a
+                // `DRAGON` ticket of radius 9 at (0, 0), so its island ticks out to 7 chunks
+                // whatever the watcher's simulation distance. The fight is where the type has one.
                 dragon: (self.dimension_type().has_ender_dragon_fight
                     && self.fight.arena_watched())
                 .then_some((0, 0)),
+                viewed: self.viewed_tickets(),
                 view_distance: self.settings.render_distance.clamp(2, 32),
                 simulation_distance: self.settings.simulation_distance.max(2),
             }
@@ -8012,7 +8011,7 @@ impl Game<'_> {
         &mut self,
         camera: glam::DVec3,
         alpha: f64,
-        billboard_frustum: Option<horizon_client::gfx::Frustum>,
+        billboard_frustum: Option<horizon_client::gfx::JoinedFrusta>,
         mut out: Vec<Vertex>,
     ) -> (
         Vec<Vertex>,
@@ -8055,60 +8054,6 @@ impl Game<'_> {
             })
         };
         laps.lap("eg_prep");
-        for m in &self.mobs {
-            // Blaze.isOnFire: a charged blaze burns.
-            let blazing = m.species() == horizon_client::mobs::Species::Blaze && m.extra.flag;
-            if (m.is_on_fire() || blazing) && !m.removed {
-                let at = m.previous.lerp(m.position, alpha);
-                if !fire_visible([at.x, at.y, at.z], m.width(), m.height()) {
-                    continue;
-                }
-                horizon_client::fire_render::flames(
-                    [at.x, at.y, at.z],
-                    m.width(),
-                    m.height(),
-                    camera,
-                    fire_yaw,
-                    &self.gui.atlas.sprites,
-                    self.world.light(
-                        at.x.floor() as i32,
-                        at.y.floor() as i32,
-                        at.z.floor() as i32,
-                    ),
-                    &mut out,
-                );
-            }
-        }
-        if self.own_body_in_view()
-            && let Some(p) = &self.player
-            && p.fire_ticks > 0
-            && !p.spectator
-        {
-            let feet = self
-                .previous_position
-                .lerp(p.position, self.clock.camera_fraction());
-            if fire_visible(
-                [feet.x, feet.y, feet.z],
-                p.dimensions.width,
-                p.dimensions.height,
-            ) {
-                horizon_client::fire_render::flames(
-                    [feet.x, feet.y, feet.z],
-                    p.dimensions.width,
-                    p.dimensions.height,
-                    camera,
-                    fire_yaw,
-                    &self.gui.atlas.sprites,
-                    self.world.light(
-                        feet.x.floor() as i32,
-                        feet.y.floor() as i32,
-                        feet.z.floor() as i32,
-                    ),
-                    &mut out,
-                );
-            }
-        }
-        laps.lap("eg_fire_mobs");
         for item in &self.dropped {
             if item.fire_ticks > 0
                 && self
@@ -8178,6 +8123,31 @@ impl Game<'_> {
         // Mobs and their projectiles (a span each).
         self.mob_geometry(camera, alpha, &mut out);
         self.mark_motion(out.len(), 0);
+        for m in self.drawn_mobs() {
+            // Blaze.isOnFire: a charged blaze burns.
+            let blazing = m.species() == horizon_client::mobs::Species::Blaze && m.extra.flag;
+            if (m.is_on_fire() || blazing) && !m.removed {
+                let at = m.previous.lerp(m.position, alpha);
+                if !fire_visible([at.x, at.y, at.z], m.width(), m.height()) {
+                    continue;
+                }
+                self.mark_entity(out.len(), &m.kind.id);
+                horizon_client::fire_render::flames(
+                    [at.x, at.y, at.z],
+                    m.width(),
+                    m.height(),
+                    camera,
+                    fire_yaw,
+                    &self.gui.atlas.sprites,
+                    self.world.light(
+                        at.x.floor() as i32,
+                        at.y.floor() as i32,
+                        at.z.floor() as i32,
+                    ),
+                    &mut out,
+                );
+            }
+        }
         laps.lap("eg_mobs");
         // In first person only a shader pack's shadow pass draws the player.
         self.mark_player(out.len(), !self.own_body_in_view());
@@ -8185,6 +8155,35 @@ impl Game<'_> {
         self.mark_motion(player_start, Self::MOTION_OWN_PLAYER);
         let player_alpha = self.own_player_alpha();
         self.player_model_geometry(camera, player_alpha, &mut out);
+        if self.own_body_in_view()
+            && let Some(p) = &self.player
+            && p.fire_ticks > 0
+            && !(p.spectator || self.own_render_canceled())
+        {
+            let feet = self
+                .previous_position
+                .lerp(p.position, self.clock.camera_fraction());
+            if fire_visible(
+                [feet.x, feet.y, feet.z],
+                p.dimensions.width,
+                p.dimensions.height,
+            ) {
+                horizon_client::fire_render::flames(
+                    [feet.x, feet.y, feet.z],
+                    p.dimensions.width,
+                    p.dimensions.height,
+                    camera,
+                    fire_yaw,
+                    &self.gui.atlas.sprites,
+                    self.world.light(
+                        feet.x.floor() as i32,
+                        feet.y.floor() as i32,
+                        feet.z.floor() as i32,
+                    ),
+                    &mut out,
+                );
+            }
+        }
         // A native pack's shadow pass alone gets the first-person model (no per-entity draws).
         if self.pack_ids.is_none() && !self.own_body_in_view() {
             self.shadow_only_vertices
@@ -8227,7 +8226,7 @@ impl Game<'_> {
                 )
             };
             let mut casters: Vec<(glam::DVec3, f32, f32)> =
-                horizon_client::shadows::mob_casters(&self.mobs, a).collect();
+                horizon_client::shadows::mob_casters(self.drawn_mobs(), a).collect();
             let item = horizon_client::shadows::shadow_params("minecraft:item");
             casters.extend(
                 self.dropped
@@ -8643,7 +8642,7 @@ impl Game<'_> {
         &self,
         camera: glam::DVec3,
         orbs: impl Iterator<Item = (&'a horizon_client::entities::ExperienceOrb, [f64; 3], f32)>,
-        orb_view: Option<&horizon_client::gfx::Frustum>,
+        orb_view: Option<&horizon_client::gfx::JoinedFrusta>,
         out: &mut Vec<Vertex>,
     ) {
         if let Some(r) = self
@@ -9728,143 +9727,6 @@ impl Game<'_> {
         }
         let _ = player.clamp_health_to_max();
         self.apply_enchantment_attributes();
-    }
-    /// The armor hits among a tick's motion events (`Player.hurtArmor` from
-    /// `getDamageAfterArmorAbsorb`), whatever the damage: a mob, an explosion,
-    /// a cactus, lava, a campfire.
-    fn wear_armor(&mut self, events: &[MotionEvent]) {
-        for event in events {
-            if let MotionEvent::Health(horizon_client::health::HealthEvent::ArmorHurt {
-                source,
-                amount,
-            }) = event
-            {
-                self.hurt_armor(*source, *amount);
-            }
-        }
-    }
-    /// `Player.hurtArmor`: every armor slot wears.
-    fn hurt_armor(&mut self, source: horizon_world::damage_source::DamageTypeId, damage: f32) {
-        self.hurt_equipment(source, damage, &[3, 2, 1, 0]);
-    }
-    /// `Player.hurtHelmet`: the head slot alone wears.
-    fn hurt_helmet(&mut self, source: horizon_world::damage_source::DamageTypeId, damage: f32) {
-        self.hurt_equipment(source, damage, &[0]);
-    }
-    /// `LivingEntity.doHurtEquipment` of the `slots` of `armor`: each worn piece that
-    /// wears when its wearer is hurt loses max(1, damage / 4) durability, except
-    /// to a fire source when the piece resists fire (`ItemStack.canBeHurtBy`).
-    fn hurt_equipment(
-        &mut self,
-        source: horizon_world::damage_source::DamageTypeId,
-        damage: f32,
-        slots: &[usize],
-    ) {
-        if damage <= 0.0 {
-            return;
-        }
-        let amount = if damage.is_nan() {
-            0
-        } else {
-            (damage / 4.0).max(1.0) as i32
-        };
-        if amount <= 0 {
-            return;
-        }
-        let amount = amount as u32;
-        let name = self
-            .health_resources
-            .damage
-            .definition(source)
-            .map(|d| d.name.clone())
-            .unwrap_or_default();
-        // The pieces that may wear (`doHurtEquipment`'s checks).
-        let mut eligible: [Option<ItemStack>; 4] = std::array::from_fn(|i| {
-            let stack = self.armor[i].clone().filter(|_| slots.contains(&i))?;
-            let info = world_items!(self).get(&stack.item)?;
-            let component = |id| stack.data().and_then(|data| data.other(id));
-            // ItemStack.isDamageableItem: component removal and
-            // unbreakable are checked before enchantment RNG or hooks.
-            if stack.count == 0
-                || !horizon_client::item_sync::damage_on_hurt(&stack, info.equip_damage_on_hurt)
-                || component("minecraft:unbreakable").is_some()
-                || component("!minecraft:max_damage").is_some()
-                || component("!minecraft:damage").is_some()
-                || !self.stack_can_be_hurt_by(&stack, &name).unwrap_or(true)
-            {
-                return None;
-            }
-            let max = match component("minecraft:max_damage") {
-                Some(horizon_core::nbt::Tag::Int(value)) => u32::try_from(*value).ok()?,
-                _ => info.max_damage,
-            };
-            if max == 0 {
-                return None;
-            }
-            Some(stack)
-        });
-        // No equipment can wear: there is no armor damage event to dispatch.
-        if eligible.iter().all(Option::is_none) {
-            return;
-        }
-        // ArmorHurtEvent: once for the pieces that would wear, a server player's only.
-        let mut amounts = [amount; 4];
-        if mod_api::__private::listened(mod_api::HookId::ArmorHurt)
-            && let (Some(uuid), Some(player)) = (self.lan_acting_uuid, self.lan_acting_entity)
-        {
-            let mut entries: Vec<mod_api::ArmorHurt> = eligible
-                .iter()
-                .enumerate()
-                .filter_map(|(i, e)| {
-                    Some(mod_api::ArmorHurt {
-                        slot: armor_slot(i),
-                        stack: e.as_ref()?.try_into_api().ok()?,
-                        damage: durability_damage(damage),
-                        new_damage: durability_damage(damage),
-                    })
-                })
-                .collect();
-            let hit = horizon_client::health::HurtSource {
-                damage_type: &name,
-                causing: 0,
-                direct: 0,
-                position: None,
-            };
-            let mut cancel = false;
-            self.native_armor_hurt(
-                Some(uuid),
-                player,
-                "minecraft:player",
-                &hit,
-                &mut entries,
-                &mut cancel,
-            );
-            if cancel {
-                return;
-            }
-            for (i, amount) in amounts.iter_mut().enumerate() {
-                *amount = answered_wear(&entries, armor_slot(i), *amount);
-            }
-        }
-        // Each break is applied before the next slot's hook and RNG draw.
-        for &index in slots {
-            let Some(before) = eligible[index].take() else {
-                continue;
-            };
-            if amounts[index] == 0 || self.armor[index].as_ref() != Some(&before) {
-                continue;
-            }
-            let (updated, broken) =
-                self.damage_stack(&before, amounts[index].min(i32::MAX as u32) as i32, true);
-            if updated.as_ref() != Some(&before) && self.armor[index].as_ref() == Some(&before) {
-                self.armor[index] = updated;
-                if let Some(stack) = broken {
-                    self.player_equipment_broke(armor_slot(index), &stack);
-                    self.award_stat("broken", &stack.item, 1);
-                    self.apply_equipment();
-                }
-            }
-        }
     }
     /// Voxel traversal that also stops at fluid source blocks (bucket pick).
     fn pick_fluid(&self) -> Option<Hit> {
@@ -12596,8 +12458,8 @@ impl Game<'_> {
         };
         self.view_frustum = self
             .renderer
-            .as_ref()
-            .map(|r| r.camera_frustum(fov_degrees, yaw, pitch, bob * spin, depth_far));
+            .as_mut()
+            .map(|r| r.camera_frustum(camera, fov_degrees, yaw, pitch, bob * spin, depth_far));
         let billboard_frustum = if self.settings.horizon.taa {
             self.renderer.as_ref().map(|r| {
                 r.camera_frustum_with_jitter(fov_degrees, yaw, pitch, bob * spin, depth_far)
@@ -14027,6 +13889,7 @@ impl<'a> Game<'a> {
             screen_blur_requested: Default::default(),
             spawn_counts: HashMap::new(),
             spawn_policies: HashMap::new(),
+            passages: Default::default(),
             pause_menu: true,
             pause_focus: None,
             death_focus: None,
@@ -14444,7 +14307,7 @@ fn load_world_rest(
                 &items,
                 overlay,
                 resources.item_defaults(),
-                &sources,
+                (&sources, &recipes),
             )
         });
         Ok((items, recipes, stations))

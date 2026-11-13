@@ -240,6 +240,30 @@ impl Weather {
             self.thunder_level.0 + (self.thunder_level.1 - self.thunder_level.0) * partial;
         (rain, thunder * rain)
     }
+    /// `ClientPacketListener.handleGameEvent`'s weather events, the player's level's or a viewed
+    /// level's: START_RAINING (1), STOP_RAINING (2), RAIN_LEVEL_CHANGE (7) and
+    /// THUNDER_LEVEL_CHANGE (8), with the event's `param`. Any other event is not the weather's.
+    pub fn game_event(&mut self, event: u8, param: f32) {
+        match event {
+            1 => {
+                self.raining = true;
+                self.rain_level = (0.0, 0.0);
+            }
+            2 => {
+                self.raining = false;
+                self.rain_level = (1.0, 1.0);
+            }
+            7 => {
+                self.rain_level = (param, param);
+                self.raining = param > 0.0;
+            }
+            8 => {
+                self.thunder_level = (param, param);
+                self.thundering = param > 0.0;
+            }
+            _ => {}
+        }
+    }
 }
 impl World {
     /// Install loaded instances, retiring an existing column's block entities even
