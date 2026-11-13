@@ -204,7 +204,10 @@ mod tests {
         game.lan_host(settings, net, hub).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let mut sender = PlayerSender::new(tx, std::sync::Arc::default());
-        sender.max_viewed_levels = 2;
+        sender.viewed_levels = horizon_protocol::viewed_levels::Answer {
+            revision: horizon_protocol::viewed_levels::REVISION,
+            max_levels: 2,
+        };
         let joined = Joined {
             conn: 2,
             uuid: 2,

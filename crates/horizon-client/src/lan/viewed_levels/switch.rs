@@ -5,10 +5,12 @@
 //! viewed level that keeps every chunk sent, lingering until an area covers it again. Nothing is
 //! sent again but the entities of both levels, which the client keeps apart from its worlds.
 //!
-//! There is no marker: the client swaps on that Respawn exactly when it holds the level entered
-//! as a viewed world, which is when this server has its view open. A travel into a level the
-//! client does not view, a death's or an End exit's Respawn (`PlayerList.respawn`) drops every
-//! view instead, and the client every viewed world.
+//! It is negotiated: only a client that answered revision 2 of `horizon:levels`
+//! (`viewed_levels::REVISION_2`) swaps. There is no marker: such a client swaps on that Respawn
+//! exactly when it holds the level entered as a viewed world, which is when this server has its
+//! view open. A travel of a revision-1 client or into a level the client does not view, and a
+//! death's or an End exit's Respawn (`PlayerList.respawn`), drops every view instead, and the
+//! client every viewed world.
 use super::super::{
     chunk_watch::ChunkWatchKind,
     hub::{AttachmentSnapshot, Hub, tracked},
@@ -18,8 +20,9 @@ use horizon_mod_runtime::attachments::Holder;
 
 impl Hub {
     /// `change_level`'s part once guest `i` was moved from level `left` into the level in place:
-    /// its views swapped with its own chunks when its client views the level in place, else its
-    /// views dropped. Either way it leaves `left`'s queues and entities.
+    /// its views swapped with its own chunks when its client swaps worlds (revision 2) and views
+    /// the level in place, else its views dropped. Either way it leaves `left`'s queues and
+    /// entities.
     pub(in crate::lan) fn leave_level(&mut self, i: usize, left: &str) {
         let levels = self.level_keys();
         let left_level = levels.iter().position(|k| k == left);
@@ -32,9 +35,10 @@ impl Hub {
             g.far_queue.clear();
             // The client drops both levels' entities: the server sends them again.
             g.tracker.clear();
+            let switches = g.sender.viewed_levels.switches() && left_level.is_some();
             let (Some(level), Some(view)) = (
                 left_level,
-                left_level.and_then(|_| g.viewed.views.remove(&entered)),
+                switches.then(|| g.viewed.views.remove(&entered)).flatten(),
             ) else {
                 g.viewed.forget_views();
                 return Vec::new();

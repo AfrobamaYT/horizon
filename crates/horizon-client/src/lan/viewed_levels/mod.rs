@@ -132,7 +132,7 @@ impl Hub {
             owner,
             &areas,
             &g.dimension,
-            g.sender.max_viewed_levels,
+            g.sender.viewed_levels.max_levels,
             &self.viewed.caps,
             others,
         )?;

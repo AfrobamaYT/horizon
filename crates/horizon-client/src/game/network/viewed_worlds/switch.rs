@@ -8,7 +8,9 @@
 //! There is no marker: the client swaps exactly when it holds the level entered as a viewed world,
 //! which is when the server has its view open. Any other Respawn (a death's or an End exit's,
 //! `PlayerList.respawn`, keep 0 or 1, or a travel into a level it does not view) drops every
-//! viewed world and enters the level as before.
+//! viewed world and enters the level as before. It is revision 2 of `horizon:levels`, which this
+//! client answers (`viewed_levels::REVISION_2`): a server serves it views only when it serves
+//! that revision, and swaps only for a client that answered it.
 use super::{routing::default_clock, worlds::ViewedWorld};
 use crate::game::Game;
 use horizon_client::level_loading::Reason;
@@ -277,6 +279,68 @@ mod tests {
         assert!(!game.world.block_entities.contains_key(&(83, 70, 85)));
         let nether = game.remote.as_ref().unwrap().viewed.get(1).unwrap();
         assert!(nether.world.block_entities.contains_key(&(83, 70, 85)));
+    }
+
+    /// A chest placed in a viewed column after its chunk packet keeps the data sent for it: an
+    /// empty position, then the chest's block update and data, then the travel, and the chest in
+    /// the new world holds its diamonds. Data for a position whose block has no block entity is
+    /// not kept meanwhile.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_chest_placed_in_a_viewed_column_keeps_its_data_through_the_travel() {
+        let mut resources = None;
+        let mut game = client(&mut resources);
+        std::sync::Arc::make_mut(&mut game.remote.as_mut().unwrap().builtin)
+            .registries
+            .insert(
+                "minecraft:block_entity_type".into(),
+                horizon_protocol::registry::Ids::from_names(vec!["minecraft:chest".into()]),
+            );
+        let chest = (game.pack.assets.registry)
+            .default_state("minecraft:chest")
+            .unwrap();
+        let items =
+            horizon_core::nbt::parse_snbt(r#"{Items:[{Slot:3b,id:"minecraft:diamond",count:7}]}"#)
+                .unwrap()
+                .0;
+        let data = |pos| {
+            C::BlockEntityData(play::BlockEntityData {
+                pos,
+                kind: 0,
+                tag: items.clone(),
+            })
+        };
+        game.handle_packet(open(1, NETHER)).unwrap();
+        game.handle_packet(run(1, &[column(5, 5)])).unwrap();
+        game.handle_packet(run(1, &[block(83, 70, 85, AIR)]))
+            .unwrap();
+        game.handle_packet(run(
+            1,
+            &[
+                block(83, 70, 85, chest),
+                data([83, 70, 85]),
+                data([84, 70, 85]),
+            ],
+        ))
+        .unwrap();
+        let nether = game.remote.as_ref().unwrap().viewed.get(1).unwrap();
+        let kept: Vec<_> = nether.block_entities[&(5, 5)]
+            .iter()
+            .map(|info| (info.packed_xz, info.y))
+            .collect();
+        assert_eq!(
+            kept,
+            vec![((3 << 4) | 5, 70)],
+            "the chest's, not the stone's"
+        );
+        game.handle_packet(respawn(NETHER, 3)).unwrap();
+        let placed = game
+            .world
+            .block_entities
+            .get(&(83, 70, 85))
+            .expect("its chest");
+        let item = placed.slots()[3].as_ref().expect("its data");
+        assert_eq!((item.item.as_ref(), item.count), ("minecraft:diamond", 7));
     }
 
     /// A travel into a level the client does not view enters it afresh: every viewed world goes,

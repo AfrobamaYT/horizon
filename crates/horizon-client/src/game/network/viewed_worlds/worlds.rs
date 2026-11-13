@@ -83,9 +83,6 @@ impl ViewedWorld {
                 self.world.unload_chunk(key);
                 self.unload_block_entities(key);
             }
-            // `handleBlockEntityData`: the data of a block entity the column holds; one it does
-            // not hold is dropped, as by the vanilla client.
-            C::BlockEntityData(p) => self.block_entity_data(p),
             C::LightUpdate(p) => {
                 let (layers, _) = self.format.light(&p.light);
                 if let Some(chunk) = self.world.chunks.get_mut(&(p.x, p.z)) {
@@ -162,9 +159,11 @@ impl ViewedWorld {
         }
     }
 
-    /// A block entity's data, kept for the column that holds the block entity. Only a held
-    /// column's own block entities take it, so what a world keeps grows with its columns alone.
-    fn block_entity_data(&mut self, p: play::BlockEntityData) {
+    /// `handleBlockEntityData`: a block entity's data, kept for the column that holds it, when
+    /// the column listed a block entity there or `entity_block`, the block there now has one (a
+    /// block entity placed since). Other data is dropped, as by the vanilla client, so what a
+    /// world keeps is bounded by its columns' block-entity blocks.
+    pub(super) fn block_entity_data(&mut self, p: play::BlockEntityData, entity_block: bool) {
         let [x, y, z] = p.pos;
         let Ok(y16) = i16::try_from(y) else {
             return;
@@ -175,8 +174,6 @@ impl ViewedWorld {
         if !self.world.chunks.contains_key(&column) {
             return;
         }
-        // A world that was the player's holds its block entities themselves.
-        let held = self.world.block_entities.contains_key(&(x, y, z));
         let infos = self.block_entities.entry(column).or_default();
         let info = BlockEntityInfo {
             packed_xz,
@@ -186,7 +183,7 @@ impl ViewedWorld {
         };
         match infos.iter_mut().find(|i| at(i)) {
             Some(kept) => *kept = info,
-            None if held => infos.push(info),
+            None if entity_block => infos.push(info),
             None => {}
         }
     }

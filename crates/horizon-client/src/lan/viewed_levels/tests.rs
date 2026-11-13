@@ -13,7 +13,7 @@ use horizon_protocol::{
     buf::{Reader, Writer},
     ids::play::clientbound as ids,
     packets::play::Clientbound as C,
-    viewed_levels::{CHANNEL, Message},
+    viewed_levels::{self, Answer, CHANNEL, Message},
 };
 use std::sync::mpsc::Receiver;
 
@@ -22,8 +22,20 @@ const NETHER: &str = "minecraft:the_nether";
 const NETHER_INDEX: i32 = 2;
 
 /// A hub with the players `uuids`, each placed in the Overworld at (0.5, 64, 0.5) with a client
-/// that views up to `max_levels` other levels and a batch quota of 9; each one's packets.
+/// of this revision that views up to `max_levels` other levels and a batch quota of 9; each one's
+/// packets.
 fn hub_with(uuids: &[u128], max_levels: u8) -> (Hub, Vec<Receiver<Out>>) {
+    hub_answered(
+        uuids,
+        Answer {
+            revision: viewed_levels::REVISION,
+            max_levels,
+        },
+    )
+}
+
+/// [`hub_with`], each client having given `answer`.
+fn hub_answered(uuids: &[u128], answer: Answer) -> (Hub, Vec<Receiver<Out>>) {
     let config = crate::lan::NetConfig {
         announce: false,
         ..crate::lan::NetConfig::loopback(0, "ViewedLevelsTest".into(), 4)
@@ -62,7 +74,7 @@ fn hub_with(uuids: &[u128], max_levels: u8) -> (Hub, Vec<Receiver<Out>>) {
     for &uuid in uuids {
         let (tx, rx) = std::sync::mpsc::channel();
         let mut sender = crate::lan::PlayerSender::new(tx, std::sync::Arc::default());
-        sender.max_viewed_levels = max_levels;
+        sender.viewed_levels = answer;
         let mut g = Guest::new(
             crate::lan::Joined {
                 conn: uuid as u32,
@@ -697,4 +709,50 @@ fn a_travel_into_a_viewed_level_swaps_it_with_the_level_left() {
     assert!(g.sent_chunks.is_empty());
     let sent = got(&rx[0]);
     assert!(!sent.iter().any(|g| matches!(g, Got::Close(_))), "{sent:?}");
+}
+
+/// A client of revision 1 does not swap worlds on a travel: into the Nether it views, the server
+/// drops its views and the Overworld left, and sends the Nether's chunks again, plain, as its own.
+#[test]
+fn a_revision_1_client_is_not_switched() {
+    let older = Answer {
+        revision: 1,
+        max_levels: 2,
+    };
+    let (mut hub, rx) = hub_answered(&[1], older);
+    hub.set_viewed_areas(1, "test:portal", nether(1)).unwrap();
+    hub.guests
+        .update(0, |g| g.sent_chunks.extend([(0, 0), (1, 0)]));
+    hub.set_dimension(NETHER);
+    let mut nether_world = lit_columns(1);
+    run_level(&mut hub, &mut nether_world);
+    assert_eq!(
+        wrapped_columns(&got(&rx[0]), ids::LEVEL_CHUNK_WITH_LIGHT).len(),
+        9,
+        "a revision-1 client still views levels"
+    );
+    in_ctx(&mut nether_world, |ctx| {
+        hub.change_level(0, [8.5, 64.0, 8.5], 0.0, None, false, 0, ctx);
+    });
+    let g = &hub.guests[0];
+    assert!(g.viewed.views.is_empty(), "no view kept, none taken over");
+    assert!(g.sent_chunks.is_empty());
+    hub.ticks += 1;
+    hub.guests.update(0, |g| {
+        g.batch_quota = 9.0;
+        g.unacknowledged = 0;
+    });
+    run_level(&mut hub, &mut nether_world);
+    let sent = got(&rx[0]);
+    assert!(sent.contains(&Got::Plain(ids::RESPAWN)));
+    let plain = sent
+        .iter()
+        .filter(|g| **g == Got::Plain(ids::LEVEL_CHUNK_WITH_LIGHT))
+        .count();
+    assert_eq!(plain, 9, "the Nether sent again as its own: {sent:?}");
+    assert!(
+        !sent
+            .iter()
+            .any(|g| matches!(g, Got::Open(_) | Got::Close(_)))
+    );
 }
