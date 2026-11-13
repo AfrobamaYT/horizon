@@ -38,15 +38,20 @@ wins over requests made inside the cycle callback.
 A server can open other levels for a client to view besides the one the player is in (`horizon:levels`,
 as Immersive Portals' `ClientWorldLoader` keeps a `ClientLevel` per dimension). On a client,
 `host.level("minecraft:the_nether")` also returns a handle for each such level while the server keeps it
-open. `block_state`, `clip`, `collision_boxes` and `has_collisions` on that handle read the viewed
-level's own world, never the player's, so a mod can aim a ray or collide a box through a portal. They
-never write and never load a column: a column the client doesn't hold is `None`, for a collision box as
-soon as its walk reaches one. `clip` keeps its traversal limit and `collision_boxes` its cell cap.
+open. Its block reads read the viewed level's own world, never the player's: `block_state`, `block`,
+`block_property`, `clip`, `collision_boxes`, `has_collisions`, and the fluid reads built on
+`block_state` (`fluid_shape`, `fluid_height`, `fluid_height_for_camera`, `fluid_can_be_replaced_with`).
+So a mod can aim a ray or collide a box through a portal. They never write and never load a column: a
+column the client doesn't hold is `None`, for a collision box as soon as its walk reaches one. `clip`
+keeps its traversal limit and `collision_boxes` its cell cap.
 
-The handle is `None` from the server's close of the level, and from a login, respawn or
-reconfiguration, until the server opens that level again. Writes, server-only reads, the other level
-reads and the entity reads (`entities_in`) refuse a viewed level. Native and wasm mods use the same
-handle methods.
+The handle is `None` while the server has the level closed. If the server closes the level and opens it
+again within the same client level, the old handle reads again. A login, a reconfiguration or a respawn
+into another level replaces the client level: the old handle stays stale for good, and the mod calls
+`host.level` again once the server reopens the level. A respawn in the same level drops the viewed
+levels too, but keeps the client level, so the old handle reads again after the reopen. Writes,
+server-only reads, the other level reads and the entity reads (`entities_in`) refuse a viewed level.
+Native and wasm mods use the same handle methods.
 
 ## Crosshair reads
 
