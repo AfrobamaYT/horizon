@@ -7944,6 +7944,7 @@ mod tests {
         assert!(!unlit.lit && !unlit.light_loaded);
     }
     #[test]
+    #[ignore = "daily"]
     fn saved_light_matches_reference_for_layers_and_metadata() {
         let section = |y: Tag, sky: Option<Tag>, block: Option<Tag>| {
             let mut entries = vec![("Y", y)];
