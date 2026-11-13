@@ -5,10 +5,11 @@ use super::{
     entities::MAX_TABLE,
     worlds::{MAX_COLUMNS, ViewedWorld},
 };
-use crate::game::Game;
+use crate::game::{Game, remote::Remote};
 use horizon_client::{text::Text, viewed_levels_net::MAX_LEVELS, world::World};
 use horizon_protocol::{
     packets::play::{Clientbound as C, SpawnInfo},
+    registry::DimensionType,
     viewed_levels::{CHANNEL, MAX_ENTITIES, Message, ViewedLevelsError},
 };
 use horizon_world::dimension_type::DimensionFacts;
@@ -76,6 +77,13 @@ impl From<ViewedLevelsError> for RouteError {
     }
 }
 
+/// The id of the world clock a level of `dimension` follows (its `default_clock`) in the
+/// server's registry.
+pub(super) fn default_clock(r: &Remote, dimension: &DimensionType) -> Option<i32> {
+    let name = dimension.default_clock.as_deref()?;
+    r.registries.id("minecraft:world_clock", name)
+}
+
 impl Game<'_> {
     /// A `horizon:levels` play payload's data: routed, or the connection closes with the reason.
     pub(in crate::game) fn viewed_levels_payload(
@@ -136,11 +144,7 @@ impl Game<'_> {
             });
         }
         let format = r.level_format(spawn, self.res.environment());
-        let default_clock = format
-            .dimension
-            .default_clock
-            .as_deref()
-            .and_then(|name| r.registries.id("minecraft:world_clock", name));
+        let default_clock = default_clock(r, &format.dimension);
         let facts = format.facts.clone().unwrap_or_else(|| {
             let key = horizon_core::LevelKey::parse(&spawn.dimension)
                 .unwrap_or(horizon_core::LevelKey::OVERWORLD);
