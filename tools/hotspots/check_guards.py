@@ -5,12 +5,13 @@ Each guard compares this change with the merge base, the way tools/check_file_si
 today stays and only growth fails:
 - docs/modding/src/SUMMARY.md may not gain a line for a page the book adds on its own
   (tools/modding_concept_pages.py: a page in concepts/ or how-to/, or in a folder beside its parent page);
-- a change may touch at most 5 files under launcher/lang/, unless it merges an upstream commit (a sync,
-  recognised by check_file_size.sync_provenance): English is the `tr()` text and a missing translation falls back
-  to it (launcher/src/i18n/tests.rs);
+- a change may touch at most 5 files under launcher/lang/: English is the `tr()` text and a missing translation
+  falls back to it (launcher/src/i18n/tests.rs). A rollup or an upstream sync carries other PRs' changes and is not
+  checked; it is recognised by its `rollup` or `sync` label, or by the branch name our rollups and syncs use
+  (CI passes the branch only for a pull request from this repository, so a fork cannot borrow the name);
 - crates/horizon-mod-vocab/src/hooks/notes.rs may not grow.
 
-    python3 tools/hotspots/check_guards.py --base origin/main
+    python3 tools/hotspots/check_guards.py --base origin/main [--branch NAME] [--labels "a b"]
 """
 
 import argparse
@@ -31,7 +32,12 @@ SUMMARY = f"{BOOK_SRC}/SUMMARY.md"
 LANG = "launcher/lang/"
 LANG_LIMIT = 5
 NOTES = "crates/horizon-mod-vocab/src/hooks/notes.rs"
-SUMMARY_LINE = re.compile(r"^(\s*)(?:[-*] )?\[([^\]]*)\]\(([^)]*)\)\s*$")
+# A chapter line, with an optional trailing HTML comment (mdBook still renders the chapter).
+SUMMARY_LINE = re.compile(r"^(\s*)(?:[-*] )?\[([^\]]*)\]\(([^)]*)\)\s*(?:<!--.*-->\s*)?$")
+# The labels and branch names of rollup and upstream-sync pull requests (AGENTS.md, handbook "Rollups"):
+# fork-review-rollup-<n>, rollup-<n>, sync-<n>, sync-after-<x>, upstream-sync-<n>.
+CARRIER_LABELS = {"rollup", "sync"}
+CARRIER_BRANCH = re.compile(r"(?:fork-review-rollup|rollup|upstream-sync|sync)-.+")
 
 
 def git(root, *args, check=True):
@@ -101,19 +107,39 @@ def redundant_summary_lines(text, src):
     return redundant
 
 
-def summary_problems(now, before):
-    return [f"{SUMMARY}: the new line for {path} lists a page the book adds on its own (a page in concepts/ or "
-            "how-to/, or in a folder beside its parent page). Remove the line; the page joins its part by its title."
-            for path in now if path not in before]
+def listed_paths(text):
+    """{link title: path} of SUMMARY.md's chapter lines."""
+    return {m[2]: m[3] for m in map(SUMMARY_LINE.match, text.splitlines()) if m and m[3]}
 
 
-def lang_problems(changed, is_sync):
-    """`changed`: the paths under launcher/lang/ this change touches; `is_sync`: called only when over the limit."""
-    if len(changed) <= LANG_LIMIT or is_sync():
+def summary_problems(now, before, renamed=None):
+    """`renamed`: {new path: old path} for lines whose title stayed and whose path changed."""
+    renamed = renamed or {}
+    out = []
+    for path in now:
+        if path in before:
+            continue
+        why = (f" It was the line for {renamed[path]}, renamed; that line was already one the book did not need."
+               if path in renamed else "")
+        out.append(f"{SUMMARY}: the new line for {path} lists a page the book adds on its own (a page in concepts/ "
+                   f"or how-to/, or in a folder beside its parent page). Remove the line; the page joins its part by "
+                   f"its title.{why}")
+    return out
+
+
+def carries_other_prs(branch, labels):
+    """Whether this pull request is a rollup or an upstream sync, by its label or its branch name."""
+    return bool(CARRIER_LABELS & set(labels)) or bool(branch and CARRIER_BRANCH.fullmatch(branch))
+
+
+def lang_problems(changed, carrier):
+    """`changed`: the paths under launcher/lang/ this change touches; `carrier`: a rollup or a sync."""
+    if len(changed) <= LANG_LIMIT or carrier:
         return []
     return [f"{LANG}: this change touches {len(changed)} language files and at most {LANG_LIMIT} may change outside "
-            "an upstream sync. A label missing from a language shows its English `tr()` text, so add a new label "
-            "only to the languages you translate, and leave the other files alone."]
+            "a rollup or an upstream sync (a `rollup` or `sync` label). A label missing from a language shows its "
+            "English `tr()` text, so add a new label only to the languages you translate, and leave the other files "
+            "alone."]
 
 
 def notes_problems(before, now):
@@ -134,20 +160,16 @@ def at(root, rev, path):
     return shown.stdout if shown.returncode == 0 else None
 
 
-def upstream_merge(root, merge_base):
-    """Whether a merge since `merge_base` has a parent from upstream main (check_file_size.sync_provenance)."""
-    merges = git(root, "rev-list", "--merges", "--parents", f"{merge_base}..HEAD").splitlines()
-    candidates = dict.fromkeys(parent for row in merges for parent in row.split()[2:])
-    return any(not check_file_size.sync_provenance(parent, merge_base) for parent in candidates)
-
-
-def problems(root, merge_base):
+def problems(root, merge_base, carrier=False):
     src = root / BOOK_SRC
-    now_summary, base_summary = (root / SUMMARY).read_text(), at(root, merge_base, SUMMARY)
+    now_summary, base_summary = (root / SUMMARY).read_text(), at(root, merge_base, SUMMARY) or ""
+    now_paths, base_paths = listed_paths(now_summary), listed_paths(base_summary)
+    renamed = {path: base_paths[title] for title, path in now_paths.items()
+               if title in base_paths and base_paths[title] != path}
     out = summary_problems(redundant_summary_lines(now_summary, src),
-                           redundant_summary_lines(base_summary, src) if base_summary else [])
+                           redundant_summary_lines(base_summary, src) if base_summary else [], renamed)
     changed = git(root, "diff", "--name-only", "--no-renames", merge_base, "--", LANG).split()
-    out += lang_problems(changed, lambda: upstream_merge(root, merge_base))
+    out += lang_problems(changed, carrier)
     notes = root / NOTES
     out += notes_problems(line_count(at(root, merge_base, NOTES)),
                           line_count(notes.read_text()) if notes.is_file() else None)
@@ -158,15 +180,21 @@ def main(argv=None, root=ROOT):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--base", help="the git ref the branch starts from (CI: the pull request's base)")
     parser.add_argument("--pull-request-merge", action="store_true", help=check_file_size.PULL_REQUEST_MERGE_HELP)
+    parser.add_argument("--branch", default="", help="the pull request's head branch, when it is in this repository")
+    parser.add_argument("--labels", default="", help="the pull request's labels, separated by spaces")
     args = parser.parse_args(argv)
     if not args.base:
         print("Hotspot guards: no base to compare with, nothing checked.")
         return 0
+    if git(root, "rev-parse", "--is-shallow-repository").strip() == "true":
+        print("Hotspot guards failed: comparing with the base needs full history; fetch --unshallow first.")
+        return 1
     base, error = check_file_size.pull_request_base(args.base, args.pull_request_merge)
     if error:
         print(f"Hotspot guards failed: {error}")
         return 1
-    found = problems(root, git(root, "merge-base", base, "HEAD").strip())
+    found = problems(root, git(root, "merge-base", base, "HEAD").strip(),
+                     carries_other_prs(args.branch, args.labels.split()))
     for problem in found:
         print(problem)
     print("Hotspot guards: " + (f"{len(found)} problem(s)" if found else "pass"))
