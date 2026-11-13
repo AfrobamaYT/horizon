@@ -18,13 +18,14 @@ impl Game<'_> {
     /// or a stack in a hand that glides there (`canGlideUsing` walks every
     /// `EquipmentSlot`).
     pub(super) fn glider_worn(&self) -> bool {
-        let items = self.res.items();
-        let hand = |stack: Option<&ItemStack>, slot: &str| {
-            stack.is_some_and(|s| horizon_client::item_sync::can_glide_using(s, slot, items))
-        };
-        gliding_pieces(items, &self.armor).contains(&true)
-            || hand(self.inventory[self.selected].as_ref(), "mainhand")
-            || hand(self.offhand.as_ref(), "offhand")
+        gliding_slots(
+            self.res.items(),
+            &self.armor,
+            self.inventory[self.selected].as_ref(),
+            self.offhand.as_ref(),
+        )
+        .next()
+        .is_some()
     }
 
     /// `LivingEntity.updateFallFlying`: the glide's wear. `Util.getRandom`
@@ -33,39 +34,40 @@ impl Game<'_> {
     /// `ItemStack.hurtAndBreak` takes `points` of its durability (Unbreaking
     /// may save it). Callers skip creative.
     pub(super) fn wear_glider(&mut self, points: u32) {
-        let items = self.res.items();
-        let gliding = gliding_pieces(items, &self.armor);
-        let hand = |stack: Option<&ItemStack>, slot: &str| {
-            stack.is_some_and(|s| horizon_client::item_sync::can_glide_using(s, slot, items))
-        };
-        // `EquipmentSlot.VALUES` order: mainhand, offhand, feet, legs, chest,
-        // head (`armor` is head, chest, legs, feet). `Ok` is a hand slot.
-        let mut slots: Vec<std::result::Result<usize, usize>> = Vec::new();
-        if hand(self.inventory[self.selected].as_ref(), "mainhand") {
-            slots.push(Ok(self.selected));
-        }
-        if hand(self.offhand.as_ref(), "offhand") {
-            slots.push(Ok(shield::OFFHAND_SLOT));
-        }
-        slots.extend([3, 2, 1, 0].into_iter().filter(|&i| gliding[i]).map(Err));
-        if slots.is_empty() {
+        // Every 20th glide tick only, so collecting the candidates here is fine.
+        let mut pieces: Vec<usize> = gliding_slots(
+            self.res.items(),
+            &self.armor,
+            self.inventory[self.selected].as_ref(),
+            self.offhand.as_ref(),
+        )
+        .collect();
+        if pieces.is_empty() {
             return;
         }
-        // `Util.getRandom(slotsWithGliders, this.random)`: the entity's own
-        // random, which never touches the level's stream.
-        let pick = random_source::entity().next_int_bound(slots.len() as i32);
-        let pick = slots[pick.unwrap_or(0) as usize];
-        let stack = match pick {
-            Ok(slot) => self.stack_in(slot).cloned(),
-            Err(i) => self.armor[i].clone(),
+        // `Util.getRandom(slotsWithGliders, this.random)` over `EquipmentSlot.VALUES` order:
+        // mainhand, offhand, feet, legs, chest, head; the entity's own random, which never
+        // touches the level's stream.
+        pieces.sort_unstable_by_key(|&slot| [5, 4, 3, 2, 0, 1][slot]);
+        let pick = random_source::entity().next_int_bound(pieces.len() as i32);
+        let slot = pieces[pick.unwrap_or(0) as usize];
+        let stack = match slot {
+            4 => self.inventory[self.selected].clone(),
+            5 => self.offhand.clone(),
+            i => self.armor[i].clone(),
         };
-        if let Some(stack) = stack {
+        // `ItemStack.hurtAndBreak` skips a stack that isn't `isDamageableItem` (no `damage`
+        // component, say), though it may still glide.
+        if let Some(stack) = stack
+            && horizon_client::stations::is_damageable(self.res.items(), &stack)
+        {
             let loss = self.wear(&stack, points);
-            let worn = match pick {
-                Ok(slot) => self.stack_in_mut(slot).as_mut(),
-                Err(i) => self.armor[i].as_mut(),
+            let target = match slot {
+                4 => &mut self.inventory[self.selected],
+                5 => &mut self.offhand,
+                i => &mut self.armor[i],
             };
-            if let Some(piece) = worn {
+            if let Some(piece) = target.as_mut() {
                 piece.damage += loss;
             }
         }
@@ -102,13 +104,7 @@ impl Game<'_> {
 
     /// `LivingEntity.getUsedItemHand`: the hand of the item in use.
     pub(super) fn used_hand(&self) -> Option<Hand> {
-        self.using.map(|(slot, _)| {
-            if slot == shield::OFFHAND_SLOT {
-                Hand::Off
-            } else {
-                Hand::Main
-            }
-        })
+        item_use::hand_of(self.using)
     }
 
     /// Run `f` with `hand` acting (`held`, `consume_held`, `swing_arm`).
