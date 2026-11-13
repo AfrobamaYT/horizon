@@ -81,7 +81,8 @@ erosion, depth and weirdness, and an `offset` from 0 to 1. The biome whose point
 climate at a position wins, as in a data pack's `minecraft:multi_noise` source with an inline `biomes` list;
 the biomes can be the mod's own or vanilla's. A mod's points shape its own level only: placing a mod's biomes
 among vanilla's in the Overworld or the Nether is a [biome region](../content-mods/biome-regions.md). Only `Fixed` suits a chunk
-generator of the mod's own, which writes terrain only.
+generator of the mod's own, which writes terrain only. `mod_biome_source` names a [biome source](#biome-sources) a
+mod registered instead, for either generator.
 
 A dimension in an unowned namespace, an empty name, a name that is not a folder of the world
 (lowercase letters, digits and `_ . -` only, with `/` between segments that are not empty, `.` or
@@ -95,8 +96,9 @@ data pack: a pack with `data/mymod/dimension/pocket.json` or `data/mymod/dimensi
 replaces that half of it, in the worlds that have the pack.
 
 `register_dimension` is the same call in a mod built to `mod.wasm`, as the settings are plain
-data. A wasm mod's dimension can name only the game's own generator, `minecraft:noise`: a chunk
-generator is code, and `register_chunk_generator` is native only.
+data. A wasm mod's dimension can name only the game's own generator, `minecraft:noise`, and only a
+biome source a native mod registered: a chunk generator and a biome source are code, and
+`register_chunk_generator` and `register_biome_source` are native only.
 
 ## Sending a player to a dimension
 
@@ -203,7 +205,8 @@ placed block. `set_block` skips a position outside the chunk or build height and
 it wrote. The chunk starts as air; invalid state ordinals are refused rather than written.
 
 The generator gives terrain only. The level has no surface, carvers or features, and every chunk
-has the stem's one biome. `noise_settings` means nothing to it.
+has the stem's one biome, unless its stem names a [biome source](#biome-sources) a mod registered.
+`noise_settings` means nothing to it.
 
 A generator in an unowned namespace, an empty name, a name that is not a folder of the world (as
 for a dimension), an id registered twice and `minecraft:noise` stop the game at startup with a
@@ -213,3 +216,34 @@ A level stem naming a generator nobody registered, say after its mod was removed
 whoever opens that level, not for the world: a teleport there fails and is logged, and a player
 saved there joins a server in the Overworld. Single player refuses to open a world whose player is
 saved in such a level.
+
+### Biome sources
+
+A biome source is a mod's code for where a level's biomes go: vanilla's `BiomeSource`, with
+`possible_biomes` its `possibleBiomes` and `noise_biome` its `getNoiseBiome`. Register it once, at
+startup, and name it from a dimension's `mod_biome_source`, or from a data pack's level stem as
+`"biome_source": {"type": "mymod:chaos"}`:
+
+```rust,ignore
+{{#include ../../../examples/src/worldgen.rs:biome_source}}
+```
+
+`possible_biomes` lists the biome ids the source places, vanilla's, a data pack's or the mod's own;
+it is asked once, at registration. `noise_biome` answers for one quart cell (a block position >> 2,
+`[x, y, z]`) of a world with `seed`, with an index into that list; an index past the end wraps
+around it. It runs on the worldgen worker threads for every 4x4x4 cell of every chunk generated, with
+no `Host`, so it is `Send + Sync`, keeps no mutable state and does not allocate. The same seed and
+cell give the same biome.
+
+The source serves the game's noise generator, whose structures and decoration read its possible
+biomes as they read a vanilla source's, and a chunk generator of a mod's own, whose chunks then
+get its biomes cell by cell instead of one biome. The biomes are saved with the chunks, by name, as
+any other.
+
+A source in another mod's namespace, an empty name, a name that is not a folder of the world (as
+for a dimension), an id registered twice and an empty `possible_biomes` stop the game at startup
+with a message naming the mod, and so does a dimension whose `mod_biome_source` nobody registered.
+The source may come from a mod that loads later. A level whose world lacks one of the possible
+biomes refuses to open, naming the source and the biome, as does a level stem naming a source that
+is gone. A wasm mod's registrar refuses `register_biome_source`, naming the source: `BiomeSource`
+is not bound by the generated wasm worker interface.
