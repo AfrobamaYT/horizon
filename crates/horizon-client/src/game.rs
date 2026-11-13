@@ -111,8 +111,6 @@ pub mod points {
 }
 mod host;
 mod native_hooks;
-#[path = "game/items/dropped_items.rs"]
-mod dropped_items;
 use event_loop::EventLoopCtl;
 use hand::interact_location;
 use horizon_client::random_source;
