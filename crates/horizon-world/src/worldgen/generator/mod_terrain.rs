@@ -12,6 +12,7 @@ use crate::worldgen::terrain::TerrainError;
 pub(super) struct ModTerrain {
     /// The registered generator's id, for the refusals.
     id: String,
+    level: Box<str>,
     generator: Arc<dyn ModChunkGenerator>,
     pub(super) stages: VanillaStages,
 }
@@ -30,6 +31,7 @@ impl ModTerrain {
         self.generator.build_terrain(&mut Filling {
             chunk,
             registry,
+            level: &self.level,
             seed,
             min_y,
             height,
@@ -42,6 +44,7 @@ impl ModTerrain {
 struct Filling<'a, 'r> {
     chunk: &'a mut TerrainChunk<'r, GenBlockStates>,
     registry: &'static BlockRegistry,
+    level: &'a str,
     seed: i64,
     min_y: i32,
     height: i32,
@@ -53,6 +56,9 @@ impl ChunkAccess for Filling<'_, '_> {
     }
     fn pos(&self) -> ChunkPos {
         self.chunk.position()
+    }
+    fn level(&self) -> &str {
+        self.level
     }
     fn seed(&self) -> i64 {
         self.seed
@@ -149,6 +155,7 @@ impl OverworldGenerator {
     pub fn for_mod(
         data: Arc<GeneratorData>,
         seed: i64,
+        level: &str,
         stem: &Value,
         generator: Arc<dyn ModChunkGenerator>,
         structures: bool,
@@ -171,6 +178,7 @@ impl OverworldGenerator {
         stages.structures &= structures;
         let terrain = ModTerrain {
             id: id.to_owned(),
+            level: level.into(),
             generator,
             stages,
         };
@@ -217,7 +225,15 @@ mod tests {
     /// settings, at seed 12345.
     fn level(stages: VanillaStages) -> OverworldGenerator {
         let stem = stem(Value::from("minecraft:overworld"));
-        OverworldGenerator::for_mod(data(), 12345, &stem, Arc::new(Slab(stages)), true).unwrap()
+        OverworldGenerator::for_mod(
+            data(),
+            12345,
+            "minecraft:overworld",
+            &stem,
+            Arc::new(Slab(stages)),
+            true,
+        )
+        .unwrap()
     }
 
     fn stem(settings: Value) -> Value {
@@ -332,7 +348,14 @@ mod tests {
                 surface: true,
                 ..Default::default()
             }));
-            match OverworldGenerator::for_mod(data(), 0, &stem(settings), slab, true) {
+            match OverworldGenerator::for_mod(
+                data(),
+                0,
+                "minecraft:overworld",
+                &stem(settings),
+                slab,
+                true,
+            ) {
                 Ok(_) => panic!("opened"),
                 Err(e) => e.to_string(),
             }
@@ -373,7 +396,15 @@ mod tests {
             }
         }
         let stem = stem(Value::from("minecraft:nether"));
-        let level = OverworldGenerator::for_mod(data(), 0, &stem, Arc::new(Column), true).unwrap();
+        let level = OverworldGenerator::for_mod(
+            data(),
+            0,
+            "minecraft:overworld",
+            &stem,
+            Arc::new(Column),
+            true,
+        )
+        .unwrap();
         let chunk = level.worker().generate_proto(ChunkPos::new(0, 0)).unwrap();
         assert_eq!(chunk.terrain.min_y(), -64);
         for (y, block) in [
@@ -404,7 +435,14 @@ mod tests {
         fields.structure_resources = None;
         let open = |stages| {
             let stem = stem(Value::from("minecraft:overworld"));
-            OverworldGenerator::for_mod(bare.clone(), 12345, &stem, Arc::new(Slab(stages)), true)
+            OverworldGenerator::for_mod(
+                bare.clone(),
+                12345,
+                "minecraft:overworld",
+                &stem,
+                Arc::new(Slab(stages)),
+                true,
+            )
         };
         let surface = VanillaStages {
             surface: true,
@@ -576,7 +614,16 @@ mod tests {
         let mut stem = stem(Value::from("minecraft:overworld"));
         stem["generator"]["biome_source"] =
             serde_json::json!({"type": "minecraft:multi_noise", "preset": "minecraft:overworld"});
-        let open = || OverworldGenerator::for_mod(data(), 12345, &stem, Arc::new(Hills), true);
+        let open = || {
+            OverworldGenerator::for_mod(
+                data(),
+                12345,
+                "minecraft:overworld",
+                &stem,
+                Arc::new(Hills),
+                true,
+            )
+        };
         let centers = [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(x, z)| ChunkPos::new(x, z));
         let first = open().unwrap();
         let mut worker = first.worker();
