@@ -3,7 +3,7 @@
 
 pub trait Hooks {
     /// The server is assembling its data tables, as for
-    /// `native_data_pack_files` (a world's first open and every `/reload`):
+    /// `data_pack_files` (a world's first open and every `/reload`):
     /// push the data map types your mod registers (NeoForge's
     /// `RegisterDataMapTypesEvent`). A type is an `id` (`mod_id:name`, not in
     /// `minecraft`) for a `registry`: any the game names. Its values come
