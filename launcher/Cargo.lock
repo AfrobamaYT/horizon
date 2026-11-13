@@ -2874,6 +2874,10 @@ name = "horizon-hooks"
 version = "0.1.0"
 
 [[package]]
+name = "horizon-java-properties"
+version = "0.1.0"
+
+[[package]]
 name = "horizon-launcher"
 version = "0.2.0"
 dependencies = [
@@ -3066,6 +3070,7 @@ dependencies = [
  "horizon-core",
  "horizon-guest-stack",
  "horizon-hooks",
+ "horizon-java-properties",
  "horizon-mod-api-gen",
  "horizon-mod-point-shape",
  "horizon-perf-format",
@@ -3137,6 +3142,7 @@ dependencies = [
  "base64",
  "getrandom 0.3.4",
  "horizon-core",
+ "horizon-java-properties",
  "horizon-protocol",
  "horizon-world",
  "log",

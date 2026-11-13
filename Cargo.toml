@@ -34,6 +34,7 @@ members = [
     "crates/horizon-command",
     "crates/horizon-items",
     "crates/horizon-server-files",
+    "crates/horizon-java-properties",
     "crates/horizon-anticheat",
     "crates/horizon-chat-filter",
     # The Model Context Protocol, shared by horizon-ctl, horizon-server and the launcher.
