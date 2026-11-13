@@ -194,4 +194,16 @@ mod tests {
         );
         assert_eq!(mode.suggest("h"), vec![CommandSuggestion::new("high")]);
     }
+
+    #[test]
+    fn an_id_value_crosses_the_wire() {
+        use super::super::CommandArgumentValue;
+        let value = CommandArgumentValue::Id(crate::Identifier::parse("minecraft:zombie").unwrap());
+        let mut out = crate::wire::Writer::new();
+        out.put(&value);
+        assert_eq!(
+            crate::wire::Reader::decode::<CommandArgumentValue>(out.bytes()).unwrap(),
+            value
+        );
+    }
 }

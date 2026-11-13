@@ -20,7 +20,7 @@ use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::{Dim, Game, commands::execute, lan::LanHost, respawn_anchor::RespawnConfig};
 use crate::game::level_control_hooks::LevelControl;
 pub(super) use argument_kinds::{CommandArguments, command_arguments};
-use argument_kinds::{MOD_ID, argument_type, parser};
+use argument_kinds::{argument_type, custom_value, parser, resource_parser};
 use mod_api::__private::game::*;
 // Their old home, for mixin code that names them here.
 use horizon_client::{
@@ -99,8 +99,14 @@ fn usage_nodes(
         if optional_seen && !optional {
             return Err(format!("`{usage}`: `{word}` follows an optional argument"));
         }
-        let (parser, properties, greedy, custom) = match parser(kind) {
-            Some((parser, properties, _)) => (parser, properties, kind == "text", None),
+        let resource = kind
+            .strip_prefix("resource:")
+            .map(|registry| resource_parser(registry).map_err(|e| format!("`{usage}`: {e}")))
+            .transpose()?;
+        let builtin =
+            resource.or_else(|| parser(kind).map(|(parser, properties, _)| (parser, properties)));
+        let (parser, properties, greedy, custom) = match builtin {
+            Some((parser, properties)) => (parser, properties, kind == "text", None),
             None => {
                 let Some(argument) = custom.get(kind) else {
                     return Err(format!("`{usage}`: unknown kind `{kind}`"));
@@ -2260,11 +2266,7 @@ impl Game<'_> {
                 Arg::Resource(id) => Value::Id(
                     mod_api::Identifier::parse(&id).map_err(|_| err("command.failed", &[]))?,
                 ),
-                Arg::Custom { kind, value } if &*kind == MOD_ID => Value::String(value),
-                Arg::Custom { kind, value } => Value::Custom {
-                    kind: kind.to_string(),
-                    value,
-                },
+                Arg::Custom { kind, value } => custom_value(&kind, value),
                 _ => unreachable!("the native tree contains only registered native argument kinds"),
             };
             arguments.push(CommandArgument::new(argument.name, value));
@@ -3124,17 +3126,33 @@ mod tests {
 
     #[test]
     fn resource_and_mod_id_kinds_accept_only_known_ids() {
-        let arguments = command_arguments();
+        let mut arguments = command_arguments();
+        // The test process loads no package: stand in for one the way `command_arguments` does.
+        arguments.insert(
+            argument_kinds::MOD_ID.into(),
+            Arc::new(mod_api::ChoiceArgument::new(["demo"])),
+        );
         let (tree, _, problems) = super::command_tree(
             &[
                 mod_api::Command::new("spawnof <kind:resource:minecraft:entity_type>"),
                 mod_api::Command::new("about <id:mod_id>"),
                 mod_api::Command::new("bad <kind:resource:NotOk>"),
+                mod_api::Command::new("worse <kind:resource:a:b:c>"),
+                mod_api::Command::new("worst <kind:resource:a/b:c>"),
             ],
             |_| false,
             &arguments,
         );
-        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert_eq!(problems.len(), 3, "{problems:?}");
+        assert!(
+            problems
+                .iter()
+                .all(|p| p.contains("is not a `namespace:path` resource location")),
+            "{problems:?}"
+        );
+        for refused in ["bad", "worse", "worst"] {
+            assert!(tree["children"].get(refused).is_none(), "{refused}");
+        }
         let kind = &tree["children"]["spawnof"]["children"]["kind"];
         assert_eq!(kind["parser"], "minecraft:resource_key");
         assert_eq!(
@@ -3143,7 +3161,7 @@ mod tests {
         );
         assert_eq!(
             tree["children"]["about"]["children"]["id"]["custom_argument"],
-            MOD_ID
+            argument_kinds::MOD_ID
         );
 
         let mut dispatcher = Dispatcher::new();
@@ -3164,6 +3182,16 @@ mod tests {
                 "{refused}"
             );
         }
+        let parsed = dispatcher.parse("about demo", &registries);
+        let (context, _) = parsed.executable().unwrap();
+        let Some(Arg::Custom { kind, value }) = context.get("id").cloned() else {
+            panic!("a mod id parses as the built-in custom kind");
+        };
+        assert_eq!(
+            custom_value(&kind, value),
+            mod_api::CommandArgumentValue::String("demo".into()),
+            "a loaded mod id reaches the mod as its plain string"
+        );
     }
 
     #[test]

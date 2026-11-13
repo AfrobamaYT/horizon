@@ -19,7 +19,9 @@ delivers it as a string (NeoForge's `ModIdArgument`). `resource:<registry>`, suc
 `<kind:resource:minecraft:entity_type>`, takes an id that registry holds, static or
 from a data pack, and delivers `CommandArgumentValue::Id`; any other id is refused
 with vanilla's `argument.resource.not_found` before a listener runs. Clients see it
-as vanilla's `minecraft:resource_key`, so unmodded clients complete it too. Block positions are resolved and floored
+as vanilla's `minecraft:resource_key`, so unmodded clients complete it too. The registry
+must be a `namespace:path` resource location of at most 256 bytes, and the server takes at
+most 256 distinct registries; a usage past either is left out, with the reason in the log. Block positions are resolved and floored
 from the source's world, relative or local coordinates without loading chunks.
 A player's source is their position and rotation. The console has no source
 entity and uses the Overworld spawn's block corner with zero rotation, so `@s`
