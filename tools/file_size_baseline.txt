@@ -3,4 +3,5 @@
 # sync-baseline: 9f42064c11efe7ef3e5ed2baad7ddc2a3b36eea0
 crates/horizon-client/src/game.rs 16655
 crates/horizon-client/src/game/mobs/creatures/mod.rs 8929
+crates/horizon-client/src/game/native_hooks/base.rs 5047
 crates/horizon-client/src/save.rs 5575
