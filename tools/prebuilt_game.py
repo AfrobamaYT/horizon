@@ -24,6 +24,11 @@ import tomllib
 import time
 from pathlib import Path
 
+try:
+    from . import lab
+except ImportError:
+    import lab
+
 ROOT = Path(__file__).resolve().parent.parent
 PROFILE = "release"
 # What rustc writes for a dylib or proc macro on each OS, plus metadata and the MinGW import libraries.
@@ -434,11 +439,8 @@ def start(out: Path) -> None:
     installed = out.parent / SMOKE
     with tempfile.TemporaryDirectory(dir=out.parent) as scratch:
         scratch = Path(scratch)
-        # Never a real player's folders (AGENTS.md): every home the game reads or writes is fresh.
-        homes = {name: scratch / name.lower() for name in
-                 ("HORIZON_HOME", "HORIZON_LAUNCHER_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME")}
-        environment = {**os.environ, **{name: str(path) for name, path in homes.items()},
-                       "HORIZON_LAUNCHER_NO_SELF_UPDATE": "1", "HORIZON_NO_AUDIO": "1", "RUST_BACKTRACE": "1"}
+        # Never a real player's folders: lab.game_env gives the game fresh homes and no audio.
+        environment = lab.game_env(RUST_BACKTRACE="1")
         game = scratch / "game"
         game.mkdir()
         command = [str(installed / EXECUTABLE), "--resources", str(scratch / "no-resources"), "--dedicated", "--nogui"]
