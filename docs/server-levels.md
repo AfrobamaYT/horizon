@@ -111,16 +111,17 @@ the fog are the Overworld's.
 
 A viewed level is a level besides its own that a player's client keeps, so that the server can send it
 that level's chunks and updates: what Immersive Portals needs to show other dimensions through its
-portals. The spec is #3716. Only its first part is built: the channel and the client's capability answer.
+portals. The spec is #3716. Built so far: the channel, the client's capability answer and the client's worlds.
 
 | Side | Where | What it does |
 |---|---|---|
 | Both | `horizon-protocol/src/viewed_levels.rs` | The codec of `horizon:levels`, an engine channel mods cannot register (`is_reserved_channel`). Configuration: the query and the answer. Play, clientbound only: `open`, `run` (packets of one level, each of a level-scoped kind) and `close`. |
 | Server | `lan/viewed_levels/capability.rs`, called from `lan/conn.rs` | Asks a client whose brand is Horizon's, in configuration, how many other levels it can view, and keeps the answer in `PlayerSender::max_viewed_levels`. No answer, or another revision, is 0. A second answer, or one it did not ask for, closes the connection. |
-| Client | `viewed_levels_net.rs`, called from `net.rs` | Answers the query before acknowledging `FinishConfiguration`. It keeps one world, so it answers 0. |
+| Client | `viewed_levels_net.rs`, called from `net.rs` | Answers the query before acknowledging `FinishConfiguration`: 2, the other two of vanilla's three dimensions. |
+| Client | `game/network/viewed_worlds/` | On `open`, a world for the level, built from the dimension type the server synced for it. A `run`'s packets change that world: its chunks, light, biomes, blocks, time and weather. `close` drops it. An `open` past the client's 2, or a `run` or `close` of a level not open, closes the connection. A Login, a Respawn or a new configuration drops them all. The player's own level (`host.level`) is never one of them, and nothing is drawn yet. |
 
 A vanilla client is never asked, and an older Horizon client ignores the query, so both view none. Nothing
-is sent in play yet.
+is sent in play by the server yet.
 
 ## Not done yet
 
