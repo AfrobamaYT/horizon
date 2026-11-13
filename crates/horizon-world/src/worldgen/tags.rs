@@ -400,6 +400,17 @@ mod tests {
         assert!(built.missing.is_empty());
     }
     #[test]
+    fn ordered_removal_objects_survive_the_worldgen_codec() {
+        let mut definitions = TagDefinitions::default();
+        definitions.apply_json("things", "fixture", r##"{"values":["stone", {"id":"stone","remove":true}, "stone", {"id":"stone","remove":true}, {"id":"absent","remove":true}]}"##).unwrap();
+        let built = definitions
+            .build(|id, _| (!id.ends_with("absent")).then(|| id.to_owned()))
+            .unwrap();
+        assert!(built.tags["minecraft:things"].is_empty());
+        assert!(built.missing.is_empty());
+    }
+
+    #[test]
     fn required_edges_precede_optional_edges_and_missing_tags_do_not_poison_siblings() {
         let mut definitions = TagDefinitions::default();
         for (name, json) in [

@@ -1083,6 +1083,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn included_child_can_be_removed_again() {
+        let names = HashMap::from([("test:one", 1)]);
+        let files = BTreeMap::from([
+            (
+                "test:parent".into(),
+                vec![
+                    serde_json::json!("#test:child"),
+                    serde_json::json!({"id":"#test:child","remove":true}),
+                ],
+            ),
+            ("test:child".into(), vec![serde_json::json!("test:one")]),
+        ]);
+        let mut out = Vec::new();
+        SyncData::expand_pack_tag(&files, "test:parent", &names, &mut out, &mut HashSet::new());
+        assert!(out.is_empty());
+        let files = BTreeMap::from([
+            (
+                "parent".into(),
+                serde_json::json!({"values":["#child"], "remove":["#child"]}),
+            ),
+            ("child".into(), serde_json::json!({"values":["test:one"]})),
+        ]);
+        SyncData::expand(&files, "parent", &names, &mut out, &mut HashSet::new());
+        assert!(out.is_empty());
+    }
+
+    #[test]
     #[ignore = "requires prepared vanilla resources"]
     fn datapack_damage_registry_reload_keeps_wire_ids_and_reloads_tags_before_future_join() {
         use horizon_world::loot::PackOverlay;

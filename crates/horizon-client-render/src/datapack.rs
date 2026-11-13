@@ -1020,7 +1020,7 @@ impl DataStore {
                             invalid,
                         );
                         out.retain(|f| !members.contains(f));
-                        seen_fns.retain(|f| !members.iter().any(|member| member == f));
+                        seen_fns.retain(|f| !members.iter().any(|member| member.as_str() == *f));
                     }
                     None => {
                         out.retain(|f| f.as_str() != e.as_str());

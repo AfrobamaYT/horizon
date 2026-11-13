@@ -105,7 +105,7 @@ mod tests {
         };
         write(
             "data/minecraft/tags/block/logs.json",
-            serde_json::json!({"values": ["oak_log", "#pack:fancy", {"id": "mod:log", "required": false}]}),
+            serde_json::json!({"values": ["oak_log", "#pack:fancy", {"id": "mod:log", "required": false}, {"id":"minecraft:oak_log", "remove":true}, "minecraft:oak_log"], "remove":["minecraft:cherry_log"]}),
         );
         // A tag that includes the one including it.
         write(
@@ -115,10 +115,7 @@ mod tests {
         let tags = Tags::new(&ResourceSource::directory(root.clone()));
         let mut logs: Vec<String> = tags.members("block", "logs").iter().cloned().collect();
         logs.sort();
-        assert_eq!(
-            logs,
-            ["minecraft:cherry_log", "minecraft:oak_log", "mod:log"]
-        );
+        assert_eq!(logs, ["minecraft:oak_log", "mod:log"]);
         assert!(tags.contains("block", "minecraft:logs", "minecraft:oak_log"));
         // Another registry's tag of the same name, and a tag no file defines, are empty.
         assert!(tags.members("entity_type", "logs").is_empty());
