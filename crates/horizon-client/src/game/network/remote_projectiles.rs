@@ -351,6 +351,7 @@ impl Game<'_> {
                 owner: None,
                 guest: None,
                 power: 4.0,
+                used_portal: false,
                 block_state: None,
             }),
             // FallingBlockEntity.recreateFromPacket: the block state is the data.

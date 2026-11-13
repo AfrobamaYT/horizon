@@ -127,6 +127,7 @@ impl Game<'_> {
                     &mut removed,
                     &mut cells,
                     i,
+                    true,
                     &max_stack,
                 );
             }
