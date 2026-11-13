@@ -4,7 +4,7 @@ run-name: daily ${{ inputs.commit || github.sha }}${{ github.event_name == 'work
 # main's head and by root's dispatch. Its legs are the workflows that used to run on main pushes, called unchanged:
 # the ignored-tests data shards, the wasm fixture and guest stacks, fn-replace-check and the native linkage probe,
 # plus the launcher's Windows runtime-lease tests (launcher-windows-check.yml) and the prebuilt SDK of the commit
-# (prebuilt-game.yml), which the nightly needs.
+# (prebuilt-game-build.yml), which the nightly needs.
 # The summary then moves the tag `daily-green` to the commit when every leg passed, or files one issue per failing
 # test (tools/ci/daily_summary.py), and on all green the nightly is published from that commit (release.yml).
 # Only a run on main with dry_run false writes anything: tags, issues, the nightly.
@@ -126,7 +126,7 @@ jobs:
   sdk:
     needs: resolve
     if: needs.resolve.outputs.skip == 'false'
-    uses: ./.github/workflows/prebuilt-game.yml
+    uses: ./.github/workflows/prebuilt-game-build.yml
     with:
       commit: ${{ needs.resolve.outputs.commit }}
 
@@ -167,7 +167,7 @@ jobs:
   # The SDK of the daily-green commit, from the sdk leg's archives in this run (no rebuild), before the nightly that
   # needs it. A dry run moved no tag and publishes nothing: it stops at the summary, which says what it would do.
   sdk-publish:
-    needs: [resolve, summary]
+    needs: [resolve, summary, sdk]
     if: needs.summary.outputs.green == 'true' && needs.resolve.outputs.dry_run == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -177,7 +177,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       COMMIT: ${{ needs.resolve.outputs.commit }}
-      TAG: prebuilt-${{ needs.resolve.outputs.commit }}
+      TAG: ${{ needs.sdk.outputs.tag }}
     steps:
       # None when the sdk leg skipped its build because the release already exists; the step below says so.
       - uses: actions/download-artifact@v4
