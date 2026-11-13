@@ -100,7 +100,6 @@ mod death_source;
 mod death_weapon;
 mod destroy_rules;
 pub(in crate::game) use death_source::death_hurt_source;
-pub(in crate::game) use death_weapon::AcceptedWeapon;
 
 /// A dying entity whose items drop (`LivingDropsEvent`).
 pub(super) struct DyingDrops<'a> {
@@ -750,7 +749,7 @@ impl Game<'_> {
     /// body — 49 to 52 are the four armour slots, which only a player's own
     /// pieces reach). A fire hit leaves a fire-resistant piece alone
     /// (`ItemStack.canBeHurtBy`).
-    fn hurt_mob_armor(&mut self, id: u32, damage: f32, kind: horizon_client::mobs::DamageKind) {
+    fn hurt_mob_armor(&mut self, id: u32, damage: f32, source: &HurtSource<'_>) {
         use horizon_core::equipment_slot::EquipmentSlot;
         if damage <= 0.0 {
             return;
@@ -760,7 +759,7 @@ impl Game<'_> {
         };
         let at = [m.position.x, m.position.y, m.position.z];
         let amount = ((damage / 4.0) as u32).max(1);
-        let name = damage_type(kind, false);
+        let name = source.damage_type;
         // A piece's maximum, or none when it may not lose durability at all.
         // `doHurtEquipment` starts from the item's `equippable` component
         // (`Equippable equippable = item.get(DataComponents.EQUIPPABLE)`), so a
@@ -807,14 +806,8 @@ impl Game<'_> {
                 damage: super::durability_damage(damage),
                 new_damage: super::durability_damage(damage),
             }];
-            let hit = mod_api::entity::health::HurtSource {
-                damage_type: name,
-                causing: 0,
-                direct: 0,
-                position: None,
-            };
             let mut cancel = false;
-            self.native_armor_hurt(None, id, &kind, &hit, &mut entries, &mut cancel);
+            self.native_armor_hurt(None, id, &kind, source, &mut entries, &mut cancel);
             if cancel {
                 return;
             }
@@ -1580,25 +1573,6 @@ impl Game<'_> {
             self.particles.add(&options, [x, y, z], [xa, ya, za]);
         }
     }
-    /// `LivingDeathEvent` for a mob whose health ran out: whether a native
-    /// mod canceled the death. A canceled mob stays alive at 1 health.
-    fn mob_death_canceled(&mut self, m: &Mob) -> bool {
-        if !mod_api::__private::listened(mod_api::HookId::LivingDeath) {
-            return false;
-        }
-        let (damage_type, attacker) = self.mob_damage_source(m);
-        let kind = super::native_hooks::mob_kind(m);
-        let mut cancel = false;
-        self.native_living_death(m.id, &kind, damage_type, attacker, &mut cancel);
-        if cancel {
-            self.died.remove(&m.id);
-            if let Some(alive) = self.mobs.iter_mut().find(|o| o.id == m.id) {
-                alive.health = 1.0;
-                alive.death_time = 0;
-            }
-        }
-        cancel
-    }
     /// LivingEntity.die / dropAllDeathLoot.
     pub(super) fn mob_died(&mut self, m: &Mob) {
         // The killing blow for the drop hooks, before the player's hit is forgotten.
@@ -2293,7 +2267,11 @@ impl Game<'_> {
                     self.snowflake_particle(at, velocity);
                 }
                 MobEvent::SunProtectionWear { mob } => self.wear_sun_protection(mob),
-                MobEvent::ArmorHurt { mob, amount, kind } => self.hurt_mob_armor(mob, amount, kind),
+                MobEvent::ArmorHurt {
+                    mob,
+                    amount,
+                    source,
+                } => self.hurt_mob_armor(mob, amount, &source),
                 MobEvent::GliderWear { mob, slot } => self.wear_mob_glider(mob, slot),
                 MobEvent::EntityEvent { mob, event, at } => {
                     // Ravager.roar (event 69 ends it): with the raw mob_griefing rule (not
@@ -4172,6 +4150,8 @@ impl Game<'_> {
         };
         attack.projectile = self.combat.attack().projectile;
         attack.direct = self.combat.attack().direct;
+        attack.position = from;
+        attack.projectile_weapon = self.combat.attack().projectile_weapon.clone();
         if let Some(a) = attacker.or(owner) {
             self.note_attacker(damage_type, a);
         }
@@ -4189,7 +4169,10 @@ impl Game<'_> {
         // owner of the projectile that hit (`projectile_owner` outlives a
         // projectile's other hits), not the guessed melee attacker.
         let owner = owner.filter(|_| projectile);
-        let causing = known.flatten().or(owner).map_or(0, |id| id as i32);
+        let causing = known.map_or_else(
+            || attacker.or(owner).map_or(attack.attacker, |id| id as i32),
+            |known| known.map_or(0, |id| id as i32),
+        );
         let mut outcome = horizon_client::health::BlockOutcome::default();
         // The hit's own push, held back until after the shield's (`hurtServer`
         // runs `applyItemBlocking` before `dealDefaultKnockback`).
@@ -4866,13 +4849,7 @@ impl Game<'_> {
     /// `ThrownEnderpearl` `.onHitEntity`), 5 from a small fireball destroys it.
     pub(super) fn hurt_vehicle(&mut self, p: &Projectile, id: u32, amount: f32) {
         let creative = p.owner == Some(Who::Player) && self.creative;
-        let damage_kind = match p.kind {
-            ProjectileKind::Arrow { .. } | ProjectileKind::Trident => DamageKind::Arrow,
-            ProjectileKind::SmallFireball | ProjectileKind::LargeFireball { .. } => {
-                DamageKind::Fireball
-            }
-            _ => DamageKind::Thrown,
-        };
+        let damage_kind = self.projectile_damage_kind(p);
         let damage_type = source_damage_type(Damage {
             kind: damage_kind,
             attacker: p.owner,
@@ -5283,8 +5260,7 @@ impl Game<'_> {
 
     /// A projectile's hit, landed in the attack of its owner.
     pub(super) fn projectile_hit(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
-        let mut attack = self.attack_of_who(p.owner);
-        attack.projectile = Some(p.id as i32);
+        let attack = self.projectile_attack(p);
         let result = self.with_attack(attack, |g| g.projectile_hit_landed(p, hit));
         self.settle_dealt_absorbed(p.owner == Some(Who::Player));
         result?;
@@ -5364,7 +5340,7 @@ impl Game<'_> {
                     id,
                     amount,
                     by_player,
-                    horizon_client::mobs::DamageKind::Arrow,
+                    self.projectile_damage_kind(p),
                     Some(p),
                 ) {
                     super::dragon::Hurt::Landed { .. } => EntityHit::Hurt,
@@ -5440,7 +5416,11 @@ impl Game<'_> {
             let burning = p.arrow.as_ref().is_some_and(|a| a.on_fire());
             let creative = p.owner == Some(Who::Player) && self.creative;
             let kind = self.carts[i].kind.id();
-            let refused = self.vehicle_refuses_projectile(p, id, kind, "minecraft:arrow");
+            let damage_type = horizon_client::health::damage_type(
+                self.projectile_damage_kind(p),
+                p.owner.is_some(),
+            );
+            let refused = self.vehicle_refuses_projectile(p, id, kind, damage_type);
             if !refused {
                 self.arrow_hits_cart(i, amount, p.velocity, burning, creative);
             }
@@ -5467,7 +5447,11 @@ impl Game<'_> {
             let amount = self.shot_damage(&mut arrow, Some(&victim_type), Who::Mob(id));
             let creative = p.owner == Some(Who::Player) && self.creative;
             let kind = self.boats[i].entity_type();
-            let refused = self.vehicle_refuses_projectile(p, id, &kind, "minecraft:arrow");
+            let damage_type = horizon_client::health::damage_type(
+                self.projectile_damage_kind(p),
+                p.owner.is_some(),
+            );
+            let refused = self.vehicle_refuses_projectile(p, id, &kind, damage_type);
             if !refused {
                 self.hurt_boat(i, amount, creative);
             }
@@ -5484,13 +5468,7 @@ impl Game<'_> {
         let atp = [at.x, at.y, at.z];
         // Projectile.onHit: the landing is heard.
         self.projectile_landed_event(p.id, p.owner, atp);
-        let source_kind = match p.kind {
-            ProjectileKind::Arrow { .. } | ProjectileKind::Trident => DamageKind::Arrow,
-            ProjectileKind::SmallFireball | ProjectileKind::LargeFireball { .. } => {
-                DamageKind::Fireball
-            }
-            _ => DamageKind::Thrown,
-        };
+        let source_kind = self.projectile_damage_kind(p);
         let attacker_species = match p.owner {
             Some(Who::Mob(id)) => self.mobs.iter().find(|m| m.id == id).map(|m| m.species()),
             _ => None,
@@ -8485,29 +8463,7 @@ fn bucketable(species: Species) -> Option<(&'static str, &'static str)> {
         _ => return None,
     })
 }
-/// The damage type id of a mob's damage source (`DamageSources.explosion`: a
-/// blast with a causing entity is `player_explosion` whoever it is, an
-/// exploding creeper too).
-pub(super) fn source_damage_type(d: Damage) -> &'static str {
-    damage_type(d.kind, d.attacker.is_some())
-}
-/// Whether the causing entity deals `kind` itself, so it is the source's
-/// direct entity too: a melee hit (`DamageSources.mobAttack`, `playerAttack`,
-/// a mace's or a spear's), a sting, a sonic boom, thorns.
-pub(super) fn melee(kind: horizon_client::mobs::DamageKind) -> bool {
-    use horizon_client::mobs::DamageKind as K;
-    matches!(
-        kind,
-        K::PlayerAttack
-            | K::MaceSmash
-            | K::Spear
-            | K::MobAttack
-            | K::Sting
-            | K::SonicBoom
-            | K::Thorns
-    )
-}
-pub(super) use death_source::damage_type;
+pub(super) use horizon_client::health::{damage_type, melee, source_damage_type};
 /// A Horizon item stack as a loot stack (id, count, damage, enchantments,
 /// and its custom data as SNBT for `minecraft:custom_data` predicates).
 fn to_loot(stack: &ItemStack) -> horizon_world::loot::LootStack {
@@ -11358,7 +11314,7 @@ mod armor_destroy_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn body_armor_guards_and_break_event_are_preserved() {
-        use horizon_client::mobs::{DamageKind, Mob};
+        use horizon_client::mobs::Mob;
         use horizon_core::equipment_slot::EquipmentSlot;
         use horizon_core::geometry::Vec3;
         with_game(|game| {
@@ -11367,7 +11323,11 @@ mod armor_destroy_tests {
             game.audio.capture = Some(Vec::new());
             let sword = ItemStack::new("minecraft:diamond_sword", 1);
             game.mobs[0].set_equipment_stack(EquipmentSlot::Body as usize, Some(sword.clone()));
-            game.hurt_mob_armor(21, 4.0, DamageKind::Generic);
+            game.hurt_mob_armor(
+                21,
+                4.0,
+                &horizon_client::health::NO_ATTACK.player_source("minecraft:generic", 0),
+            );
             assert_eq!(game.mobs[0].item_by_slot(EquipmentSlot::Body), Some(sword));
             let resistant = ItemStack::new("minecraft:netherite_chestplate", 1);
             assert!(
@@ -11376,7 +11336,11 @@ mod armor_destroy_tests {
                     .unwrap()
             );
             game.mobs[0].set_equipment_stack(EquipmentSlot::Body as usize, Some(resistant.clone()));
-            game.hurt_mob_armor(21, 4.0, DamageKind::Lava);
+            game.hurt_mob_armor(
+                21,
+                4.0,
+                &horizon_client::health::NO_ATTACK.player_source("minecraft:lava", 0),
+            );
             assert_eq!(
                 game.mobs[0].item_by_slot(EquipmentSlot::Body),
                 Some(resistant)
@@ -11399,7 +11363,11 @@ mod armor_destroy_tests {
                 Some(true)
             );
             game.mobs[0].set_equipment_stack(EquipmentSlot::Body as usize, Some(vulnerable));
-            game.hurt_mob_armor(21, 4.0, DamageKind::Lava);
+            game.hurt_mob_armor(
+                21,
+                4.0,
+                &horizon_client::health::NO_ATTACK.player_source("minecraft:lava", 0),
+            );
             assert_eq!(
                 game.mobs[0]
                     .item_by_slot(EquipmentSlot::Body)
@@ -11420,7 +11388,11 @@ mod armor_destroy_tests {
                 Some(false)
             );
             game.mobs[0].set_equipment_stack(EquipmentSlot::Body as usize, Some(resistant));
-            game.hurt_mob_armor(21, 4.0, DamageKind::Lava);
+            game.hurt_mob_armor(
+                21,
+                4.0,
+                &horizon_client::health::NO_ATTACK.player_source("minecraft:lava", 0),
+            );
             assert_eq!(
                 game.mobs[0]
                     .item_by_slot(EquipmentSlot::Body)
@@ -11431,7 +11403,11 @@ mod armor_destroy_tests {
             let mut armor = ItemStack::new("minecraft:wolf_armor", 1);
             armor.damage = game.items().get(&armor.item).unwrap().max_damage - 1;
             game.mobs[0].set_equipment_stack(EquipmentSlot::Body as usize, Some(armor));
-            game.hurt_mob_armor(21, 4.0, DamageKind::Generic);
+            game.hurt_mob_armor(
+                21,
+                4.0,
+                &horizon_client::health::NO_ATTACK.player_source("minecraft:generic", 0),
+            );
             assert!(game.mobs[0].item_by_slot(EquipmentSlot::Body).is_none());
             assert_eq!(game.lan_entity_events.last().map(|event| event.1), Some(65));
         });

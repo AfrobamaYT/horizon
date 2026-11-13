@@ -242,6 +242,17 @@ impl Game<'_> {
         dimension: DimensionKey,
         target: Target,
     ) -> bool {
+        let player = match target {
+            Target::Guest(conn) => Some(conn),
+            Target::Player => self.lan_acting,
+            _ => None,
+        };
+        if player
+            .and_then(|conn| self.command_guest(conn))
+            .is_some_and(|guest| !guest.body_present())
+        {
+            return false;
+        }
         if dimension == self.dim.key() {
             return !self.persist.removals.contains(&target)
                 && !self.persist.destroying_vehicles.contains(&target);

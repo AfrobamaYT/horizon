@@ -135,6 +135,7 @@ fn the_bridge_names_the_attacker_and_what_it_holds() {
             direct: None,
             player_uuid: None,
             held: Default::default(),
+            ..Default::default()
         };
         for pushed in [
             Hurting::Mob(&mob, &by_player),
@@ -162,6 +163,7 @@ fn the_bridge_names_the_attacker_and_what_it_holds() {
             direct: None,
             player_uuid: None,
             held: [Some(ItemStack::new("minecraft:iron_sword", 1)), None],
+            ..Default::default()
         };
         push(Hurting::Player(12, source(0)), &sword);
         push(Hurting::Player(12, source(0)), &NO_ATTACK);
@@ -309,6 +311,7 @@ fn the_attack_scope_nests_restores_and_a_guest_swap_hides_it() {
                             direct: None,
                             player_uuid: None,
                             held: Default::default(),
+                            ..Default::default()
                         };
                         game.with_attack(inner.clone(), |game| {
                             assert_eq!(game.current_attack(), inner);
