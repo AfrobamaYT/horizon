@@ -34,6 +34,7 @@ pub const DECODED_COMPONENTS: &[&str] = &[
     "minecraft:stored_enchantments",
     "minecraft:custom_name",
     "minecraft:item_name",
+    "minecraft:item_model",
     "minecraft:block_entity_data",
     "minecraft:enchantable",
     "minecraft:ominous_bottle_amplifier",
@@ -50,6 +51,9 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
     }
     if id == "minecraft:potion_duration_scale" {
         return potion_duration_scale(value).map(|value| Tag::Float(value.to_bits()));
+    }
+    if id == "minecraft:item_model" {
+        return item_model(value);
     }
     decode_component(id, value, reg)?;
     if id == "minecraft:block_entity_data" {
@@ -178,6 +182,7 @@ pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), Strin
         },
         "minecraft:enchantments" | "minecraft:stored_enchantments" => enchantment_map(t, reg),
         "minecraft:custom_name" | "minecraft:item_name" => super::component::decode(t),
+        "minecraft:item_model" => item_model(t).map(|_| ()),
         // TypedEntityData.codec: the type is the compound's id.
         "minecraft:block_entity_data" => match t {
             Tag::Compound(c) => match c.get(&"id".into()) {
@@ -222,6 +227,17 @@ fn potion_duration_scale(t: &Tag) -> Result<f32, String> {
     } else {
         Err(format!("Value must be non-negative: {value}"))
     }
+}
+/// `DataComponents.ITEM_MODEL`: `Identifier.CODEC`, without a resource lookup.
+fn item_model(value: &Tag) -> Result<Tag, String> {
+    let Tag::String(value) = value else {
+        return Err("Not a string".into());
+    };
+    let text =
+        String::from_utf16(&value.0).map_err(|_| "Not a valid resource location".to_owned())?;
+    let id = horizon_core::identifier::Identifier::parse(&text)
+        .map_err(|error| format!("Not a valid resource location: {text} {error}"))?;
+    Ok(Tag::String(id.to_string().as_str().into()))
 }
 /// `ItemEnchantments.CODEC`: registry keys and boxed-number levels in 1..=255.
 /// `UnboundedMapCodec` reports failed entries; commands do not retain its partial map.

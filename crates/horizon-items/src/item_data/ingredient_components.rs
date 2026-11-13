@@ -109,6 +109,10 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
             b.data().and_then(|d| d.other(id)),
         ),
         "minecraft:item_name" => item_name_equal(a, b),
+        "minecraft:item_model" => identifier_equal(
+            a.data().and_then(|d| d.other(id)),
+            b.data().and_then(|d| d.other(id)),
+        ),
         "minecraft:rarity" => rarity(a) == rarity(b),
         "minecraft:ominous_bottle_amplifier" => ominous_amplifier(a) == ominous_amplifier(b),
         _ => stored_component_equal(id, a, b),
@@ -287,6 +291,21 @@ fn ominous_amplifier(stack: &ItemStack) -> Option<i32> {
         None => i32::from(data.ominous_amplifier?),
     };
     (0..=4).contains(&value).then_some(value)
+}
+/// `Identifier.bySeparator`/`equals`: default namespaces, borrowing Java UTF-16.
+fn identifier_equal(a: Option<&Tag>, b: Option<&Tag>) -> bool {
+    let (Some(Tag::String(a)), Some(Tag::String(b))) = (a, b) else {
+        return false;
+    };
+    fn units(value: &JavaString) -> impl Iterator<Item = u16> + '_ {
+        let (prefix, path) = match value.0.iter().position(|unit| *unit == u16::from(b':')) {
+            Some(0) => ("minecraft:", &value.0[1..]),
+            None => ("minecraft:", value.0.as_slice()),
+            Some(_) => ("", value.0.as_slice()),
+        };
+        prefix.encode_utf16().chain(path.iter().copied())
+    }
+    units(a).eq(units(b))
 }
 
 fn block_entity_equal(a: Option<&Tag>, b: Option<&Tag>) -> bool {

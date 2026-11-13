@@ -964,3 +964,102 @@ fn minimum_attack_charge_recipe_decodes_and_matches_float_values() {
     assert!(absence.test_in(&context, &no_default));
     assert!(!positive.test_in(&context, &no_default));
 }
+
+#[test]
+fn item_model_component_literals_decode_validate_and_match() {
+    let mut items = Items::empty();
+    items.component_defaults = std::sync::Arc::new(std::collections::HashMap::from([(
+        "minecraft:stick".into(),
+        crate::json_nbt::json_to_compound(
+            serde_json::json!({"minecraft:item_model":"unregistered/model"})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap(),
+    )]));
+    let load = load();
+    let context = load.loop_context(LoopSide::Server, []);
+    for source in [
+        r#"{"type":"neoforge:components","items":"minecraft:stick","components":{"minecraft:item_model":"unregistered/model"}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:stick","components":{"minecraft:item_model":"minecraft:unregistered/model"}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:stick","components":{"minecraft:item_model":":unregistered/model"}}"#,
+    ] {
+        let ingredient = parse(source, &items);
+        assert_eq!(
+            ingredient.shown.as_ref().unwrap()[0]
+                .data()
+                .unwrap()
+                .other("minecraft:item_model"),
+            Some(&Tag::String("minecraft:unregistered/model".into())),
+        );
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        let (_, allocations) = horizon_threads::allocation_probe::measure(|| {
+            assert!(ingredient.test_in(&context, &stack));
+        });
+        assert_eq!(allocations.calls, 0, "{allocations:?}");
+        for model in [
+            "unregistered/model",
+            "minecraft:unregistered/model",
+            ":unregistered/model",
+        ] {
+            stack
+                .data_mut()
+                .set_loot_component("minecraft:item_model", &Some(Tag::String(model.into())));
+            let (_, allocations) = horizon_threads::allocation_probe::measure(|| {
+                assert!(ingredient.test_in(&context, &stack));
+            });
+            assert_eq!(allocations.calls, 0, "{allocations:?}");
+        }
+        for model in [
+            "minecraft:other",
+            "fixture:unregistered/model",
+            "Minecraft:unregistered/model",
+        ] {
+            stack
+                .data_mut()
+                .set_loot_component("minecraft:item_model", &Some(Tag::String(model.into())));
+            assert!(!ingredient.test_in(&context, &stack));
+        }
+    }
+    for source in [
+        r#"{"type":"neoforge:components","items":"minecraft:stick","components":{"minecraft:item_model":"Minecraft:stick"}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:stick","components":{"minecraft:item_model":"minecraft:Stick"}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:stick","components":{"minecraft:item_model":"bad namespace:stick"}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:stick","components":{"minecraft:item_model":"..:stick"}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:stick","components":{"minecraft:item_model":"a:b:c"}}"#,
+        r#"{"type":"neoforge:components","items":"minecraft:stick","components":{"minecraft:item_model":5}}"#,
+    ] {
+        let value: serde_json::Value = serde_json::from_str(source).unwrap();
+        assert!(Ingredient::parse(&value, &items).is_none());
+        let rule = IngredientRule::Components {
+            patch: crate::json_nbt::json_to_compound(value["components"].as_object().unwrap())
+                .unwrap(),
+            removed: Vec::new(),
+            strict: false,
+        };
+        let error = components::validate(&rule, &items).unwrap_err();
+        assert!(error.contains("component minecraft:item_model:"), "{error}");
+    }
+    for model in ["", ":", "minecraft:"] {
+        assert_eq!(
+            horizon_command::item::decoded_component_value(
+                "minecraft:item_model",
+                &Tag::String(model.into()),
+                &items.component_registry,
+            )
+            .unwrap(),
+            Tag::String("minecraft:".into()),
+        );
+    }
+    for units in [vec![0xd800], vec![0xdc00], vec![0xd83d, 0xde00]] {
+        let invalid_utf16 = Tag::String(horizon_core::nbt::JavaString(units));
+        assert!(
+            horizon_command::item::decoded_component_value(
+                "minecraft:item_model",
+                &invalid_utf16,
+                &items.component_registry,
+            )
+            .is_err()
+        );
+    }
+}
