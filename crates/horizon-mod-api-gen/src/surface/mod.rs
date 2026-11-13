@@ -3,6 +3,7 @@
 //! sides and "Not on wasm" from the wire index; everything else from a walk of the public items
 //! of `horizon-mod-api` and the vocabulary it re-exports.
 mod expand;
+pub mod notes;
 mod rust;
 #[cfg(test)]
 mod tests;
