@@ -11387,7 +11387,7 @@ impl Game<'_> {
             border,
             game_time: self.world.game_time as f32,
             shader_game_time: ((self.world.game_time % 24000) as f32 + alpha as f32) / 24000.0,
-            crumbling_sprite: crumbling_sprite(
+            crumbling_sprite: frame_geometry::crumbling_sprite(
                 &self.gui.atlas.sprites,
                 self.settings.improved_transparency,
             ),
