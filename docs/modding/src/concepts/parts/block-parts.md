@@ -22,6 +22,23 @@ to replace the state's emission or `None` to keep it.
 
 Keep the callback a pure function of the level, position and state, without side effects.
 
+## Connections
+
+`BlockPart::can_be_connected_to` lets the block beside a fence, a wall, or iron bars or a pane
+answer whether that connector connects to it. The event names your block's `pos` and `state`, the
+`connector` state, its vanilla rule (`kind`), the `direction` from your block toward the connector
+and `face_solid`, whether your block's face toward it is sturdy. Return `Some(true)` to connect,
+`Some(false)` to refuse, or `None` to keep vanilla's rule.
+
+| Rule | Behavior |
+| --- | --- |
+| Order | Vanilla's rule, then your block's answer, then the connector's own `connects_to`, which starts from that answer and has the last word. |
+| Calls | When the connector is placed and each time it settles its shape toward your block, on authoritative servers. |
+| Walls | A connected wall side is still low or tall from the block above it. |
+| Panics | A panicking part is contained with a warning, and vanilla's answer is used. |
+
+Answer from the event without touching the world: the level host is read-only.
+
 ## Landing writes
 
 `BlockPart::fall_on` runs at vanilla's landing moment on a read-only level random host.
