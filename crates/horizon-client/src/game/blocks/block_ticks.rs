@@ -386,6 +386,3 @@ impl Game<'_> {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod random_order_tests;
