@@ -1,5 +1,19 @@
 use super::*;
 
+// The shared guest fixture forwards this hook to its per-item listener.
+pub(super) fn listen(event: &mut mod_api::ViewedLevelSoundEvent<'_>) {
+    assert_eq!(
+        mod_api::__private::dimension_id(event.level.dimension()),
+        Some("minecraft:the_nether")
+    );
+    assert_eq!(event.sound.to_string(), "minecraft:block.anvil.land");
+    assert_eq!(event.source, mod_api::SoundSource::Blocks);
+    assert_eq!((event.position, event.seed), ([56.5, 64.0, 8.25], 42));
+    *event.play_at = Some([7.0, 64.0, 1.0]);
+    event.volume /= 4.0;
+    event.pitch = 1.5;
+}
+
 /// A wasm listener of `viewed_level_sound` reads the viewed level, the sound, its source,
 /// position and seed, and the `play_at`, volume and pitch it leaves come back.
 #[test]
