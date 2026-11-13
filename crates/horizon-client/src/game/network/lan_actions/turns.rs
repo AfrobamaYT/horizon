@@ -201,6 +201,8 @@ impl Game<'_> {
         motion.invulnerable = abilities.invulnerable || g.handover.is_some();
         // `ServerPlayer.isInvulnerableTo`'s connection term, as of now.
         motion.client_loaded = g.client_loaded();
+        // The mods' collision exclusions are the guest's (#3717).
+        motion.collision_exclusions.clone_from(&g.collision_exclusions);
         let _ = motion.set_health(g.health, false);
         motion.health.food.food = g.food;
         motion.health.food.saturation = g.saturation;
