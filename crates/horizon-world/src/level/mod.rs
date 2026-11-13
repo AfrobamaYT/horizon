@@ -609,6 +609,20 @@ pub trait LevelAccess: BlockEntityNeighbors {
         _destroy: &[BlockPos],
     ) {
     }
+    /// NeoForge's `IBlockExtension.onDestroyedByPushReaction`: the piston move
+    /// `piston_move_blocks` resolved destroys the block `state` at `pos`, the
+    /// blocks moving `direction`, after it dropped its resources and before
+    /// its cell becomes air. `ticks` schedules the ticks the level's writes
+    /// schedule; a write to a cell of the move is overwritten, as the pushed
+    /// states were read before. The default does nothing.
+    fn on_destroyed_by_push_reaction(
+        &mut self,
+        _ticks: &mut Ticks,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _direction: Direction,
+    ) {
+    }
     /// Observe a committed `Level.setBlock` state change, before its side effects.
     fn observe_block_changed(&self, _pos: BlockPos, _old: BlockStateId, _new: BlockStateId) {}
     /// NeoForge's `NeighborNotifyEvent`: the block at `pos` is about to tell

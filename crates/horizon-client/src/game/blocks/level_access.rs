@@ -354,6 +354,15 @@ impl LevelAccess for GameLevel<'_> {
     ) -> bool {
         self.piston_move_allowed(piston, direction, extending, push, destroy)
     }
+    fn on_destroyed_by_push_reaction(
+        &mut self,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Direction,
+    ) {
+        self.destroyed_by_push_reaction(ticks, pos, state, direction);
+    }
     fn observe_piston_moved(
         &self,
         piston: BlockPos,
