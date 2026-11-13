@@ -125,7 +125,11 @@ fn drown_up_to(
     server: bool,
 ) -> Option<Drowning> {
     let (next, drowned) = apply(*air, max, breath);
-    *air = if drowned { *air - breath.consume } else { next };
+    *air = if drowned {
+        air.saturating_sub(breath.consume)
+    } else {
+        next
+    };
     let (mut drowning, mut damage, mut bubbles, mut cancel) = (drowned, 2.0, 8, false);
     if server && !breath.can_breathe && *air <= 0 {
         native_living_drown(
@@ -179,9 +183,9 @@ pub fn own_air(
         *air = max;
         return None;
     }
-    if exact && !breath.can_breathe && *air - breath.consume < -20 {
+    if exact && !breath.can_breathe && air.saturating_sub(breath.consume) < -20 {
         // Already past -20: `WaterAnimal`'s `== -20` never fires again.
-        *air -= breath.consume;
+        *air = air.saturating_sub(breath.consume);
         return None;
     }
     drown_up_to(context, entity, kind, air, max, breath, true)?.damage
@@ -190,12 +194,12 @@ pub fn own_air(
 /// The air supply after `breath`: raised up to `max` when it can breathe,
 /// lowered otherwise. The second is whether the entity now drowns
 /// (`LivingEntity.shouldTakeDrowningDamage`: -20 or less), and its air is
-/// then 0.
+/// then 0. A mod's amounts saturate rather than overflow.
 pub fn apply(air: i32, max: i32, breath: Breath) -> (i32, bool) {
     if breath.can_breathe {
-        return (air.max((air + breath.refill).min(max)), false);
+        return (air.max(air.saturating_add(breath.refill).min(max)), false);
     }
-    let air = air - breath.consume;
+    let air = air.saturating_sub(breath.consume);
     if air <= -20 { (0, true) } else { (air, false) }
 }
 
