@@ -138,6 +138,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 
 | Method | Verdict | Horizon | Notes |
 | --- | --- | --- | --- |
+| `MutableDataComponentHolder`: `set`, `remove`, `update`, `applyComponents`, `copyFrom` | Covered | `ItemStack::set`, `remove`, `get`, `apply_components`, `copy_component_from`; `ItemPlace::edit` | `update` is `get` then `set`. Patch merges retain unrelated overrides and normalize damage atomically; copying preserves the source's own value/removal or clears the target override when the source inherits. Server-side `edit` writes the whole slot without changing its item/count or splitting one off, and a transaction abort restores it. [#3339](https://github.com/arismoko/horizon/issues/3339). |
 | `getDefaultAttributeModifiers(stack)` | Partial | `item_attribute_modifier` (`hooks/item_attribute_modifier.rs`) | Global `ItemAttributeModifierEvent` edits the stack's modifiers; the stack filters it, but it is not a Part method. |
 | `onDroppedByPlayer(stack, player)` | Covered | `ItemPart::on_dropped_by_player` (`hooks/on_dropped_by_player.rs`) | Runs on the server where `ServerPlayer.drop(boolean)` starts, for the drop key, with the whole selected stack and whether all of it goes; a cancel keeps the stack in the slot (no item entity, no statistic, no `item_toss`) and sends a server's player the slot back. A menu's throw is not asked, as in NeoForge; the global `item_toss` still hears every toss the part allows. |
 | `getHighlightTip(stack, name)` | Missing | — | No highlight-name hook. |
@@ -275,6 +276,20 @@ not its type properties, so "partial" below means the vanilla answer is readable
 | `canExtinguish(state, level, pos)` | Partial | `FluidTypeProperties.can_extinguish` | Static, and only a water-family fluid extinguishes; a mod fluid cannot opt in. |
 | `appendHoverText(stack, context, display, lines, flag)` | Missing | — | `FluidStack` has no tooltip hook. |
 
+## `BlockItemExtension`
+
+| Method | Verdict | Horizon | Notes |
+| --- | --- | --- | --- |
+| `onBlockPlacedBy(context, level, pos, state, placer, stack)` | Covered | `ItemPart::on_block_placed_by` (`hooks/on_block_placed_by.rs`, hook version 1) | Server notice with a `ServerHost`, the pre-shrink stack, optional player, primary position, final state and placement face/click. Fires once after stack block-entity data and `Block.setPlacedBy` companions exist, before level events and consumption, on player and dispenser block-item placement; a dispenser has no placer. Refused, failed and `entity_place`-canceled placements never notify. An item with no subscribed Part costs one lookup and no stack conversion. |
+
+With `HORIZON_TEST_RESOURCES` pointing to prepared 26.3 resources, the isolated Game regression
+places a custom block item, a two-part red bed and a dispenser's shulker box, and checks cancellation
+and refusal without consuming the stack:
+
+```sh
+cargo test -p horizon-client --lib game::native_hooks::on_block_placed_by_tests::block_items_notify_after_setup_and_before_consumption -- --exact --ignored
+```
+
 ## `IMenuTypeExtension`
 
 Menu types are content data (`MenuType` in `crates/horizon-mod-package/src/content.rs`, files under
@@ -369,3 +384,28 @@ shearing when no part answers. Entity parts are native-only, so wasm mods do not
 | `isValidRailShape(shape)` | **Covered** | Server `BlockPart::rail_valid_shape` (`hooks/rail_valid_shape.rs`), with the rail's state, asked before `RailState` writes a shape; a refused shape keeps the current one. It starts false for a value the rail's `shape` property lacks, as NeoForge's default answers. |
 
 A minecart now treats any block in `#minecraft:rails` built on `BaseRailBlock` as track (`BaseRailBlock.isRail`), where it used to accept only the four vanilla rail names.
+
+## Standalone model baking
+
+These are model-registration counterparts, not object-extension methods (#3430).
+
+| NeoForge | Verdict | Horizon route |
+| --- | --- | --- |
+| `ModelEvent.RegisterStandalone.register` | **Covered for quad results** | Client `standalone_models` contract version 2 retains plain file ids in `models` and adds `forms: Vec<StandaloneModelForm>` on the same hook, with `RegistrationContext` on native and wasm. |
+| `SimpleUnbakedStandaloneModel` with a `ModelState` | **Covered for quad results** | `Rotated { id, model, turns, uvlock }` uses the blockstate baker's centered negative XYZ quarter-turns and inverse face UV transform; no draw-pose substitution. |
+| `UnbakedStandaloneModel.resolveDependencies` and quad composition | **Covered for declared file dependencies** | `Combined { id, parts }` loads all sources and their transitive dependencies, concatenates their quads and publishes one `ModelRef`. A missing dependency drops the entire form and logs its registering mod. |
+| Mod-defined baked result type `T` | **Out of scope** | Horizon's standalone result is baked quads, not arbitrary mod-owned objects. |
+
+The namespace rule, `RenderAssets::model` resolution and `model_baking_completed` publication
+are unchanged. Forms rebake on every resource load; failed reloads leave old handles valid.
+See [the model drawing guide](../../modding/src/how-to/client/model-drawing.md#bake-time-standalone-forms).
+
+CPU proof selectors in `horizon-client-render` are
+`models::catalog::standalone_tests::standalone_rotated_arrow_has_literal_geometry_and_world_locked_uvs`,
+`models::catalog::standalone_tests::standalone_combined_keeps_both_cubes_and_rebakes_changed_dependencies`
+and `models::catalog::standalone_tests::standalone_missing_dependency_drops_entire_form_and_logs_registering_mod`.
+The resource-backed `horizon-client` test
+`game::model_baking_completed_tests::standalone_forms_resolve_as_one_model_and_republish_after_resource_reload`
+exercises real Game publication, model-registry lookup, distinct full-block/slab geometry,
+missing-form refusal and stale/replacement handles. It requires `HORIZON_TEST_RESOURCES`
+and `--ignored`. These are CPU/model-registry proofs, not GPU rendering or screenshot proof.
