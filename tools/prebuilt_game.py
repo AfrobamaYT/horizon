@@ -24,9 +24,6 @@ import tomllib
 import time
 from pathlib import Path
 
-# lab sits beside this file; the script also loads by path (tests, CI) with no package around it.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import lab  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 PROFILE = "release"
@@ -435,6 +432,9 @@ def start(out: Path) -> None:
     """Start the executable `smoke` installed, as a dedicated server with no game data: it loads the game's libraries
     and sets up the mods' runtime, then stops at the missing prepared files. Fails on a crash, a hang or any other
     stop, so an archive whose libraries disagree (two allocators, #3877) cannot ship."""
+    # Run as a script, so lab sits on the path beside it; tests import this module without running `start`.
+    import lab
+
     installed = out.parent / SMOKE
     with tempfile.TemporaryDirectory(dir=out.parent) as scratch:
         scratch = Path(scratch)
