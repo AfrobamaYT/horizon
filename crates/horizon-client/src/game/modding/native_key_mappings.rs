@@ -138,3 +138,33 @@ impl Game<'_> {
         self.native_input.mappings.consume_click(mod_id, id)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn opening_and_closing_a_direct_screen_discards_pending_clicks() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.title = None;
+            game.native_input
+                .mappings
+                .bind([horizon_client::keymapping::ModBinding {
+                    owner: "test",
+                    id: "pending",
+                    input: "key.keyboard.k".into(),
+                    modifiers: 0,
+                    context: horizon_client::keymapping::MappingContext::InGame,
+                }]);
+            game.native_input.mappings.input(
+                "key.keyboard.k",
+                horizon_client::keymapping::KeyAction::Press,
+                false,
+                false,
+                0,
+            );
+            game.open_emote_wheel();
+            game.close_emote_wheel(None);
+            assert!(!game.consume_click("test", "pending"));
+        });
+    }
+}
