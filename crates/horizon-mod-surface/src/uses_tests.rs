@@ -1923,6 +1923,8 @@ fn a_path_inside_the_mod_is_its_own_only_through_modules_it_declares() {
         "some_dep::bind!(world);\nmod terrain;",
         "#[some_dep::reexport(world)]\nmod terrain;",
         "#[reexport]\nmod terrain;",
+        // Called only inside a function body: its `use` still binds a name the scan cannot see.
+        "macro_rules! api { ($m:ident) => { use mod_api::$m; }; }\nfn g() { api!(world); }\nmod terrain;",
     ] {
         refused_for_the_new_field(fits_a_new_dims_field(&[
             ("src/lib.rs", lib),
