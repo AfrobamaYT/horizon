@@ -8,7 +8,7 @@ impl Game<'_> {
     /// the part placed the contents, `Some(false)` it failed.
     pub(in crate::game) fn native_empty_contents(
         &mut self,
-        player: Option<u128>,
+        player: Option<PlayerRef>,
         pos: BlockPos,
         hit: Option<(BlockPos, Direction)>,
         stack: &ItemStack,
@@ -36,7 +36,7 @@ impl Game<'_> {
         if !self.empty_contents_listens(&stack.item) {
             return None;
         }
-        let player = hit.is_some().then(|| self.native_acting_id());
+        let player = hit.and_then(|_| self.native_acting_player());
         let mut answer = None;
         self.native_empty_contents(player, pos, hit, stack, &mut answer);
         answer

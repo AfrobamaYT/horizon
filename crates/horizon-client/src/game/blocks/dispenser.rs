@@ -32,7 +32,7 @@ pub(super) type Pos = (i32, i32, i32);
 
 /// The sound event of a plain click, a failed dispense and a launched projectile.
 pub(super) const CLICK: i32 = 1000;
-const FAIL: i32 = 1001;
+pub(super) const FAIL: i32 = 1001;
 const LAUNCH: i32 = 1002;
 
 fn step(d: Direction) -> [i32; 3] {

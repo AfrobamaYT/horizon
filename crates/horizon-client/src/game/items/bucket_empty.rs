@@ -5,11 +5,14 @@ use horizon_client::first_person::UseResult;
 use horizon_client::items::ItemStack;
 use horizon_core::{geometry::Direction, position::BlockPos};
 use horizon_world::level::BucketContent;
+use mod_api::HostTransaction;
 
 impl Game<'_> {
     /// `BucketItem.use`'s `emptyContents` for the acting player's `stack`,
     /// poured at `target` from the clicked `hit`: the use's result when the
-    /// item's `empty_contents` Part answered, `None` for vanilla's pour.
+    /// item's `empty_contents` Part answered, `None` for vanilla's pour. The
+    /// Part is asked in a transaction with the use's apply: one that changed
+    /// the hand it was asked about is refused and undone, never re-decided.
     pub(in crate::game) fn player_empty_contents(
         &mut self,
         stack: &ItemStack,
@@ -26,14 +29,29 @@ impl Game<'_> {
         };
         let clicked = BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]);
         let pos = BlockPos::new(target[0], target[1], target[2]);
-        if !self.native_empty_contents_event(pos, Some((clicked, face)), stack)? {
-            return Some(UseResult::Fail);
+        if !self.empty_contents_listens(&stack.item) {
+            return None;
         }
-        // `BucketItem.getEmptySuccessItem`: the empty bucket, kept full in creative.
-        if !self.creative {
-            *self.held_mut() = Some(ItemStack::new("minecraft:bucket", 1));
-        }
-        Some(UseResult::Success { swing: true })
+        // The decision's preconditions: the hand's slot and its whole stack.
+        let slot = self.held_slot();
+        let held = self.stack_in(slot).cloned();
+        let used = self.transaction(|game, _| {
+            match game.native_empty_contents_event(pos, Some((clicked, face)), stack) {
+                None => return Ok(None),
+                Some(false) => return Ok(Some(UseResult::Fail)),
+                Some(true) => {}
+            }
+            if game.held_slot() != slot || game.stack_in(slot) != held.as_ref() {
+                return Err(());
+            }
+            game.trigger_block("minecraft:placed_block", target, stack);
+            // `BucketItem.getEmptySuccessItem`: the empty bucket, kept full in creative.
+            if !game.creative {
+                *game.held_mut() = Some(ItemStack::new("minecraft:bucket", 1));
+            }
+            Ok(Some(UseResult::Success { swing: true }))
+        });
+        used.unwrap_or(Some(UseResult::Fail))
     }
 
     /// `BucketItem.emptyContents` plays `playSound(player, …)`: a guest's own client already
