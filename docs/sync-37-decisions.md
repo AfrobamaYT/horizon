@@ -16,8 +16,12 @@ obsolete held-mesh accounting is removed. No replacement raw world-hold API is i
 The name-only Game measurement against the frozen pin reports **9 matches**, not zero:
 `key`, `level` and `sea_level` are unrelated `Dim` methods; `render_with`, `in_own_process`,
 `all`, `stage`, `native` and `exists` match unrelated methods outside upstream's Game directory.
-These are name clashes, not remaining extraction copies. The previous sync's 99-name figure is not reused.
-Game is now 12,270 physical lines at the restoration head.
+These are name-only matches, not game.rs moves: zero genuine move remnants remain.
+Measured afresh against the frozen pin, the base has 99 name-only matches occupying 4,882 function
+lines; the restoration has 9 occupying 983 function lines. Game shrinks from 15,507 to 12,270
+physical lines (264 to 167 functions; 12,893 to 10,061 function lines). Upstream's game.rs has
+10,128 function lines. These are actual base/head measurements, not reused earlier-sync figures.
+The generated baseline has zero allowances; no baseline was raised.
 
 Newer main overlaps were inspected against the reference replay: generic `Clicks<Option<ItemStack>>`,
 `menu_env()` in the moved menu click handler and custom drowning bubbles in guest ticks are preserved.
