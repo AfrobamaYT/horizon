@@ -5,7 +5,10 @@
 use super::{entities::ViewedEntities, routing::RouteError};
 use crate::game::remote_chunks::{ChunkFormat, section_blocks};
 use horizon_client::{chunk::known_block_state, fast_hash::FxHashMap, world::World};
-use horizon_protocol::packets::play::{Clientbound as C, ClockState};
+use horizon_protocol::{
+    chunk::BlockEntityInfo,
+    packets::play::{self, Clientbound as C, ClockState},
+};
 use horizon_world::registry::BlockStateId;
 use std::sync::Arc;
 
@@ -18,6 +21,8 @@ pub(in crate::game) const MAX_COLUMNS: usize = 2048;
 pub(in crate::game) struct ViewedWorld {
     /// The level's key (`minecraft:the_nether`).
     pub(in crate::game) level: String,
+    /// Its key as a mod's `LevelRef` names it.
+    key: mod_api::DimensionKey,
     /// What its chunk packets decode with.
     format: Arc<ChunkFormat>,
     /// The world clock its day time follows: its dimension type's `default_clock`.
@@ -27,6 +32,10 @@ pub(in crate::game) struct ViewedWorld {
     clock: Option<ClockState>,
     pub(in crate::game) world: World,
     pub(in crate::game) entities: ViewedEntities,
+    /// The block entities of each column as its chunk packet carried them, with the data sent
+    /// since: what a travel into the level loads (`switch`). A world that was the player's keeps
+    /// its own in `world.block_entities` besides.
+    pub(in crate::game) block_entities: FxHashMap<(i32, i32), Vec<BlockEntityInfo>>,
 }
 
 impl ViewedWorld {
@@ -37,12 +46,14 @@ impl ViewedWorld {
         world: World,
     ) -> Self {
         Self {
+            key: mod_api::__private::dimension_key(&level),
             level,
             format,
             default_clock,
             clock: None,
             world,
             entities: ViewedEntities::default(),
+            block_entities: FxHashMap::default(),
         }
     }
 
@@ -63,12 +74,17 @@ impl ViewedWorld {
             }
             C::LevelChunkWithLight(p) => match self.format.column(&p) {
                 Ok(chunk) => {
-                    self.world.chunks.insert((p.x, p.z), Arc::new(chunk));
+                    let key = (p.x, p.z);
+                    self.world.chunks.insert(key, Arc::new(chunk));
+                    self.unload_block_entities(key);
+                    self.block_entities.insert(key, p.chunk.block_entities);
                 }
                 Err(e) => log::warn!("Horizon: {} chunk {} {}: {e}", self.level, p.x, p.z),
             },
             C::ForgetLevelChunk(p) => {
-                self.world.unload_chunk((p.pos[0], p.pos[1]));
+                let key = (p.pos[0], p.pos[1]);
+                self.world.unload_chunk(key);
+                self.unload_block_entities(key);
             }
             C::LightUpdate(p) => {
                 let (layers, _) = self.format.light(&p.light);
@@ -131,10 +147,74 @@ impl ViewedWorld {
     /// A server's block: a state the client lacks (a server with mods it lacks) reads as air,
     /// as in its chunks.
     fn set_block(&mut self, [x, y, z]: [i32; 3], state: i32) {
-        let state = state.max(0) as u32;
-        let state = BlockStateId(if known_block_state(state) { state } else { 0 });
-        self.world.set_stored(x, y, z, state);
+        self.world.set_stored(x, y, z, stored_state(state));
     }
+
+    /// `LevelChunk.setBlockState` with another block at `pos`: the block entity there goes, with
+    /// the data kept for it (a block's own state change keeps them).
+    pub(super) fn forget_block_entity(&mut self, [x, y, z]: [i32; 3]) {
+        let packed_xz = ((x & 15) << 4 | (z & 15)) as i8;
+        if let Some(infos) = self.block_entities.get_mut(&(x >> 4, z >> 4)) {
+            infos.retain(|info| (info.packed_xz, i32::from(info.y)) != (packed_xz, y));
+        }
+        self.world.block_entities.remove(&(x, y, z));
+    }
+
+    /// The column `key` goes, or is sent again: so do its block entities.
+    fn unload_block_entities(&mut self, key: (i32, i32)) {
+        self.block_entities.remove(&key);
+        if !self.world.block_entities.is_empty() {
+            self.world
+                .block_entities
+                .unload(|p| (p.0 >> 4, p.2 >> 4) == key);
+        }
+    }
+
+    /// A block with a block entity placed at `pos` (`LevelChunk.setBlockState`): the travel makes
+    /// its block entity, with the data sent for it since, if any.
+    pub(super) fn placed_block_entity(&mut self, pos: [i32; 3]) {
+        let placed = play::BlockEntityData {
+            pos,
+            kind: -1,
+            tag: horizon_core::nbt::Tag::End,
+        };
+        self.block_entity_data(placed, true);
+    }
+
+    /// `handleBlockEntityData`: a block entity's data, kept for the column that holds it, when
+    /// the column listed a block entity there or `entity_block`, the block there now has one (a
+    /// block entity placed since). Other data is dropped, as by the vanilla client, so what a
+    /// world keeps is bounded by its columns' block-entity blocks.
+    pub(super) fn block_entity_data(&mut self, p: play::BlockEntityData, entity_block: bool) {
+        let [x, y, z] = p.pos;
+        let Ok(y16) = i16::try_from(y) else {
+            return;
+        };
+        let packed_xz = ((x & 15) << 4 | (z & 15)) as i8;
+        let at = |info: &BlockEntityInfo| info.packed_xz == packed_xz && info.y == y16;
+        let column = (x >> 4, z >> 4);
+        if !self.world.chunks.contains_key(&column) {
+            return;
+        }
+        let infos = self.block_entities.entry(column).or_default();
+        let info = BlockEntityInfo {
+            packed_xz,
+            y: y16,
+            kind: p.kind,
+            tag: p.tag,
+        };
+        match infos.iter_mut().find(|i| at(i)) {
+            Some(kept) => *kept = info,
+            None if entity_block => infos.push(info),
+            None => {}
+        }
+    }
+}
+
+/// The state a server's block update leaves: one the client lacks reads as air.
+pub(super) fn stored_state(state: i32) -> BlockStateId {
+    let state = state.max(0) as u32;
+    BlockStateId(if known_block_state(state) { state } else { 0 })
 }
 
 /// The worlds a connection views (`Remote::viewed`), by the level's index in the Login packet's
@@ -155,6 +235,22 @@ impl ViewedWorlds {
     pub(in crate::game) fn get_mut(&mut self, level: i32) -> Option<&mut ViewedWorld> {
         self.worlds.get_mut(&level)
     }
+    /// The key of the level named `level`, while the server keeps it open: what `host.level`
+    /// hands a client mod for it.
+    pub(in crate::game) fn key_of(&self, level: &str) -> Option<mod_api::DimensionKey> {
+        self.worlds
+            .values()
+            .find(|w| w.level == level)
+            .map(|w| w.key)
+    }
+    /// The world of the level `key` names, while the server keeps it open: what a client mod's
+    /// reads through its handle read.
+    pub(in crate::game) fn world_of(&self, key: mod_api::DimensionKey) -> Option<&World> {
+        self.worlds
+            .values()
+            .find(|w| w.key == key)
+            .map(|w| &w.world)
+    }
     /// The world of `level`, if the server opened it.
     #[cfg(test)]
     pub(in crate::game) fn get(&self, level: i32) -> Option<&ViewedWorld> {
@@ -165,6 +261,10 @@ impl ViewedWorlds {
         if let Some(old) = self.worlds.insert(level, world) {
             free(old);
         }
+    }
+    /// Takes `level`'s world out, whole: a travel into it (`switch`).
+    pub(in crate::game) fn take(&mut self, level: i32) -> Option<ViewedWorld> {
+        self.worlds.remove(&level)
     }
     /// Drops `level`'s world (`close`); false when it held none.
     pub(in crate::game) fn remove(&mut self, level: i32) -> bool {
