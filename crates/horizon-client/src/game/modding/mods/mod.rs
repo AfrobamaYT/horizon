@@ -1204,8 +1204,8 @@ fn register_entity_types(mods: &[horizon_client::mod_content::ContentMod]) {
     let templates_changed = !templates_set
         && tracking::templates()
             .iter()
-            .map(|t| t.0)
-            .ne(types.iter().map(|t| t.id.as_str()));
+            .copied()
+            .ne(types.iter().map(|t| (t.id.as_str(), t.template.as_str())));
     types.retain(|t| t.item.is_some());
     let set = projectiles::register_thrown_types(
         types
@@ -2077,7 +2077,11 @@ mod tests {
                 Some(horizon_core::nbt::Tag::IntArray(owner.to_vec())),
                 "{id}"
             );
-            assert_eq!(get("Sitting"), Some(horizon_core::nbt::Tag::Byte(1)), "{id}");
+            assert_eq!(
+                get("Sitting"),
+                Some(horizon_core::nbt::Tag::Byte(1)),
+                "{id}"
+            );
             assert_eq!(get(own.0), Some(own.1), "{id}");
             let loaded = horizon_client::entity_nbt::mob_from_nbt(&tag, &types, 2, None)
                 .expect("it loads back");
@@ -2090,7 +2094,14 @@ mod tests {
                     loaded.extra.sitting,
                     (loaded.extra.color, loaded.extra.variant)
                 ),
-                (id, species, true, Some(owner), true, (pet.extra.color, pet.extra.variant))
+                (
+                    id,
+                    species,
+                    true,
+                    Some(owner),
+                    true,
+                    (pet.extra.color, pet.extra.variant)
+                )
             );
         }
     }
