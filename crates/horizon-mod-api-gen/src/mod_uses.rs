@@ -90,6 +90,26 @@ fn inside(base: &[String], target: &str) -> bool {
     true
 }
 
+/// Whether the token at `at` sits inside an attribute's brackets, `#[…]` or `#![…]`.
+fn in_attribute(list: &[Token<'_>], at: usize) -> bool {
+    let mut depth = 0usize;
+    for index in (0..at).rev() {
+        match list[index] {
+            Token::Punct(b')' | b']' | b'}') => depth += 1,
+            Token::Punct(b'(' | b'[' | b'{') if depth > 0 => depth -= 1,
+            Token::Punct(b'[') => {
+                return index >= 1
+                    && (list[index - 1] == Token::Punct(b'#')
+                        || (index >= 2
+                            && list[index - 1] == Token::Punct(b'!')
+                            && list[index - 2] == Token::Punct(b'#')));
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 /// The first `#[path = "…"]` or `include!(…)` in `text` that leaves the folder, given the file's
 /// folder relative to the mod's.
 fn escape(text: &str, folder: &[String]) -> Option<String> {
@@ -104,11 +124,11 @@ fn escape(text: &str, folder: &[String]) -> Option<String> {
     };
     for at in 0..list.len() {
         match list[at] {
+            // `path = "…"` anywhere inside an attribute, `cfg_attr(…, path = …)` included.
             Token::Ident("path")
-                if at >= 2
-                    && list[at - 1] == Token::Punct(b'[')
-                    && list[at - 2] == Token::Punct(b'#')
-                    && list.get(at + 1) == Some(&Token::Punct(b'=')) =>
+                if list.get(at + 1) == Some(&Token::Punct(b'='))
+                    && list.get(at + 2) != Some(&Token::Punct(b'='))
+                    && in_attribute(&list, at) =>
             {
                 match literal(at + 2) {
                     Some(target) if inside(folder, target) => {}
@@ -329,6 +349,13 @@ mod tests {
             escapes("#[path = \"/abs/x.rs\"] mod x;"),
             ReadError::Escapes { .. }
         ));
+        assert_eq!(
+            escapes("#[cfg_attr(all(), path = \"../../elsewhere/x.rs\")] mod x;"),
+            ReadError::Escapes {
+                file: "src/lib.rs".into(),
+                target: "../../elsewhere/x.rs".into()
+            }
+        );
         assert_eq!(
             escapes("include!(concat!(env!(\"OUT_DIR\"), \"/gen.rs\"));"),
             ReadError::Escapes {
