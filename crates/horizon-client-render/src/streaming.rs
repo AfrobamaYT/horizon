@@ -1799,7 +1799,7 @@ impl Streaming {
         if sweep {
             (self.scan_area, self.scan_age) = (area, 0);
         } else {
-            self.scan_age += 1;
+            self.scan_age = self.scan_age.saturating_add(1);
         }
         self.requeue();
         self.relight_edits(world);
