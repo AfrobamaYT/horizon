@@ -608,6 +608,54 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily: starts rustc"]
+    fn wrapper_owns_holder_marker() {
+        let dir = fixture();
+        let source = dir.join("main.rs");
+        let output = dir.join(std::env::consts::EXE_SUFFIX.to_owned() + "wrapper");
+        let library_source = dir.join("library.rs");
+        fs::write(&library_source, "pub mod holder { pub static CAPABILITY: [u8; 26] = *b\"horizon-private-holder-v2;\"; }").unwrap();
+        let library = dir.join(format!(
+            "{}horizon_mod_package{}",
+            std::env::consts::DLL_PREFIX,
+            std::env::consts::DLL_SUFFIX
+        ));
+        assert!(std::process::Command::new("rustc")
+            .args([
+                "--crate-type=dylib",
+                "--crate-name=horizon_mod_package",
+                "-Cprefer-dynamic"
+            ])
+            .arg(&library_source)
+            .arg("-o")
+            .arg(&library)
+            .status()
+            .unwrap()
+            .success());
+        let template =
+            "fn main() { std::hint::black_box(&horizon_mod_package::holder::CAPABILITY); }";
+        fs::write(
+            &source,
+            main_rs(template, &[], &internals::Catalog::default()),
+        )
+        .unwrap();
+        assert!(std::process::Command::new("rustc")
+            .args(["--edition=2021", "-O", "-Cprefer-dynamic", "--extern"])
+            .arg(format!("horizon_mod_package={}", library.display()))
+            .arg(&source)
+            .arg("-o")
+            .arg(&output)
+            .status()
+            .unwrap()
+            .success());
+        assert!(fs::read(&output)
+            .unwrap()
+            .windows(26)
+            .any(|w| w == b"horizon-private-holder-v2;"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn projects_refuse_a_game_dependency_and_need_the_mod_api() {
         let dir = fixture();
         for (dependencies, game) in [
