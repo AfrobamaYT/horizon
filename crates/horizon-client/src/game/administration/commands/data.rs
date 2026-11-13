@@ -2802,6 +2802,15 @@ mod vehicle_container_tests {
                     false,
                     "",
                 ),
+                // Only container carts read a loot table: one on any other cart is dropped.
+                (
+                    "tnt_cart_plain",
+                    "minecraft:tnt_minecart",
+                    "Items:[{Slot:0b,id:\"minecraft:diamond\",count:3,components:{\"minecraft:custom_data\":{h052:9}}}],LootTable:\"minecraft:empty\",LootTableSeed:73L",
+                    None,
+                    false,
+                    "",
+                ),
                 (
                     "boat_items",
                     "minecraft:oak_chest_boat",
