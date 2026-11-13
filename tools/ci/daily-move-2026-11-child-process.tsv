@@ -167,3 +167,4 @@ horizon-world	lib	native_load_context::tests::fifo_and_directory_do_not_block_or
 horizon-world	lib	native_load_context::tests::validates_open_handle_after_entry_replacement	crates/horizon-world/src/native_load_context.rs:526	child-process
 xtask	test:book_chapters	the_hook_notes_chapter_is_the_page_alone	xtask/tests/book_chapters.rs:31	child-process
 xtask	test:packaging	client_and_server_layouts_require_and_ship_std	xtask/tests/packaging.rs:18	child-process
+xtask	bin:xtask	tests::missing_inputs_are_named_before_the_folder_is_touched	xtask/src/main.rs:649	child-process
