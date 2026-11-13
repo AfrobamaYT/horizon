@@ -2938,13 +2938,18 @@ impl crate::block_contact::InsideWalk for PlayerInside<'_, '_, '_, '_> {
     }
     /// `getEntityInsideCollisionShape` for the player: the whole block but for
     /// powder snow (its own collision shape), the filled cauldrons (their content
-    /// column) and the end portals and tripwires Horizon doesn't follow it into.
+    /// column), the end portals and tripwires Horizon doesn't follow it into, and
+    /// blocks inside the player's collision exclusions.
     fn inside_shape(
         &mut self,
         state: BlockStateId,
         p: BlockPos,
     ) -> crate::block_contact::InsideShape {
         use crate::block_contact::InsideShape;
+        // A block a mod's collision exclusions reach is none to be inside (#3717).
+        if self.m.player.collision_exclusions.spares(p) {
+            return InsideShape::Empty;
+        }
         let Some(definition) = self.m.assets.registry.state(state) else {
             return InsideShape::Full;
         };

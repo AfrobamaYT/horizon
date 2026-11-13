@@ -648,7 +648,8 @@ pub trait EntitiesBackendMut {
     /// Sets the player's collision exclusions, boxes of its own level
     /// (`[min_x, min_y, min_z, max_x, max_y, max_z]`) in which that level's blocks don't stop it:
     /// the part of a block's collision shape inside a box doesn't collide, a block sharing volume
-    /// with one is no wall to suffocate in, and the server's check of the player's moves reads
+    /// with one is no wall to suffocate in and doesn't act on the player inside it (cobwebs, powder
+    /// snow, damaging blocks), and the server's check of the player's moves reads
     /// the same boxes. Entity colliders and the world border still stop it. Each call replaces
     /// the last set; an empty slice clears it, and so do a change of level, a respawn and
     /// leaving. Nothing is saved, and nothing reaches the player's client: its own half sets the

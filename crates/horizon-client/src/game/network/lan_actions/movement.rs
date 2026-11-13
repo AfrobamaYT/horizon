@@ -152,3 +152,7 @@ impl Game<'_> {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "tests/collision_exclusion_wall_tests.rs"]
+mod collision_exclusion_wall_tests;

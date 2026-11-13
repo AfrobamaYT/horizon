@@ -9,10 +9,10 @@ level's blocks don't stop the player, as Immersive Portals' `CollisionHelper` do
 
 - the part of a block's collision shape inside a box doesn't collide (`Shapes.join(shape, box, ONLY_FIRST)`), so a box
   over half a block leaves the other half solid;
-- a block sharing volume with a box is no wall to suffocate in (`isInWall`), and the client doesn't push its player
-  out of it (`moveTowardsClosestSpace`);
-- entity colliders (boats, shulkers) and the world border still stop the player, and blocks the player stands in
-  still act on it (`checkInsideBlocks`).
+- a block sharing volume with a box is no wall to suffocate in (`isInWall`), the client doesn't push its player
+  out of it (`moveTowardsClosestSpace`), and it doesn't act on a player inside it (`checkInsideBlocks`: no cobweb,
+  powder snow or damaging block there);
+- entity colliders (boats, shulkers) and the world border still stop the player.
 
 There are two halves, and **the mod sets both**: the engine sends neither set to the other side.
 
@@ -31,4 +31,5 @@ A call is refused with a `CollisionExclusionsError`, and the set there was stays
 `NotFinite` for a value that is NaN or infinite, `Inverted` for a box whose minimum is above its maximum on an axis,
 `NotAPlayer` for another entity, and `Stale` for a stale handle or a client with no player of its own.
 
-A player with no boxes pays one empty-slice check per move.
+A player with no boxes pays one empty-slice check per move. With boxes, each block shape a box reaches is joined
+with it, which allocates, and the server copies the guest's set into its body every turn.
