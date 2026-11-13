@@ -103,6 +103,9 @@ jobs:
       # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
       - name: Restore unchanged source timestamps
         run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
+      # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
+      - name: Cap build parallelism to the runner
+        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
       # The SDK is built with the launcher's Rust: a mod's code is compiled against its metadata.
       - name: Server SDK, warnings denied
         run: python3 tools/prebuilt_game.py build "$FNR_SCRATCH/prebuilt" --server
