@@ -88,7 +88,7 @@ fn the_index_lists_each_function_with_its_text_or_its_refusal() {
         &GAME[start..end],
         "/// Kept.\n    pub fn ticks(&self) -> u32 {\n        *self.ticks\n    }"
     );
-    assert_eq!(ticks.sha256, sha256(GAME[start..end].as_bytes()));
+    assert_eq!(ticks.sha256, sha256(&GAME.as_bytes()[start..end]));
     let refused = |key: &str| index.refused[key].clone();
     assert_eq!(refused("horizon_client::game::twice").code, Code::Ambiguous);
     let generic = refused("horizon_client::game::Game::generic");
