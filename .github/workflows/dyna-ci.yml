@@ -773,6 +773,9 @@ jobs:
       # The unit tier: a test that boots the game is #[ignore = "daily"]; the fixtures are in tools/ci/game-boot-fixtures.txt.
       - name: Game-boot tests are daily tests
         run: python3 tools/ci/check_game_boot_tests.py
+      # The unit tier: a test that starts a child process is #[ignore = "daily"]; helpers in tools/ci/process-spawns.txt.
+      - name: Process-starting tests are daily tests
+        run: python3 tools/ci/check_process_tests.py
       # docs/layers.md: a crate depends only on its own layer or a lower one; today's exceptions only shrink.
       - name: Crates follow the layers
         if: needs.changes.outputs.rust_required != 'false'

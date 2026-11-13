@@ -47,6 +47,10 @@ A rowless `#[ignore]` in a target a package's shard builds (`horizon-client`'s t
 libraries) still runs every day with `--include-ignored` and must pass, so it needs no row. Anywhere else it would run
 nowhere, so verify-static fails it until it has a row: `daily` to run it in the daily run, or `manual` to say who does.
 
+verify-static fails an un-ignored test that starts a child process (`check_process_tests.py`): it runs a
+`Command`, directly or through a helper of its file or one listed in `tools/ci/process-spawns.txt`. Such a test is a
+`daily` row with reason `child-process`.
+
 `verify` times its test binaries (`tools/ci/run_test_binaries.py --time-limits 2,5`): a test over 5 s fails by name,
 one over 2 s only warns, so it stays until someone moves it. The times are wall time with three binaries and their
 test threads running at once, not isolated measurements. Documentation examples and `verify`'s Python steps are not
