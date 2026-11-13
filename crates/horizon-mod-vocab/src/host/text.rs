@@ -8,7 +8,11 @@ pub trait TextHost {
     /// Reads a text component as `/tellraw` and `ComponentSerialization.CODEC` take it: one
     /// JSON or SNBT value (`"plain"`, `{"text":"Hi","color":"gold"}`, `["a",{"text":"b"}]`,
     /// `translate`, `extra`, click and hover events), with nothing but whitespace after it
-    /// (Paper's `GsonComponentSerializer.deserialize`). None when it isn't one component.
+    /// (Paper's `GsonComponentSerializer.deserialize`). None when it does not parse as one component:
+    /// an object needs one content key (a `type` binds alone, a null `type` counts as absent),
+    /// `text` must be a string, `extra` a non-empty list, and a style field that is present and
+    /// wrong refuses the whole component. An object whose only content key is `index` is refused,
+    /// as in vanilla's codec; Horizon follows vanilla there.
     #[access(Metadata)]
     fn text_from_json(&self, json: &str) -> Result<Option<Text>, TextFormError>;
     /// Side: both.
