@@ -179,17 +179,16 @@ if [ -n "$resources" ]; then
     printf 'mod.%s:true\n' "$layout_mod" > "$run/horizon-mods.txt"
   fi
   # Swapping a library never changes the fixed executable. A separately built replacement
-  # can be supplied by the check set; otherwise exercise replacement with identical bytes.
-  python3 - "$scratch/engine" "${FNR_SWAP_LIBRARY:-}" <<'PYLIB'
+  # must be supplied by the check set to prove different compiled code can be loaded.
+  python3 - "$scratch/engine" "${FNR_SWAP_LIBRARY:?supply an independently compiled replacement mod library}" <<'PYLIB'
 import hashlib, json, pathlib, shutil, sys
 folder = pathlib.Path(sys.argv[1])
 record = folder / "native-mods.json"
 rows = json.loads(record.read_text())
 row = next(r for r in rows["libraries"] if r["kind"] == "mod")
 library = folder / row["file"]
-replacement = pathlib.Path(sys.argv[2]) if sys.argv[2] else library.with_suffix(".swap")
-if not sys.argv[2]:
-    shutil.copyfile(library, replacement)
+replacement = pathlib.Path(sys.argv[2])
+assert replacement.read_bytes() != library.read_bytes(), "swap must change the compiled library"
 shutil.copyfile(replacement, library)
 row["sha256"] = hashlib.sha256(library.read_bytes()).hexdigest()
 record.write_text(json.dumps(rows))

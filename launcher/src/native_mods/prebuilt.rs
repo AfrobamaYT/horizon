@@ -659,12 +659,21 @@ fn standard_library(rust: &Toolchain) -> Result<PathBuf, String> {
 /// rustc with the prebuilt game's settings, its libraries and `out`'s on the search path, and the
 /// native libraries the game's build scripts link (`native/`: the `windows` crates' import
 /// libraries).
-fn rustc(rust: &Toolchain, game: &Path, out: &Path, edition: &str) -> Command {
+fn rustc(
+    rust: &Toolchain,
+    game: &Path,
+    out: &Path,
+    edition: &str,
+    link_args: &[String],
+) -> Command {
     let mut cmd = rustc_with(
         rust,
         &[&game.join("deps"), &game.join("host"), out],
         edition,
     );
+    for arg in link_args {
+        cmd.arg("-C").arg(format!("link-arg={arg}"));
+    }
     cmd.arg("-L")
         .arg(format!("native={}", game.join("native").display()));
     cmd
@@ -791,6 +800,22 @@ pub(super) fn compile(
     resolution: &dependencies::Resolution,
     consent: Option<&dyn Fn(&super::RegistryInventory) -> bool>,
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
+    let mut names = std::collections::HashSet::new();
+    names.insert(dylib_name("horizon_patch"));
+    for item in fs::read_dir(package.runtime.join("deps")).map_err(|e| e.to_string())? {
+        names.insert(
+            item.map_err(|e| e.to_string())?
+                .file_name()
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+    for project in projects {
+        let name = dylib_name(&project.crate_name());
+        if !names.insert(name.clone()) {
+            return Err(trf("Native mod {mod} uses reserved or duplicate library file {file}. Choose a unique Cargo library name.", &[("mod", &project.bundle.manifest.id), ("file", &name)]));
+        }
+    }
     if route == Route::Api {
         let out = &builds.join("api");
         let built = super::api_route::compile(
@@ -868,7 +893,7 @@ pub(super) fn compile(
             let facade = &generated[id];
             fs::write(&source, &facade.source).map_err(|e| e.to_string())?;
             let rlib = out.join(format!("libinternals_{id}.rlib"));
-            let mut cmd = rustc(rust, game, out, "2024");
+            let mut cmd = rustc(rust, game, out, "2024", &sdk.link_args);
             cmd.args(["--crate-type", "rlib", "--crate-name", "internals"])
                 .arg("-C")
                 .arg(format!("metadata={id}"))
@@ -896,7 +921,7 @@ pub(super) fn compile(
             project,
             &declared[index],
             out,
-            |edition| rustc(rust, game, out, edition),
+            |edition| rustc(rust, game, out, edition, &sdk.link_args),
             |package| match package {
                 "internals" => &facades[id],
                 _ => &libraries[package],
@@ -925,7 +950,7 @@ pub(super) fn compile(
         &rlibs,
         &crate_names,
         &sdk,
-        |edition| rustc(rust, game, out, edition),
+        |edition| rustc(rust, game, out, edition, &sdk.link_args),
     )?;
     let mut installed = runtime_libraries(rust, &deps)?;
     for &index in &resolution.order {
@@ -943,9 +968,18 @@ pub(super) fn compile(
             "0",
             &patch.installs,
         );
-        fs::write(&source, entry).map_err(|e| e.to_string())?;
+        fs::write(&source, &entry).map_err(|e| e.to_string())?;
         let library = out.join(dylib_name("horizon_patch"));
-        let mut cmd = rustc(rust, game, out, "2024");
+        let mut hash = Sha256::new();
+        hash.update(&entry);
+        for (_, path) in &patch.rlibs {
+            hash.update(fs::read(path).map_err(|e| e.to_string())?);
+        }
+        let fingerprint = format!("{:x}", hash.finalize());
+        let saved = library.with_extension("fingerprint");
+        let unchanged =
+            library.is_file() && fs::read_to_string(&saved).ok().as_deref() == Some(&fingerprint);
+        let mut cmd = rustc(rust, game, out, "2024", &sdk.link_args);
         cmd.args(["--crate-type", "dylib", "--crate-name", "horizon_patch"]);
         for (name, path) in wrapper_externs(&deps, &template)? {
             cmd.arg("--extern")
@@ -956,7 +990,11 @@ pub(super) fn compile(
                 .arg(format!("{name}={}", path.display()));
         }
         cmd.arg("-o").arg(&library).arg(source);
-        super::run(cmd, "Compiling the patch library", |_| {})?;
+        if !unchanged {
+            super::run(cmd, "Compiling the patch library", |_| {})?;
+            fs::write(saved, fingerprint).map_err(|e| e.to_string())?;
+        }
+        super::library_record::validate_exports(&library, "horizon_patch")?;
         super::library_record::stamp(&library, sdk.commit(), "horizon_patch", "0", true)?;
         installed.push(library);
     }
@@ -1076,7 +1114,7 @@ pub(super) fn compile_mod<'a>(
     let mut hash = Sha256::new();
     hash.update(build);
     hash.update(entry);
-    hash.update(super::source_digest(project.bundle).unwrap_or_default());
+    hash.update(super::source_digest(project.bundle).ok_or("could not hash native mod inputs")?);
     for dependency in declared {
         if let Some(path) = rlibs.get(dependency.id.as_str()) {
             hash.update(fs::read(path).map_err(|e| e.to_string())?);
@@ -1090,6 +1128,7 @@ pub(super) fn compile_mod<'a>(
     cmd.arg("--out-dir").arg(out).arg(&source);
     super::run(cmd, &format!("Compiling {id}"), |_| {})?;
     fs::write(saved, fingerprint).map_err(|e| e.to_string())?;
+    super::library_record::validate_exports(&library, id)?;
     super::library_record::stamp(
         &library,
         build,
@@ -1102,7 +1141,7 @@ pub(super) fn compile_mod<'a>(
 
 /// The launcher's settings for a kept registry build: bumped whenever the launcher changes the
 /// cargo arguments, the compiler plan or how it stages, so a build made the old way is not reused.
-const KEPT_BUILD_FLAGS: u32 = 1;
+const KEPT_BUILD_FLAGS: u32 = 2;
 
 /// The folder a registry build's cargo output is kept in, under `native/prebuilt-build`: one per
 /// game build, Rust toolchain and launcher settings ([`KEPT_BUILD_FLAGS`]). Inside one, cargo's

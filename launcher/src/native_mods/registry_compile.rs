@@ -493,6 +493,7 @@ pub(super) fn compile(
     for &index in &resolution.order {
         let project = &projects[index];
         let library = release.join(prebuilt::dylib_name(&project.crate_name()));
+        super::library_record::validate_exports(&library, &project.bundle.manifest.id)?;
         super::library_record::stamp(
             &library,
             sdk.commit(),
@@ -503,6 +504,7 @@ pub(super) fn compile(
         runtime.push(library);
     }
     let library = release.join(prebuilt::dylib_name("horizon_patch"));
+    super::library_record::validate_exports(&library, "horizon_patch")?;
     super::library_record::stamp(&library, sdk.commit(), "horizon_patch", "0", true)?;
     runtime.push(library);
     for library in outputs.runtime(&metadata.runtime_packages()?, target_dir)? {

@@ -37,6 +37,37 @@ pub(super) fn stamp(
     .map_err(|e| e.to_string())
 }
 
+pub(super) fn validate_exports(path: &Path, id: &str) -> Result<(), String> {
+    if !cfg!(windows) {
+        return Ok(());
+    }
+    let parse = || -> Result<usize, String> {
+        let bytes = fs::read(path).map_err(|e| e.to_string())?;
+        let pe = object::read::pe::PeFile64::parse(bytes.as_slice()).map_err(|e| e.to_string())?;
+        Ok(pe
+            .export_table()
+            .map_err(|e| e.to_string())?
+            .map_or(0, |table| table.addresses().len()))
+    };
+    let count = parse().map_err(|e| {
+        crate::i18n::trf(
+            "Could not inspect native mod {mod}'s DLL exports: {error}",
+            &[("mod", id), ("error", &e)],
+        )
+    })?;
+    refuse_exports(id, count)
+}
+
+fn refuse_exports(id: &str, count: usize) -> Result<(), String> {
+    if count > 65_535 {
+        return Err(crate::i18n::trf(
+            "Native mod {mod} has {count} DLL exports; Windows permits at most 65,535.",
+            &[("mod", id), ("count", &count.to_string())],
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn collect(paths: &[std::path::PathBuf]) -> Result<Vec<Library>, String> {
     use sha2::{Digest, Sha256};
     let mut rows = Vec::new();
@@ -61,6 +92,14 @@ pub(super) fn collect(paths: &[std::path::PathBuf]) -> Result<Vec<Library>, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn export_limit_names_the_mod_and_count() {
+        assert!(refuse_exports("heavy", 65_535).is_ok());
+        let error = refuse_exports("heavy", 65_536).unwrap_err();
+        assert!(error.contains("heavy"), "{error}");
+        assert!(error.contains("65536"), "{error}");
+    }
+
     #[test]
     fn records_hashes_and_dependency_order_with_patch_last() {
         let tmp = tempfile::tempdir().unwrap();

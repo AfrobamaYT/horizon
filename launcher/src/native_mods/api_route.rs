@@ -1,8 +1,5 @@
-//! The API route (SDK design §1, PR 3b): an instance whose native mods are all API-only builds
-//! them, from the prebuilt package's `api` files alone, into the `horizon_native_mods` library
-//! that the package's prebuilt API executable loads in place of its stub. The executable is never
-//! relinked and the `engine` archive is never read; the library, like any native build, is exact
-//! to the game build.
+//! Build each API-only native mod as its own Rust dylib from SDK metadata.
+//! The executable is fixed and the engine archive is never read.
 use super::{api, dependencies, internals, prebuilt};
 use crate::rust_toolchain::Toolchain;
 use std::collections::HashMap;
@@ -11,13 +8,11 @@ use std::path::{Path, PathBuf};
 
 /// The template the mods library is written from, in the `api` slice.
 pub(super) const TEMPLATE: &str = "native_mod_entry.rs.template";
-/// The folder of the `runtime` slice holding the API executable and its stub.
+/// The folder of the runtime slice holding the fixed executable.
 const BIN: &str = "bin";
 
-/// Compiles the mods (`resolution`'s order) and the `horizon_native_mods` library against the
-/// `api` slice alone, into `out`, and links the library against the `runtime` slice's game
-/// libraries. Returns the `runtime` slice's API executable and the libraries to install beside
-/// it: the game's, std, the toolchain's runtime on Windows, and the mods library.
+/// Compile the mods in dependency order against API metadata and the runtime's dynamic
+/// closure. Return the unchanged executable and its runtime libraries, followed by mod dylibs.
 pub(super) fn compile(
     rust: &Toolchain,
     runtime: &Path,
@@ -32,7 +27,8 @@ pub(super) fn compile(
     let deps = api.join("deps");
     let host = api.join("host");
     let runtime_deps = runtime.join("deps");
-    let search = |edition: &str| prebuilt::rustc_with(rust, &[&deps, &host, &runtime_deps, out], edition);
+    let search =
+        |edition: &str| prebuilt::rustc_with(rust, &[&deps, &host, &runtime_deps, out], edition);
     let mut libraries = HashMap::new();
     for (package, name) in api::PACKAGES {
         if package != api::INTERNALS_PACKAGE {
