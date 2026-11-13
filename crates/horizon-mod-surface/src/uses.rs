@@ -2383,7 +2383,9 @@ pub fn fits<'a>(entries: impl IntoIterator<Item = &'a Entry>, target: &Surface) 
         public_paths.insert(&m.id, &m.paths);
     }
     let entries: Vec<&Entry> = entries.into_iter().collect();
-    // What each trait a member is reached from leads to in the target.
+    // What each trait a member is reached from leads to in the target, along references built
+    // once: a table's `reached_from` strings are many and its own, the surface's size is not.
+    let refs = target.refs(true);
     let mut leads: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
     let mut misfits = Vec::new();
     for entry in &entries {
@@ -2437,10 +2439,16 @@ pub fn fits<'a>(entries: impl IntoIterator<Item = &'a Entry>, target: &Surface) 
         }
         if let Some(owner) = owner(id, &hashes) {
             for from in &entry.reached_from {
-                let leads = leads
-                    .entry(from.as_str())
-                    .or_insert_with(|| target.reach([from.as_str()]));
-                if !leads.contains(&owner) {
+                // A trait the target lacks leads nowhere but to itself.
+                let leads_there = if hashes.contains_key(from.as_str()) {
+                    leads
+                        .entry(from.as_str())
+                        .or_insert_with(|| crate::walk_refs(&refs, [from.as_str()]))
+                        .contains(&owner)
+                } else {
+                    *from == owner
+                };
+                if !leads_there {
                     misfit(Change::Route {
                         from: from.clone(),
                         owner: owner.clone(),
