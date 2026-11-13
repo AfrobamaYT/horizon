@@ -879,9 +879,6 @@ impl DataStore {
                     && let Some(bytes) = pack.read(&f)
                     && let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes)
                 {
-                    if conditions.is_some_and(|conditions| !conditions.allows_file(&v, &f)) {
-                        continue;
-                    }
                     let mut entries = tag_entries(&v);
                     if let Some(removes) = v["remove"].as_array() {
                         entries.extend(
@@ -1974,9 +1971,9 @@ mod tests {
         assert!(off.item_modifiers.is_empty());
         assert_eq!(
             off.function_tags["demo:load"],
-            [("demo:low".into(), true, false)]
+            [("demo:high".into(), true, false)]
         );
-        assert!(!off.function_tags.contains_key("demo:unknown"));
+        assert!(off.function_tags["demo:unknown"].is_empty());
         let enabled = horizon_world::conditions::LoadConditions::new(["provider"]);
         let on = DataStore::load_with_conditions(&refs, &enabled);
         assert_eq!(on.predicates["demo:entry"]["layer"], "high");

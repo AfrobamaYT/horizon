@@ -40,16 +40,13 @@ pub(super) fn merge_tag(
     text: Option<&str>,
     layers: &[TagLayers<'_>],
     what: &str,
-    conditions: &horizon_world::conditions::LoadConditions,
+    _conditions: &horizon_world::conditions::LoadConditions,
 ) -> Result<String> {
     let mut doc = match text {
         Some(t) => serde_json::from_str(t).map_err(|e| format!("{what}: {e}"))?,
         None => J::Obj(vec![("values".into(), J::Arr(Vec::new()))]),
     };
-    if !tag_conditions_hold(&doc, conditions, what)? {
-        doc = J::Obj(vec![("values".into(), J::Arr(Vec::new()))]);
-    }
-    // These conditions selected one source layer, not the flattened result.
+    // Tags do not evaluate load conditions.
     doc.remove("neoforge:conditions");
     // The vanilla file's own `remove` entries apply right after its values,
     // before the mods' layers: they join `values` as removal objects.
@@ -263,9 +260,6 @@ pub fn build_with_conditions(
                 if is_tag {
                     let doc: J =
                         serde_json::from_slice(&bytes).map_err(|e| format!("{file}: {e}"))?;
-                    if !tag_conditions_hold(&doc, conditions, &file)? {
-                        continue;
-                    }
                     let Some(J::Arr(values)) = doc.get("values") else {
                         return Err(format!("{}: {file}: no values", m.id).into());
                     };
