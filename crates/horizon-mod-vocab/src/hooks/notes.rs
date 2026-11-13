@@ -2231,7 +2231,9 @@ registration path.
   `minecraft:mob_attack` and hurts with `minecraft:mob_attack_no_aggro`, as in vanilla), the `attacker` (the attacking
   entity's network id, falling back to a known last hurt-by mob, or 0 when unknown) and what it holds (`attacker_main`
   and `attacker_off`: a player's selected and off-hand stacks, a mob's main hand; none when unknown, recorded only
-  while a native mod is loaded), the `strength`, the direction (`x`, `z`; vanilla points it at the source of a hit, the
+  while a native mod is loaded), the `entry` (`Short` when the push came in through `knockback(power, x, z)`, which
+  delegates to the full entry, `Full` when the full entry was called directly; the hook fires once per full-entry call
+  either way), the `strength`, the direction (`x`, `z`; vanilla points it at the source of a hit, the
   attacker's side, and the entity is pushed the other way) and a `canceled` flag. A mod may change the three numbers or
   set `canceled`, and the push follows: canceled, the entity's motion is left alone. A `strength` of 0 or less after the
   hook is no push, and a direction too short to tell draws a random one after it, as in vanilla; the resistance scales
