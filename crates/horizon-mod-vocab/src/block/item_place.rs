@@ -19,7 +19,7 @@ use std::{fmt::Debug, marker::PhantomData};
 /// Where a stack lives.
 // no wire: preserves stable explicit variant tags (Equipment is 9) and interns Mod.provider into a bounded static string.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ItemPlace {
     /// Slot `slot` of a player's inventory, by `inventory_tick`'s numbers: 0..36 (0..9
     /// the hotbar), the armour 100..=103 (feet to head), the off hand -106
@@ -139,6 +139,132 @@ pub enum ItemPlace {
         /// The place the player reaches.
         inner: Box<ItemPlace>,
     },
+}
+
+impl Clone for ItemPlace {
+    fn clone(&self) -> Self {
+        enum Link {
+            Strict,
+            One,
+            Infinite(u128),
+            Nested(usize),
+        }
+        let mut links = Vec::new();
+        let mut current = self;
+        let mut cloned = loop {
+            match current {
+                Self::Strict(inner) => {
+                    links.push(Link::Strict);
+                    current = inner;
+                }
+                Self::OneByOne(inner) => {
+                    links.push(Link::One);
+                    current = inner;
+                }
+                Self::InfiniteMaterials { player, inner } => {
+                    links.push(Link::Infinite(*player));
+                    current = inner;
+                }
+                Self::Nested { parent, slot } => {
+                    links.push(Link::Nested(*slot));
+                    current = parent;
+                }
+                Self::PlayerSlot { player, slot } => {
+                    break Self::PlayerSlot {
+                        player: *player,
+                        slot: *slot,
+                    };
+                }
+                Self::PlayerHand { player, hand } => {
+                    break Self::PlayerHand {
+                        player: *player,
+                        hand: *hand,
+                    };
+                }
+                Self::PlayerCursor { menu } => break Self::PlayerCursor { menu: *menu },
+                Self::BlockEntity {
+                    level,
+                    pos,
+                    side,
+                    slot,
+                } => {
+                    break Self::BlockEntity {
+                        level: *level,
+                        pos: *pos,
+                        side: *side,
+                        slot: *slot,
+                    };
+                }
+                Self::ItemEntity { id } => break Self::ItemEntity { id: *id },
+                Self::EntitySlot { entity, slot } => {
+                    break Self::EntitySlot {
+                        entity: *entity,
+                        slot: *slot,
+                    };
+                }
+                Self::Equipment { entity, slot } => {
+                    break Self::Equipment {
+                        entity: *entity,
+                        slot: *slot,
+                    };
+                }
+                Self::MenuSlot { menu, slot } => {
+                    break Self::MenuSlot {
+                        menu: *menu,
+                        slot: *slot,
+                    };
+                }
+                Self::Mod { provider, key } => {
+                    break Self::Mod {
+                        provider,
+                        key: *key,
+                    };
+                }
+                Self::Scratch(id) => break Self::Scratch(*id),
+            }
+        };
+        for link in links.into_iter().rev() {
+            cloned = match link {
+                Link::Strict => Self::Strict(Box::new(cloned)),
+                Link::One => Self::OneByOne(Box::new(cloned)),
+                Link::Infinite(player) => Self::InfiniteMaterials {
+                    player,
+                    inner: Box::new(cloned),
+                },
+                Link::Nested(slot) => Self::Nested {
+                    parent: Box::new(cloned),
+                    slot,
+                },
+            };
+        }
+        cloned
+    }
+}
+
+impl Drop for ItemPlace {
+    fn drop(&mut self) {
+        let mut current = match self {
+            Self::Strict(inner)
+            | Self::OneByOne(inner)
+            | Self::InfiniteMaterials { inner, .. }
+            | Self::Nested { parent: inner, .. } => {
+                std::mem::replace(inner, Box::new(Self::Scratch(0)))
+            }
+            _ => return,
+        };
+        loop {
+            match &mut *current {
+                Self::Strict(inner)
+                | Self::OneByOne(inner)
+                | Self::InfiniteMaterials { inner, .. }
+                | Self::Nested { parent: inner, .. } => {
+                    let next = std::mem::replace(inner, Box::new(Self::Scratch(0)));
+                    current = next;
+                }
+                _ => break,
+            }
+        }
+    }
 }
 
 /// A mod's own places ([`ItemPlace::Mod`]), registered with

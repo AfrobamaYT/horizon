@@ -154,13 +154,10 @@ fn wrappers_nest_far_deeper_than_any_stack_would_recurse() {
     assert_eq!(deep.amount(server), 1);
     assert_eq!(extract(&mut host, &deep, dirt, 5), 1);
     assert_eq!(slots(&host), [(3, 4)]);
-    // Taken apart a level at a time: the derived drop would recurse as deep as the nesting.
-    while let ItemPlace::Strict(inner)
-    | ItemPlace::OneByOne(inner)
-    | ItemPlace::InfiniteMaterials { inner, .. } = deep
-    {
-        deep = *inner;
-    }
+    let cloned = deep.clone();
+    assert_eq!(cloned.amount(&mut host), 1);
+    drop(cloned);
+    drop(deep);
 }
 
 #[test]
