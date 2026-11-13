@@ -33,6 +33,9 @@ pub(in crate::game) enum RouteError {
     TooManyEntities,
     /// An entity's effect or attribute of a new kind past `entities::MAX_TABLE` of them.
     EntityTableFull,
+    /// A `SetTime` whose game time, or whose clock's total moved on to it, passes the range of a
+    /// long.
+    ClockOverflow,
 }
 
 impl std::fmt::Display for RouteError {
@@ -62,6 +65,7 @@ impl std::fmt::Display for RouteError {
                     "{CHANNEL}: an entity past {MAX_TABLE} effects or attributes"
                 )
             }
+            Self::ClockOverflow => write!(f, "{CHANNEL}: a viewed level's time past its range"),
         }
     }
 }

@@ -99,12 +99,18 @@ impl ViewedWorld {
             // `handleSetTime` / `ClientClockManager.handleUpdates`: the clock it follows moves on
             // by the game time since the last packet at its rate, then takes what the packet
             // carries of it; its day follows that clock.
+            // A time whose distance from the last, or whose clock's total, passes the range of a
+            // long is refused before anything changes.
             C::SetTime(p) => {
-                let delta = p.game_time - self.world.game_time;
-                self.world.game_time = p.game_time;
+                let delta = (p.game_time.checked_sub(self.world.game_time))
+                    .ok_or(RouteError::ClockOverflow)?;
                 if let Some(clock) = &mut self.clock {
-                    crate::game::remote::client_level_tick::advance_clock(clock, delta);
+                    let mut moved = clock.clone();
+                    crate::game::remote::client_level_tick::advance_clock(&mut moved, delta)
+                        .ok_or(RouteError::ClockOverflow)?;
+                    *clock = moved;
                 }
+                self.world.game_time = p.game_time;
                 if let Some(update) = p
                     .clocks
                     .into_iter()
@@ -276,5 +282,51 @@ mod tests {
         assert_eq!(viewed.world.day_time, 2001);
         viewed.apply(time(124, Vec::new())).unwrap();
         assert_eq!(viewed.world.day_time, 2002);
+    }
+
+    /// A server's times that would overflow are refused with a fixed reason and change nothing:
+    /// the minimum game time then the maximum, and a retained clock at the maximum moved on a
+    /// tick.
+    #[test]
+    fn a_time_past_the_range_of_a_long_is_refused() {
+        let overworld = DimensionType::vanilla("minecraft:overworld");
+        let format = Arc::new(ChunkFormat::new(&overworld, vec![0, 7, 9], 2));
+        let fresh = || {
+            ViewedWorld::new(
+                "minecraft:the_end".into(),
+                format.clone(),
+                Some(3),
+                World::new(BlockStateId(0), 1),
+            )
+        };
+        let mut viewed = fresh();
+        let time = |game_time, clocks| C::SetTime(play::SetTime { game_time, clocks });
+        viewed.apply(time(i64::MIN, Vec::new())).unwrap();
+        assert_eq!(
+            viewed.apply(time(i64::MAX, Vec::new())),
+            Err(RouteError::ClockOverflow)
+        );
+        assert_eq!(viewed.world.game_time, i64::MIN);
+        assert_eq!(
+            RouteError::ClockOverflow.to_string(),
+            "horizon:levels: a viewed level's time past its range"
+        );
+        let full = ClockState {
+            clock: 3,
+            total_ticks: i64::MAX,
+            partial_tick: 0.0,
+            rate: 1.0,
+        };
+        let mut viewed = fresh();
+        viewed.apply(time(100, vec![full])).unwrap();
+        assert_eq!(viewed.world.day_time, i64::MAX);
+        assert_eq!(
+            viewed.apply(time(101, Vec::new())),
+            Err(RouteError::ClockOverflow)
+        );
+        assert_eq!(
+            (viewed.world.game_time, viewed.world.day_time),
+            (100, i64::MAX)
+        );
     }
 }

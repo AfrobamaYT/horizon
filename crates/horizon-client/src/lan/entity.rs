@@ -1368,6 +1368,7 @@ impl Entities {
                     let mut held = vec![0; chunks.len()];
                     let (chunks, held) = (&**chunks, &mut held);
                     let mut kept = 0;
+                    let room = horizon_protocol::viewed_levels::MAX_ENTITIES;
                     // A client that moved (ChunkMap.move), or whose own entity
                     // appeared or changed section (ChunkMap.tick's movedPlayers), has
                     // every pair checked again.
@@ -1400,7 +1401,9 @@ impl Entities {
                                 if v.tracker.seen.contains_key(&p.id) {
                                     flags[index] = SEES | TRACKS;
                                     kept += 1;
-                                } else {
+                                } else if v.sources.is_none() || starts.len() + kept < room {
+                                    // A viewing client collects no more starts than its world
+                                    // could take with what it keeps so far; the cut below is exact.
                                     flags[index] = SEES;
                                     starts.push(index);
                                 }
@@ -1481,8 +1484,7 @@ impl Entities {
                     }
                     // A viewing client starts tracking no more than its viewed world holds.
                     if v.sources.is_some() {
-                        let room = horizon_protocol::viewed_levels::MAX_ENTITIES
-                            .saturating_sub(v.tracker.seen.len());
+                        let room = room.saturating_sub(v.tracker.seen.len());
                         for &index in starts.iter().skip(room) {
                             flags[index] = 0;
                         }
