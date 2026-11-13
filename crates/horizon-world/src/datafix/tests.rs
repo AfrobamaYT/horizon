@@ -265,13 +265,23 @@ fn a_riding_chain_the_fix_makes_too_deep_is_refused_after_it() {
     // DataVersion 100, before `EntityRidingToPassengersFix` (135): each mount is one level below its rider, and
     // after the fix each rider is two below its mount (a `Passengers` list, then the compound).
     let old = 100;
-    // 200 riders: depth 200 in, 400 out, both within the cap; the fix runs.
-    let upgraded = Tag::Compound(upgrade_entity(old, riding_chain(200)).unwrap());
+    // A small positive control verifies that the Riding fix actually runs.
+    let upgraded = Tag::Compound(upgrade_entity(old, riding_chain(2)).unwrap());
     assert!(upgraded.get("Riding").is_none());
     assert_eq!(dynamic::stream(upgraded.get("Passengers")).len(), 1);
-    // 300 riders: depth 300 passes the input check, and the upgraded tree is 600 deep.
+    // One rider with a deep opaque payload is enough: the input's deepest
+    // compound is at 510, and moving the rider below Passengers adds two levels.
+    // Avoid hundreds of riders: legacy fixes preserve additional nested data,
+    // and repeatedly walking and cloning that chain is needlessly expensive.
+    let mut rider = riding_chain(1);
+    let mut payload = Tag::Compound(Compound::new());
+    for _ in 0..509 {
+        payload = Tag::compound([("x", payload)]);
+    }
+    rider.insert("payload".into(), payload);
+    assert!(upgrade_entity(CURRENT, rider.clone()).is_ok());
     assert_eq!(
-        upgrade_entity(old, riding_chain(300)),
+        upgrade_entity(old, rider),
         Err(UpgradeError::UpgradedTooDeep)
     );
 }
