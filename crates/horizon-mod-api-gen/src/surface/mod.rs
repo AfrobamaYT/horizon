@@ -336,6 +336,20 @@ pub(crate) fn build(
     let mut queue: Vec<(ItemId, Vec<String>)> =
         public.items.iter().map(|(id, path)| (*id, path.clone())).collect();
     queue.sort_by(|a, b| b.1.cmp(&a.1));
+    // A hook's event type is part of the surface even when no public signature names it (a
+    // scoped hook's event).
+    let events: BTreeSet<String> = hooks
+        .iter()
+        .map(|hook| format!("{}Event", crate::hook_id(&hook.name)))
+        .collect();
+    let mut hidden_events: Vec<(ItemId, Vec<String>)> = public
+        .hidden
+        .iter()
+        .filter(|(_, path)| path.last().is_some_and(|name| events.contains(name)))
+        .map(|(id, path)| (*id, path.clone()))
+        .collect();
+    hidden_events.sort_by(|a, b| b.1.cmp(&a.1));
+    queue.extend(hidden_events);
     let mut recorded: std::collections::HashSet<ItemId> = queue.iter().map(|(id, _)| *id).collect();
     let mut layouts = Layouts::new();
     let mut traits = Vec::new();

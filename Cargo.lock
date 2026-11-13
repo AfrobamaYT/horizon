@@ -2219,6 +2219,7 @@ dependencies = [
  "heck",
  "horizon-game-discovery",
  "horizon-mod-point-shape",
+ "horizon-mod-surface",
  "prettyplease",
  "proc-macro2",
  "quote",
