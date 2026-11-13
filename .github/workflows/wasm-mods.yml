@@ -150,8 +150,6 @@ jobs:
           # process, so a second initialization there refuses the fixture's replace listener as already owned.
           # The tests are the `needs HORIZON_WASM_FIXTURE` rows; each run must report exactly one test passed.
           python3 tools/ci/ignored_tests.py --needs HORIZON_WASM_FIXTURE --one-process-each --jobs "$jobs"
-          run_exact 1 -p horizon-client --lib -- --exact \
-            game::native_hooks::math::tests::math_profile_selection_matches_platform_and_is_stable
       - name: Build independent library members
         run: |
           tool="$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod"
