@@ -150,6 +150,19 @@ pub(super) fn build(
     let mut compiled = Vec::new();
     for name in &prepared.names {
         let rlib = out.join(format!("lib{name}.rlib"));
+        let mut hash = sha2::Sha256::new();
+        use sha2::Digest;
+        hash.update(sdk.commit());
+        for bundle in &prepared.bundles {
+            hash.update(super::source_digest(bundle).ok_or("could not hash patch inputs")?);
+            hash.update(fs::read(&rlibs[bundle.manifest.id.as_str()]).map_err(|e| e.to_string())?);
+        }
+        let fingerprint = format!("{:x}", hash.finalize());
+        let saved = rlib.with_extension("fingerprint");
+        if rlib.is_file() && fs::read_to_string(&saved).ok().as_deref() == Some(&fingerprint) {
+            compiled.push((name.clone(), rlib));
+            continue;
+        }
         let mut cmd = rustc("2024");
         cmd.args([
             "--crate-type",
@@ -182,6 +195,7 @@ pub(super) fn build(
         arg.push(&argfile);
         cmd.arg(arg);
         super::run(cmd, "Compiling the patched functions", |_| {})?;
+        fs::write(saved, fingerprint).map_err(|e| e.to_string())?;
         compiled.push((name.clone(), rlib));
     }
     prepared.log()?;
