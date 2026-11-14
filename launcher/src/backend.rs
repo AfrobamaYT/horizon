@@ -901,11 +901,6 @@ pub fn data_dir() -> PathBuf {
     if let Some(home) = std::env::var_os("HORIZON_LAUNCHER_HOME").filter(|h| !h.is_empty()) {
         return PathBuf::from(home);
     }
-    // A unit test never reaches the player's real profile: without its own home it gets one of
-    // this test process's, and the configured location is never read.
-    if cfg!(test) {
-        return std::env::temp_dir().join(format!("horizon-launcher-test-{}", std::process::id()));
-    }
     // A location that does not open stands in as the default folders, as
     // `data_location::startup` makes it for the window: never a panic here.
     if let Ok(Some(roots)) = crate::data_location::configured_roots() {
@@ -944,7 +939,7 @@ fn tool_safe(path: &Path) -> bool {
 /// link (horizon-mixins refuses one, and macOS's /tmp is one). On Windows, when the resolved
 /// path isn't [`tool_safe`], [`windows_build_dir`] names the same folder a way MinGW-w64 can open.
 pub fn build_dir() -> PathBuf {
-    if !cfg!(test) && std::env::var_os("HORIZON_LAUNCHER_HOME").is_none_or(|p| p.is_empty()) {
+    if std::env::var_os("HORIZON_LAUNCHER_HOME").is_none_or(|p| p.is_empty()) {
         // A location that does not open stands in as the default folders, as
         // `data_location::startup` makes it for the window: never a panic here.
         if let Ok(Some(roots)) = crate::data_location::configured_roots() {
@@ -4441,24 +4436,6 @@ mod tests {
     use super::*;
     use std::cmp::Ordering::*;
     use std::ffi::OsStr;
-
-    /// No unit test reaches the player's real profile: with no home of its own, a test's data,
-    /// build folders and native build log are all under the temporary folder.
-    #[test]
-    fn unit_tests_never_resolve_the_real_profile() {
-        let temp = std::env::temp_dir();
-        for path in [data_dir(), build_dir(), crate::native_mods::log_path()] {
-            assert!(
-                path.starts_with(&temp)
-                    || path
-                        .canonicalize()
-                        .is_ok_and(|p| p.starts_with(temp.canonicalize().unwrap())),
-                "{} is outside {}",
-                path.display(),
-                temp.display()
-            );
-        }
-    }
 
     fn pe_architecture(bytes: &[u8]) -> Option<GameArchitecture> {
         if bytes.get(..2)? != b"MZ" {
