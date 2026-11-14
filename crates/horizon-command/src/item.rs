@@ -916,6 +916,7 @@ mod tests {
             Tag::String("minecraft:red".into()),
             Tag::String(" red".into()),
             Tag::String("".into()),
+            Tag::Byte(0),
             Tag::Byte(14),
             Tag::Short(14),
             Tag::Int(14),

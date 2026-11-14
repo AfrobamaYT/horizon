@@ -4,8 +4,8 @@ use crate::game::{
     native_entity_refs::tests::{with_client_game, with_game},
 };
 use mod_api::{EntityEnteringSectionEvent, Hooks, HostSide};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// What each told crossing carried: client side, entity id, old, new, chunk changed.
 type Calls = Arc<Mutex<Vec<(bool, u32, [i32; 3], [i32; 3], bool)>>>;
@@ -36,10 +36,7 @@ impl Hooks for PositionListener {
             HostSide::Server(host) => event.entity.position(host),
             HostSide::Client(host) => event.entity.position(host),
         };
-        self.0
-            .lock()
-            .unwrap()
-            .push(position);
+        self.0.lock().unwrap().push(position);
     }
 }
 
@@ -385,7 +382,10 @@ fn a_real_mob_tick_exposes_each_intermediate_position_to_the_listener() {
             let id = floating_cow(game, [8.5, 100.0, 8.5]);
             teleport_then_walk(game, id, &[[8.5, 127.75, 8.5]], [0.0, 0.6, 0.0]);
             let positions = positions.lock().unwrap();
-            assert_eq!(positions.first().copied().flatten(), Some([8.5, 127.75, 8.5]));
+            assert_eq!(
+                positions.first().copied().flatten(),
+                Some([8.5, 127.75, 8.5])
+            );
             assert_eq!(positions.len(), 2);
             assert!(positions[1].is_some_and(|at| at[1] >= 128.0));
         })
@@ -444,7 +444,7 @@ impl horizon_client::mobs::goals::Goal for TeleportsAndChecks {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_real_mob_tick_tells_inside_each_position_write() {
     observe_count(|callbacks| {
         with_game(|game| {

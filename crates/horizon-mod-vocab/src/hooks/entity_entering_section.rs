@@ -23,8 +23,8 @@ pub trait Hooks {
     /// moving or removing the entity until the write completes, because the write is still in
     /// progress while this hook runs.
     ///
-    /// Mob and item ticks capture each committed position write in a small per-tick record rather
-    /// than reconstructing one move from the tick's start and end positions.
+    /// Mob ticks dispatch synchronously in position-write order. During a borrowed mob pass,
+    /// the Host answers only this entity's position; other Host operations are refused.
     #[notes = r#"## Entering a section
 
 `Hooks::entity_entering_section` (NeoForge's `EntityEvent.EnteringSection`) tells a mod each time an entity's
@@ -56,9 +56,10 @@ subscription check per position update.
 
 The hook runs at the position write: at once for a teleport (`/tp`, `teleport_to`, `random_teleport` from outside the tick,
 an enderman's or a shulker's teleport when hurt), a piston or shulker push, a server player's sent move and, on a client,
-a packet that places an entity. Mob and item ticks use a small per-tick write record so each committed position write is
-reported in order rather than being reconstructed as one end-of-tick move. A listener's own move is deferred until the
-current write returns, never re-entered from inside its call."#]
+a packet that places an entity. Mob ticks dispatch synchronously inside each position write, in write order,
+not by replaying captured moves after the tick. During a borrowed mob pass the Host answers only the current
+entity's position; every other Host operation is refused. There is no automatic mutation deferral: listeners
+must not move or remove the entity while its write is in progress."#]
     #[hook(
         side = "both",
         contract = "listen",

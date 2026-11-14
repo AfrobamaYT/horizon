@@ -64,17 +64,17 @@ pub(super) fn player_after(game: &mut Game<'_>, from: Option<Vec3>) {
     }
 }
 
-pub(super) fn tick_items(game: &mut Game<'_>, entered: &mut Vec<horizon_client::entities::ItemSplash>) {
+pub(super) fn tick_items(
+    game: &mut Game<'_>,
+    entered: &mut Vec<horizon_client::entities::ItemSplash>,
+) {
     let mut items = game.dropped.lift();
     let mut i = 0;
     while i < items.len() {
-        let (_, discarded) = game.tick_item_with_block_contacts(
-            &mut items[i],
-            None,
-            &[],
-            true,
-            &mut |splash| entered.push(splash),
-        );
+        let (_, discarded) =
+            game.tick_item_with_block_contacts(&mut items[i], None, &[], true, &mut |splash| {
+                entered.push(splash)
+            });
         let from = items[i].previous;
         let to = items[i].position;
         if !discarded {

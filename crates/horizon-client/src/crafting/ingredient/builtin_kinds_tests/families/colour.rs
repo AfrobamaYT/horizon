@@ -218,8 +218,10 @@ fn dye_components_compile_recipes_match_live_values_and_preserve_defaults() {
         assert!(!ingredient.test_in(&context, &stack));
         assert!(recipes.craft(&context, &[Some(stack.clone())], 1).is_none());
     }
-    let removal = Tag::compound([("!minecraft:dye", Tag::Compound(Default::default()))]);
-    (_, stack.extra) = crate::item_data::decode_components(Some(&removal));
+    stack.data_mut().set_loot_component("minecraft:dye", &None);
+    stack
+        .data_mut()
+        .set_loot_component("!minecraft:dye", &Some(Tag::Compound(Default::default())));
     assert!(!ingredient.test_in(&context, &stack));
     let absent = parse(
         r#"{"type":"neoforge:components","items":"minecraft:red_dye","components":{"!minecraft:dye":{}}}"#,
@@ -228,6 +230,11 @@ fn dye_components_compile_recipes_match_live_values_and_preserve_defaults() {
     assert!(absent.test_in(&context, &stack));
     assert!(!absent.test_in(&context, &ItemStack::new("minecraft:red_dye", 1)));
     assert!(!ingredient.test_in(&context, &ItemStack::new("minecraft:blue_dye", 1)));
+    let stone_absent = parse(
+        r#"{"type":"neoforge:components","items":"minecraft:stone","components":{"!minecraft:dye":{}}}"#,
+        &items,
+    );
+    assert!(stone_absent.test_in(&context, &ItemStack::new("minecraft:stone", 1)));
 }
 
 #[test]
@@ -241,17 +248,21 @@ fn malformed_dye_payloads_reject_whole_recipes_with_component_errors() {
         serde_json::json!("minecraft:red"),
         serde_json::json!(14),
         serde_json::json!(true),
+        serde_json::json!(false),
+        serde_json::Value::Null,
         serde_json::json!({}),
         serde_json::json!([]),
     ] {
         let patch = serde_json::json!({"minecraft:dye":value});
-        let rule = IngredientRule::Components {
-            patch: crate::json_nbt::json_to_compound(patch.as_object().unwrap()).unwrap(),
-            removed: vec![],
-            strict: false,
-        };
-        let error = components::validate(&rule, &items).unwrap_err();
-        assert!(error.contains("component minecraft:dye:"), "{error}");
+        if !value.is_null() {
+            let rule = IngredientRule::Components {
+                patch: crate::json_nbt::json_to_compound(patch.as_object().unwrap()).unwrap(),
+                removed: vec![],
+                strict: false,
+            };
+            let error = components::validate(&rule, &items).unwrap_err();
+            assert!(error.contains("component minecraft:dye:"), "{error}");
+        }
         let ingredient = serde_json::json!({
             "type":"neoforge:components", "items":"minecraft:red_dye", "components":patch
         });
@@ -274,4 +285,3 @@ fn malformed_dye_payloads_reject_whole_recipes_with_component_errors() {
         assert!(recipes.by_type.values().all(|recipes| recipes.is_empty()));
     }
 }
-

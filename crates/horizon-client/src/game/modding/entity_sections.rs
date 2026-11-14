@@ -25,8 +25,8 @@
 
 use super::Game;
 use crate::mobs::living::section_writes::PositionWrite;
-use mod_api::{DimensionKey, EntityRef, WorldEpoch};
 use mod_api::__private::game::BackendRefOf;
+use mod_api::{DimensionKey, EntityRef, WorldEpoch};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
@@ -228,8 +228,8 @@ impl LiveSectionObserver {
         };
         for crossing in &batch {
             host.current = self.current.filter(|(id, _)| *id == crossing.id);
-            let chunk_changed = crossing.old[0] != crossing.new[0]
-                || crossing.old[2] != crossing.new[2];
+            let chunk_changed =
+                crossing.old[0] != crossing.new[0] || crossing.old[2] != crossing.new[2];
             mod_api::dispatch_entity_entering_section(
                 mod_api::HostSide::Server(&mut host),
                 EntityRef::new(self.scope.epoch, crossing.id),
@@ -246,7 +246,12 @@ impl LiveSectionObserver {
 }
 
 impl crate::mobs::living::section_writes::WriteObserver for LiveSectionObserver {
-    fn position_written(&mut self, id: u32, from: horizon_core::geometry::Vec3, to: horizon_core::geometry::Vec3) {
+    fn position_written(
+        &mut self,
+        id: u32,
+        from: horizon_core::geometry::Vec3,
+        to: horizon_core::geometry::Vec3,
+    ) {
         self.current = Some((id, [to.x, to.y, to.z]));
         self.sections.borrow_mut().moved(
             self.scope,
@@ -321,7 +326,10 @@ impl Game<'_> {
     /// Entity `id` is gone, or replaced under the same id: it starts over untold.
     pub(super) fn entity_section_forget(&mut self, id: u32) {
         self.native_lifecycle.entity_sections.forget(id);
-        self.native_lifecycle.entity_sections.projectile_live.remove(&id);
+        self.native_lifecycle
+            .entity_sections
+            .projectile_live
+            .remove(&id);
     }
 
     /// Tell the writes from one lifted mob while its owning list is resident.
@@ -411,7 +419,12 @@ impl Game<'_> {
         if let Err(payload) = result {
             std::panic::resume_unwind(payload);
         }
-        scope.is_none_or(|_| self.native_lifecycle.entity_sections.filed.contains_key(&id))
+        scope.is_none_or(|_| {
+            self.native_lifecycle
+                .entity_sections
+                .filed
+                .contains_key(&id)
+        })
     }
 
     /// `Entity.teleport` placed as `/tp` places it ([`Game::place_teleport_in_level`]), then filed

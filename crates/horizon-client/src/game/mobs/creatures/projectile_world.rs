@@ -56,7 +56,7 @@ impl ProjectileWorld for ProjWorld<'_, '_> {
         self.w.pushed_by_currents(bounds, velocity)
     }
     fn targets(&self) -> &[(Who, Aabb)] {
-        &self.targets
+        self.targets
     }
     /// `BaseFireBlock.entityInside` for a thrown projectile: fire and soul
     /// fire set it alight for 160 ticks.

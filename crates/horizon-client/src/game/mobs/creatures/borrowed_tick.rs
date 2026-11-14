@@ -127,20 +127,19 @@ impl Game<'_> {
             .sections()
             .then(|| self.entity_section_scope())
             .flatten();
-        let live_section_observer: Option<
-            crate::mobs::living::section_writes::Observer,
-        > = section_scope
-            .zip(section_table.as_ref())
-            .map(|(scope, sections)| {
-                let observer: crate::mobs::living::section_writes::Observer =
-                    std::rc::Rc::new(std::cell::RefCell::new(
-                    crate::game::entity_sections::LiveSectionObserver::new(
-                        std::rc::Rc::clone(sections),
-                        scope,
-                    ),
-                    ));
-                observer
-            });
+        let live_section_observer: Option<crate::mobs::living::section_writes::Observer> =
+            section_scope
+                .zip(section_table.as_ref())
+                .map(|(scope, sections)| {
+                    let observer: crate::mobs::living::section_writes::Observer =
+                        std::rc::Rc::new(std::cell::RefCell::new(
+                            crate::game::entity_sections::LiveSectionObserver::new(
+                                std::rc::Rc::clone(sections),
+                                scope,
+                            ),
+                        ));
+                    observer
+                });
         let mut dispatch_panic = None;
         let mut pushes = std::mem::take(state.pushes);
         let original_len = snapshot.len();
@@ -554,19 +553,14 @@ impl Game<'_> {
                                 // still has the old filed section as its first write.
                                 section_moves.push(
                                     crate::mobs::living::section_writes::PositionWrite::baseline(
-                                        m.id,
-                                        m.join,
-                                        m.previous,
+                                        m.id, m.join, m.previous,
                                     ),
                                 );
                             }
                             if changed && captured == 0 {
                                 section_moves.push(
                                     crate::mobs::living::section_writes::PositionWrite::captured(
-                                        m.id,
-                                        m.join,
-                                        m.previous,
-                                        m.position,
+                                        m.id, m.join, m.previous, m.position,
                                     ),
                                 );
                                 section_yield = true;
