@@ -2,7 +2,6 @@ use super::*;
 use horizon_core::nbt::Tag;
 use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs, LoopSide};
 
-
 fn load() -> LoadContext {
     LoadContext::new(
         DataLoadOrigin::ServerDataLoad,
@@ -23,5 +22,8 @@ fn resources() -> Items {
 
 mod families {
     use super::*;
-    include!(concat!(env!("OUT_DIR"), "/builtin_ingredient_test_modules.rs"));
+    include!(concat!(
+        env!("OUT_DIR"),
+        "/builtin_ingredient_test_modules.rs"
+    ));
 }
