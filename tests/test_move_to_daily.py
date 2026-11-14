@@ -76,9 +76,9 @@ class MoveToDaily(unittest.TestCase):
         text = self.source.read_text()
         self.assertIn("    #[test]\n    fn slow_one() {", text)
         self.assertIn('#[ignore = "daily"]\n    #[allow(unused)]\n    async fn async_one', text)
-        rows = [line for line in (self.policy / "daily-pkg.txt").read_text().splitlines() if not line.startswith("#")]
-        self.assertEqual(rows, ["pkg tests::async_one lib daily slow"])
-        restored, skipped = move_to_daily.restore(rows and [self.row("slow_one")], root=self.root, folder=self.policy)
+        kept = [line for line in (self.policy / "daily-pkg.txt").read_text().splitlines() if not line.startswith("#")]
+        self.assertEqual(kept, ["pkg tests::async_one lib daily slow"])
+        restored, skipped = move_to_daily.restore([self.row("slow_one")], root=self.root, folder=self.policy)
         self.assertEqual(restored, [])
         self.assertEqual(skipped[0][1], "no daily mark above the fn")
 
