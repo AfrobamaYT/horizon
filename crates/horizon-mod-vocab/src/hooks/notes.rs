@@ -2534,7 +2534,7 @@ registration path.
 
 - A server player about to enter a bed after its sleep checks pass: `player_bed_enter(player, name, pos, cancel)` hears the bed head position. Set `cancel` to keep the player out. The player's state is swapped in.
 
-- A server player woke or stood up from the bed at `pos`, after their sleeping state changed.
+- A server player is waking or standing up from the bed at `pos`; `player_bed_leave` is heard before their sleeping state is cleared, so a listener still reads them as sleeping.
 
 - A server player caught a bucketable mob: `player_bucket_entity(player, name, entity_id, entity)` runs after the mob was removed and the filled bucket was put in the player's hand or inventory. `entity` is the mob species id.
 
