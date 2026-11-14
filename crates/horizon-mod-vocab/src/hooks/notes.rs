@@ -240,7 +240,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   block is not `pos`, since a block that refuses the fluid passes it there; the fluid may still go into `pos`.
 - **`player_bed_enter(player, name, pos, cancel)`**: a server player passed the sleep checks and is about to
   enter the bed at its head position. Set `cancel` to keep them out.
-- **`player_bed_leave(player, name, pos)`**: A server player woke or stood up from a bed, after their sleeping state changed. The head position is `pos`.
+- **`player_bed_leave(player, name, pos, wake_immediately, update_level)`**: A server player is getting out of a bed (`PlayerWakeUpEvent`), heard before their sleeping state is cleared, so they still read as sleeping at `pos`, the head position. `update_level` is false for the morning wake of all players and true when the player got up; `wake_immediately` is true for generic stop-sleeping, missing-bed and death wakes, false for morning, explicit leave and bed-rule refusal; the hook owns the full caller table.
 - **`player_edit_book(player, name, pages, signing, cancel)`**: A server player book-and-quill edit or signing packet is about to be applied. `pages` is its page count and `signing` says it has a title. Set `cancel` to drop the packet.
 - **`player_shear_entity(player, name, entity_id, off_hand, cancel)`**: A server player is about to shear a sheep, mooshroom, snow golem or bogged. The hook gives the mob entity id and whether the shears are in the off hand. Set `cancel` to leave the mob and shears unchanged.
 - **`player_advancement_done(player, name, advancement)`**: A server player completed an advancement after its progress was recorded. `advancement` is its identifier, such as `minecraft:story/mine_stone`.
@@ -2534,7 +2534,7 @@ registration path.
 
 - A server player about to enter a bed after its sleep checks pass: `player_bed_enter(player, name, pos, cancel)` hears the bed head position. Set `cancel` to keep the player out. The player's state is swapped in.
 
-- A server player woke or stood up from the bed at `pos`, after their sleeping state changed.
+- A server player is waking or standing up from the bed at `pos`; `player_bed_leave` is heard before their sleeping state is cleared, so a listener still reads them as sleeping.
 
 - A server player caught a bucketable mob: `player_bucket_entity(player, name, entity_id, entity)` runs after the mob was removed and the filled bucket was put in the player's hand or inventory. `entity` is the mob species id.
 
