@@ -29,7 +29,7 @@ archive=horizon-prebuilt-v$format-
 # FNR_KEEP=1 keeps the launcher's folder (toolchain, horizon-mixins, source): a warm build.
 # FNR_MIXINS_FROM_SOURCE=1 builds horizon-mixins from its pinned source, dropping a kept tool: the
 # launcher otherwise downloads the prebuilt one, and its source build has to stay proven.
-if [ -n "${FNR_KEEP:-}" ]; then rm -rf "$scratch/mods" "$scratch/engine" "$scratch/run" "$scratch/launcher/native/server-builds" "$scratch/launcher/versions"/native-*; else rm -rf "$scratch"; fi
+if [ -n "${FNR_KEEP:-}" ]; then rm -rf "$scratch/mods" "$scratch/engine" "$scratch/run" "$scratch/swap-mods" "$scratch/swap-engine" "$scratch/launcher/native/server-builds" "$scratch/launcher/versions"/native-*; else rm -rf "$scratch"; fi
 mkdir -p "$scratch"/{home,launcher,data,config,trash,clipboard,desktop,mods}
 scratch=$(realpath "$scratch")
 data=$scratch/launcher
@@ -178,26 +178,57 @@ if [ -n "$resources" ]; then
     layout_mod=$(python3 "$root/tools/ci/mismatch_wasm_layout.py" "$FNR_WASM_LAYOUT_PACKAGE" "$run/horizon-mods/layout-refused.hmod")
     printf 'mod.%s:true\n' "$layout_mod" > "$run/horizon-mods.txt"
   fi
-  # Swapping a library never changes the fixed executable. A separately built replacement
-  # must be supplied by the check set to prove different compiled code can be loaded.
-  if [ -n "${FNR_SWAP_LIBRARY:-}" ]; then
-  python3 - "$scratch/engine" "$FNR_SWAP_LIBRARY" <<'PYLIB'
+  # Compile a changed copy of one mod, then swap only its library into the first build.
+  # Its public probe adds compiled code without changing the hooks the check asserts below.
+  executable_hash=$(sha256sum "$scratch/engine/horizon-engine" | cut -d' ' -f1)
+  swap_mods=$scratch/swap-mods
+  cp -a "$mods" "$swap_mods"
+  python3 - "$scratch/engine/native-mods.json" "$swap_mods" <<'PYCHANGE'
+import json, pathlib, sys, tomllib
+record = json.loads(pathlib.Path(sys.argv[1]).read_text())
+mod_id = next(r["mod"] for r in record["libraries"] if r["kind"] == "mod")
+for folder in pathlib.Path(sys.argv[2]).iterdir():
+    manifest = folder / "horizon-mod.toml"
+    if manifest.is_file() and tomllib.loads(manifest.read_text())["id"] == mod_id:
+        cargo = tomllib.loads((folder / "Cargo.toml").read_text())
+        source = folder / cargo.get("lib", {}).get("path", "src/lib.rs")
+        with source.open("a") as stream:
+            stream.write("\n#[inline(never)] pub fn __horizon_library_swap_probe() -> u64 { 0x4041 }\n")
+        break
+else:
+    raise SystemExit(f"no source for swap mod {mod_id}")
+PYCHANGE
+  swap_args=()
+  if [ "$side" = server ]; then swap_args+=(--server-output "$scratch/swap-engine"); fi
+  env "${env_vars[@]}" "$launcher" native-build "$swap_mods" "${swap_args[@]}" --version native-ci --profile optimized \
+    --trust-native-code > "$scratch/swap-build.out" 2> "$scratch/swap-build.err" || {
+      cat "$scratch/swap-build.out"; cat "$scratch/swap-build.err" >&2; exit 1;
+    }
+  python3 - "$scratch/engine" "$scratch/swap-engine" "$data/versions" <<'PYLIB'
 import hashlib, json, pathlib, shutil, sys
 folder = pathlib.Path(sys.argv[1])
 record = folder / "native-mods.json"
 rows = json.loads(record.read_text())
 row = next(r for r in rows["libraries"] if r["kind"] == "mod")
 library = folder / row["file"]
-replacement = pathlib.Path(sys.argv[2])
-assert replacement.read_bytes() != library.read_bytes(), "swap must change the compiled library"
-shutil.copyfile(replacement, library)
-row["sha256"] = hashlib.sha256(library.read_bytes()).hexdigest()
-record.write_text(json.dumps(rows))
+original = library.read_bytes()
+for root in map(pathlib.Path, sys.argv[2:]):
+    for candidate in root.rglob("native-mods.json"):
+        build = json.loads(candidate.read_text())
+        for replacement in build.get("libraries", []):
+            if replacement["mod"] != row["mod"] or replacement["identity"] != row["identity"]:
+                continue
+            path = candidate.parent / replacement["file"]
+            if path.read_bytes() == original:
+                continue
+            shutil.copyfile(path, library)
+            row["sha256"] = hashlib.sha256(library.read_bytes()).hexdigest()
+            record.write_text(json.dumps(rows))
+            print(f"Swapped independently rebuilt library for {row['mod']}")
+            raise SystemExit(0)
+raise SystemExit("no changed library with the expected identity was built")
 PYLIB
-  else
-    echo "Library swap proof skipped: set FNR_SWAP_LIBRARY to an independently compiled replacement."
-  fi
-  executable_hash=$(sha256sum "$scratch/engine/horizon-engine" | cut -d' ' -f1)
+  test "$(sha256sum "$scratch/engine/horizon-engine" | cut -d' ' -f1)" = "$executable_hash"
   # A loop mod gets a forced chunk of hoppers handing stone along each row, so the loop visits them,
   # and a row of each loop mod's counters beside them.
   hoppers=
