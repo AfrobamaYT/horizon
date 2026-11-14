@@ -9,6 +9,7 @@
 mod selector_metadata;
 use selector_metadata::hurt_sound_for;
 mod attack_target;
+mod break_prediction;
 mod fall_sound;
 mod interaction_actions;
 mod interaction_prediction;
@@ -8235,35 +8236,6 @@ impl Game<'_> {
             &mut canceled,
         );
         canceled
-    }
-    /// MultiPlayerGameMode.destroyBlock: the predicted break.
-    fn predict_break(&mut self, pos: [i32; 3], state: BlockStateId, sequence: i32) {
-        self.tutorial_destroy(state, 1.0);
-        // BlockStatePredictionHandler.retainKnownServerState.
-        let here = self.player_position();
-        if let Some(r) = self.remote.as_mut() {
-            r.predictions
-                .entry(pos)
-                .and_modify(|p| p.sequence = sequence)
-                .or_insert(Prediction {
-                    sequence,
-                    state: state.0 as i32,
-                    player_pos: here,
-                });
-        }
-        // Block.playerWillDestroy's destroy event (particles and the break
-        // sound), which BaseFireBlock skips: the server's extinguish sound
-        // is all a player hears.
-        if !self.res.facts().get(state).has_class("BaseFireBlock") {
-            self.play_break_sound(pos, state);
-            self.destroy_particles(pos, state);
-        }
-        // The server's block update follows (waterlogged blocks leave water).
-        let air = self.world.air;
-        if self.world.set(pos[0], pos[1], pos[2], air).is_ok() {
-            self.world.block_entities.remove(&(pos[0], pos[1], pos[2]));
-        }
-        self.mining = None;
     }
     /// `Player.blockActionRestricted` for the block at `pos`: a spectator
     /// never breaks, an adventure player only with a main-hand item whose
