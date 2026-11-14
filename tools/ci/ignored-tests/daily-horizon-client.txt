@@ -15,6 +15,7 @@ horizon-client game::mounts::tests::feeding_a_mount_draws_from_its_own_random_an
 horizon-client game::native_block_entity_transform_tests::structure_transform_placement_rotations_mirrors_unset_and_refusal lib daily child-process
 horizon-client game::native_server::network_settings_tests::server_settings_follow_the_network_config lib daily slow
 horizon-client game::natural_spawning::tests::spawn_candidates_match_the_uncached_union_while_players_move lib daily slow
+horizon-client game::split::players::tests::offline_guests_join_only_local_servers lib daily network
 horizon-client game::stats::phantom_spawn_tests::no_phantoms_under_a_roof_the_sky_light_does_not_reach lib daily game-boot
 horizon-client game::stats::phantom_spawn_tests::phantoms_spawn_under_a_glass_roof lib daily game-boot
 horizon-client game::tnt::tests::h13201_a_dispensed_potion_is_a_level_entity lib daily game-boot
