@@ -30,7 +30,7 @@ fn chain(depth: usize, riding: bool) -> Compound {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "daily"]
 fn a_mods_host_upgrades_old_data_and_refuses_by_name() {
     // The pre-1.13 fixes (the riding chain's) read the data fixers' tables of the prepared resources.
     horizon_world::datafix::set_resources(std::path::Path::new(
