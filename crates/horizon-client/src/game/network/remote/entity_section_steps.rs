@@ -2,6 +2,42 @@ use super::Game;
 use horizon_core::geometry::Vec3;
 
 impl Game<'_> {
+    pub(super) fn remote_move_entity_and_file(
+        &mut self,
+        id: i32,
+        path: Option<super::Path>,
+        rotation: Option<(f32, f32)>,
+        on_ground: bool,
+    ) {
+        self.move_entity(id, path, rotation, on_ground, super::MovePacket::Move);
+        self.entity_section_moved_id(id as u32);
+    }
+
+    pub(super) fn remote_position_sync_and_file(
+        &mut self,
+        id: i32,
+        path: super::Path,
+        yaw: f32,
+        pitch: f32,
+        on_ground: bool,
+    ) {
+        self.move_entity(
+            id,
+            Some(path),
+            Some((yaw, pitch)),
+            on_ground,
+            super::MovePacket::PositionSync,
+        );
+        self.entity_section_moved_id(id as u32);
+    }
+
+    pub(super) fn remote_move_vehicle_and_file(&mut self, position: [f64; 3], yaw: f32) {
+        self.remote_move_vehicle(position, yaw);
+        if let Some(mount) = self.driven_mount() {
+            self.entity_section_moved_id(mount.id as u32);
+        }
+    }
+
     pub(super) fn remote_entity_section_step(&mut self, id: u32, from: Vec3, to: Vec3) {
         self.entity_section_step(id, [from.x, from.y, from.z], [to.x, to.y, to.z]);
     }

@@ -4000,7 +4000,7 @@ impl Game<'_> {
                 ) {
                     t.codec_base = path.end();
                 }
-                self.move_entity(m.id, path, rotation, m.on_ground, MovePacket::Move);
+                self.remote_move_entity_and_file(m.id, path, rotation, m.on_ground);
             }
             C::EntityPositionSync(p) => {
                 let path = match p.path {
@@ -4011,13 +4011,7 @@ impl Game<'_> {
                 if let Some(t) = self.remote.as_mut().and_then(|r| r.entities.get_mut(&p.id)) {
                     t.codec_base = path.end();
                 }
-                self.move_entity(
-                    p.id,
-                    Some(path),
-                    Some((p.yaw, p.pitch)),
-                    p.on_ground,
-                    MovePacket::PositionSync,
-                );
+                self.remote_position_sync_and_file(p.id, path, p.yaw, p.pitch, p.on_ground);
             }
             C::TeleportEntity(p) => {
                 let base = self
@@ -4050,6 +4044,7 @@ impl Game<'_> {
                 if self.driven_mount().is_some_and(|m| m.id as i32 == p.id) {
                     self.remote_move_vehicle(position, p.yaw);
                 }
+                self.entity_section_moved_id(p.id as u32);
             }
             C::SetPassengers(p) => self.remote_set_passengers(p.vehicle, &p.passengers),
             // ClientPacketListener.handleEntityLinkPacket: who holds a mob's
@@ -4080,7 +4075,7 @@ impl Game<'_> {
                     });
                 }
             }
-            C::MoveVehicle(p) => self.remote_move_vehicle(p.position, p.yaw),
+            C::MoveVehicle(p) => self.remote_move_vehicle_and_file(p.position, p.yaw),
             C::MoveMinecartAlongTrack(p) => self.remote_move_minecart(p),
             // ClientPacketListener.handleRotateMob: lerpHeadTo(yHeadRot, 3).
             C::RotateHead(p) => {

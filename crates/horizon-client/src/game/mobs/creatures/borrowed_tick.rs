@@ -113,8 +113,34 @@ impl Game<'_> {
         // Each mob's position updates in its tick, in order, filed and told before the next mob
         // is examined. The small record remains separate from `Mob` because teleports update
         // the same position field as ordinary movement.
-        let mut section_moves = std::mem::take(&mut self.native_lifecycle.entity_sections.ticked);
-        crate::mobs::living::section_writes::begin(round.sections());
+        let section_table = round.sections().then(|| {
+            std::rc::Rc::new(std::cell::RefCell::new(std::mem::take(
+                &mut self.native_lifecycle.entity_sections,
+            )))
+        });
+        let mut section_moves = section_table
+            .as_ref()
+            .map(|sections| std::mem::take(&mut sections.borrow_mut().ticked))
+            .unwrap_or_default();
+        crate::mobs::living::section_writes::begin(section_table.is_some());
+        let section_scope = round
+            .sections()
+            .then(|| self.entity_section_scope())
+            .flatten();
+        let live_section_observer: Option<
+            crate::mobs::living::section_writes::Observer,
+        > = section_scope
+            .zip(section_table.as_ref())
+            .map(|(scope, sections)| {
+                let observer: crate::mobs::living::section_writes::Observer =
+                    std::rc::Rc::new(std::cell::RefCell::new(
+                    crate::game::entity_sections::LiveSectionObserver::new(
+                        std::rc::Rc::clone(sections),
+                        scope,
+                    ),
+                    ));
+                observer
+            });
         let mut dispatch_panic = None;
         let mut pushes = std::mem::take(state.pushes);
         let original_len = snapshot.len();
@@ -166,6 +192,9 @@ impl Game<'_> {
                     .map(super::super::boat_leads::boat_state)
                     .collect();
                 let mut base = self.mob_world_base(&[]);
+                // Install the shared observer only on the per-mob view below; keeping the
+                // reusable base empty lets its reference fields remain copyable between rows.
+                base.section_writer = None;
                 base.passenger_objects = passenger_objects;
                 let mut level = horizon_client::health::DamageLevel::lent(
                     &self.world,
@@ -281,6 +310,7 @@ impl Game<'_> {
                             nearest_player,
                             player: None,
                             teams: std::sync::Arc::clone(&base.teams),
+                            section_writer: None,
                             ..base
                         };
                         let kept = horizon_client::mobs::ai::despawn_check(m, &w);
@@ -412,8 +442,10 @@ impl Game<'_> {
                         player_identity: active_identity,
                         player_selection: selection.as_ref(),
                         teams: std::sync::Arc::clone(&base.teams),
+                        section_writer: None,
                         ..base
                     };
+                    w.section_writer = live_section_observer.clone();
                     w.controlling_player_movement = controlling_player_movement;
                     let credit_expiring = if resuming {
                         resume_credit_expiring
@@ -528,7 +560,7 @@ impl Game<'_> {
                                     ),
                                 );
                             }
-                            if changed {
+                            if changed && captured == 0 {
                                 section_moves.push(
                                     crate::mobs::living::section_writes::PositionWrite::captured(
                                         m.id,
@@ -650,7 +682,12 @@ impl Game<'_> {
             }
             let callback_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 if section_yield {
-                    self.entity_sections_ticked_live(&mut section_moves);
+                    if let Some(sections) = section_table.as_ref() {
+                        self.entity_sections_ticked_live(
+                            &mut sections.borrow_mut(),
+                            &mut section_moves,
+                        );
+                    }
                 }
                 if let Some(id) = retry_rider {
                     self.dismount_mob(id);
@@ -764,10 +801,19 @@ impl Game<'_> {
             }
         }
         crate::mobs::living::section_writes::finish();
+        drop(live_section_observer);
         // Keep the reusable write storage for the next pass; the live-row callback has already
         // consumed every record that belonged to this family tick.
         section_moves.clear();
-        self.native_lifecycle.entity_sections.ticked = section_moves;
+        if let Some(table) = section_table {
+            let mut sections = std::rc::Rc::try_unwrap(table)
+                .ok()
+                .expect("live section observer still held");
+            sections.get_mut().ticked = section_moves;
+            self.native_lifecycle.entity_sections = sections.into_inner();
+        } else {
+            self.native_lifecycle.entity_sections.ticked = section_moves;
+        }
         *state.pushes = pushes;
         *state.mobs = mobs;
         *state.snapshot = snapshot;

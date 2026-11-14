@@ -353,14 +353,22 @@ impl Mob {
         let dh = (new_h - old_h).max(0.0) + 1.0e-6;
         let at = |allowed: Aabb, size_y: f64| free_position(w, allowed, center, new_w, size_y);
         if let Some(p) = at(Aabb::of_size(center, Vec3::new(dw, dh, dw)), new_h) {
-            teleports::set_pos(self, Vec3::new(p.x, p.y - new_h / 2.0, p.z));
+            teleports::set_pos_with(
+                self,
+                Vec3::new(p.x, p.y - new_h / 2.0, p.z),
+                w.section_writer.clone(),
+            );
             return;
         }
         if new_w > old_w
             && new_h > old_h
             && let Some(p) = at(Aabb::of_size(center, Vec3::new(dw, 1.0e-6, dw)), old_h)
         {
-            teleports::set_pos(self, Vec3::new(p.x, p.y - old_h / 2.0 + 1.0e-6, p.z));
+            teleports::set_pos_with(
+                self,
+                Vec3::new(p.x, p.y - old_h / 2.0 + 1.0e-6, p.z),
+                w.section_writer.clone(),
+            );
         }
     }
     fn no_physics(&self) -> bool {
@@ -743,6 +751,7 @@ impl Mob {
             self.velocity = Vec3::ZERO;
         }
         let step = self.kind.step_height as f32;
+        let from = self.position;
         let scene = SceneCollisions {
             world: w.world,
             binding: w.collision,
@@ -774,6 +783,13 @@ impl Mob {
                 self.position.x + moved.x,
                 self.position.y + moved.y,
                 self.position.z + moved.z,
+            );
+            super::living::section_writes::record_with(
+                self.id,
+                self.join,
+                from,
+                self.position,
+                w.section_writer.clone(),
             );
         }
         // !Mth.equal(delta, movement)
@@ -2357,7 +2373,7 @@ pub fn random_teleport(
         return false;
     }
     // Entity.teleportTo -> snapTo: the old position moves too, the motion stays.
-    teleports::snap_to(m, Vec3::new(x, ny, z));
+    teleports::snap_to_with(m, Vec3::new(x, ny, z), w.section_writer.clone());
     m.ai.nav.stop();
     // `randomTeleport(..., true)` broadcasts entity event 46.
     events.push(MobEvent::EntityEvent {

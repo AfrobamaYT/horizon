@@ -15,11 +15,21 @@ pub struct PositionWrite {
     pub join: JoinSeq,
     pub from: Option<Vec3>,
     pub to: Vec3,
+    /// The write was filed and delivered at the write boundary.  It remains in the
+    /// per-tick record only so the ordinary movement bookkeeping knows that this
+    /// mob already had a position write and must not synthesize a second one.
+    pub delivered: bool,
 }
 
 impl PositionWrite {
     pub const fn new(id: u32, join: JoinSeq, from: Option<Vec3>, to: Vec3) -> Self {
-        Self { id, join, from, to }
+        Self {
+            id,
+            join,
+            from,
+            to,
+            delivered: false,
+        }
     }
 
     pub const fn captured(id: u32, join: JoinSeq, from: Vec3, to: Vec3) -> Self {
@@ -30,6 +40,16 @@ impl PositionWrite {
         Self::new(id, join, None, to)
     }
 }
+
+/// A live section boundary for a mob write.  The game supplies this only while
+/// the entity list is lifted; keeping it behind a tiny trait lets the mob code
+/// report a write without borrowing `Game` through its world view.
+pub trait WriteObserver {
+    fn position_written(&mut self, id: u32, from: Vec3, to: Vec3);
+}
+
+/// A shared live observer used inside cloned `MobWorld` views.
+pub type Observer = std::rc::Rc<RefCell<dyn WriteObserver>>;
 
 #[derive(Default)]
 struct State {
@@ -52,12 +72,22 @@ pub fn begin(enabled: bool) {
 
 /// Capture a committed teleport while the current mob is being ticked.
 pub fn record(id: u32, join: JoinSeq, from: Vec3, to: Vec3) {
+    record_with(id, join, from, to, None);
+}
+
+/// Capture a write and, when a live observer is present, deliver it before the
+/// mob continues its tick.  The record is retained as a delivered marker so
+/// the end-of-tick fallback does not replay it.
+pub fn record_with(id: u32, join: JoinSeq, from: Vec3, to: Vec3, observer: Option<Observer>) {
     STATE.with(|state| {
         let mut state = state.borrow_mut();
         if state.enabled {
-            state
-                .writes
-                .push_back(PositionWrite::captured(id, join, from, to));
+            if let Some(observer) = observer.as_ref() {
+                observer.borrow_mut().position_written(id, from, to);
+            }
+            let mut write = PositionWrite::captured(id, join, from, to);
+            write.delivered = observer.is_some();
+            state.writes.push_back(write);
         }
     });
 }

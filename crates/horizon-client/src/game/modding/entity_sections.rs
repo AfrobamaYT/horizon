@@ -26,6 +26,7 @@
 use super::Game;
 use crate::mobs::living::section_writes::PositionWrite;
 use mod_api::{DimensionKey, EntityRef, WorldEpoch};
+use mod_api::__private::game::BackendRefOf;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
@@ -164,6 +165,100 @@ impl EntitySections {
     }
 }
 
+/// The lightweight host used while a mob's world view is borrowed.  Entity
+/// reads are answered from the write that is currently being delivered; all
+/// other host operations retain their normal typed refusal instead of trying
+/// to borrow the game through the live mob view.
+struct LiveSectionHost {
+    epoch: WorldEpoch,
+    current: Option<(u32, [f64; 3])>,
+}
+
+mod_api::impl_host_areas!(LiveSectionHost);
+mod_api::impl_server_host_areas!(LiveSectionHost);
+mod_api::impl_backend_areas!(LiveSectionHost, except(entities));
+
+impl mod_api::prelude::EntitiesBackend for LiveSectionHost {
+    fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        (entity.epoch() == self.epoch)
+            .then_some(self.current)
+            .flatten()
+            .and_then(|(id, position)| (id == entity.id()).then_some(position))
+    }
+}
+
+impl mod_api::Backend for LiveSectionHost {}
+
+impl mod_api::Host for LiveSectionHost {
+    fn backend(&self) -> Option<mod_api::BackendRef<'_>> {
+        Some(mod_api::BackendRef::of(self))
+    }
+}
+
+impl mod_api::ServerHost for LiveSectionHost {}
+
+/// Delivers a mob's captured teleport at the write boundary.  The observer
+/// owns only the section table, so it can run while the mob's borrowed world
+/// view is still live.
+pub(crate) struct LiveSectionObserver {
+    sections: std::rc::Rc<std::cell::RefCell<EntitySections>>,
+    scope: Scope,
+    current: Option<(u32, [f64; 3])>,
+}
+
+impl LiveSectionObserver {
+    pub(crate) fn new(
+        sections: std::rc::Rc<std::cell::RefCell<EntitySections>>,
+        scope: Scope,
+    ) -> Self {
+        Self {
+            sections,
+            scope,
+            current: None,
+        }
+    }
+
+    fn tell(&mut self) {
+        let Some(mut batch) = self.sections.borrow_mut().begin_telling() else {
+            return;
+        };
+        let mut host = LiveSectionHost {
+            epoch: self.scope.epoch,
+            current: self.current,
+        };
+        for crossing in &batch {
+            host.current = self.current.filter(|(id, _)| *id == crossing.id);
+            let chunk_changed = crossing.old[0] != crossing.new[0]
+                || crossing.old[2] != crossing.new[2];
+            mod_api::dispatch_entity_entering_section(
+                mod_api::HostSide::Server(&mut host),
+                EntityRef::new(self.scope.epoch, crossing.id),
+                crossing.old,
+                crossing.new,
+                chunk_changed,
+            );
+        }
+        batch.clear();
+        let mut sections = self.sections.borrow_mut();
+        sections.telling = batch;
+        sections.busy = false;
+    }
+}
+
+impl crate::mobs::living::section_writes::WriteObserver for LiveSectionObserver {
+    fn position_written(&mut self, id: u32, from: horizon_core::geometry::Vec3, to: horizon_core::geometry::Vec3) {
+        self.current = Some((id, [to.x, to.y, to.z]));
+        self.sections.borrow_mut().moved(
+            self.scope,
+            id,
+            Some([from.x, from.y, from.z]),
+            [to.x, to.y, to.z],
+        );
+        self.tell();
+        self.current = None;
+    }
+}
+
 impl Game<'_> {
     /// Where boundaries are now: None with no listener (nothing is filed) or no world open.
     pub(super) fn entity_section_scope(&self) -> Option<Scope> {
@@ -236,7 +331,11 @@ impl Game<'_> {
     /// temporarily moved to each recorded write while its crossing is told;
     /// this gives listeners the same position they would see at the write and
     /// preserves a listener's own position change.
-    pub(super) fn entity_sections_ticked_live(&mut self, moves: &mut Vec<PositionWrite>) {
+    pub(super) fn entity_sections_ticked_live(
+        &mut self,
+        sections: &mut EntitySections,
+        moves: &mut Vec<PositionWrite>,
+    ) {
         let Some(scope) = self.entity_section_scope() else {
             moves.clear();
             return;
@@ -249,19 +348,22 @@ impl Game<'_> {
                 .map(|(index, mob)| (mob.join, index)),
         );
         for write in moves.drain(..) {
+            if write.delivered {
+                continue;
+            }
             let Some(&index) = indices.get(&write.join) else {
-                self.native_lifecycle.entity_sections.forget(write.id);
+                sections.forget(write.id);
                 continue;
             };
             let final_position = self.mobs[index].position;
             self.mobs.update(index, |mob| mob.position = write.to);
-            self.native_lifecycle.entity_sections.moved(
+            sections.moved(
                 scope,
                 write.id,
                 write.from.map(|from| [from.x, from.y, from.z]),
                 [write.to.x, write.to.y, write.to.z],
             );
-            self.tell_entity_sections();
+            self.tell_entity_sections_in(sections);
             indices.clear();
             indices.extend(
                 self.mobs
@@ -393,15 +495,6 @@ impl Game<'_> {
         }
         let packet_section = match &packet {
             C::AddEntity(p) => Some((true, p.id as u32, p.position)),
-            C::MoveEntityPos(p) => Some((false, p.0.id as u32, [0.0; 3])),
-            C::MoveEntityPosRot(p) => Some((false, p.0.id as u32, [0.0; 3])),
-            C::MoveEntityRot(p) => Some((false, p.0.id as u32, [0.0; 3])),
-            C::EntityPositionSync(p) => Some((false, p.id as u32, [0.0; 3])),
-            C::TeleportEntity(p) => Some((false, p.id as u32, [0.0; 3])),
-            C::PlayerPosition(_) => u32::try_from(self.own_entity_id())
-                .ok()
-                .map(|id| (false, id, [0.0; 3])),
-            C::MoveVehicle(_) => self.driven_mount().map(|m| (false, m.id, [0.0; 3])),
             _ => None,
         };
         let respawned = matches!(packet, C::Respawn(_));
@@ -439,5 +532,23 @@ impl Game<'_> {
             }
         }
         self.native_lifecycle.entity_sections.end_telling(batch);
+    }
+
+    fn tell_entity_sections_in(&mut self, sections: &mut EntitySections) {
+        let Some(batch) = sections.begin_telling() else {
+            return;
+        };
+        if let Some(epoch) = self.native_lifecycle.epoch() {
+            for c in &batch {
+                let chunk_changed = c.old[0] != c.new[0] || c.old[2] != c.new[2];
+                self.native_entity_entering_section(
+                    EntityRef::new(epoch, c.id),
+                    c.old,
+                    c.new,
+                    chunk_changed,
+                );
+            }
+        }
+        sections.end_telling(batch);
     }
 }
