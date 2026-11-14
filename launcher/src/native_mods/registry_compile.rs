@@ -591,7 +591,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "daily: compiles fixture crates in child processes"]
+    #[ignore = "daily"]
     fn registry_adapter_compiles_facade_with_transitive_host_macro_metadata() {
         use std::{ffi::OsString, process::Command};
         let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/registry-facade-tests");

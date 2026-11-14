@@ -22,6 +22,23 @@ pub mod native {
         pub installs: fn() -> Vec<(&'static str, &'static [&'static str], bool)>,
     }
 
+    impl NativeMod {
+        /// The library's registration, as its generated entry module builds it.
+        pub fn new(
+            entries: fn() -> Vec<crate::ModEntry>,
+            slots: fn() -> Vec<super::points::SlotListener>,
+            built: &'static [BuiltMod],
+            installs: fn() -> Vec<(&'static str, &'static [&'static str], bool)>,
+        ) -> Self {
+            Self {
+                entries,
+                slots,
+                built,
+                installs,
+            }
+        }
+    }
+
     /// One native mod supplied by a library, with its manifest's `side`.
     #[derive(Clone, Copy, Debug, Default, PartialEq)]
     pub struct BuiltMod {
