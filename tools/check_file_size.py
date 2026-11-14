@@ -23,6 +23,8 @@ end must agree:
 Unformatted code, or a lexer mistake, makes them disagree, and the module counts. The two start lines must begin in
 code too, so Rust source quoted in a string is no module.
 
+A `#[ignore = "daily"]` line doesn't count either, on the base or now: moving a test to the daily run must not grow a file.
+
     python3 tools/check_file_size.py --base origin/main
 """
 

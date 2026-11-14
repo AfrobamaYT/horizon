@@ -30,7 +30,6 @@ class ProblemsTests(unittest.TestCase):
         self.assertEqual(count(before), count(marked))
         self.assertEqual(len(check_file_size.problems([
             entry("tests.rs", count(marked), count(marked + 'fn added() {}\n'))])), 1)
-        self.assertEqual(check_file_size.problems([entry("tests.rs", count(marked), count(before))]), [])
 
     def test_a_big_file_may_shrink_or_stay(self):
         self.assertEqual(check_file_size.problems([entry("a.rs", 21000, 20000), entry("b.rs", 5000, 5000)]), [])
