@@ -580,7 +580,7 @@ grow to 3000 lines, and a big file may shrink or stay as it is. The fork records
 explicitly fetched from `https://github.com/horizon-rust/horizon.git` into `refs/sync/upstream-main`.
 It must not be an ancestor of the base and must be a parent of a merge in `base..HEAD`. Without this
 proof, adding or raising an entry fails against `--base`. Missing network access, failed fetches and
-shallow history fail closed. The addresses and layers checks reuse the same provenance helper to
+shallow history fail closed (`tools/pr_ready.py` skips the step on a shallow clone, saying so; CI's verify job checks a full history). The addresses and layers checks reuse the same provenance helper to
 permit only exact rows or assignments from the verified upstream inventories. A PR can still merge
 a real upstream commit and add unrelated caps: review the sync and growth list
 (see `tools/sync/README.md`). In a sync PR a listed file must stay within its cap, and a cap above
