@@ -5,11 +5,10 @@ use crate::*;
 #[path = "__private/registry_installation.rs"]
 mod registry_installation;
 
-/// The native mods compiled into a game: the launcher-to-game build contract, not a mod-facing
-/// API. The launcher generates the rows from the selected manifests, independently of the mods'
-/// hook factories; the game checks them against the packages beside its executable
-/// (`horizon_mod_package::runtime`). It lives in the API's closure so that the launcher's
-/// `horizon_native_mods` library, built from the API slice alone, can name it.
+/// Native libraries' launcher-to-game registration contract, not a mod-facing API.
+/// The launcher generates manifest rows independently of hook factories. The game checks
+/// them against the packages beside its executable (`horizon_mod_package::runtime`).
+/// These types live in the shared API closure so every library uses the same Rust ABI.
 pub mod native {
     /// One dynamically loaded native library, registered before the engine seal.
     pub struct NativeMod {
@@ -23,7 +22,7 @@ pub mod native {
         pub installs: fn() -> Vec<(&'static str, &'static [&'static str], bool)>,
     }
 
-    /// One native mod compiled into the executable, with its manifest's `side`.
+    /// One native mod supplied by a library, with its manifest's `side`.
     #[derive(Clone, Copy, Debug, Default, PartialEq)]
     pub struct BuiltMod {
         pub id: &'static str,

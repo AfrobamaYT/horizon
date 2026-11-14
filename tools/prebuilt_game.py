@@ -42,7 +42,7 @@ LOCK = "Cargo.lock"
 # Where `smoke` installs the executable it builds, as the launcher does, for `start`: beside OUT, never inside it,
 # since the archive is OUT alone.
 SMOKE = "prebuilt-smoke"
-# Where `smoke` installs the API route's executable with its stub (no mods), for `start`.
+# Where `smoke` installs the same executable without selected mods, for `start`.
 SMOKE_API = "prebuilt-smoke-api"
 EXECUTABLE = "horizon-client.exe" if sys.platform == "win32" else "horizon-client"
 # The furthest a game started without its prepared files gets (game.rs `missing_resources`): past loading the
@@ -52,13 +52,13 @@ NO_RESOURCES = "Horizon's prepared game files are missing"
 TEMPLATE = "native_main.rs.template"
 NATIVE_MODS_TEMPLATE = "native_mod_entry.rs.template"
 API_MAIN = ROOT / "crates/horizon-client/src/native_main.rs.template"
-# The folder holding that executable and the stub, in the `runtime` slice.
+# The fixed executable folder in the runtime slice.
 RUNTIME = "bin"
 # The required inputs (`horizon_mod_package::sdk::Inputs`): `members` lists what each slice must hold.
 INPUTS = ROOT / "crates/horizon-mod-package/src/sdk/inputs.json"
 # The crates an API-only mod may name; their closure is the `api` archive.
 API_ROOTS = ("horizon-mod-api", "horizon-mod-points")
-# The two game libraries every executable loads, in the `runtime` archive.
+# The game libraries outside the API closure, in the runtime archive.
 GAME_LIBRARIES = ("horizon_mod_host", "horizon_mod_wasm")
 # Source files the folder carries besides compiler outputs.
 CARRIED = {"Cargo.toml": None, IDENTITY: None, LOCK: ROOT / LOCK, TEMPLATE: ROOT / "crates/horizon-client/src" / TEMPLATE,
@@ -192,7 +192,7 @@ def copy_artifacts(messages: list[dict], deps: Path, host: Path, target_dir: Pat
         filenames = list(message["filenames"])
         # Cargo does not inventory standalone metadata emitted alongside a dylib.
         for name in message["filenames"]:
-            if proc_macro or not name.endswith((".so", ".dll", ".dylib")):
+            if proc_macro or not any(file.endswith((".so", ".dll", ".dylib")) for file in message["filenames"]):
                 continue
             metadata = Path(name).with_suffix(".rmeta")
             if metadata.is_file() and str(metadata) not in filenames:
@@ -231,10 +231,8 @@ def api_closure(metadata: dict, roots=API_ROOTS) -> set[str]:
 
 
 def slices(metadata: dict, copied: dict[str, list[str]], api_route: list[str]) -> dict[str, list[str]]:
-    """The package's files for the `runtime` and `api` archives, from the build's own records (never a hand-kept list);
-    every other file is the `engine` archive's. `runtime`: the identity, the game's two libraries and `api_route` (the
-    API route's executable and stub). `api`: the API closure's compiled files, the point data and the mods library's
-    template (not the function index, which only the engine route reads)."""
+    """Inventory the runtime dynamic libraries and API metadata from Cargo's build records.
+    All remaining files belong to the engine slice."""
     names = {package["id"]: package["name"] for package in metadata["packages"]}
     libraries = {crate.replace("_", "-") for crate in GAME_LIBRARIES}
     closure = api_closure(metadata)
@@ -253,9 +251,7 @@ def slices(metadata: dict, copied: dict[str, list[str]], api_route: list[str]) -
 
 
 def api_route(out: Path, link_args: list[str]) -> list[str]:
-    """The API route's executable and its stub `horizon_native_mods`, built against the package in OUT/bin. The
-    stub is the launcher's template with no rows, built as a dylib with the fixed metadata the launcher's library uses,
-    so the executable's imports name what the launcher's library exports. Returns their paths in the package."""
+    """Build the fixed executable shared by both native routes, once for this SDK."""
     deps = out / "deps"
     folder = out / RUNTIME
     folder.mkdir()
@@ -274,7 +270,7 @@ def api_route(out: Path, link_args: list[str]) -> list[str]:
 
 
 def api_route_files() -> set[str]:
-    """What OUT/bin may hold: the executable and the stub, with its import library on Windows."""
+    """The runtime binary folder contains only the fixed executable."""
     return {EXECUTABLE}
 
 
@@ -584,7 +580,7 @@ def check(out: Path) -> None:
 
 
 def smoke(out: Path) -> None:
-    """Build what a player's launcher builds: the starter mod and the generated executable, from OUT alone."""
+    """Build a starter mod dylib and install the fixed executable from OUT alone."""
     deps = out / "deps"
     assert_externs(out, json.loads((out / IDENTITY).read_text())["facade_crates"])
 
@@ -599,30 +595,34 @@ def smoke(out: Path) -> None:
     installed.mkdir()
     # The game's libraries load from beside the executable (launcher/src/native_mods/prebuilt.rs `compile`).
     origin = {"linux": ["-Wl,-rpath,$ORIGIN"], "darwin": ["-Wl,-rpath,@executable_path"]}.get(sys.platform, [])
+    identity = json.loads((out / IDENTITY).read_text())
+    release = next(line.removeprefix("release: ") for line in identity["rustc"].splitlines() if line.startswith("release: "))
+    build = f"{identity['commit']} smoke 0.1.0 {release}"
+    library = f"{dylib_prefix()}smoke{dylib_suffix()}"
     with tempfile.TemporaryDirectory(dir=out.parent) as scratch:
         scratch = Path(scratch)
         starter = (ROOT / "crates/cargo-horizon-mod/template/native/lib.rs").read_text()
-        (scratch / "mod_0.rs").write_text(starter.replace("{id}", "smoke"))
-        run(["rustc", *common, "--crate-type", "rlib", "--crate-name", "mod_0", *extern("mod_api"),
-             "--out-dir", str(scratch), str(scratch / "mod_0.rs")])
-        template = (out / TEMPLATE).read_text()
-        main = template.replace("/* MOD_ENTRIES */", '        "smoke" => mod_0::hooks,\n').replace(
-            "/* BUILT_MODS */",
-            '    mod_api::__private::native::BuiltMod { id: "smoke", version: "0.1.0", side: mod_api::Side::Both },\n',
-        )
-        (scratch / "main.rs").write_text(main)
-        link_args = json.loads((out / IDENTITY).read_text())["link_args"]
-        run(["rustc", *common, "--crate-type", "bin", "--crate-name", "horizon_client_smoke",
-             *(flag for arg in origin + link_args for flag in ("-C", f"link-arg={arg}")),
-             *extern("horizon_client"), *extern("mod_api"), *extern("horizon_mod_package"), "--extern", f"horizon_mod_host={dylib(deps, 'horizon_mod_host')}",
-             "--extern", f"mod_0={scratch / 'libmod_0.rlib'}", "-L", f"dependency={scratch}",
-             "-o", str(installed / EXECUTABLE), str(scratch / "main.rs")])
+        entry = (out / NATIVE_MODS_TEMPLATE).read_text()
+        rows = {"NATIVE_BUILD": build, "MOD_ENTRIES": '"smoke" => crate::hooks,',
+                "BUILT_MODS": 'mod_api::__private::native::BuiltMod { id: "smoke", version: "0.1.0", side: mod_api::Side::Both },',
+                "MOD_SLOTS": "", "MOD_REDIRECTS": ""}
+        for marker, value in rows.items():
+            entry = entry.replace(f"/* {marker} */", value)
+        (scratch / "entry.rs").write_text(entry)
+        (scratch / "smoke.rs").write_text(starter.replace("{id}", "smoke") + '\n#[path = "entry.rs"] mod entry;\n')
+        run(["rustc", *common, "--crate-type", "dylib", "--crate-name", "smoke", *extern("mod_api"),
+             "--extern", f"horizon_mod_host={dylib(deps, 'horizon_mod_host')}",
+             *(flag for arg in origin for flag in ("-C", f"link-arg={arg}")),
+             "-o", str(installed / library), str(scratch / "smoke.rs")])
+    shutil.copy2(out / RUNTIME / EXECUTABLE, installed / EXECUTABLE)
+    (installed / "native-mods.json").write_text(json.dumps({"libraries": [{"file": library,
+        "sha256": sha256(installed / library), "kind": "mod", "mod": "smoke", "identity": build}]}))
     if holder_mark() not in (installed / EXECUTABLE).read_bytes():
         sys.exit("smoke: holder capability missing from the executable")
     for library in runtime_libraries(deps):
         shutil.copy2(library, installed / library.name)
     install_package(installed / "horizon-native-mods" / "smoke", starter.replace("{id}", "smoke"))
-    # The API route's executable as shipped, beside the same libraries, with its stub's empty mod list.
+    # The same executable as shipped, with no native libraries selected.
     api = out.parent / SMOKE_API
     if api.exists():
         shutil.rmtree(api)
@@ -651,7 +651,7 @@ def install_package(folder: Path, source: str) -> None:
 
 def runtime_libraries(deps: Path) -> list[Path]:
     """What the launcher installs beside the executable (launcher/src/native_mods/prebuilt.rs `runtime_libraries`):
-    the game's two libraries, std, and on Windows the MinGW runtime the GNU DLLs import."""
+    the game's shared libraries, std, and on Windows the MinGW runtime the GNU DLLs import."""
     libraries = [path for path in deps.iterdir() if path.suffix in (".so", ".dll", ".dylib")]
     libdir = Path(run(["rustc", "--print", "target-libdir"]).strip())
     libraries += [path for path in libdir.iterdir()
@@ -665,7 +665,7 @@ def runtime_libraries(deps: Path) -> list[Path]:
 
 
 def start(out: Path) -> None:
-    """Start both executables `smoke` installed (the engine route's with the starter mod, the API route's with its stub),
+    """Start two installations of the fixed executable (with the starter library and without mods),
     each as a dedicated server with no game data: it loads the game's libraries
     and sets up the mods' runtime, then stops at the missing prepared files. Fails on a crash, a hang or any other
     stop, so an archive whose libraries disagree (two allocators, #3877) cannot ship."""

@@ -476,6 +476,20 @@ class PrebuiltContentsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             prebuilt_game.extern_args(output, "shared")
 
+    def test_dylib_metadata_is_collected_from_the_rlib_sidecar(self):
+        root = self.folder("cache/host/release/deps/libmod_api.rlib",
+                           "cache/host/release/deps/libmod_api.rmeta",
+                           "cache/host/release/libmod_api.so")
+        deps, host = root / "sdk/deps", root / "sdk/host"
+        deps.mkdir(parents=True)
+        host.mkdir()
+        copied = prebuilt_game.copy_artifacts([{
+            "reason": "compiler-artifact", "target": {"kind": ["lib"]}, "package_id": "api",
+            "filenames": [str(root / "cache/host/release/deps/libmod_api.rlib"),
+                          str(root / "cache/host/release/libmod_api.so")],
+        }], deps, host, root / "cache/host")
+        self.assertEqual(set(copied["api"]), {"deps/libmod_api.so", "deps/libmod_api.rmeta"})
+
     def test_facades_exclude_build_only_and_ambiguous_runtime_crates(self):
         def package(name, kind="lib"):
             return {"id": name, "name": name, "targets": [{"name": name.replace('-', '_'), "kind": [kind]}]}
