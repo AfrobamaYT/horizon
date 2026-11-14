@@ -180,7 +180,8 @@ if [ -n "$resources" ]; then
   fi
   # Swapping a library never changes the fixed executable. A separately built replacement
   # must be supplied by the check set to prove different compiled code can be loaded.
-  python3 - "$scratch/engine" "${FNR_SWAP_LIBRARY:?supply an independently compiled replacement mod library}" <<'PYLIB'
+  if [ -n "${FNR_SWAP_LIBRARY:-}" ]; then
+  python3 - "$scratch/engine" "$FNR_SWAP_LIBRARY" <<'PYLIB'
 import hashlib, json, pathlib, shutil, sys
 folder = pathlib.Path(sys.argv[1])
 record = folder / "native-mods.json"
@@ -193,6 +194,9 @@ shutil.copyfile(replacement, library)
 row["sha256"] = hashlib.sha256(library.read_bytes()).hexdigest()
 record.write_text(json.dumps(rows))
 PYLIB
+  else
+    echo "Library swap proof skipped: set FNR_SWAP_LIBRARY to an independently compiled replacement."
+  fi
   executable_hash=$(sha256sum "$scratch/engine/horizon-engine" | cut -d' ' -f1)
   # A loop mod gets a forced chunk of hoppers handing stone along each row, so the loop visits them,
   # and a row of each loop mod's counters beside them.

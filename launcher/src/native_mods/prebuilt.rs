@@ -1122,12 +1122,10 @@ pub(super) fn compile_mod<'a>(
     }
     let fingerprint = format!("{:x}", hash.finalize());
     let saved = library.with_extension("fingerprint");
-    if library.is_file() && fs::read_to_string(&saved).ok().as_deref() == Some(&fingerprint) {
-        return Ok((library, krate));
+    if !library.is_file() || fs::read_to_string(&saved).ok().as_deref() != Some(&fingerprint) {
+        cmd.arg("--out-dir").arg(out).arg(&source);
+        super::run(cmd, &format!("Compiling {id}"), |_| {})?;
     }
-    cmd.arg("--out-dir").arg(out).arg(&source);
-    super::run(cmd, &format!("Compiling {id}"), |_| {})?;
-    fs::write(saved, fingerprint).map_err(|e| e.to_string())?;
     super::library_record::validate_exports(&library, id)?;
     super::library_record::stamp(
         &library,
@@ -1136,6 +1134,7 @@ pub(super) fn compile_mod<'a>(
         &project.bundle.manifest.version.to_string(),
         false,
     )?;
+    fs::write(saved, fingerprint).map_err(|e| e.to_string())?;
     Ok((library, krate))
 }
 
