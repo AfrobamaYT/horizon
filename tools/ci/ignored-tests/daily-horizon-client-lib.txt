@@ -13,8 +13,10 @@ horizon-client-lib block_entity_item::tests::a_mod_block_entity_rides_its_item l
 horizon-client-lib carrier_store_tests::a_decoded_operation_never_passes_the_decoded_envelope lib daily slow
 horizon-client-lib carrier_store_tests::a_thousand_operations_do_not_grow_the_store lib daily slow
 horizon-client-lib carrier_store_tests::entity_and_operation_envelopes_hold_exactly_at_their_limits lib daily slow
+horizon-client-lib client_perf::tests::health_samples_carry_the_process_gauges_and_this_seconds_counts lib daily slow
 horizon-client-lib client_perf::tests::sampled::each_side_samples_its_own_thread_and_side_client_selects_the_render_thread lib daily slow
 horizon-client-lib client_perf::tests::sampled::the_render_thread_samples_count_the_frames_the_run_made lib daily slow
+horizon-client-lib client_perf::tests::status_grows_with_the_capture lib daily slow
 horizon-client-lib datapack_net::transport::tests::incompressible_large_registry_snapshot_fits_each_frame_and_activates_only_when_complete lib daily slow
 horizon-client-lib join_seq::visibility::tests::unbound_passes_block_until_restore_consumption_and_unwind lib daily child-process
 horizon-client-lib lan::conn::tests::profession_mod_missing_refused_before_pairing lib daily child-process
