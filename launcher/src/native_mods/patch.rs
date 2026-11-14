@@ -154,7 +154,10 @@ pub(super) fn build(
         use sha2::Digest;
         hash.update(sdk.commit());
         for bundle in &prepared.bundles {
-            hash.update(super::source_digest(bundle).ok_or("could not hash patch inputs")?);
+            hash.update(
+                super::source_digest(bundle)
+                    .ok_or(crate::i18n::tr("Could not hash patch inputs"))?,
+            );
             hash.update(fs::read(&rlibs[bundle.manifest.id.as_str()]).map_err(|e| e.to_string())?);
         }
         let fingerprint = format!("{:x}", hash.finalize());

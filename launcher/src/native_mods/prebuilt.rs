@@ -626,20 +626,21 @@ pub(super) fn compile(
     consent: Option<&dyn Fn(&super::RegistryInventory) -> bool>,
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
     let mut names = std::collections::HashSet::new();
-    names.insert(dylib_name("horizon_patch"));
+    names.insert(dylib_name("horizon_patch").to_ascii_lowercase());
     for item in fs::read_dir(package.runtime.join("deps")).map_err(|e| e.to_string())? {
         names.insert(
             item.map_err(|e| e.to_string())?
                 .file_name()
                 .to_string_lossy()
-                .into_owned(),
+                .to_ascii_lowercase(),
         );
     }
     for project in projects {
-        let name = dylib_name(&project.crate_name());
-        if !names.insert(name.clone()) {
-            return Err(trf("Native mod {mod} uses reserved or duplicate library file {file}. Choose a unique Cargo library name.", &[("mod", &project.bundle.manifest.id), ("file", &name)]));
-        }
+        check_library_name(
+            &mut names,
+            &dylib_name(&project.crate_name()),
+            &project.bundle.manifest.id,
+        )?;
     }
     // Every route's outputs are kept per SDK build (its files, the toolchain and the launcher's
     // settings): a library reused across builds was always compiled from the same SDK inputs.
@@ -819,7 +820,7 @@ pub(super) fn compile(
         }
         cmd.arg("-o").arg(&library).arg(source);
         if !unchanged {
-            super::run(cmd, "Compiling the patch library", |_| {})?;
+            super::run(cmd, &tr("Compiling the patch library"), |_| {})?;
             fs::write(saved, fingerprint).map_err(|e| e.to_string())?;
         }
         super::library_record::validate_exports(&library, "horizon_patch")?;
@@ -912,7 +913,10 @@ pub(super) fn compile_mod<'a>(
     let mut cmd = rustc(edition);
     fs::write(source.with_file_name("__horizon_entry.rs"), entry).map_err(|e| e.to_string())?;
     let mut root = fs::read_to_string(&source).map_err(|e| e.to_string())?;
-    root.push_str("\n#[path = \"__horizon_entry.rs\"] mod __horizon_entry;\n");
+    check_entry_root(&root, id)?;
+    root.push_str(
+        "\n#[allow(unsafe_code)]\n#[path = \"__horizon_entry.rs\"] mod __horizon_entry;\n",
+    );
     fs::write(&source, root).map_err(|e| e.to_string())?;
     cmd.args(["--crate-type", "dylib", "--crate-name", &krate])
         .arg("-C")
@@ -944,7 +948,9 @@ pub(super) fn compile_mod<'a>(
     let mut hash = Sha256::new();
     hash.update(build);
     hash.update(entry);
-    hash.update(super::source_digest(project.bundle).ok_or("could not hash native mod inputs")?);
+    hash.update(
+        super::source_digest(project.bundle).ok_or(tr("Could not hash native mod inputs"))?,
+    );
     for dependency in declared {
         if let Some(path) = rlibs.get(dependency.id.as_str()) {
             hash.update(fs::read(path).map_err(|e| e.to_string())?);
@@ -954,7 +960,7 @@ pub(super) fn compile_mod<'a>(
     let saved = library.with_extension("fingerprint");
     if !library.is_file() || fs::read_to_string(&saved).ok().as_deref() != Some(&fingerprint) {
         cmd.arg("--out-dir").arg(out).arg(&source);
-        super::run(cmd, &format!("Compiling {id}"), |_| {})?;
+        super::run(cmd, &compiling(id), |_| {})?;
     }
     super::library_record::validate_exports(&library, id)?;
     super::library_record::stamp(
@@ -968,10 +974,38 @@ pub(super) fn compile_mod<'a>(
     Ok((library, krate))
 }
 
+fn check_library_name(
+    names: &mut std::collections::HashSet<String>,
+    name: &str,
+    id: &str,
+) -> Result<(), String> {
+    if !names.insert(name.to_ascii_lowercase()) {
+        return Err(trf("Native mod {mod} uses reserved or duplicate library file {file}. Choose a unique Cargo library name.", &[("mod", id), ("file", name)]));
+    }
+    Ok(())
+}
+
+pub(super) fn check_entry_root(source: &str, id: &str) -> Result<(), String> {
+    let file = syn::parse_file(source).map_err(|e| e.to_string())?;
+    for attr in file.attrs {
+        if attr.path().is_ident("forbid") {
+            let lints = attr
+                .parse_args_with(
+                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+                )
+                .map_err(|e| e.to_string())?;
+            if lints.iter().any(|lint| lint.path().is_ident("unsafe_code")) {
+                return Err(trf("{mod}: its crate root forbids unsafe code, which the launcher's generated library entry needs; use #![deny(unsafe_code)] instead", &[("mod", id)]));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// What the build log and a failure call compiling mod `id`: a failure starts
 /// "Compiling <id> failed".
 pub(super) fn compiling(id: &str) -> String {
-    format!("Compiling {id}")
+    trf("Compiling {mod}", &[("mod", id)])
 }
 
 /// The launcher's settings for a kept registry build: bumped whenever the launcher changes the
@@ -1116,6 +1150,22 @@ fn game_dylibs(deps: &Path) -> Result<Vec<PathBuf>, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn library_names_are_case_insensitive_and_entry_lints_are_checked() {
+        let mut names = std::collections::HashSet::new();
+        super::check_library_name(&mut names, "Example.dll", "one").unwrap();
+        assert!(super::check_library_name(&mut names, "example.dll", "two")
+            .unwrap_err()
+            .contains("two"));
+        assert!(super::check_entry_root("#![deny(unsafe_code)]", "safe").is_ok());
+        assert!(
+            super::check_entry_root("#![forbid(unsafe_code, unused)]", "safe")
+                .unwrap_err()
+                .contains("safe")
+        );
+        assert!(super::check_entry_root("// #![forbid(unsafe_code)]", "safe").is_ok());
+    }
+
     #[test]
     fn unhashed_metadata_is_found_and_dylib_is_preferred_for_linking() {
         let dir = tempfile::tempdir().unwrap();

@@ -172,7 +172,7 @@ pub(super) fn compile(
                     .entry("lib")
                     .or_insert_with(|| toml::Table::new().into())
                     .as_table_mut()
-                    .ok_or("invalid lib table")?;
+                    .ok_or(tr("Invalid lib table"))?;
                 lib.insert(
                     "crate-type".into(),
                     vec![toml::Value::String("dylib".into())].into(),
@@ -184,7 +184,7 @@ pub(super) fn compile(
                 );
                 let entry = root
                     .parent()
-                    .ok_or("invalid library root")?
+                    .ok_or(tr("Invalid library root"))?
                     .join("__horizon_entry.rs");
                 fs::write(
                     &entry,
@@ -200,7 +200,8 @@ pub(super) fn compile(
                 )
                 .map_err(|e| e.to_string())?;
                 let mut source = fs::read_to_string(&root).map_err(|e| e.to_string())?;
-                source.push_str("\n#[path = \"__horizon_entry.rs\"] mod __horizon_entry;\n");
+                prebuilt::check_entry_root(&source, id)?;
+                source.push_str("\n#[allow(unsafe_code)]\n#[path = \"__horizon_entry.rs\"] mod __horizon_entry;\n");
                 fs::write(root, source).map_err(|e| e.to_string())?;
             }
             fs::write(path, manifest.to_string()).map_err(|e| e.to_string())?;
@@ -448,6 +449,7 @@ pub(super) fn compile(
     command
         .args([
             "--workspace",
+            "--lib",
             "--offline",
             "--locked",
             "--release",
@@ -467,7 +469,7 @@ pub(super) fn compile(
     let messages = out.join("cargo-messages.jsonl");
     let result = super::run_checked(
         command,
-        "Compiling registry mod libraries",
+        &tr("Compiling registry mod libraries"),
         |_| {},
         Some(fs::File::create(&messages).map_err(|e| e.to_string())?),
     );

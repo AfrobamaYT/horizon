@@ -13,6 +13,8 @@ The pages in this section follow a mod from its source to a player's game and a 
 
 <!-- section-pages -->
 
+Native crate roots may use `#![deny(unsafe_code)]`, but not `#![forbid(unsafe_code)]`: the launcher allows unsafe code only in its generated library entry module.
+
 ## Living knockback entry
 
 `living_knockback` fires once per full-entry call, before resistance and motion changes.
