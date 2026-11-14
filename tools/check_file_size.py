@@ -11,7 +11,8 @@ entry above the current size fail. Any other PR ignores the entries and applies 
 file, so shrinking a listed file never needs a baseline edit. A sync (or a rollup carrying one)
 regenerates the file with tools/sync/write_file_size_baseline.py instead of editing it by hand.
 
-Inline test modules don't count, on the base or now: a normal build doesn't compile them. A test module is a
+Inline test modules don't count, on the base or now: a normal build doesn't compile them.
+Lines whose stripped text is exactly `#[ignore = "daily"]` also don't count, on either side. A test module is a
 `#[cfg(test)]` line directly followed by `mod name {` (or `pub mod`, `pub(crate) mod`...) at the same indentation,
 through its closing `}`. Other `#[cfg(test)]` items count. When in doubt the module counts, so the rule can't skip
 real code. A small lexer tells code from strings, raw strings, chars and (nested) comments, and two readings of the
@@ -133,7 +134,8 @@ def test_module_lines(text):
 
 
 def code_lines(text):
-    """The lines that count toward the limit: all but inline test modules."""
+    """The lines that count toward the limit: all but daily marks and inline test modules."""
+    text = "\n".join(row for row in text.split("\n") if row.strip() != '#[ignore = "daily"]')
     return lines(text) - test_module_lines(text)
 
 
