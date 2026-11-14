@@ -7,11 +7,15 @@
     nightly.py rotate              renames the current `nightly` pre-release to nightly-<its date>, frees the tag
     nightly.py prune [--days 7]    deletes the nightly-<date> pre-releases and tags older than that, nothing else
     nightly.py prune-snapshots [--days 7]   deletes the snapshot-<date>-<short> pre-releases older than that, but
-                                   the newest; never a prebuilt-<sha> SDK (snapshots and nightlies reference those)
+                                   the newest; never an sdk-<sha> SDK (snapshots and nightlies reference those)
     nightly.py prune-builds [--days 7]   deletes the nightly/build-<date>-<n> branches older than that, but the
                                    newest and any a published nightly points to (Ludovic, 2026-10-27)
     nightly.py keep-source <sha> <date>  tags the nightly's commit nightly-source/<date>-<short>, for good
-    nightly.py sdk-archives        the archives a complete prebuilt-<sha> release holds, one per line
+    nightly.py sdk-archives        the assets the SDK's packing legs make (tools/prebuilt_game.py gather), one per line
+    nightly.py sdk-assets          every asset a complete sdk-<sha> release holds: those, sdk.json and the signed sums
+    nightly.py sdk-index <sha> <out>     writes sdk-<sha>'s sdk.json to <out>, checked against its SHA256SUMS
+    nightly.py sdk-previous <sha> <out>  prints the SDK published before <sha> on its history, and writes its
+                                   surface.json to <out>, checked; prints nothing when there is none
 
 A nightly builds main plus the pull requests the trusted reviewers picked (the set: tools/ci/nightly_set.py), merged
 in their order and pushed as nightly/build-<date>-<n>; with no set, main alone. Main is its newest commit where
@@ -19,8 +23,8 @@ this repository's checks passed (`dyna-checks` on the fork, `checks` and `parity
 (release_train.green_main_head), or NIGHTLY_BASE when the caller gives that commit. It is published as the
 `nightly` pre-release; the previous one stays a week as nightly-<date>.
 On arismoko/horizon only, the base is the commit `daily-green` points to (the newest daily run that passed every
-leg, which also published its SDK: release_train.daily_green_commit), with a complete published SDK of the current
-package format for that exact SHA. An explicit base that is any other commit, or has no SDK, fails; PR picks are
+leg, which also published its SDK: release_train.daily_green_commit), with a complete published `sdk-<sha>` release
+of the current package format for that exact SHA, whose sdk.json the Nightly carries in its signed sums. An explicit base that is any other commit, or has no SDK, fails; PR picks are
 disabled, and the final SHA is rechecked before pushing.
 Its notes list what reached main since the previous nightly, then the picked pull requests. Runs from main's
 checkout with `gh`; it reads and merges the branches with git and never runs anything from them.
@@ -33,11 +37,13 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -237,21 +243,27 @@ def package_format() -> int:
     return int((Path(__file__).resolve().parents[2] / "crates/horizon-mod-package/src/sdk/package-format").read_text().rstrip())
 
 
-# The archives a complete prebuilt-<sha> release holds, beside SHA256SUMS: what a nightly requires, and what the
-# daily run's sdk-publish refuses to release without (`nightly.py sdk-archives`).
-SDK_ARCHIVES = tuple(f"horizon-prebuilt-v{package_format()}-{target}.tar.gz" for target in (
-    "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu-server", "x86_64-pc-windows-gnu", "aarch64-apple-darwin"))
+# The SDK's packing legs (prebuilt-game-build.yml's matrix): each target, and the Linux server's side.
+SDK_LEGS = (("x86_64-unknown-linux-gnu", ""), ("x86_64-unknown-linux-gnu", "-server"),
+            ("x86_64-pc-windows-gnu", ""), ("aarch64-apple-darwin", ""))
+# The SDK's assets beside its index: each packing leg's three slices, one build data and surface (gathered once,
+# tools/prebuilt_game.py gather) and the API source (tools/sdk_api_source.py). What the publish job refuses to
+# release without (`nightly.py sdk-archives`), and what a mod tool's fetch needs.
+SDK_ARCHIVES = tuple(f"{kind}-{target}{side}.tar.xz" for target, side in SDK_LEGS
+                     for kind in ("runtime", "api", "engine")) + ("api-source.tar.xz", "build-data.tar.xz", "surface.json")
+# Beside them in the release: the index and the signed sums (`horizon_mod_package::sdk::BESIDE_ASSETS`).
+SDK_INDEX = "sdk.json"
+SDK_ASSETS = SDK_ARCHIVES + (SDK_INDEX, "SHA256SUMS", "SHA256SUMS.sig")
 
 
 def ready_sdk_shas() -> set[str]:
-    """Snapshot complete published pairs of the current package format; API failures fail closed."""
+    """Snapshot of the complete published `sdk-<sha>` releases; API failures fail closed."""
     releases = train.gh_json("api", "--paginate", "--slurp",
                              f"repos/arismoko/horizon/releases?per_page=100")
-    required = {"SHA256SUMS", *SDK_ARCHIVES}
-    return {release["tag_name"].removeprefix("prebuilt-")
+    return {release["tag_name"].removeprefix("sdk-")
             for page in releases for release in page
-            if not release["draft"] and re.fullmatch(r"prebuilt-[0-9a-f]{40}", release["tag_name"])
-            and required <= {asset["name"] for asset in release["assets"]}}
+            if not release["draft"] and re.fullmatch(r"sdk-[0-9a-f]{40}", release["tag_name"])
+            and set(SDK_ASSETS) <= {asset["name"] for asset in release["assets"]}}
 
 
 def sdk_ready(sha: str) -> bool:
@@ -259,10 +271,80 @@ def sdk_ready(sha: str) -> bool:
     return sha in ready_sdk_shas()
 
 
+def listed(name: str, data: bytes, sums: str) -> bool:
+    """Whether `data` is the `name` that a `sha256sum` listing `sums` names."""
+    for line in sums.splitlines():
+        digest, _, file = line.partition(" ")
+        if file.strip().lstrip("*") == name:
+            return digest == hashlib.sha256(data).hexdigest()
+    return False
+
+
+def signature_check(sha: str, folder: Path, names: list[str]) -> list[str]:
+    """The command that checks sdk-<sha>'s SHA256SUMS signature in `folder` as the launcher does (horizon-release-sign,
+    with the fork's keys and the tag the signature must name), and the bytes of `names` against it."""
+    return ["cargo", "run", "--locked", "--quiet", "-p", "horizon-release-sign", "--", "verify",
+            "--repository", "arismoko/horizon", "--tag", f"sdk-{sha}",
+            *(argument for name in names for argument in ("--only", name)), str(folder)]
+
+
+def released(sha: str, name: str) -> bytes:
+    """The asset `name` of sdk-<sha>, once its SHA256SUMS signature is the fork's for `sdk-<sha>` and its bytes match
+    them ([`signature_check`])."""
+    with tempfile.TemporaryDirectory() as folder:
+        gh("release", "download", f"sdk-{sha}", "--repo", "arismoko/horizon", "--dir", folder,
+           "--pattern", name, "--pattern", "SHA256SUMS", "--pattern", "SHA256SUMS.sig")
+        data = (Path(folder) / name).read_bytes()
+        if not listed(name, data, (Path(folder) / "SHA256SUMS").read_text()):
+            raise SystemExit(f"sdk-{sha}'s {name} does not match its SHA256SUMS")
+        checked = subprocess.run(signature_check(sha, Path(folder), [name]), cwd=Path(__file__).resolve().parents[2],
+                                 capture_output=True, text=True)
+        if checked.returncode != 0:
+            raise SystemExit(f"sdk-{sha}'s signature does not check: {checked.stderr.strip()}")
+        return data
+
+
+def checked_index(sha: str, index: bytes) -> dict:
+    """sdk-<sha>'s sdk.json, once it names this build, this package format and every asset the release must hold;
+    anything else stops the Nightly, naming why."""
+    try:
+        document = json.loads(index)
+        commit, layout, assets = document["build"]["commit"], document["package_format"], set(document["assets"])
+    except (ValueError, KeyError, TypeError) as error:
+        raise SystemExit(f"sdk-{sha}'s {SDK_INDEX} is not an SDK index: {error}")
+    if commit != sha:
+        raise SystemExit(f"sdk-{sha}'s {SDK_INDEX} is for build {commit}")
+    if layout != package_format():
+        raise SystemExit(f"sdk-{sha}'s {SDK_INDEX} has package format {layout}, not this source's {package_format()}")
+    missing = sorted(set(SDK_ARCHIVES) - assets)
+    if missing:
+        raise SystemExit(f"sdk-{sha}'s {SDK_INDEX} does not list {', '.join(missing)}")
+    return document
+
+
+def published_index(sha: str) -> bytes:
+    """sdk-<sha>'s sdk.json as published, checked ([`released`], [`checked_index`])."""
+    index = released(sha, SDK_INDEX)
+    checked_index(sha, index)
+    return index
+
+
+def previous_sdk(sha: str) -> str:
+    """The build id of the newest complete SDK published before `sha` on its history (the fewest commits behind
+    it), or "" when there is none: what this build's surface is compared with."""
+    behind = {}
+    for other in ready_sdk_shas() - {sha}:
+        if is_ancestor(other, sha):
+            behind[other] = int(git("rev-list", "--count", f"{other}..{sha}"))
+    return min(behind, key=behind.get) if behind else ""
+
+
 def require_sdk(sha: str) -> None:
-    """Refuse before rotating/publishing Nightly if its SDK disappeared."""
-    if os.environ.get("GITHUB_REPOSITORY") == "arismoko/horizon" and not sdk_ready(sha):
-        raise SystemExit(f"Nightly publication refused: {sha} has no complete published v{package_format()} SDK pair")
+    """Refuse before rotating/publishing Nightly if its SDK disappeared or its index is not this build's."""
+    if os.environ.get("GITHUB_REPOSITORY") == "arismoko/horizon":
+        if not sdk_ready(sha):
+            raise SystemExit(f"Nightly publication refused: {sha} has no complete published sdk-{sha} release")
+        published_index(sha)
 
 
 def green_base(repo: str, issue: str) -> Ref:
@@ -287,7 +369,7 @@ def green_base(repo: str, issue: str) -> Ref:
         stop(repo, issue, f"the build stopped: {sha} is not the commit `daily-green` points to; a nightly builds "
                           "only the newest fully green daily run's commit, never an older one without its own daily run.")
     if fork and not sdk_ready(sha):
-        stop(repo, issue, f"the build stopped: {sha} has no complete published v{package_format()} SDK pair.")
+        stop(repo, issue, f"the build stopped: {sha} has no complete published sdk-{sha} release.")
     return Ref("main", sha, dt.datetime.fromisoformat(git("show", "-s", "--format=%cI", sha)))
 
 
@@ -332,10 +414,12 @@ def pick_snapshot() -> None:
     git("fetch", "--quiet", "origin", "+refs/heads/main:refs/remotes/origin/main")
     repo, dry_run = os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("DRY_RUN") == "true"
     sha = train.channel_head("snapshot", os.environ.get("NIGHTLY_BASE", "").strip())
-    if repo == "arismoko/horizon" and not sdk_ready(sha):
+    sdk = repo != "arismoko/horizon" or sdk_ready(sha)
+    if not sdk:
         if not dry_run:
             stop(repo, "", f"the snapshot stopped: {sha} has no complete published SDK (release.yml publishes it first).")
-        print(f"::warning::{sha} has no published SDK yet: a real snapshot publishes prebuilt-{sha} first")
+        print(f"::warning::{sha} has no published SDK yet: a real snapshot publishes sdk-{sha} first; this dry run "
+              "carries no sdk.json")
     today = dt.datetime.now(dt.timezone.utc).date().isoformat()
     tag = train.build_tag("snapshot", today, sha)
     # A tag is never replaced: the same day's snapshot of the same commit is that build already (a dry run builds).
@@ -343,9 +427,9 @@ def pick_snapshot() -> None:
     with open("nightly-notes.md", "w") as f:
         f.write(f"Snapshot {today} · {sha[:7]}: main at {sha}, built to test it after merge. Not a Nightly: no "
                 "launcher offers or updates to it; a developer installs it with "
-                f"`horizon-launcher install {tag}`. Its SDK is the release prebuilt-{sha}.\n\n{train.DISCLAIMER}\n")
+                f"`horizon-launcher install {tag}`. Its SDK is the release sdk-{sha}.\n\n{train.DISCLAIMER}\n")
     output(build=str(build).lower(), sha=sha, short=sha[:7], source="main", date=today, version=f"snapshot-{today}",
-           nightly=f"{today} {sha[:7]}", source_tag="", tag=tag)
+           nightly=f"{today} {sha[:7]}", source_tag="", tag=tag, sdk=str(sdk).lower())
     print(f"{'build' if build else f'skip ({tag} is already published)'}: {tag} {sha}")
 
 
@@ -382,7 +466,7 @@ SNAPSHOT = re.compile(r"^snapshot-(\d{4}-\d{2}-\d{2})-[0-9a-f]{7,40}$")
 
 def stale_snapshots(tags: list[dict], today: dt.date, days: int) -> list[str]:
     """The snapshot pre-releases older than `days`, never the newest one, never anything not named
-    snapshot-<date>-<short> (a prebuilt-<sha> SDK above all)."""
+    snapshot-<date>-<short> (an sdk-<sha> SDK above all)."""
     snapshots = [r["tagName"] for r in tags if r["isPrerelease"] and SNAPSHOT.match(r["tagName"])]
     if not snapshots:
         return []
@@ -464,6 +548,13 @@ def main() -> None:
     sub.add_parser("rotate")
     sub.add_parser("require-sdk").add_argument("sha")
     sub.add_parser("sdk-archives")
+    sub.add_parser("sdk-assets")
+    index = sub.add_parser("sdk-index")
+    index.add_argument("sha")
+    index.add_argument("out", type=Path)
+    previous = sub.add_parser("sdk-previous")
+    previous.add_argument("sha")
+    previous.add_argument("out", type=Path)
     sub.add_parser("prune").add_argument("--days", type=int, default=7)
     sub.add_parser("prune-snapshots").add_argument("--days", type=int, default=7)
     sub.add_parser("prune-builds").add_argument("--days", type=int, default=7)
@@ -480,6 +571,14 @@ def main() -> None:
         require_sdk(args.sha)
     elif args.cmd == "sdk-archives":
         print("\n".join(SDK_ARCHIVES))
+    elif args.cmd == "sdk-assets":
+        print("\n".join(SDK_ASSETS))
+    elif args.cmd == "sdk-index":
+        args.out.write_bytes(published_index(args.sha))
+    elif args.cmd == "sdk-previous":
+        if build := previous_sdk(args.sha):
+            args.out.write_bytes(released(build, "surface.json"))
+            print(build)
     elif args.cmd == "rotate":
         rotate()
     elif args.cmd == "prune-builds":

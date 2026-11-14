@@ -5,7 +5,7 @@ name: release
 #   defaults to `daily-green` and keeps the batch rules. It refuses any commit but the one `daily-green` points to.
 # - snapshot: root's dispatch on main, for main's head or an explicit commit of main; it needs only dyna-checks' gate
 #   (lint, verify, verify-static, launcher) passed on that exact commit (pending is not passed). It builds that
-#   commit's SDK (prebuilt-game-build.yml), publishes it as prebuilt-<sha> (sdk-publish.yml, skipped when it exists),
+#   commit's SDK (prebuilt-game-build.yml), publishes it as sdk-<sha> (sdk-publish.yml, skipped when it exists),
 #   then starts `nightly build` with kind=snapshot, which builds, signs and publishes the game as the pre-release
 #   snapshot-<date>-<short> on its own tag: never the `nightly` tag or channel, never `daily-green`, no daily tests.
 # tools/release_train.py decides (`--channel`): a Nightly when a pull request merged since the published Nightly
@@ -119,8 +119,9 @@ jobs:
           gh workflow run nightly-build.yml --repo "$GITHUB_REPOSITORY" --ref main -f base="$HEAD_SHA" -f urgent="$URGENT"
           echo "### Started \`nightly build\` on ${HEAD_SHA:0:9}" >> "$GITHUB_STEP_SUMMARY"
 
-  # A snapshot: the commit's SDK, built in this run (a dry run too) and published by sdk-publish.yml from this run's
-  # artifacts, then the game, built and published by `nightly build` (kind snapshot) once the SDK is out.
+  # A snapshot: the commit's SDK, built in this run by prebuilt-game-build.yml's legs and signed and published as
+  # sdk-<sha> by sdk-publish.yml from their artifacts (a dry run: throwaway key, nothing published), then the game,
+  # built and published by `nightly build` (kind snapshot) once the SDK is out.
   snapshot-sdk:
     needs: decide
     if: inputs.kind == 'snapshot' && needs.decide.outputs.release == 'true'
@@ -130,21 +131,23 @@ jobs:
 
   snapshot-sdk-publish:
     needs: [decide, snapshot-sdk]
-    if: inputs.kind == 'snapshot' && needs.decide.outputs.release == 'true' && needs.decide.outputs.dry_run != 'true'
+    # Not when sdk-<sha> exists already: then the legs built nothing (output `needed` false).
+    if: inputs.kind == 'snapshot' && needs.decide.outputs.release == 'true' && needs.snapshot-sdk.outputs.needed == 'true'
     permissions:
-      contents: write  # the prebuilt-<sha> release
+      contents: write  # the sdk-<sha> release (its publish job; a dry run writes nothing)
     uses: ./.github/workflows/sdk-publish.yml
     with:
       commit: ${{ needs.decide.outputs.head }}
-      tag: ${{ needs.snapshot-sdk.outputs.tag }}
+      publish: ${{ needs.decide.outputs.dry_run != 'true' }}
+    secrets: inherit
 
   snapshot:
     needs: [decide, snapshot-sdk, snapshot-sdk-publish]
-    # The SDK built; on a real run it is published too (a dry run skips the publish).
+    # The SDK built, and its publish (or dry run) passed, or was skipped because sdk-<sha> exists.
     if: >-
       always() && inputs.kind == 'snapshot' && needs.decide.outputs.release == 'true' &&
       needs.snapshot-sdk.result == 'success' &&
-      (needs.decide.outputs.dry_run == 'true' || needs.snapshot-sdk-publish.result == 'success')
+      (needs.snapshot-sdk-publish.result == 'success' || needs.snapshot-sdk-publish.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -159,7 +162,7 @@ jobs:
           gh workflow run nightly-build.yml --repo "$GITHUB_REPOSITORY" --ref main -f kind=snapshot -f base="$HEAD_SHA" \
             -f dry_run="$DRY_RUN"
           if [ "$DRY_RUN" = true ]; then
-            echo "### Dry run: started \`nightly build\` (kind snapshot, dry run) on ${HEAD_SHA:0:9}; a real run would publish prebuilt-$HEAD_SHA (unless it exists) and the pre-release $TAG" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Dry run: started \`nightly build\` (kind snapshot, dry run) on ${HEAD_SHA:0:9}; a real run would publish sdk-$HEAD_SHA (unless it exists) and the pre-release $TAG" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "### Published prebuilt-$HEAD_SHA (or it existed); started \`nightly build\` (kind snapshot) for $TAG" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Published sdk-$HEAD_SHA (or it existed); started \`nightly build\` (kind snapshot) for $TAG" >> "$GITHUB_STEP_SUMMARY"
           fi

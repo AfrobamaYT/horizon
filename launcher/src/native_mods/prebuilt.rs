@@ -3,11 +3,9 @@
 use super::{api, dependencies, internals, Target};
 use crate::i18n::{tr, trf};
 use crate::rust_toolchain::{self, Toolchain};
-use horizon_mod_package::index::native;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -16,26 +14,19 @@ const IDENTITY: &str = "horizon-prebuilt.json";
 /// (`tools/prebuilt_game.py build`). Read for developer installs only: their commit has no release.
 pub(super) const DEVELOPER_SDK: &str = "HORIZON_LAUNCHER_DEVELOPER_SDK";
 pub(super) const TEMPLATE: &str = "native_main.rs.template";
-const SUMS: &str = "SHA256SUMS";
 /// The optimization level of the `release` profile the prebuilt game is built with: the mods' code
 /// matches the game's.
 const OPT_LEVEL: &str = "opt-level=3";
-/// The archive's largest plausible unpacked size: a corrupt or hostile archive stops there.
-const UNPACKED_LIMIT: u64 = 8 << 30;
 
-/// Why a build compiles the game from source instead of using the prebuilt game.
+/// Why a build can't use the prebuilt game.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Refusal {
     /// A mod has a build script, which the prebuilt route doesn't run.
     BuildScript { mod_id: String },
     /// A mod declares Cargo features, or asks the mod API for features of its own.
     Features { mod_id: String },
-    /// No prebuilt game for this computer.
-    Host,
-    /// The prebuilt game's release couldn't be downloaded.
-    Download { why: String },
-    /// No prebuilt game was released for this revision and target.
-    NoRelease { revision: String },
+    /// The game build's mod SDK can't be used.
+    Sdk(super::sdk_cache::Refusal),
 }
 
 impl std::fmt::Display for Refusal {
@@ -49,17 +40,7 @@ impl std::fmt::Display for Refusal {
                 "E_NATIVE_FEATURES: {mod} requests Cargo features; use the pinned SDK feature set",
                 &[("mod", mod_id)],
             ),
-            Self::Host => {
-                tr("E_NATIVE_HOST: no prebuilt game supports this computer; use a supported host").into()
-            }
-            Self::Download { why } => trf(
-                "The prebuilt game couldn't be downloaded ({why}). Try again.",
-                &[("why", why)],
-            ),
-            Self::NoRelease { revision } => trf(
-                "E_NATIVE_NO_RELEASE: no prebuilt game for {revision}; pin a commit with a published SDK",
-                &[("revision", &revision[..revision.len().min(10)])],
-            ),
+            Self::Sdk(refusal) => refusal.to_string(),
         };
         f.write_str(&text)
     }
@@ -117,206 +98,19 @@ pub(super) fn project_refusal(project: &api::Project<'_>) -> Option<Refusal> {
     }
 }
 
-/// The prebuilt game for `revision` and `target`, downloaded and checked once, then kept in the
-/// launcher's data (`downloading` is told before a download starts); `Err(reason)` inside when
-/// there is none to use, or its download failed. An archive that arrives must match the release's
-/// `SHA256SUMS` before it is unpacked, and its identity this revision, this computer and the
-/// launcher's Rust: a mismatch is an error, never a source build. `local` is a developer
-/// install's own prebuilt game ([`DEVELOPER_SDK`]): used where it is, under the same identity check.
-pub(super) fn fetch(
-    revision: &str,
-    target: Target,
-    local: Option<&Path>,
-    downloading: impl FnOnce(),
-) -> Result<Result<Package, Refusal>, String> {
-    let Some(host) = rust_toolchain::host() else {
-        return Ok(Err(Refusal::Host));
-    };
-    let name = native::prebuilt_archive(host.target, matches!(target, Target::Server));
-    if let Some(local) = local {
-        check_identity(local, revision, host.target, target)?;
-        // Laid out afresh each build, by links: the developer's folder is never changed.
-        let build = cache_dir(revision, &format!("{name}.developer"));
-        let _ = fs::remove_dir_all(&build);
-        return Ok(Ok(lay_out(local, &build, true)?));
-    }
-    let dir = cache_dir(revision, &name);
-    if Package::at(&dir).runtime.join(IDENTITY).is_file() {
-        crate::storage::mark_used(&dir).map_err(super::cache_error)?;
-        return Ok(Ok(Package::at(&dir)));
-    }
-    let release = release_url(revision);
-    let download = |why: String| Ok(Err(Refusal::Download { why }));
-    let expected = match release_sum(revision, &name) {
-        Ok(sum) => sum,
-        Err(reason) => return Ok(Err(reason)),
-    };
-    let parent = dir.parent().expect("under prebuilt/");
-    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let partial = parent.join(format!(".{name}.partial"));
-    let _ = fs::remove_dir_all(&partial);
-    fs::create_dir_all(&partial).map_err(|e| e.to_string())?;
-    downloading();
-    let file = partial.join(&name);
-    let mut body = match crate::backend::get(&format!("{release}/{name}")) {
-        Ok(response) => response.into_reader(),
-        Err(why) => return download(why),
-    };
-    let mut out = fs::File::create(&file).map_err(|e| e.to_string())?;
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0; 1 << 20];
-    loop {
-        let read = match body.read(&mut buffer) {
-            Ok(read) => read,
-            Err(e) => {
-                let _ = fs::remove_dir_all(&partial);
-                return download(e.to_string());
-            }
-        };
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-        std::io::Write::write_all(&mut out, &buffer[..read]).map_err(|e| e.to_string())?;
-    }
-    drop(out);
-    let actual = format!("{:x}", hasher.finalize());
-    if actual != expected {
-        let _ = fs::remove_dir_all(&partial);
-        return Err(trf(
-            "The prebuilt game {name} doesn't match its release's checksum. Try again.",
-            &[("name", &name)],
-        ));
-    }
-    let _publication = crate::run_leases::installation().map_err(super::cache_error)?;
-    let unpacked = partial.join("game");
-    // `unpack_in` writes inside a folder that exists.
-    fs::create_dir_all(&unpacked).map_err(|e| e.to_string())?;
-    let reader = flate2::read::GzDecoder::new(fs::File::open(&file).map_err(|e| e.to_string())?)
-        .take(UNPACKED_LIMIT);
-    let mut tar = tar::Archive::new(reader);
-    for entry in tar.entries().map_err(|e| e.to_string())? {
-        let mut entry = entry.map_err(|e| e.to_string())?;
-        let kind = entry.header().entry_type();
-        if kind.is_file() || kind.is_dir() {
-            entry
-                .unpack_in(&unpacked)
-                .map_err(|e| format!("Could not unpack the prebuilt game: {e}"))?;
-        }
-    }
-    check_identity(&unpacked, revision, host.target, target)?;
-    let laid = partial.join("build");
-    lay_out(&unpacked, &laid, false)?;
-    let _ = fs::remove_dir_all(&dir);
-    fs::rename(&laid, &dir).map_err(|e| e.to_string())?;
-    crate::run_leases::publish(&dir).map_err(super::cache_error)?;
-    let _ = fs::remove_dir_all(&partial);
-    crate::storage::mark_used(&dir).map_err(super::cache_error)?;
-    Ok(Ok(Package::at(&dir)))
-}
-
-fn release_url(revision: &str) -> String {
-    format!(
-        "https://github.com/{}/releases/download/{}{revision}",
-        native::PREBUILT_REPO,
-        native::PREBUILT_TAG
-    )
-}
-
-fn release_sum(revision: &str, name: &str) -> Result<String, Refusal> {
-    let missing = || Refusal::NoRelease {
-        revision: revision.to_owned(),
-    };
-    let download = |why: String| Refusal::Download { why };
-    let sums = crate::backend::get_unless_missing(&format!("{}/{SUMS}", release_url(revision)))
-        .map_err(download)?
-        .ok_or_else(missing)?;
-    let mut text = String::new();
-    sums.into_reader()
-        .read_to_string(&mut text)
-        .map_err(|error| download(error.to_string()))?;
-    expected_sum(&text, name).ok_or_else(missing)
-}
-
-/// Checks release metadata without downloading the prebuilt game. Run only on a worker.
-/// Download failures are retryable, never permission to rebuild the game from source.
-pub fn prebuilt_availability(revision: &str, target: Target) -> Option<Refusal> {
-    let Some(host) = rust_toolchain::host() else {
-        return Some(Refusal::Host);
-    };
-    let name = native::prebuilt_archive(host.target, matches!(target, Target::Server));
-    let cached = cache_dir(revision, &name);
-    if cached.join(IDENTITY).is_file() {
-        return None;
-    }
-    release_sum(revision, &name).err()
-}
-
-fn cache_dir(revision: &str, name: &str) -> PathBuf {
-    super::root()
+/// A developer install's own prebuilt game, the folder `local` ([`DEVELOPER_SDK`]): checked to be
+/// `revision`'s for this computer and `target`, then laid out afresh as its slices by links, so
+/// the developer's folder is never changed. A release's game comes from its SDK instead
+/// ([`super::sdk_cache`]).
+pub(super) fn developer(revision: &str, target: Target, local: &Path) -> Result<Package, String> {
+    let host = rust_toolchain::host().ok_or_else(|| super::sdk_cache::Refusal::Host.to_string())?;
+    check_identity(local, revision, host.target, target)?;
+    let unit = super::sdk_cache::unit(revision, host.target, side(target));
+    let build = super::root()
         .join("prebuilt")
-        .join(format!("{revision}-{}", name.trim_end_matches(".tar.gz")))
-}
-
-/// Read checked SDK metadata; the caller owns consent and the native-cache lease.
-pub(super) fn planning_catalog(
-    lease: &crate::native_cache::Cache,
-    revision: &str,
-) -> Result<internals::Catalog, Refusal> {
-    let host = rust_toolchain::host().ok_or(Refusal::Host)?;
-    let name = native::prebuilt_archive(host.target, false);
-    let game = cache_dir(revision, &name);
-    let package = Package::at(&game);
-    if package.runtime.join(IDENTITY).is_file() {
-        if let Ok(catalog) = internals::Catalog::read(&package.api) {
-            crate::storage::mark_used(&game).map_err(|error| Refusal::Download {
-                why: super::cache_error(error),
-            })?;
-            return Ok(catalog);
-        }
-    }
-    let expected = release_sum(revision, &name)?;
-    let download = |why| Refusal::Download { why };
-    let unit = format!("catalog-{revision}-{}", host.target);
-    let cache = super::root().join("internals-sync").join(&unit);
-    let directory = lease
-        .directory(&["internals-sync", &unit])
-        .map_err(|error| download(super::cache_error(error)))?;
-    crate::storage::mark_used(&cache).map_err(|error| download(super::cache_error(error)))?;
-    catalog_pair(&directory, &cache, &name, &expected, || {
-        crate::backend::get(&format!("{}/{name}", release_url(revision)))
-            .map_err(download)
-            .map(|response| response.into_reader())
-    })
-}
-
-fn catalog_pair<R: Read>(
-    directory: &cap_std::fs::Dir,
-    path: &Path,
-    name: &str,
-    expected: &str,
-    fetch: impl FnOnce() -> Result<R, Refusal>,
-) -> Result<internals::Catalog, Refusal> {
-    let download = |why| Refusal::Download { why };
-    if directory.read_to_string("archive.sha256").ok().as_deref() == Some(expected) {
-        if let Ok(catalog) = internals::Catalog::read(path) {
-            return Ok(catalog);
-        }
-    }
-    let reader = fetch()?;
-    // A failed second rename must never leave an old marker authorizing a mixed pair.
-    match directory.remove_file("archive.sha256") {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(download(error.to_string())),
-    }
-    horizon_mod_package::internals::cache_catalogs(directory, name, reader, expected)
-        .map_err(|error| download(error.to_string()))?;
-    let catalog = internals::Catalog::read(path).map_err(download)?;
-    directory
-        .write("archive.sha256", expected)
-        .map_err(|error| download(error.to_string()))?;
-    Ok(catalog)
+        .join(format!("{unit}.developer"));
+    let _ = fs::remove_dir_all(&build);
+    lay_out(local, &build, true)
 }
 
 /// `name`'s sum in a `sha256sum` listing.
@@ -325,6 +119,13 @@ pub(super) fn expected_sum(listing: &str, name: &str) -> Option<String> {
         let (sum, file) = line.split_once(char::is_whitespace)?;
         (file.trim_start().trim_start_matches('*') == name).then(|| sum.to_ascii_lowercase())
     })
+}
+
+fn side(target: Target) -> horizon_mod_package::sdk::Side {
+    match target {
+        Target::Client => horizon_mod_package::sdk::Side::Client,
+        Target::Server => horizon_mod_package::sdk::Side::Server,
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -718,36 +519,22 @@ impl Route {
     pub(super) fn of(projects: &[api::Project<'_>]) -> Self {
         if projects.iter().any(registry_dependency) {
             Self::Registry
-        } else if projects.iter().any(|project| {
-            let manifest = &project.bundle.manifest;
-            // Every row kind by name: a new one does not compile until it is routed here.
-            let rows = manifest.native.as_ref().is_some_and(|native| {
-                let horizon_mod_package::manifest::Native {
-                    game: _,
-                    horizon: _,
-                    mixins: _,
-                    mixin,
-                    module,
-                    bridge,
-                    state,
-                    r#loop,
-                } = native;
-                !(mixin.is_empty()
-                    && module.is_empty()
-                    && bridge.is_empty()
-                    && state.is_empty()
-                    && r#loop.is_empty())
-            });
-            internals::needed(manifest)
-                || rows
-                || project
-                    .api_dependencies()
-                    .iter()
-                    .any(|(_, package)| *package == "internals")
-        }) {
+        } else if projects
+            .iter()
+            .any(|project| changes_game(project).is_some())
+        {
             Self::Engine
         } else {
             Self::Api
+        }
+    }
+
+    /// The route's name in the SDK's input list (`sdk.json`'s `inputs.routes`): which slices
+    /// it fetches.
+    pub(super) fn inputs(self) -> &'static str {
+        match self {
+            Self::Api => "api",
+            Self::Engine | Self::Registry => "engine",
         }
     }
 
@@ -758,6 +545,42 @@ impl Route {
             Self::Engine | Self::Registry => "prebuilt",
         }
     }
+}
+
+/// How `project` reaches into the game's own code, which ties it to exactly the build it was made
+/// for: a `[native]` table row (named by its table), or game internals (`internals`); `None` for
+/// a mod on the mod API alone.
+pub(super) fn changes_game(project: &api::Project<'_>) -> Option<&'static str> {
+    let manifest = &project.bundle.manifest;
+    // Every row kind by name: a new one does not compile until it is routed here.
+    if let Some(native) = &manifest.native {
+        let horizon_mod_package::manifest::Native {
+            game: _,
+            horizon: _,
+            mixins: _,
+            mixin,
+            module,
+            bridge,
+            state,
+            r#loop,
+        } = native;
+        for (empty, table) in [
+            (mixin.is_empty(), "[[native.mixin]]"),
+            (module.is_empty(), "[[native.module]]"),
+            (bridge.is_empty(), "[[native.bridge]]"),
+            (state.is_empty(), "[[native.state]]"),
+            (r#loop.is_empty(), "[[native.loop]]"),
+        ] {
+            if !empty {
+                return Some(table);
+            }
+        }
+    }
+    let facade = project
+        .api_dependencies()
+        .iter()
+        .any(|(_, package)| *package == "internals");
+    (internals::needed(manifest) || facade).then_some("internals")
 }
 
 /// Whether `project` depends on a crate that is not one of the game's own packages.
@@ -774,16 +597,19 @@ fn registry_dependency(project: &api::Project<'_>) -> bool {
 }
 
 /// Compiles the mods (`resolution`'s order, each with its installed mod dependencies) and the
-/// launcher's executable against the prebuilt game in `game`, into `out`, by `route`
-/// ([`Route::of`] the same `projects`). Returns the executable and the dynamic libraries it
-/// loads, to be installed beside it.
+/// launcher's executable against the prebuilt game `package`, by `route` ([`Route::of`] the same
+/// `projects`), under `builds` (`native/prebuilt-build`): the API route in its `api` folder and
+/// the engine route in its `rustc` folder, each rebuilt every time, and the registry route in the
+/// folder its cargo build is kept in ([`kept_build`]), staged per mods folder (`mods`). Returns
+/// the executable and the dynamic libraries it loads, to be installed beside it.
 // Unlike the source workspace, this route invokes rustc with only selected --extern
 // libraries; it does not resolve or compile arbitrary transitive Cargo dependencies.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn compile(
     rust: &Toolchain,
     package: &Package,
-    out: &Path,
+    builds: &Path,
+    mods: &Path,
     route: Route,
     projects: &[api::Project<'_>],
     declared: &[Vec<dependencies::Dependency>],
@@ -791,7 +617,8 @@ pub(super) fn compile(
     consent: Option<&dyn Fn(&super::RegistryInventory) -> bool>,
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
     if route == Route::Api {
-        return super::api_route::compile(
+        let out = &builds.join("api");
+        let built = super::api_route::compile(
             rust,
             &package.runtime,
             &package.api,
@@ -800,13 +627,24 @@ pub(super) fn compile(
             declared,
             resolution,
         );
+        // Stamped after the route has made its folder again, failed or not.
+        if out.exists() {
+            crate::storage::mark_used(out).map_err(super::cache_error)?;
+        }
+        return built;
     }
-    let game = &package.whole(&out.with_file_name("prebuilt-package"))?;
+    let game = &package.whole(&builds.with_file_name("prebuilt-package"))?;
     if route == Route::Registry {
-        return super::registry_compile::compile(
+        let kept = builds.join(kept_build(rust, package, game)?);
+        // Stamped before it fills, so a build that fails still leaves an aged unit.
+        fs::create_dir_all(&kept).map_err(|e| e.to_string())?;
+        crate::storage::mark_used(&kept).map_err(super::cache_error)?;
+        let stage = kept.join(format!("stage-{}", short_hash(&mods_key(mods)?)));
+        let built = super::registry_compile::compile(
             rust,
             game,
-            out,
+            &stage,
+            &kept.join("target"),
             projects,
             declared,
             resolution,
@@ -814,8 +652,12 @@ pub(super) fn compile(
                 consent,
                 adapter: &std::env::current_exe().map_err(|e| e.to_string())?,
             },
-        );
+        )?;
+        // The Storage page's Build files row ages this unit by its last use.
+        crate::storage::mark_used(&kept).map_err(super::cache_error)?;
+        return Ok(built);
     }
+    let out = &builds.join("rustc");
     let catalog = internals::Catalog::read(game)?;
     let generated = catalog
         .prepare(projects.iter().map(|project| &project.bundle.manifest))
@@ -825,6 +667,7 @@ pub(super) fn compile(
     }
     let _ = fs::remove_dir_all(out);
     fs::create_dir_all(out).map_err(|e| e.to_string())?;
+    crate::storage::mark_used(out).map_err(super::cache_error)?;
     let deps = game.join("deps");
     let sdk = identity(game)?;
     let mut libraries = std::collections::HashMap::new();
@@ -1003,8 +846,99 @@ pub(super) fn compile_mod<'a>(
         }
     }
     cmd.arg("--out-dir").arg(out).arg(&source);
-    super::run(cmd, &format!("Compiling {id}"), |_| {})?;
+    super::run(cmd, &compiling(id), |_| {})?;
     Ok((out.join(format!("lib{krate}.rlib")), krate))
+}
+
+/// What the build log and a failure call compiling mod `id`: a failure starts
+/// "Compiling <id> failed".
+pub(super) fn compiling(id: &str) -> String {
+    format!("Compiling {id}")
+}
+
+/// The launcher's settings for a kept registry build: bumped whenever the launcher changes the
+/// cargo arguments, the compiler plan or how it stages, so a build made the old way is not reused.
+const KEPT_BUILD_FLAGS: u32 = 1;
+
+/// The folder a registry build's cargo output is kept in, under `native/prebuilt-build`: one per
+/// game build, Rust toolchain and launcher settings ([`KEPT_BUILD_FLAGS`]). Inside one, cargo's
+/// own fingerprints decide what to rebuild.
+fn kept_build(rust: &Toolchain, package: &Package, game: &Path) -> Result<String, String> {
+    let sdk = identity(game)?;
+    let mut hasher = Sha256::new();
+    hasher.update(KEPT_BUILD_FLAGS.to_le_bytes());
+    hasher.update(rust_toolchain::VERSION.as_bytes());
+    hasher.update(rust.host.target.as_bytes());
+    // The package's files reach rustc and the linker through the compiler plan, which cargo
+    // doesn't fingerprint: a package any of whose files differ is another key. Each file is known
+    // by its slice, path, length and modified time, read from the slices themselves (the whole
+    // game they are linked into is laid out again every build): a downloaded package was checked
+    // against its release's sums when it was unpacked, and a rebuilt local SDK writes its files
+    // anew.
+    let mut files = Vec::new();
+    for (name, slice) in [
+        ("runtime", &package.runtime),
+        ("api", &package.api),
+        ("engine", &package.engine),
+    ] {
+        sdk_files(slice, Path::new(name), &mut files).map_err(|e| e.to_string())?;
+    }
+    files.sort();
+    for (path, length, modified) in files {
+        hasher.update(path.as_bytes());
+        hasher.update(length.to_le_bytes());
+        hasher.update(modified.to_le_bytes());
+    }
+    let revision = sdk.commit();
+    Ok(format!(
+        "{}-{}",
+        revision.get(..12).unwrap_or(revision),
+        short_hash(&format!("{:x}", hasher.finalize()))
+    ))
+}
+
+/// Each file under `folder` (shown as `shown`): its path, length and modified time in nanoseconds.
+fn sdk_files(
+    folder: &Path,
+    shown: &Path,
+    out: &mut Vec<(String, u64, u128)>,
+) -> std::io::Result<()> {
+    let entries = match fs::read_dir(folder) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let meta = entry.metadata()?;
+        let path = shown.join(entry.file_name());
+        if meta.is_dir() {
+            sdk_files(&entry.path(), &path, out)?;
+        } else {
+            let modified = meta
+                .modified()?
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |time| time.as_nanos());
+            out.push((path.to_string_lossy().into_owned(), meta.len(), modified));
+        }
+    }
+    Ok(())
+}
+
+/// The key of the mods folder a build stages: one staging folder per instance (or per CLI or
+/// export folder), so instances never restage each other's files.
+fn mods_key(mods: &Path) -> Result<String, String> {
+    let path = mods
+        .canonicalize()
+        .map_err(|e| format!("{}: {e}", mods.display()))?;
+    Ok(format!(
+        "{:x}",
+        Sha256::digest(path.to_string_lossy().as_bytes())
+    ))
+}
+
+fn short_hash(hex: &str) -> &str {
+    hex.get(..16).unwrap_or(hex)
 }
 
 /// The runtime shipped beside the prebuilt executable, for every native build route.
@@ -1076,10 +1010,13 @@ mod tests {
         };
         let api_only = write(
             "api_only",
-            "horizon-mod-api='0.1'\nhorizon-mod-points='0.1'",
+            "horizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}\nhorizon-mod-points={path='.horizon/sdk/api/crates/horizon-mod-points'}",
         );
-        let facade = write("facade", "horizon-mod-api='0.1'\nhorizon-internals='0.1'");
-        let registry = write("registry", "horizon-mod-api='0.1'\nserde='1'");
+        let facade = write("facade", "horizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}\nhorizon-internals={path='.horizon/sdk/api/crates/horizon-internals'}");
+        let registry = write(
+            "registry",
+            "horizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}\nserde='1'",
+        );
         let with = |change: &dyn Fn(&mut horizon_mod_package::manifest::Manifest)| {
             let mut bundle = api_only.clone();
             change(&mut bundle.manifest);
@@ -1149,6 +1086,27 @@ mod tests {
             assert_eq!(route(&[needs, &registry]), Route::Registry);
         }
         assert_eq!(route(&[&api_only, &registry]), Route::Registry);
+        // What ties a mod to its exact build is named by its table.
+        let tie =
+            |bundle: &super::super::Bundle| changes_game(&api::Project::read(bundle).unwrap());
+        let ties: Vec<_> = engine.iter().map(tie).collect();
+        assert_eq!(
+            ties,
+            [
+                Some("[[native.mixin]]"),
+                Some("[[native.module]]"),
+                Some("[[native.bridge]]"),
+                Some("[[native.state]]"),
+                Some("[[native.loop]]"),
+                Some("internals"),
+                Some("internals"),
+            ]
+        );
+        assert_eq!(tie(&api_only), None);
+        assert_eq!(tie(&registry), None);
+        assert_eq!(Route::Api.inputs(), "api");
+        assert_eq!(Route::Engine.inputs(), "engine");
+        assert_eq!(Route::Registry.inputs(), "engine");
         assert_eq!(Route::Api.name(), "prebuilt-api");
         assert_eq!(Route::Engine.name(), "prebuilt");
     }
@@ -1287,7 +1245,7 @@ mod tests {
                 this.target == host
             );
             // Another build of a developer's own game is refused before anything is laid out.
-            assert!(fetch("abc124", Target::Client, Some(&dir), || ()).is_err());
+            assert!(developer("abc124", Target::Client, &dir).is_err());
         }
         fs::remove_file(dir.join(IDENTITY)).unwrap();
         assert!(check_identity(&dir, "abc123", host, Target::Client).is_err());
@@ -1362,13 +1320,18 @@ mod tests {
 
     #[test]
     fn mods_on_the_mod_api_alone_take_the_prebuilt_game() {
-        assert_eq!(refusal_of("[dependencies]\nhorizon-mod-api='0.1'"), None);
         assert_eq!(
-            refusal_of("build=false\n[dependencies]\nhorizon-mod-api='0.1'"),
+            refusal_of(
+                "[dependencies]\nhorizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}"
+            ),
             None
         );
         assert_eq!(
-            refusal_of("[dependencies.api]\npackage='horizon-mod-api'\nversion='0.1'"),
+            refusal_of("build=false\n[dependencies]\nhorizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}"),
+            None
+        );
+        assert_eq!(
+            refusal_of("[dependencies.api]\npackage='horizon-mod-api'\npath='.horizon/sdk/api/crates/horizon-mod-api'"),
             None
         );
     }
@@ -1376,8 +1339,8 @@ mod tests {
     #[test]
     fn registry_dependencies_do_not_rebuild_the_game() {
         for cargo in [
-            "[dependencies]\nhorizon-mod-api='0.1'\nserde='1'",
-            "[dependencies]\nhorizon-mod-api='0.1'\n[target.'cfg(unix)'.dependencies]\nlibc='0.2'",
+            "[dependencies]\nhorizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}\nserde='1'",
+            "[dependencies]\nhorizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}\n[target.'cfg(unix)'.dependencies]\nlibc='0.2'",
         ] {
             assert_eq!(refusal_of(cargo), None);
         }
@@ -1388,20 +1351,28 @@ mod tests {
         let id = || "example".to_owned();
         for (cargo, reason) in [
             (
-                "[dependencies]\nhorizon-mod-api={version='0.1',features=['testing']}",
+                "[dependencies]\nhorizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api',features=['testing']}",
                 Refusal::Features { mod_id: id() },
             ),
             (
-                "[dependencies]\nhorizon-mod-api='0.1'\n[features]\nextra=[]",
+                "[dependencies]\nhorizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}\n[features]\nextra=[]",
                 Refusal::Features { mod_id: id() },
             ),
             (
-                "build='make.rs'\n[dependencies]\nhorizon-mod-api='0.1'",
+                "build='make.rs'\n[dependencies]\nhorizon-mod-api={path='.horizon/sdk/api/crates/horizon-mod-api'}",
                 Refusal::BuildScript { mod_id: id() },
             ),
         ] {
             assert_eq!(refusal_of(cargo), Some(reason), "{cargo}");
         }
+    }
+
+    #[test]
+    fn a_file_is_found_by_name_in_a_sums_listing() {
+        let name = "horizon-mixins-x86_64-unknown-linux-gnu.tar.gz";
+        let listing = format!("AB12  horizon-mixins-other.tar.gz\ncd34 *{name}\n");
+        assert_eq!(expected_sum(&listing, name).as_deref(), Some("cd34"));
+        assert_eq!(expected_sum(&listing, "horizon-mixins-x.tar.gz"), None);
     }
 
     #[test]
@@ -1418,18 +1389,5 @@ mod tests {
         let newer = horizon_mod_package::sdk::PACKAGE_FORMAT + 1;
         let error = refusal(&format!(r#"{{"package_format": {newer}}}"#));
         assert!(error.contains("update the launcher"), "{error}");
-    }
-
-    #[test]
-    fn the_archive_is_found_by_name_in_the_release_sums() {
-        let name = native::prebuilt_archive("x86_64-unknown-linux-gnu", true);
-        assert_eq!(
-            name,
-            "horizon-prebuilt-v6-x86_64-unknown-linux-gnu-server.tar.gz"
-        );
-        let listing =
-            format!("AB12  horizon-prebuilt-v6-x86_64-unknown-linux-gnu.tar.gz\ncd34 *{name}\n");
-        assert_eq!(expected_sum(&listing, &name).as_deref(), Some("cd34"));
-        assert_eq!(expected_sum(&listing, "horizon-prebuilt-x.tar.gz"), None);
     }
 }

@@ -1,15 +1,13 @@
 name: prebuilt game
-# The prebuilt game (#589): horizon-client as a Rust dylib plus every crate's metadata, one archive per OS, so the
-# launcher builds native trait mods against it with rustc alone, in seconds, instead of rebuilding the game.
-# Each OS builds with explicit --target <host>: target metadata lives in deps/, host proc-macros in host/.
-# Built with the pinned Rust (tools/ci/rust-version, which the launcher builds native mods with), because rustc reads only metadata from its own
-# version. Built by the daily run (daily.yml) for its commit, and by this dispatch (a run whose commit already has a
-# release stops early), and published as a prerelease tagged prebuilt-<sha>, never marked latest. Exact-SHA SDKs are retained: Nightlies and installed
-# games can continue referencing older builds. Only compiler outputs go in:
-# tools/prebuilt_game.py refuses anything else, and nothing here reads vanilla data. The build lives in
-# prebuilt-game-build.yml and the publish in sdk-publish.yml, which the daily run (once every leg is green), a
-# snapshot (release.yml) and this hand dispatch (from main) all call. A run on another branch builds
-# and smokes every OS and publishes nothing.
+# The prebuilt game (#589): horizon-client as a Rust dylib plus every crate's metadata, so the launcher builds native
+# mods against it with rustc alone, in seconds, instead of rebuilding the game. Built with the pinned Rust
+# (tools/ci/rust-version, which the launcher builds native mods with), because rustc reads only metadata from its own
+# version. Only compiler outputs go in: tools/prebuilt_game.py refuses anything else, and nothing here reads vanilla
+# data. The build is prebuilt-game-build.yml, which the daily run calls for its commit and publishes once every leg is
+# green (daily.yml, sdk-publish); this workflow is the hand dispatch of the same two steps for main's head. The mod
+# SDK is published as the signed release sdk-<sha> (sdk-publish.yml), a prerelease never marked latest; exact-SHA
+# SDKs are retained, as Nightlies and installed games keep referencing older builds. A commit whose sdk-<sha> exists
+# stops early. A run on another branch builds, smokes, packs and signs with a throwaway key, and publishes nothing.
 on:
   workflow_dispatch:
 permissions:
@@ -23,11 +21,11 @@ jobs:
 
   publish:
     needs: build
-    # A run on any other branch builds and smokes every OS but releases nothing.
-    if: github.ref == 'refs/heads/main' && needs.build.outputs.needed == 'true'
+    if: needs.build.outputs.needed == 'true'
     permissions:
-      contents: write  # the prebuilt-<sha> release
+      contents: write  # the sdk-<sha> release, on main only
     uses: ./.github/workflows/sdk-publish.yml
     with:
       commit: ${{ github.sha }}
-      tag: ${{ needs.build.outputs.tag }}
+      publish: ${{ github.ref == 'refs/heads/main' }}
+    secrets: inherit

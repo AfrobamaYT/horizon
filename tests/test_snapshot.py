@@ -29,7 +29,7 @@ class ReleaseSnapshotTests(unittest.TestCase):
                          "echo \"dry_run=${{ inputs.dry_run || github.ref != 'refs/heads/main' }}\" >> \"$GITHUB_OUTPUT\"")
         self.assertEqual(self.workflow["on"]["workflow_dispatch"]["inputs"]["dry_run"]["default"], "true")
         publish = self.snapshot["snapshot-sdk-publish"]
-        self.assertIn("needs.decide.outputs.dry_run != 'true'", publish["if"])
+        self.assertEqual(publish["with"]["publish"], "${{ needs.decide.outputs.dry_run != 'true' }}")
         self.assertEqual(publish["uses"], "./.github/workflows/sdk-publish.yml")
         # The game is built by `nightly build`, which publishes only when its own dry_run is false: it gets ours.
         run = self.snapshot["snapshot"]["steps"][0]["run"]
@@ -51,11 +51,13 @@ class ReleaseSnapshotTests(unittest.TestCase):
         self.assertEqual(self.snapshot["snapshot-sdk"]["uses"], "./.github/workflows/prebuilt-game-build.yml")
         self.assertEqual(self.snapshot["snapshot-sdk"]["with"], {"commit": "${{ needs.decide.outputs.head }}"})
         self.assertEqual(self.snapshot["snapshot-sdk-publish"]["with"],
-                         {"commit": "${{ needs.decide.outputs.head }}", "tag": "${{ needs.snapshot-sdk.outputs.tag }}"})
+                         {"commit": "${{ needs.decide.outputs.head }}",
+                          "publish": "${{ needs.decide.outputs.dry_run != 'true' }}"})
         game = self.snapshot["snapshot"]
         self.assertEqual(game["needs"], ["decide", "snapshot-sdk", "snapshot-sdk-publish"])
         self.assertIn("needs.snapshot-sdk.result == 'success'", game["if"])
-        self.assertIn("needs.snapshot-sdk-publish.result == 'success'", game["if"])
+        self.assertIn("(needs.snapshot-sdk-publish.result == 'success' || needs.snapshot-sdk-publish.result == 'skipped')",
+                      game["if"].replace("\n", " "))
 
     def test_snapshots_never_queue_with_nightlies(self):
         self.assertIn("inputs.kind == 'snapshot' && '-snapshot'", self.workflow["concurrency"]["group"])
@@ -101,6 +103,7 @@ class SnapshotToolsTests(unittest.TestCase):
                 {"tagName": "snapshot-2026-11-02-bbbbbbb", "isPrerelease": True},
                 {"tagName": "snapshot-2026-11-12-ccccccc", "isPrerelease": True},
                 {"tagName": "prebuilt-" + "d" * 40, "isPrerelease": True},
+                {"tagName": "sdk-" + "d" * 40, "isPrerelease": True},
                 {"tagName": "nightly-2026-11-01", "isPrerelease": True},
                 {"tagName": "snapshot-2026-11-01", "isPrerelease": True},
                 {"tagName": "snapshot-2026-11-01-eeeeeee", "isPrerelease": False}]
@@ -136,7 +139,14 @@ class SnapshotToolsTests(unittest.TestCase):
                         mock.patch.object(nightly, "sdk_ready", return_value=True), \
                         mock.patch.object(nightly, "gh", return_value='{"tagName": "x"}'):
                     nightly.pick_snapshot()
-                self.assertIn("build=false", out.read_text().splitlines()[-9:])
+                self.assertIn("build=false", out.read_text().splitlines()[-10:])
+                self.assertIn("sdk=true", out.read_text().splitlines()[-10:])
+                # No published SDK: a dry run builds without it (sdk=false: no sdk.json), a real snapshot stops.
+                with mock.patch.dict(os.environ, {**env, "DRY_RUN": "true"}), mock.patch.object(nightly, "git"), \
+                        mock.patch.object(nightly.train, "channel_head", return_value=sha), \
+                        mock.patch.object(nightly, "sdk_ready", return_value=False):
+                    nightly.pick_snapshot()
+                self.assertIn("sdk=false", out.read_text().splitlines()[-10:])
                 # No published SDK: a real snapshot stops.
                 with mock.patch.dict(os.environ, env), mock.patch.object(nightly, "git"), \
                         mock.patch.object(nightly.train, "channel_head", return_value=sha), \
