@@ -110,7 +110,7 @@ fn overlay_reference(game: &mut Game<'_>, carried: bool) -> Vec<u8> {
 }
 
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and software Vulkan"]
+#[ignore = "daily"]
 fn chest_render_phases_cover_panel_but_preserve_items_tooltips_and_carried_stack() {
     let mut no_subscriber = None;
     with_mods(Vec::new().into(), || {
