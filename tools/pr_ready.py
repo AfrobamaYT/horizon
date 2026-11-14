@@ -72,9 +72,6 @@ state="$HOME/.cache/pr-ready/$(basename "$PWD")"
 mkdir -p "$state/parity-runner" "$state/parity-target"
 ln -sfn "$state/parity-runner" .local/parity-runner && ln -sfn "$state/parity-target" .local/parity-target""",
 }
-DISCOVERED_RUST = ("crates/horizon-mod-wasm/wire-loopback/tests/wire_loopback/*.rs",
-                   "crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs",
-                   "crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*/*.rs")
 ROOT_RUST = {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rustfmt.toml", "clippy.toml"}
 LAUNCHER_FEATURES = """export features=""
 if [ "$(uname)" = Darwin ] && ! xcrun metal --version > /dev/null 2>&1; then features="--features gpui_platform/runtime_shaders"; fi
@@ -413,9 +410,8 @@ def plan(args, base, changed, crates_of, libraries, dependencies):
         Step("Test stand-ins", "python3 tools/hotspots/check_stand_ins.py", where="here"),
         # Always, as in CI: some read the crates, the roadmap or the workflows.
         Step("Python tests", "python3 -m unittest discover -s tests", where="here", summary=unittest_passed),
-        Step("rustfmt", "cargo fmt --all -- --check", skip=None if rust else no_rust),
-        # Discovered by a build script, so no mod line leads cargo fmt to them (CI checks them by path too).
-        Step("rustfmt by path", "rustfmt --edition 2024 --check " + " ".join(DISCOVERED_RUST), skip=None if rust else no_rust),
+        # CI's own scan (tools/ci/format_scan.py): cargo fmt, then the files no `mod` line reaches, by path.
+        Step("rustfmt", "python3 tools/ci/format_scan.py", skip=None if rust else no_rust),
         Step("clippy", clippy, skip=None if rust else no_rust),
         Step("holder actor", HOLDER_ACTOR,
              skip=None if crates is None or "horizon-mod-package" in crates or launcher
@@ -571,9 +567,7 @@ def run_windows(steps, verbose, environment=None):
         elif step.name == "Python tests":
             command = [sys.executable, "-m", "unittest", "discover", "-s", "tests"]
         elif step.name == "rustfmt":
-            command = ["cargo", "fmt", "--all", "--", "--check"]
-        elif step.name == "rustfmt by path":
-            command = ["rustfmt", "--edition", "2024", "--check", *sorted(str(p) for g in DISCOVERED_RUST for p in ROOT.glob(g))]
+            command = [sys.executable, "tools/ci/format_scan.py"]
         elif step.name == "clippy":
             command = shlex.split(CI_CLIPPY)  # the server build's clippy runs in CI (Linux)
         elif step.name.startswith("tests"):

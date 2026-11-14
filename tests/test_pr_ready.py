@@ -344,6 +344,7 @@ class PrReadyTests(unittest.TestCase):
                 by_name = {step.name: step for step in steps}
                 self.assertIsNone(by_name["clippy"].skip)
                 self.assertIsNone(by_name["rustfmt"].skip)
+                self.assertEqual(by_name["rustfmt"].command, "python3 tools/ci/format_scan.py")
                 tests = next(step for step in steps if step.name.startswith("tests:"))
                 self.assertIsNone(tests.skip)
                 self.assertEqual(tests.command, "cargo test --locked -p horizon-client -p horizon-client-render "
