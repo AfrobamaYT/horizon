@@ -303,10 +303,12 @@ with (folder / row["file"]).open("ab") as stream:
 print(row["mod"])
 PYLIB
 )
-  if (cd "$run" && env "${env_vars[@]}" timeout 30 "$scratch/engine/horizon-engine" --resources "$(realpath "$resources")" --dedicated --nogui) > "$scratch/corrupt.log" 2>&1; then
+  corrupt_status=0
+  (cd "$run" && env "${env_vars[@]}" timeout 30 "$scratch/engine/horizon-engine" --resources "$(realpath "$resources")" --dedicated --nogui) > "$scratch/corrupt.log" 2>&1 || corrupt_status=$?
+  if (( corrupt_status == 0 || corrupt_status >= 124 )); then
     echo "corrupted native library was accepted"; exit 1
   fi
-  grep -F "$corrupt_mod" "$scratch/corrupt.log"
+  grep -E "^Horizon: refusing native startup: mod ${corrupt_mod}: library [^/]+ hash mismatch " "$scratch/corrupt.log"
   if grep -F 'fnr:' "$scratch/corrupt.log"; then
     echo "mod code ran before library hashes passed"; exit 1
   fi

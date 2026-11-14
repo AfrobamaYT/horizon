@@ -10,7 +10,6 @@ pub const RUSTC_VERSION: &str = env!("HORIZON_RUSTC_VERSION");
 
 #[derive(Deserialize)]
 struct Record {
-    #[serde(default)]
     libraries: Vec<Library>,
 }
 #[derive(Deserialize)]
@@ -24,6 +23,14 @@ struct Library {
 
 fn verify(folder: &Path, libraries: &[Library]) -> Result<(), String> {
     for library in libraries {
+        if library.identity.split_whitespace().next() != Some(GAME_BUILD_ID)
+            || library.identity.split_whitespace().last() != Some(RUSTC_VERSION)
+        {
+            return Err(format!(
+                "mod {}: incompatible build identity {:?}; game {GAME_BUILD_ID} rustc {RUSTC_VERSION}",
+                library.id, library.identity
+            ));
+        }
         // File names are untrusted build-record input, not paths outside this installation.
         if Path::new(&library.file).components().count() != 1
             || !matches!(
@@ -175,7 +182,7 @@ mod tests {
             file: "test.so".into(),
             sha256: format!("{:x}", Sha256::digest(b"valid")),
             id: "example".into(),
-            identity: String::new(),
+            identity: format!("{GAME_BUILD_ID} example 1 {RUSTC_VERSION}"),
         };
         assert!(
             verify(&folder, std::slice::from_ref(&row))
@@ -184,6 +191,17 @@ mod tests {
         );
         std::fs::write(folder.join("test.so"), b"valid").unwrap();
         verify(&folder, std::slice::from_ref(&row)).unwrap();
+        for identity in [
+            format!("wrong example 1 {RUSTC_VERSION}"),
+            format!("{GAME_BUILD_ID} example 1 wrong"),
+        ] {
+            let valid = std::mem::replace(&mut row.identity, identity);
+            let error = verify(&folder, std::slice::from_ref(&row)).unwrap_err();
+            assert!(error.contains("example") && error.contains("identity"));
+            row.identity = valid;
+        }
+        assert!(serde_json::from_str::<Record>("{}").is_err());
+        assert!(serde_json::from_str::<Record>(r#"{"libraries": []}"#).is_ok());
         std::fs::write(folder.join("test.so"), b"corrupt").unwrap();
         assert!(
             verify(&folder, std::slice::from_ref(&row))
