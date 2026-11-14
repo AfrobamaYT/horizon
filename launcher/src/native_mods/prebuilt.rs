@@ -820,7 +820,7 @@ pub(super) fn compile(
         }
         cmd.arg("-o").arg(&library).arg(source);
         if !unchanged {
-            super::run(cmd, &tr("Compiling the patch library"), |_| {})?;
+            super::run(cmd, tr("Compiling the patch library"), |_| {})?;
             fs::write(saved, fingerprint).map_err(|e| e.to_string())?;
         }
         super::library_record::validate_exports(&library, "horizon_patch")?;
