@@ -27,6 +27,13 @@ const RECIPES_SETTINGS_WIDTH: f32 = 20.0;
 /// Items a panel may hold.
 const ITEMS: usize = 8192;
 
+/// The browser's overlay selected while painting its contents.
+pub(super) enum BrowserTooltip {
+    Text(String),
+    Stack(ItemStack),
+    Fluid(mod_api::FluidStack),
+}
+
 /// Whose panel it is: a native mod's id.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Owner {
@@ -459,15 +466,11 @@ impl Game<'_> {
             );
         }
     }
-    /// Draws the panel over the open container screen, then the carried
-    /// stack or the tooltip again so they stay on top of it.
-    pub(super) fn draw_mod_browser(&mut self, batch: &mut HudBatch) {
-        if self.browser_sync().is_none() {
-            return;
-        }
-        let Some(layout) = self.browser_layout(batch) else {
-            return;
-        };
+    /// Draw the browser's contents once, leaving its tooltip for the screen's
+    /// overlay phase. The carried stack belongs to the enclosing screen.
+    pub(super) fn draw_mod_browser(&mut self, batch: &mut HudBatch) -> Option<BrowserTooltip> {
+        self.browser_sync()?;
+        let layout = self.browser_layout(batch)?;
         let cursor = self.cursor;
         if self.panel.recipes.is_some() {
             self.draw_browser_recipes(batch, &layout);
@@ -508,18 +511,34 @@ impl Game<'_> {
             let label = horizon_client::lang::get("options.title");
             horizon_client::widgets::record(&label, rect, true);
             if hovered && self.carried.is_none() {
-                self.draw_tooltip_lines(batch, &[(label, u32::MAX)], cursor.0, cursor.1);
-                return;
+                return Some(BrowserTooltip::Text(label));
             }
         }
         if self.carried.is_some() {
-            self.draw_carried(batch);
+            None
         } else if let Some(stack) = self.browser_pointed_stack(&layout) {
-            self.draw_stack_tooltip(batch, &stack.1, cursor.0, cursor.1);
-        } else if let Some(fluid) = self.recipe_fluid_hovered(&layout) {
-            self.draw_fluid_tooltip(batch, &fluid, cursor.0, cursor.1);
+            Some(BrowserTooltip::Stack(stack.1))
         } else {
-            self.draw_slot_tooltip(batch);
+            self.recipe_fluid_hovered(&layout)
+                .map(BrowserTooltip::Fluid)
+        }
+    }
+
+    pub(super) fn draw_mod_browser_tooltip(
+        &mut self,
+        batch: &mut HudBatch,
+        tooltip: BrowserTooltip,
+    ) {
+        match tooltip {
+            BrowserTooltip::Text(text) => {
+                self.draw_tooltip_lines(batch, &[(text, u32::MAX)], self.cursor.0, self.cursor.1);
+            }
+            BrowserTooltip::Stack(stack) => {
+                self.draw_stack_tooltip(batch, &stack, self.cursor.0, self.cursor.1);
+            }
+            BrowserTooltip::Fluid(fluid) => {
+                self.draw_fluid_tooltip(batch, &fluid, self.cursor.0, self.cursor.1);
+            }
         }
     }
 
