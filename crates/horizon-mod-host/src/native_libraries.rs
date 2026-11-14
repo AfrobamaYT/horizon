@@ -36,7 +36,20 @@ fn verify(folder: &Path, libraries: &[Library]) -> Result<(), String> {
                 library.id, library.file
             ));
         }
-        let bytes = std::fs::read(folder.join(&library.file))
+        // The launcher installs real files (copies or hard links), never symlinks: a link could
+        // lead out of the installation.
+        let path = folder.join(&library.file);
+        let is_link = std::fs::symlink_metadata(&path)
+            .map_err(|error| format!("mod {}: {}: {error}", library.id, library.file))?
+            .file_type()
+            .is_symlink();
+        if is_link {
+            return Err(format!(
+                "mod {}: library file {} is a symbolic link",
+                library.id, library.file
+            ));
+        }
+        let bytes = std::fs::read(&path)
             .map_err(|error| format!("mod {}: {}: {error}", library.id, library.file))?;
         let actual = format!("{:x}", Sha256::digest(bytes));
         if actual != library.sha256 {
@@ -131,13 +144,18 @@ pub fn main() {
     let mut slots = Vec::new();
     let mut built = Vec::new();
     let mut installs = Vec::new();
+    // Every patch copy is installed and checked before any mod's hook factory runs, as the
+    // generated `main` did: a factory may call a patched function, and a refused install stops
+    // the start before any mod code beyond the installs has run.
+    for library in &libraries {
+        installs.extend((library.installs)());
+    }
+    horizon_client::entry::installed(&installs);
     for library in libraries {
         entries.extend((library.entries)());
         slots.extend((library.slots)());
         built.extend_from_slice(library.built);
-        installs.extend((library.installs)());
     }
-    horizon_client::entry::installed(&installs);
     crate::main_with(
         entries,
         &slots,
@@ -172,6 +190,18 @@ mod tests {
                 .unwrap_err()
                 .contains("example")
         );
+        // A link with the right bytes is still refused: it could lead out of the installation.
+        #[cfg(unix)]
+        {
+            std::fs::write(folder.join("real.so"), b"valid").unwrap();
+            std::os::unix::fs::symlink(folder.join("real.so"), folder.join("link.so")).unwrap();
+            row.file = "link.so".into();
+            let error = verify(&folder, std::slice::from_ref(&row)).unwrap_err();
+            assert!(
+                error.contains("example") && error.contains("symbolic link"),
+                "{error}"
+            );
+        }
         row.file = "../test.so".into();
         assert!(verify(&folder, &[row]).unwrap_err().contains("example"));
         std::fs::remove_dir_all(folder).unwrap();

@@ -606,9 +606,10 @@ fn registry_dependency(project: &api::Project<'_>) -> bool {
 
 /// Compiles the mods (`resolution`'s order, each with its installed mod dependencies) and the
 /// launcher's executable against the prebuilt game `package`, by `route` ([`Route::of`] the same
-/// `projects`), under `builds` (`native/prebuilt-build`): the API route in its `api` folder and
-/// the engine route in its `rustc` folder, each rebuilt every time, and the registry route in the
-/// folder its cargo build is kept in ([`kept_build`]), staged per mods folder (`mods`). Returns
+/// `projects`), under `builds` (`native/prebuilt-build`), in folders keyed by the SDK's inputs
+/// ([`kept_build`]): the API route in `api-<key>`, the engine route in `rustc-<key>`, each mod's
+/// library reused only while its own inputs are unchanged, and the registry route's cargo build in
+/// `<key>`, staged per mods folder (`mods`). Returns
 /// the executable and the dynamic libraries it loads, to be installed beside it.
 // Unlike the source workspace, this route invokes rustc with only selected --extern
 // libraries; it does not resolve or compile arbitrary transitive Cargo dependencies.
@@ -640,8 +641,11 @@ pub(super) fn compile(
             return Err(trf("Native mod {mod} uses reserved or duplicate library file {file}. Choose a unique Cargo library name.", &[("mod", &project.bundle.manifest.id), ("file", &name)]));
         }
     }
+    // Every route's outputs are kept per SDK build (its files, the toolchain and the launcher's
+    // settings): a library reused across builds was always compiled from the same SDK inputs.
+    let key = kept_build(rust, package)?;
     if route == Route::Api {
-        let out = &builds.join("api");
+        let out = &builds.join(format!("api-{key}"));
         let built = super::api_route::compile(
             rust,
             &package.runtime,
@@ -659,7 +663,7 @@ pub(super) fn compile(
     }
     let game = &package.whole(&builds.with_file_name("prebuilt-package"))?;
     if route == Route::Registry {
-        let kept = builds.join(kept_build(rust, package, game)?);
+        let kept = builds.join(&key);
         // Stamped before it fills, so a build that fails still leaves an aged unit.
         fs::create_dir_all(&kept).map_err(|e| e.to_string())?;
         crate::storage::mark_used(&kept).map_err(super::cache_error)?;
@@ -681,7 +685,7 @@ pub(super) fn compile(
         crate::storage::mark_used(&kept).map_err(super::cache_error)?;
         return Ok(built);
     }
-    let out = &builds.join("rustc");
+    let out = &builds.join(format!("rustc-{key}"));
     let catalog = internals::Catalog::read(game)?;
     let generated = catalog
         .prepare(projects.iter().map(|project| &project.bundle.manifest))
@@ -977,8 +981,8 @@ const KEPT_BUILD_FLAGS: u32 = 2;
 /// The folder a registry build's cargo output is kept in, under `native/prebuilt-build`: one per
 /// game build, Rust toolchain and launcher settings ([`KEPT_BUILD_FLAGS`]). Inside one, cargo's
 /// own fingerprints decide what to rebuild.
-fn kept_build(rust: &Toolchain, package: &Package, game: &Path) -> Result<String, String> {
-    let sdk = identity(game)?;
+fn kept_build(rust: &Toolchain, package: &Package) -> Result<String, String> {
+    let sdk = identity(&package.runtime)?;
     let mut hasher = Sha256::new();
     hasher.update(KEPT_BUILD_FLAGS.to_le_bytes());
     hasher.update(rust_toolchain::VERSION.as_bytes());

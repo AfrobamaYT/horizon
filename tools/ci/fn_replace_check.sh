@@ -228,6 +228,9 @@ for root in map(pathlib.Path, sys.argv[2:]):
 raise SystemExit("no changed library with the expected identity was built")
 PYLIB
   test "$(sha256sum "$scratch/engine/horizon-engine" | cut -d' ' -f1)" = "$executable_hash"
+  # The start below loads the swapped library: the loader hashes every library against the record
+  # before loading any, and the record now holds only the new bytes, so a start that passes the
+  # checks ran the rebuilt library, with the executable unchanged.
   # A loop mod gets a forced chunk of hoppers handing stone along each row, so the loop visits them,
   # and a row of each loop mod's counters beside them.
   hoppers=
