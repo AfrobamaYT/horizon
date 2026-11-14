@@ -641,11 +641,12 @@ mod refusal_tests {
             super::install_expression("game::tick", &["first", "second"], "patch::install()"),
             r#"("game::tick", &["first", "second"], patch::install())"#
         );
-        let template = include_str!("../../../crates/horizon-client/src/native_main.rs.template");
-        assert!(
-            template.find("entry::installed").unwrap()
-                < template.find("mod_api::ModEntry> =").unwrap()
-        );
+        // The patch library's entry module hands its installs to the loader, which passes them
+        // to the startup gate before any mod's entries are registered.
+        let template =
+            include_str!("../../../crates/horizon-client/src/native_mod_entry.rs.template");
+        let installs = template.find("fn installs()").unwrap();
+        assert!(template[installs..].find("/* MOD_REDIRECTS */").is_some());
     }
 
     #[test]
