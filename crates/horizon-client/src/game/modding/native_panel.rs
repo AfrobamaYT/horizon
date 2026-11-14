@@ -257,8 +257,14 @@ fn classic_layout(
     let list_width = grid_width.max(4.0 * CLASSIC_BUTTON);
     let list_x = right - list_width;
     let x = list_x + ((list_width - grid_width) / 2.0).floor();
-    let foot = height - CLASSIC_PAD - CLASSIC_BUTTON;
     let centred = centred && window[1] + window[3] + CLASSIC_BUTTON < height;
+    let foot = height
+        - CLASSIC_BUTTON
+        - if centred {
+            CLASSIC_PAD
+        } else {
+            2.0 * CLASSIC_PAD
+        };
     let (search_x, search_width) = if centred {
         (window[0], window[2])
     } else {
@@ -652,14 +658,16 @@ impl Game<'_> {
         let search = self.browser_search(&layout);
         // The hint shows in an empty box without focus, as the recipe book's.
         search.suggestion = (search.value.is_empty() && !search.focused).then_some(hint);
-        if layout.classic {
-            // JEI's search text: white, red when nothing matches.
-            search.text_color = if nothing_found && !search.value.is_empty() {
+        // Reset every frame, including when leaving the classic style.
+        search.text_color = if layout.classic {
+            if nothing_found && !search.value.is_empty() {
                 rgba(255, 0, 0, 255)
             } else {
                 rgba(255, 255, 255, 255)
-            };
-        }
+            }
+        } else {
+            rgba(224, 224, 224, 255)
+        };
         let mut search = search.clone();
         search.draw_with_skin(batch, &self.gui.atlas, None, skin);
         self.panel.search = Some(search);
@@ -674,8 +682,8 @@ impl Game<'_> {
                     "horizon/jei/button_enabled_v2"
                 };
                 horizon_client::ui::nine_slice(batch, atlas, sprite, x, y, width, height, u32::MAX);
-                let (icon, tint) = ("horizon/jei/icons/config_button", icon_tint(true, hovered));
-                batch.sprite_scaled(atlas, icon, x + 2.0, y + 2.0, 16.0, 16.0, tint);
+                let icon = "horizon/jei/icons/config_button";
+                batch.sprite_scaled(atlas, icon, x + 2.0, y + 2.0, 16.0, 16.0, u32::MAX);
             } else {
                 let sprite = if hovered {
                     "gui/sprites/widget/button_highlighted"
@@ -1081,9 +1089,9 @@ mod tests {
 
         // Under the items, with the rows above it.
         let beside = super::classic_layout(screen, window, 0.0, false).unwrap();
-        assert_eq!(beside.search, [388.0, 451.0, 161.0, 20.0]);
-        assert_eq!(beside.settings, Some([548.0, 451.0, 20.0, 20.0]));
-        assert_eq!((beside.rows, beside.grid.1), (23, 28.0));
+        assert_eq!(beside.search, [388.0, 449.0, 161.0, 20.0]);
+        assert_eq!(beside.settings, Some([548.0, 449.0, 20.0, 20.0]));
+        assert_eq!((beside.rows, beside.grid.1), (23, 27.0));
 
         // A window reaching the foot keeps the search box under the items.
         let tall = super::classic_layout(screen, [197.0, 153.0, 176.0, 310.0], 0.0, true).unwrap();
@@ -1098,8 +1106,11 @@ mod tests {
         assert_eq!(few.browser_arrow_rects(true)[1], [278.0, 2.0, 20.0, 20.0]);
         // The area covers the first column's left pixels (x 231 to 239).
         assert!(few.area[0] <= few.grid.0);
-        assert!(super::inside((few.grid.0 + 1.0, few.grid.1 + 1.0), few.area));
-        assert_eq!(few.search, [218.0, 451.0, 61.0, 20.0]);
+        assert!(super::inside(
+            (few.grid.0 + 1.0, few.grid.1 + 1.0),
+            few.area
+        ));
+        assert_eq!(few.search, [218.0, 449.0, 61.0, 20.0]);
         // No room for two columns: no panel.
         let narrow = [37.0, 17.0, 176.0, 166.0];
         assert!(super::classic_layout([250.0, 200.0], narrow, 0.0, true).is_none());
