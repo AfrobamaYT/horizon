@@ -974,6 +974,8 @@ pub(super) fn compile_mod<'a>(
     Ok((library, krate))
 }
 
+/// Refuses mod `id`'s library file `name` when another library already takes it. Names compare
+/// without case, as Windows' and macOS's default file systems do.
 fn check_library_name(
     names: &mut std::collections::HashSet<String>,
     name: &str,
@@ -985,15 +987,20 @@ fn check_library_name(
     Ok(())
 }
 
+/// Refuses mod `id` when its crate root (`source`) forbids unsafe code: the generated library
+/// entry appended to it exports `#[unsafe(no_mangle)]` functions, and `forbid` can't be lifted for
+/// one module. A root this parser can't read is left to rustc, which reports it in its own words.
 pub(super) fn check_entry_root(source: &str, id: &str) -> Result<(), String> {
-    let file = syn::parse_file(source).map_err(|e| e.to_string())?;
+    let Ok(file) = syn::parse_file(source) else {
+        return Ok(());
+    };
     for attr in file.attrs {
         if attr.path().is_ident("forbid") {
-            let lints = attr
-                .parse_args_with(
-                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
-                )
-                .map_err(|e| e.to_string())?;
+            let Ok(lints) = attr.parse_args_with(
+                syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+            ) else {
+                continue;
+            };
             if lints.iter().any(|lint| lint.path().is_ident("unsafe_code")) {
                 return Err(trf("{mod}: its crate root forbids unsafe code, which the launcher's generated library entry needs; use #![deny(unsafe_code)] instead", &[("mod", id)]));
             }
