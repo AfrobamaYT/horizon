@@ -50,7 +50,10 @@
       "horizon-prebuilt.json",
       "bin/@program:horizon-client",
       "deps/@dylib:horizon_mod_host",
-      "deps/@dylib:horizon_mod_wasm"
+      "deps/@dylib:horizon_mod_wasm",
+      "deps/@dylib:mod_api",
+      "deps/@dylib:mod_vocab",
+      "deps/@dylib:mod_points"
     ],
     "api": [
       "native_mod_entry.rs.template",

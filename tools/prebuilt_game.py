@@ -189,7 +189,15 @@ def copy_artifacts(messages: list[dict], deps: Path, host: Path, target_dir: Pat
         if message["reason"] != "compiler-artifact":
             continue
         proc_macro = "proc-macro" in message["target"]["kind"]
+        filenames = list(message["filenames"])
+        # Cargo does not inventory standalone metadata emitted alongside a dylib.
         for name in message["filenames"]:
+            if proc_macro or not name.endswith((".so", ".dll", ".dylib")):
+                continue
+            metadata = Path(name).with_suffix(".rmeta")
+            if metadata.is_file() and str(metadata) not in filenames:
+                filenames.append(str(metadata))
+        for name in filenames:
             file = Path(name)
             if not name.endswith(SUFFIXES):
                 continue
@@ -290,6 +298,8 @@ def holds(names: list[str], member: str) -> bool:
     if name.startswith("@dylib:"):
         return f"{prefix}{dylib_prefix()}{name[7:]}{dylib_suffix()}" in names
     if name.startswith("@rmeta:"):
+        if f"{prefix}lib{name[7:]}.rmeta" in names:
+            return True
         return any(re.fullmatch(re.escape(f"{prefix}lib{name[7:]}-") + r"[0-9a-f]+\.rmeta", entry) for entry in names)
     return member in names
 
@@ -385,7 +395,7 @@ def build(out: Path, server: bool) -> None:
         manifest.write_text(text)
 
     # One std for the game, every mod and the executable: the game links std dynamically, as mods will.
-    rustflags = "-C prefer-dynamic"
+    rustflags = "-C prefer-dynamic --emit=metadata"
     # On macOS this also gives both dylibs an @rpath install name instead of an absolute build path.
     if sys.platform == "darwin":
         rustflags += " -C rpath"
@@ -518,7 +528,7 @@ def extern_args(deps: Path, crate: str) -> list[str]:
     """Resolve a native SDK extern by name, refusing ambiguous metadata rather than choosing a variant."""
     library = dylib(deps, crate)
     if library is None:
-        candidates = list(deps.glob(f"lib{crate}-*.rmeta"))
+        candidates = list(deps.glob(f"lib{crate}-*.rmeta")) + list(deps.glob(f"lib{crate}.rmeta"))
         if len(candidates) != 1:
             raise ValueError(f"expected exactly one SDK metadata for {crate}: {candidates}")
         library = candidates[0]
