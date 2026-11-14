@@ -2964,10 +2964,7 @@ mod enchantment_snapshot_tests {
         game.world_root = dir;
         let stack = game.reload_datapacks(false, &[]).unwrap();
         let root = game.options.resources.clone();
-        game.world_tables = game
-            .build_world_tables(&stack, false, &root, game.mods.data_switched)
-            .unwrap()
-            .0;
+        game.world_tables = game.stage_world_tables(&stack, false, &root).unwrap().0;
         assert!(
             game.world_tables.is_some(),
             "the real active table container must be available"
@@ -3119,9 +3116,8 @@ mod damage_type_registry_tests {
         .unwrap();
         game.world_root = dir;
         let stack = game.reload_datapacks(false, &[]).unwrap();
-        (game.world_tables, game.health_resources) = game
-            .build_world_tables(&stack, false, &root, game.mods.data_switched)
-            .unwrap();
+        (game.world_tables, game.health_resources, _) =
+            game.stage_world_tables(&stack, false, &root).unwrap();
         game.level.allow_commands = Some(true);
         game.build_registries();
 
