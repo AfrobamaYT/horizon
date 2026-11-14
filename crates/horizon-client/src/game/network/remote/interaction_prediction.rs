@@ -55,7 +55,7 @@ impl Game<'_> {
                     (
                         c.kind
                             .interact_passes(sneaking, ridden, self.can_use_game_master_blocks()),
-                        c.kind == super::minecarts::CartKind::Rideable,
+                        c.kind == crate::game::minecarts::CartKind::Rideable,
                     )
                 })
                 .unwrap_or((false, false));
@@ -88,14 +88,14 @@ impl Game<'_> {
             // a successful boarding click, not on SetPassengers (commands
             // can mount a player without this interaction).
             if let Some(i) = self.carts.iter().position(|c| {
-                c.id as i32 == hit.id && c.kind == super::minecarts::CartKind::Rideable
+                c.id as i32 == hit.id && c.kind == crate::game::minecarts::CartKind::Rideable
             }) {
                 self.carts
                     .update(i, |c| c.player_rotation_offset = c.rotation_offset);
             }
             // MinecartCommandBlock.interact on the client: the editor opens.
             if self.carts.iter().any(|c| {
-                c.id as i32 == hit.id && c.kind == super::minecarts::CartKind::CommandBlock
+                c.id as i32 == hit.id && c.kind == crate::game::minecarts::CartKind::CommandBlock
             }) {
                 self.open_cart_command_block(hit.id as u32);
             }
@@ -158,11 +158,11 @@ impl Game<'_> {
             let (mut canceled, mut use_block, mut use_item) =
                 (None, TriState::Default, TriState::Default);
             match self.right_click_block(&hit, hand, held.as_ref()) {
-                super::native_hooks::BlockClickAnswer::Go {
+                crate::game::native_hooks::BlockClickAnswer::Go {
                     use_block: block,
                     use_item: item,
                 } => (use_block, use_item) = (block, item),
-                super::native_hooks::BlockClickAnswer::Canceled(answer) => {
+                crate::game::native_hooks::BlockClickAnswer::Canceled(answer) => {
                     canceled = Some(answer);
                 }
             }
@@ -218,7 +218,7 @@ impl Game<'_> {
                 && vanilla_block
                 && self.shelf_hit(&hit).is_some();
             let (result, changes) = if let Some(answer) = block_answer {
-                if let Some(result) = super::native_hooks::block_use_result(answer) {
+                if let Some(result) = crate::game::native_hooks::block_use_result(answer) {
                     (result, DryUse::default())
                 } else if hand == Hand::Main {
                     self.remote_block_template(&hit, held.as_ref(), true)
