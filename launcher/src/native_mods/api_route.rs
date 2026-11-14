@@ -32,10 +32,10 @@ pub(super) fn compile(
     let mut libraries = HashMap::new();
     for (package, name) in api::PACKAGES {
         if package != api::INTERNALS_PACKAGE {
-            libraries.insert(name, prebuilt::library(&deps, name)?);
+            libraries.insert(name, prebuilt::library(&runtime_deps, name)?);
         }
     }
-    libraries.insert("mod_vocab", prebuilt::library(&deps, "mod_vocab")?);
+    libraries.insert("mod_vocab", prebuilt::library(&runtime_deps, "mod_vocab")?);
     let mut rlibs: HashMap<&str, PathBuf> = HashMap::new();
     for &index in &resolution.order {
         let project = &projects[index];

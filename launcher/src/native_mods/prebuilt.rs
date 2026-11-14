@@ -586,7 +586,8 @@ pub(super) fn library(deps: &Path, krate: &str) -> Result<PathBuf, String> {
         .map(|entry| entry.path())
         .filter(|path| {
             let name = path.file_name().unwrap_or_default().to_string_lossy();
-            name.starts_with(&prefix) && name.ends_with(".rmeta")
+            (name.starts_with(&prefix) && name.ends_with(".rmeta"))
+                || name == format!("lib{krate}.rmeta")
         })
         .collect();
     match candidates.as_slice() {
@@ -1005,8 +1006,10 @@ pub(super) fn compile(
 }
 
 pub(super) fn refuse_closure_rlib(id: &str, name: &str, path: &Path) -> Result<(), String> {
-    if matches!(name, "mod_api" | "mod_vocab" | "mod_points")
-        && path.extension().is_some_and(|ext| ext == "rlib")
+    if matches!(
+        name,
+        "mod_api" | "mod_vocab" | "mod_points" | "horizon_mod_runtime" | "horizon_core"
+    ) && path.extension().is_some_and(|ext| ext == "rlib")
     {
         return Err(trf("Native mod {mod} links API closure crate {crate} as an rlib. Rebuild the SDK with a shared API closure.", &[("mod", id), ("crate", name)]));
     }
@@ -1253,7 +1256,15 @@ fn game_dylibs(deps: &Path) -> Result<Vec<PathBuf>, String> {
     } else {
         "horizon_client"
     };
-    let crates = [top, "horizon_mod_wasm"];
+    let crates = [
+        top,
+        "horizon_mod_wasm",
+        "mod_api",
+        "mod_vocab",
+        "mod_points",
+        "horizon_mod_runtime",
+        "horizon_core",
+    ];
     crates
         .into_iter()
         .map(|krate| {
@@ -1272,6 +1283,17 @@ fn game_dylibs(deps: &Path) -> Result<Vec<PathBuf>, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unhashed_metadata_is_found_and_dylib_is_preferred_for_linking() {
+        let dir = tempfile::tempdir().unwrap();
+        let metadata = dir.path().join("libmod_api.rmeta");
+        std::fs::write(&metadata, b"metadata").unwrap();
+        assert_eq!(super::library(dir.path(), "mod_api").unwrap(), metadata);
+        let dylib = dir.path().join(super::dylib_name("mod_api"));
+        std::fs::write(&dylib, b"dylib").unwrap();
+        assert_eq!(super::library(dir.path(), "mod_api").unwrap(), dylib);
+    }
+
     #[test]
     fn closure_rlib_refusal_names_the_mod_and_crate() {
         let message = super::refuse_closure_rlib(
@@ -1431,7 +1453,16 @@ mod tests {
         // Metadata alone has no code to load: the archive is incomplete.
         assert!(game_dylibs(&deps).is_err());
         fs::write(deps.join(format!("libhorizon_mod_wasm.{ext}")), b"").unwrap();
-        assert_eq!(game_dylibs(&deps).unwrap().len(), 2);
+        for krate in [
+            "mod_api",
+            "mod_vocab",
+            "mod_points",
+            "horizon_mod_runtime",
+            "horizon_core",
+        ] {
+            fs::write(deps.join(format!("lib{krate}.{ext}")), b"").unwrap();
+        }
+        assert_eq!(game_dylibs(&deps).unwrap().len(), 7);
         fs::write(deps.join(format!("libhorizon_mod_host.{ext}")), b"").unwrap();
         let names: Vec<_> = game_dylibs(&deps)
             .unwrap()
@@ -1442,7 +1473,12 @@ mod tests {
             names,
             [
                 format!("libhorizon_mod_host.{ext}"),
-                format!("libhorizon_mod_wasm.{ext}")
+                format!("libhorizon_mod_wasm.{ext}"),
+                format!("libmod_api.{ext}"),
+                format!("libmod_vocab.{ext}"),
+                format!("libmod_points.{ext}"),
+                format!("libhorizon_mod_runtime.{ext}"),
+                format!("libhorizon_core.{ext}")
             ]
         );
         fs::remove_dir_all(deps).unwrap();
@@ -1458,6 +1494,18 @@ mod tests {
         for library in [&game, &wasm] {
             fs::write(library, b"").unwrap();
         }
+        let mut closure = Vec::new();
+        for krate in [
+            "mod_api",
+            "mod_vocab",
+            "mod_points",
+            "horizon_mod_runtime",
+            "horizon_core",
+        ] {
+            let path = deps.join(format!("{krate}.dll"));
+            fs::write(&path, b"").unwrap();
+            closure.push(path);
+        }
         for host in rust_toolchain::hosts() {
             let rust = Toolchain {
                 dir: scratch.path().join(host.target),
@@ -1466,7 +1514,9 @@ mod tests {
             let std = rust.target_libdir().unwrap().join("std-test.dll");
             fs::create_dir_all(std.parent().unwrap()).unwrap();
             fs::write(&std, b"").unwrap();
-            let mut expected = vec![game.clone(), wasm.clone(), std];
+            let mut expected = vec![game.clone(), wasm.clone()];
+            expected.extend(closure.clone());
+            expected.push(std);
             if host.target == rust_toolchain::WINDOWS_X64_TARGET {
                 let bin = rust.mingw_bin();
                 fs::create_dir_all(&bin).unwrap();
